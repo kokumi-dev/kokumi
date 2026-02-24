@@ -8,4 +8,32 @@ layout:
 - go.kubebuilder.io/v4
 projectName: kokumi
 repo: github.com/kokumi-dev/kokumi
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: kokumi.dev
+  group: delivery
+  kind: Recipe
+  path: github.com/kokumi-dev/kokumi/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: kokumi.dev
+  group: delivery
+  kind: Preparation
+  path: github.com/kokumi-dev/kokumi/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: kokumi.dev
+  group: delivery
+  kind: Serving
+  path: github.com/kokumi-dev/kokumi/api/v1alpha1
+  version: v1alpha1
 version: "3"
