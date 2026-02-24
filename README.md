@@ -1,121 +1,84 @@
-# kokumi
-// TODO(user): Add simple overview of use/purpose
+<p align="center">
+  <img src="docs/assets/kokumi.png" alt="Kokumi Logo" width="400" />
+</p>
 
-## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+<h1 align="center">Kokumi</h1>
 
-## Getting Started
+<p align="center">
+  <em>
+    Kokumi (/koʊkuːmi/, Japanese: コク味, from コク “richness” + 味 “taste”) means "heartiness" or
+    "richness" — subtle compounds that enhance and harmonize flavors.
+    <br /><br />
+    Kokumi applies this idea to platform delivery: Recipes define intent,
+    Preparations produce immutable artifacts, Servings activate a selected
+    preparation, and Menus orchestrate them together.
+  </em>
+</p>
 
-### Prerequisites
-- go version v1.24.6+
-- docker version 17.03+.
-- kubectl version v1.11.3+.
-- Access to a Kubernetes v1.11.3+ cluster.
+---
 
-### To Deploy on the cluster
-**Build and push your image to the location specified by `IMG`:**
+# Overview
 
-```sh
-make docker-build docker-push IMG=<some-registry>/kokumi:tag
-```
+**Kokumi** is a Kubernetes operator for structured, immutable release management.
 
-**NOTE:** This image ought to be published in the personal registry you specified.
-And it is required to have access to pull the image from the working environment.
-Make sure you have the proper permission to the registry if the above commands don’t work.
+It separates:
 
-**Install the CRDs into the cluster:**
+- Intent definition
+- Immutable artifact rendering
+- Activation of a single selected version
+- Atomic coordination across multiple components
 
-```sh
-make install
-```
+## Core Concepts
 
-**Deploy the Manager to the cluster with the image specified by `IMG`:**
+Kokumi models release workflows using a small set of CRDs.
 
-```sh
-make deploy IMG=<some-registry>/kokumi:tag
-```
+### Recipe
 
-> **NOTE**: If you encounter RBAC errors, you may need to grant yourself cluster-admin
-privileges or be logged in as admin.
+Defines how something should be built or rendered.
 
-**Create instances of your solution**
-You can apply the samples (examples) from the config/sample:
+A Recipe contains:
 
-```sh
-kubectl apply -k config/samples/
-```
+- source definitions
+- patches or transformations
+- rendering configuration
 
->**NOTE**: Ensure that the samples has default values to test it out.
+A Recipe describes intent — not a running system.
 
-### To Uninstall
-**Delete the instances (CRs) from the cluster:**
+### Preparation (immutable)
 
-```sh
-kubectl delete -k config/samples/
-```
+Represents the rendered, immutable OCI artifact produced from a Recipe.
 
-**Delete the APIs(CRDs) from the cluster:**
+Properties:
 
-```sh
-make uninstall
-```
+- Derived from exactly one Recipe
+- Immutable once created
+- Multiple Preparations may exist per Recipe
+- Comparable to a build artifact or release candidate
 
-**UnDeploy the controller from the cluster:**
+### Serving (active selection)
 
-```sh
-make undeploy
-```
+Represents the active deployment of exactly one Preparation.
 
-## Project Distribution
+Properties:
 
-Following the options to release and provide this solution to the users.
+- Exactly one Serving per Recipe
+- References one specific Preparation
+- Mutable (can switch to a different Preparation)
+- Represents what is currently active
 
-### By providing a bundle with all YAML files
+This cleanly separates immutable history from active state.
 
-1. Build the installer for the image built and published in the registry:
+### Menu (atomic coordination)
 
-```sh
-make build-installer IMG=<some-registry>/kokumi:tag
-```
+Groups multiple Recipes into a single logical unit.
 
-**NOTE:** The makefile target mentioned above generates an 'install.yaml'
-file in the dist directory. This file contains all the resources built
-with Kustomize, which are necessary to install this project without its
-dependencies.
+A Menu allows:
 
-2. Using the installer
+- Coordinated updates
+- Atomic rollouts
+- Consistent activation across multiple Recipes
 
-Users can just run 'kubectl apply -f <URL for YAML BUNDLE>' to install
-the project, i.e.:
-
-```sh
-kubectl apply -f https://raw.githubusercontent.com/<org>/kokumi/<tag or branch>/dist/install.yaml
-```
-
-### By providing a Helm Chart
-
-1. Build the chart using the optional helm plugin
-
-```sh
-kubebuilder edit --plugins=helm/v2-alpha
-```
-
-2. See that a chart was generated under 'dist/chart', and users
-can obtain this solution from there.
-
-**NOTE:** If you change the project, you need to update the Helm Chart
-using the same command above to sync the latest changes. Furthermore,
-if you create webhooks, you need to use the above command with
-the '--force' flag and manually ensure that any custom configuration
-previously added to 'dist/chart/values.yaml' or 'dist/chart/manager/manager.yaml'
-is manually re-applied afterwards.
-
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
-
-**NOTE:** Run `make help` for more information on all potential `make` targets
-
-More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
+This enables platform-level releases composed of multiple components.
 
 ## License
 
