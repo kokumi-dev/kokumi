@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/kokumi-dev/kokumi/compare/0.1.0...0.2.0) (2026-02-25)
+
+
+### Miscellaneous Chores
+
+* release 0.2.0 ([#21](https://github.com/kokumi-dev/kokumi/issues/21)) ([5f14fd6](https://github.com/kokumi-dev/kokumi/commit/5f14fd64e23d2ba389f56690e7343b194b3ff647))
+
 ## 0.1.0 (2026-02-24)
 
 
