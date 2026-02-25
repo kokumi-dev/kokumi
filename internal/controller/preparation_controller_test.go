@@ -32,13 +32,13 @@ import (
 
 var _ = Describe("Preparation Controller", func() {
 	Context("When reconciling a resource", func() {
-		const resourceName = "test-resource"
+		const resourceName = "preparation"
 
 		ctx := context.Background()
 
 		typeNamespacedName := types.NamespacedName{
 			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
+			Namespace: "default",
 		}
 		preparation := &deliveryv1alpha1.Preparation{}
 
@@ -51,7 +51,22 @@ var _ = Describe("Preparation Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: deliveryv1alpha1.PreparationSpec{
+						Recipe:     "recipe",
+						ConfigHash: "sha256:448093f1b28dc7147740d8e400946e9b228650aa31a54b0ed734ca9ab0ae5b6b",
+						Renderer: deliveryv1alpha1.Renderer{
+							Version: "0.1.0",
+							Digest:  "sha256:fdf90e00e7605d65cdf4a5d3a404c9823ee2e473f7468f68c29694f1b909e2bc",
+						},
+						Source: deliveryv1alpha1.RecipeSource{
+							OCI:        "oci://registry.kokumi.svc.cluster.local:5000/recipe/test-resource",
+							BaseDigest: "sha256:6c2069fa6684d3659d93538331711b09a33cb42ae305802195d6a4d58847b345",
+						},
+						Artifact: deliveryv1alpha1.Artifact{
+							OCIRef: "oci://registry.kokumi.svc.cluster.local:5000/preparation/test-resource@sha256:fdf90e00e7605d65cdf4a5d3a404c9823ee2e473f7468f68c29694f1b909e2bc",
+							Digest: "sha256:fdf90e00e7605d65cdf4a5d3a404c9823ee2e473f7468f68c29694f1b909e2bc",
+						},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}

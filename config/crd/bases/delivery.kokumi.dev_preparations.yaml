@@ -11,10 +11,33 @@ spec:
     kind: Preparation
     listKind: PreparationList
     plural: preparations
+    shortNames:
+    - prep
     singular: preparation
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .spec.recipe
+      name: Recipe
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .spec.artifact.digest
+      name: Digest
+      priority: 1
+      type: string
+    - jsonPath: .spec.artifact.signed
+      name: Signed
+      priority: 1
+      type: boolean
+    - jsonPath: .status.createdAt
+      name: Created
+      type: date
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: Preparation is the Schema for the preparations API
@@ -39,10 +62,70 @@ spec:
           spec:
             description: spec defines the desired state of Preparation
             properties:
-              foo:
-                description: foo is an example field of Preparation. Edit preparation_types.go
-                  to remove/update
+              artifact:
+                description: artifact defines the output artifact information
+                properties:
+                  digest:
+                    description: digest is the SHA256 digest of the artifact
+                    pattern: ^sha256:[a-f0-9]{64}$
+                    type: string
+                  ociRef:
+                    description: ociRef is the full OCI reference including digest
+                    pattern: ^oci://.*@sha256:[a-f0-9]{64}$
+                    type: string
+                  signed:
+                    description: signed indicates whether the artifact has been cryptographically
+                      signed
+                    type: boolean
+                required:
+                - digest
+                - ociRef
+                type: object
+              configHash:
+                description: configHash is the SHA256 hash of the canonicalized patches
+                  configuration
+                pattern: ^sha256:[a-f0-9]+$
                 type: string
+              recipe:
+                description: recipe is the name of the recipe this preparation belongs
+                  to
+                type: string
+              renderer:
+                description: renderer defines the renderer used to process this preparation
+                properties:
+                  digest:
+                    description: digest is the SHA256 digest of the renderer binary/image
+                    pattern: ^sha256:[a-f0-9]{64}$
+                    type: string
+                  version:
+                    description: version is the semantic version of the renderer
+                    type: string
+                required:
+                - digest
+                - version
+                type: object
+              source:
+                description: source defines the source artifact information
+                properties:
+                  baseDigest:
+                    description: baseDigest is the SHA256 digest of the base source
+                      artifact
+                    pattern: ^sha256:[a-f0-9]{64}$
+                    type: string
+                  oci:
+                    description: oci is the OCI registry URL for the source manifests
+                    pattern: ^oci://.*
+                    type: string
+                required:
+                - baseDigest
+                - oci
+                type: object
+            required:
+            - artifact
+            - configHash
+            - recipe
+            - renderer
+            - source
             type: object
           status:
             description: status defines the observed state of Preparation
@@ -116,6 +199,18 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              createdAt:
+                description: createdAt is the timestamp when the preparation was created
+                format: date-time
+                type: string
+              phase:
+                description: phase represents the current phase of the Preparation
+                  lifecycle
+                enum:
+                - Pending
+                - Ready
+                - Failed
+                type: string
             type: object
         required:
         - spec

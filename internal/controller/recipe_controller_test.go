@@ -32,13 +32,13 @@ import (
 
 var _ = Describe("Recipe Controller", func() {
 	Context("When reconciling a resource", func() {
-		const resourceName = "test-resource"
+		const resourceName = "recipe"
 
 		ctx := context.Background()
 
 		typeNamespacedName := types.NamespacedName{
 			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
+			Namespace: "default",
 		}
 		recipe := &deliveryv1alpha1.Recipe{}
 
@@ -51,7 +51,16 @@ var _ = Describe("Recipe Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: deliveryv1alpha1.RecipeSpec{
+						AutoDeploy: false,
+						Source: deliveryv1alpha1.OCISource{
+							OCI:     "oci://registry.kokumi.svc.cluster.local:5000/recipe/test-resource",
+							Version: "0.1.0",
+						},
+						Destination: deliveryv1alpha1.OCIDestination{
+							OCI: "oci://registry.kokumi.svc.cluster.local:5000/preparation/test-resource",
+						},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}

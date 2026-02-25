@@ -19,10 +19,33 @@ spec:
     kind: Preparation
     listKind: PreparationList
     plural: preparations
+    shortNames:
+    - prep
     singular: preparation
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .spec.recipe
+      name: Recipe
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .spec.artifact.digest
+      name: Digest
+      priority: 1
+      type: string
+    - jsonPath: .spec.artifact.signed
+      name: Signed
+      priority: 1
+      type: boolean
+    - jsonPath: .status.createdAt
+      name: Created
+      type: date
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: Preparation is the Schema for the preparations API
@@ -47,10 +70,70 @@ spec:
           spec:
             description: spec defines the desired state of Preparation
             properties:
-              foo:
-                description: foo is an example field of Preparation. Edit preparation_types.go
-                  to remove/update
+              artifact:
+                description: artifact defines the output artifact information
+                properties:
+                  digest:
+                    description: digest is the SHA256 digest of the artifact
+                    pattern: ^sha256:[a-f0-9]{64}$
+                    type: string
+                  ociRef:
+                    description: ociRef is the full OCI reference including digest
+                    pattern: ^oci://.*@sha256:[a-f0-9]{64}$
+                    type: string
+                  signed:
+                    description: signed indicates whether the artifact has been cryptographically
+                      signed
+                    type: boolean
+                required:
+                - digest
+                - ociRef
+                type: object
+              configHash:
+                description: configHash is the SHA256 hash of the canonicalized patches
+                  configuration
+                pattern: ^sha256:[a-f0-9]+$
                 type: string
+              recipe:
+                description: recipe is the name of the recipe this preparation belongs
+                  to
+                type: string
+              renderer:
+                description: renderer defines the renderer used to process this preparation
+                properties:
+                  digest:
+                    description: digest is the SHA256 digest of the renderer binary/image
+                    pattern: ^sha256:[a-f0-9]{64}$
+                    type: string
+                  version:
+                    description: version is the semantic version of the renderer
+                    type: string
+                required:
+                - digest
+                - version
+                type: object
+              source:
+                description: source defines the source artifact information
+                properties:
+                  baseDigest:
+                    description: baseDigest is the SHA256 digest of the base source
+                      artifact
+                    pattern: ^sha256:[a-f0-9]{64}$
+                    type: string
+                  oci:
+                    description: oci is the OCI registry URL for the source manifests
+                    pattern: ^oci://.*
+                    type: string
+                required:
+                - baseDigest
+                - oci
+                type: object
+            required:
+            - artifact
+            - configHash
+            - recipe
+            - renderer
+            - source
             type: object
           status:
             description: status defines the observed state of Preparation
@@ -124,6 +207,18 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              createdAt:
+                description: createdAt is the timestamp when the preparation was created
+                format: date-time
+                type: string
+              phase:
+                description: phase represents the current phase of the Preparation
+                  lifecycle
+                enum:
+                - Pending
+                - Ready
+                - Failed
+                type: string
             type: object
         required:
         - spec
@@ -148,7 +243,29 @@ spec:
     singular: recipe
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.latestRevision
+      name: Latest Revision
+      type: string
+    - jsonPath: .spec.source.oci
+      name: Source
+      priority: 1
+      type: string
+    - jsonPath: .spec.source.version
+      name: Version
+      priority: 1
+      type: string
+    - jsonPath: .spec.autoDeploy
+      name: Auto Deploy
+      priority: 1
+      type: boolean
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: Recipe is the Schema for the recipes API
@@ -173,10 +290,85 @@ spec:
           spec:
             description: spec defines the desired state of Recipe
             properties:
-              foo:
-                description: foo is an example field of Recipe. Edit recipe_types.go
-                  to remove/update
-                type: string
+              autoDeploy:
+                default: false
+                description: |-
+                  autoDeploy controls whether a newly created Preparation
+                  should automatically become the active Serving.
+                  If false, activation must be performed explicitly.
+                type: boolean
+              destination:
+                description: destination defines where the rendered Preparation artifact
+                  will be pushed
+                properties:
+                  oci:
+                    description: oci is the OCI registry URL where configured manifests
+                      will be pushed
+                    pattern: ^oci://.*
+                    type: string
+                required:
+                - oci
+                type: object
+              patches:
+                description: |-
+                  patches defines deterministic transformations applied to the source artifact
+                  before producing a Preparation
+                items:
+                  description: Patch defines a modification to apply to a resource
+                  properties:
+                    set:
+                      additionalProperties:
+                        type: string
+                      description: |-
+                        set contains JSONPath expressions and their values to set
+                        Keys are JSONPath expressions (e.g., ".spec.replicas")
+                        Values are the desired values for those paths
+                      type: object
+                    target:
+                      description: target identifies which resource to patch
+                      properties:
+                        kind:
+                          description: kind specifies the Kubernetes resource kind
+                            to patch
+                          type: string
+                        name:
+                          description: name specifies the name of the resource to
+                            patch
+                          type: string
+                        namespace:
+                          description: namespace specifies the namespace of the resource
+                            (optional, defaults to same namespace as Recipe)
+                          type: string
+                      required:
+                      - kind
+                      - name
+                      type: object
+                  required:
+                  - set
+                  - target
+                  type: object
+                type: array
+              source:
+                description: source defines the immutable base artifact to render
+                  from
+                properties:
+                  oci:
+                    description: oci is the OCI registry URL for the source manifests
+                    pattern: ^oci://.*
+                    type: string
+                  version:
+                    description: |-
+                      version is the semantic version or tag of the artifact
+                      The controller will resolve this to a digest
+                    type: string
+                required:
+                - oci
+                - version
+                type: object
+            required:
+            - autoDeploy
+            - destination
+            - source
             type: object
           status:
             description: status defines the observed state of Recipe
@@ -250,6 +442,24 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              latestRevision:
+                description: |-
+                  latestRevision is the name of the most recent immutable Preparation
+                  produced from this Recipe
+                type: string
+              observedGeneration:
+                description: observedGeneration is the most recent generation observed
+                  by the controller
+                format: int64
+                type: integer
+              phase:
+                description: phase represents the current phase of the Recipe lifecycle
+                enum:
+                - Pending
+                - Processing
+                - Ready
+                - Failed
+                type: string
             type: object
         required:
         - spec
@@ -274,7 +484,28 @@ spec:
     singular: serving
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .spec.recipe
+      name: Recipe
+      type: string
+    - jsonPath: .spec.preparation
+      name: Preparation
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .spec.preparationPolicy.type
+      name: Policy
+      priority: 1
+      type: string
+    - jsonPath: .status.observedPreparation
+      name: Observed
+      priority: 1
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: Serving is the Schema for the servings API
@@ -299,10 +530,30 @@ spec:
           spec:
             description: spec defines the desired state of Serving
             properties:
-              foo:
-                description: foo is an example field of Serving. Edit serving_types.go
-                  to remove/update
+              preparation:
+                description: preparation is the desired Preparation to serve
                 type: string
+              preparationPolicy:
+                description: preparationPolicy defines how preparation updates are
+                  handled
+                properties:
+                  type:
+                    default: Manual
+                    description: type specifies whether preparation updates are automatic
+                      or manual
+                    enum:
+                    - Automatic
+                    - Manual
+                    type: string
+                required:
+                - type
+                type: object
+              recipe:
+                description: recipe is the name of the recipe to serve
+                type: string
+            required:
+            - preparation
+            - recipe
             type: object
           status:
             description: status defines the observed state of Serving
@@ -376,6 +627,23 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              deployedDigest:
+                description: deployedDigest is the SHA256 digest of the currently
+                  deployed artifact
+                pattern: ^sha256:[a-f0-9]{64}$
+                type: string
+              observedPreparation:
+                description: observedPreparation is the preparation that was last
+                  observed by the controller
+                type: string
+              phase:
+                description: phase represents the current phase of the Serving lifecycle
+                enum:
+                - Pending
+                - Deploying
+                - Deployed
+                - Failed
+                type: string
             type: object
         required:
         - spec
