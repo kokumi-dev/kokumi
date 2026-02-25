@@ -32,13 +32,13 @@ import (
 
 var _ = Describe("Serving Controller", func() {
 	Context("When reconciling a resource", func() {
-		const resourceName = "test-resource"
+		const resourceName = "serving"
 
 		ctx := context.Background()
 
 		typeNamespacedName := types.NamespacedName{
 			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
+			Namespace: "default",
 		}
 		serving := &deliveryv1alpha1.Serving{}
 
@@ -51,7 +51,13 @@ var _ = Describe("Serving Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: deliveryv1alpha1.ServingSpec{
+						Recipe:      "recipe",
+						Preparation: "preparation-fdf90e00e76",
+						PreparationPolicy: deliveryv1alpha1.PreparationPolicy{
+							Type: deliveryv1alpha1.PreparationPolicyManual,
+						},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}

@@ -20,28 +20,71 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+// PreparationPolicyType defines how updates to the Preparations are handled
+// +kubebuilder:validation:Enum=Automatic;Manual
+type PreparationPolicyType string
+
+const (
+	// PreparationPolicyAutomatic automatically deploys new preparations
+	PreparationPolicyAutomatic PreparationPolicyType = "Automatic"
+	// PreparationPolicyManual requires manual approval for preparation updates
+	PreparationPolicyManual PreparationPolicyType = "Manual"
+)
+
+// PreparationPolicy defines how updates to the Preparation artifact are handled
+// when a new version is available for deployment. It determines whether updates
+// are automatically deployed or require manual approval. By default, updates are manual.
+type PreparationPolicy struct {
+	// type specifies whether preparation updates are automatic or manual
+	// +kubebuilder:validation:Required
+	// +kubebuilder:default=Manual
+	Type PreparationPolicyType `json:"type"`
+}
 
 // ServingSpec defines the desired state of Serving
 type ServingSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
+	// recipe is the name of the recipe to serve
+	// +kubebuilder:validation:Required
+	Recipe string `json:"recipe"`
 
-	// foo is an example field of Serving. Edit serving_types.go to remove/update
+	// preparation is the desired Preparation to serve
+	// +kubebuilder:validation:Required
+	Preparation string `json:"preparation"`
+
+	// preparationPolicy defines how preparation updates are handled
 	// +optional
-	Foo *string `json:"foo,omitempty"`
+	PreparationPolicy PreparationPolicy `json:"preparationPolicy,omitempty"`
 }
+
+// ServingPhase represents the current phase of the Serving
+// +kubebuilder:validation:Enum=Pending;Deploying;Deployed;Failed
+type ServingPhase string
+
+const (
+	// ServingPhasePending indicates the serving is pending
+	ServingPhasePending ServingPhase = "Pending"
+	// ServingPhaseDeploying indicates the serving is in progress
+	ServingPhaseDeploying ServingPhase = "Deploying"
+	// ServingPhaseDeployed indicates the serving is complete and active
+	ServingPhaseDeployed ServingPhase = "Deployed"
+	// ServingPhaseFailed indicates the serving failed
+	ServingPhaseFailed ServingPhase = "Failed"
+)
 
 // ServingStatus defines the observed state of Serving.
 type ServingStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// observedPreparation is the preparation that was last observed by the controller
+	// +optional
+	ObservedPreparation string `json:"observedPreparation,omitempty"`
 
-	// For Kubernetes API conventions, see:
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
+	// deployedDigest is the SHA256 digest of the currently deployed artifact
+	// +optional
+	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
+	DeployedDigest string `json:"deployedDigest,omitempty"`
+
+	// phase represents the current phase of the Serving lifecycle
+	// +optional
+	Phase ServingPhase `json:"phase,omitempty"`
 
 	// conditions represent the current state of the Serving resource.
 	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
@@ -60,6 +103,12 @@ type ServingStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Recipe",type=string,JSONPath=`.spec.recipe`
+// +kubebuilder:printcolumn:name="Preparation",type=string,JSONPath=`.spec.preparation`
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Policy",type=string,JSONPath=`.spec.preparationPolicy.type`,priority=1
+// +kubebuilder:printcolumn:name="Observed",type=string,JSONPath=`.status.observedPreparation`,priority=1
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Serving is the Schema for the servings API
 type Serving struct {

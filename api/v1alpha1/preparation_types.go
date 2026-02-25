@@ -20,28 +20,94 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+// RecipeSource defines the immutable base artifact for a preparation
+type RecipeSource struct {
+	// oci is the OCI registry URL for the source manifests
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^oci://.*`
+	OCI string `json:"oci"`
+
+	// baseDigest is the SHA256 digest of the base source artifact
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
+	BaseDigest string `json:"baseDigest"`
+}
+
+// Renderer defines the tool and its version/digest used to render the source
+type Renderer struct {
+	// version is the semantic version of the renderer
+	// +kubebuilder:validation:Required
+	Version string `json:"version"`
+
+	// digest is the SHA256 digest of the renderer binary/image
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
+	Digest string `json:"digest"`
+}
+
+// Artifact defines the final immutable output of the rendering process
+type Artifact struct {
+	// ociRef is the full OCI reference including digest
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^oci://.*@sha256:[a-f0-9]{64}$`
+	OCIRef string `json:"ociRef"`
+
+	// digest is the SHA256 digest of the artifact
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
+	Digest string `json:"digest"`
+
+	// signed indicates whether the artifact has been cryptographically signed
+	// +optional
+	Signed bool `json:"signed,omitempty"`
+}
 
 // PreparationSpec defines the desired state of Preparation
 type PreparationSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
+	// recipe is the name of the recipe this preparation belongs to
+	// +kubebuilder:validation:Required
+	Recipe string `json:"recipe"`
 
-	// foo is an example field of Preparation. Edit preparation_types.go to remove/update
-	// +optional
-	Foo *string `json:"foo,omitempty"`
+	// source defines the source artifact information
+	// +kubebuilder:validation:Required
+	Source RecipeSource `json:"source"`
+
+	// renderer defines the renderer used to process this preparation
+	// +kubebuilder:validation:Required
+	Renderer Renderer `json:"renderer"`
+
+	// configHash is the SHA256 hash of the canonicalized patches configuration
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]+$`
+	ConfigHash string `json:"configHash"`
+
+	// artifact defines the output artifact information
+	// +kubebuilder:validation:Required
+	Artifact Artifact `json:"artifact"`
 }
+
+// PreparationPhase represents the current phase of the Preparation
+// +kubebuilder:validation:Enum=Pending;Ready;Failed
+type PreparationPhase string
+
+const (
+	// PreparationPhasePending indicates the preparation is being created
+	PreparationPhasePending PreparationPhase = "Pending"
+	// PreparationPhaseReady indicates the preparation is ready for serving
+	PreparationPhaseReady PreparationPhase = "Ready"
+	// PreparationPhaseFailed indicates the preparation creation failed
+	PreparationPhaseFailed PreparationPhase = "Failed"
+)
 
 // PreparationStatus defines the observed state of Preparation.
 type PreparationStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// phase represents the current phase of the Preparation lifecycle
+	// +optional
+	Phase PreparationPhase `json:"phase,omitempty"`
 
-	// For Kubernetes API conventions, see:
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
+	// createdAt is the timestamp when the preparation was created
+	// +optional
+	CreatedAt *metav1.Time `json:"createdAt,omitempty"`
 
 	// conditions represent the current state of the Preparation resource.
 	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
@@ -60,6 +126,13 @@ type PreparationStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Recipe",type=string,JSONPath=`.spec.recipe`
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Digest",type=string,JSONPath=`.spec.artifact.digest`,priority=1
+// +kubebuilder:printcolumn:name="Signed",type=boolean,JSONPath=`.spec.artifact.signed`,priority=1
+// +kubebuilder:printcolumn:name="Created",type=date,JSONPath=`.status.createdAt`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+// +kubebuilder:resource:shortName=prep
 
 // Preparation is the Schema for the preparations API
 type Preparation struct {
