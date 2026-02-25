@@ -32,6 +32,9 @@ resources:
 # Only CR(s) which requires webhooks and are applied on namespaces labeled with 'webhooks: enabled' will
 # be able to communicate with the Webhook Server.
 #- ../network-policy
+# [REGISTRY] To deploy an unauthenticated OCI registry for the operator, uncomment the following line.
+# The registry will be available at registry.kokumi.svc.cluster.local:5000
+- ../registry
 
 # Uncomment the patches line if you enable Metrics
 patches:
@@ -40,6 +43,7 @@ patches:
 - path: manager_metrics_patch.yaml
   target:
     kind: Deployment
+    name: controller-manager
 
 # Uncomment the patches line if you enable Metrics and CertManager
 # [METRICS-WITH-CERTS] To enable metrics protected with certManager, uncomment the following line.

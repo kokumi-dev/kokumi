@@ -1029,6 +1029,29 @@ subjects:
   namespace: kokumi
 ---
 apiVersion: v1
+data:
+  config.yml: |
+    version: 0.1
+    log:
+      level: info
+
+    http:
+      addr: :5000
+
+    storage:
+      filesystem:
+        rootdirectory: /var/lib/registry
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/component: registry
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: kokumi
+    app.kubernetes.io/part-of: kokumi
+  name: kokumi-registry-config
+  namespace: kokumi
+---
+apiVersion: v1
 kind: Service
 metadata:
   labels:
@@ -1046,6 +1069,44 @@ spec:
   selector:
     app.kubernetes.io/name: kokumi
     control-plane: controller-manager
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/component: registry
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: kokumi
+    app.kubernetes.io/part-of: kokumi
+  name: kokumi-registry
+  namespace: kokumi
+spec:
+  ports:
+  - name: http
+    nodePort: 30050
+    port: 5000
+    protocol: TCP
+    targetPort: 5000
+  selector:
+    app: registry
+  type: NodePort
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  labels:
+    app.kubernetes.io/component: registry
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: kokumi
+    app.kubernetes.io/part-of: kokumi
+  name: kokumi-registry-pvc
+  namespace: kokumi
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -1113,3 +1174,55 @@ spec:
       serviceAccountName: kokumi-controller-manager
       terminationGracePeriodSeconds: 10
       volumes: []
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/component: registry
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: kokumi
+    app.kubernetes.io/part-of: kokumi
+  name: kokumi-registry
+  namespace: kokumi
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: registry
+  template:
+    metadata:
+      labels:
+        app: registry
+    spec:
+      containers:
+      - image: registry:3
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        name: registry
+        ports:
+        - containerPort: 5000
+          name: http
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 5000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - mountPath: /etc/docker/registry
+          name: config
+        - mountPath: /var/lib/registry
+          name: storage
+      volumes:
+      - configMap:
+          name: kokumi-registry-config
+        name: config
+      - name: storage
+        persistentVolumeClaim:
+          claimName: kokumi-registry-pvc
