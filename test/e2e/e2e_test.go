@@ -34,7 +34,7 @@ import (
 )
 
 // namespace where the project is deployed in
-const namespace = "kokumi-system"
+const namespace = "kokumi"
 
 // serviceAccountName created for the project
 const serviceAccountName = "kokumi-controller-manager"

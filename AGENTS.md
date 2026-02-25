@@ -165,7 +165,7 @@ make deploy IMG=$IMG
 kubectl apply -k config/samples/
 
 # 4. Debug
-kubectl logs -n <project>-system deployment/<project>-controller-manager -c manager -f
+kubectl logs -n <project> deployment/<project>-controller-manager -c manager -f
 ```
 
 ### API Design
