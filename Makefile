@@ -102,6 +102,43 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 lint-config: golangci-lint ## Verify golangci-lint linter configuration
 	"$(GOLANGCI_LINT)" config verify
 
+KIND_CLUSTER_DEVELOPMENT ?= kokumi
+
+.PHONY: kind-setup
+kind-setup: ## Set up a Kind cluster for local development if it does not exist
+	@command -v $(KIND) >/dev/null 2>&1 || { \
+		echo "Kind is not installed. Please install Kind manually."; \
+		exit 1; \
+	}
+	@case "$$($(KIND) get clusters)" in \
+		*"$(KIND_CLUSTER_DEVELOPMENT)"*) \
+			echo "Kind cluster '$(KIND_CLUSTER_DEVELOPMENT)' already exists. Skipping creation." ;; \
+		*) \
+			echo "Creating Kind cluster '$(KIND_CLUSTER_DEVELOPMENT)'..."; \
+			$(KIND) create cluster --config hack/kind/kokumi-cluster.yaml ;; \
+	esac
+
+.PHONY: kind-delete
+kind-delete: ## Delete the Kind cluster for local development
+	$(KIND) delete cluster --name $(KIND_CLUSTER_DEVELOPMENT)
+
+.PHONY: kind-load-image
+kind-load-image: ## Load image into Kind cluster if it exists
+	@command -v $(KIND) >/dev/null 2>&1 || { \
+		echo "Kind is not installed. Please install Kind manually."; \
+		exit 1; \
+	}
+	@if $(KIND) get clusters | grep -q "^$(KIND_CLUSTER_DEVELOPMENT)$$"; then \
+		echo "Loading image $(IMG) into Kind cluster '$(KIND_CLUSTER_DEVELOPMENT)'..."; \
+		$(KIND) load docker-image $(IMG) --name $(KIND_CLUSTER_DEVELOPMENT); \
+	else \
+		echo "Kind cluster '$(KIND_CLUSTER_DEVELOPMENT)' does not exist. Skipping image load."; \
+	fi
+
+.PHONY: push-artifacts
+push-artifacts: ## Pushes artifacts to local local registry
+	bash ./hack/push-artifacts.sh
+
 ##@ Build
 
 .PHONY: build
