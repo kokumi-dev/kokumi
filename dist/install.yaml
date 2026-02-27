@@ -709,6 +709,18 @@ metadata:
   name: kokumi-manager-role
 rules:
 - apiGroups:
+  - argoproj.io
+  resources:
+  - applications
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - delivery.kokumi.dev
   resources:
   - preparations
@@ -1139,6 +1151,7 @@ spec:
         command:
         - /manager
         image: ghcr.io/kokumi-dev/kokumi:latest
+        imagePullPolicy: IfNotPresent
         livenessProbe:
           httpGet:
             path: /healthz
@@ -1166,14 +1179,18 @@ spec:
             drop:
             - ALL
           readOnlyRootFilesystem: true
-        volumeMounts: []
+        volumeMounts:
+        - mountPath: /tmp
+          name: tmp
       securityContext:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
       serviceAccountName: kokumi-controller-manager
       terminationGracePeriodSeconds: 10
-      volumes: []
+      volumes:
+      - emptyDir: {}
+        name: tmp
 ---
 apiVersion: apps/v1
 kind: Deployment

@@ -43,8 +43,39 @@ var _ = Describe("Serving Controller", func() {
 		serving := &deliveryv1alpha1.Serving{}
 
 		BeforeEach(func() {
+			const fakeDigest = "sha256:fdf90e00e76bf3f0d2e5042c4c4e6c42a6d38c1e2b4f5a7d8e9f0a1b2c3d4e5f"
+
+			By("creating the Preparation referenced by the Serving")
+			preparation := &deliveryv1alpha1.Preparation{}
+			preparationKey := types.NamespacedName{Name: "preparation-fdf90e00e76", Namespace: "default"}
+			err := k8sClient.Get(ctx, preparationKey, preparation)
+			if err != nil && errors.IsNotFound(err) {
+				Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Preparation{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "preparation-fdf90e00e76",
+						Namespace: "default",
+					},
+					Spec: deliveryv1alpha1.PreparationSpec{
+						Recipe: "recipe",
+						Source: deliveryv1alpha1.RecipeSource{
+							OCI:        "oci://registry.kokumi.svc.cluster.local:5000/recipe/test-resource",
+							BaseDigest: fakeDigest,
+						},
+						Renderer: deliveryv1alpha1.Renderer{
+							Version: "v1.0.0",
+							Digest:  fakeDigest,
+						},
+						ConfigHash: "sha256:abc123",
+						Artifact: deliveryv1alpha1.Artifact{
+							OCIRef: "oci://registry.kokumi.svc.cluster.local:5000/preparation/test-resource@" + fakeDigest,
+							Digest: fakeDigest,
+						},
+					},
+				})).To(Succeed())
+			}
+
 			By("creating the custom resource for the Kind Serving")
-			err := k8sClient.Get(ctx, typeNamespacedName, serving)
+			err = k8sClient.Get(ctx, typeNamespacedName, serving)
 			if err != nil && errors.IsNotFound(err) {
 				resource := &deliveryv1alpha1.Serving{
 					ObjectMeta: metav1.ObjectMeta{
@@ -61,16 +92,29 @@ var _ = Describe("Serving Controller", func() {
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
+
+			By("marking the Serving as already deployed so Argo CD creation is skipped")
+			latestServing := &deliveryv1alpha1.Serving{}
+			Expect(k8sClient.Get(ctx, typeNamespacedName, latestServing)).To(Succeed())
+			latestServing.Status.ObservedPreparation = "preparation-fdf90e00e76"
+			latestServing.Status.DeployedDigest = fakeDigest
+			Expect(k8sClient.Status().Update(ctx, latestServing)).To(Succeed())
 		})
 
 		AfterEach(func() {
-			// TODO(user): Cleanup logic after each test, like removing the resource instance.
 			resource := &deliveryv1alpha1.Serving{}
 			err := k8sClient.Get(ctx, typeNamespacedName, resource)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("Cleanup the specific resource instance Serving")
 			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+
+			By("Cleanup the Preparation")
+			preparation := &deliveryv1alpha1.Preparation{}
+			preparationKey := types.NamespacedName{Name: "preparation-fdf90e00e76", Namespace: "default"}
+			if err := k8sClient.Get(ctx, preparationKey, preparation); err == nil {
+				Expect(k8sClient.Delete(ctx, preparation)).To(Succeed())
+			}
 		})
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
