@@ -139,6 +139,19 @@ kind-load-image: ## Load image into Kind cluster if it exists
 push-artifacts: ## Pushes artifacts to local local registry
 	bash ./hack/push-artifacts.sh
 
+.PHONY: argocd
+argocd: ## Installs Argo CD in the cluster
+	"$(KUBECTL)" create namespace argocd --dry-run=client -o yaml | "$(KUBECTL)" apply -f -
+	"$(KUBECTL)" apply -n argocd --server-side --force-conflicts -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.3.0/manifests/install.yaml
+	"$(KUBECTL)" patch svc argocd-server -n argocd -p '{"spec": {"type": "NodePort", "ports": [{"port": 80,"targetPort": 8080,"nodePort": 30052}]}}'
+	"$(KUBECTL)" -n argocd create secret generic manifests-registry-creds \
+		--from-literal=type=oci \
+		--from-literal=url=oci://kokumi-registry.kokumi.svc.cluster.local:5000 \
+		--from-literal=insecureOCIForceHttp=true \
+		--dry-run=client -o yaml | \
+	"$(KUBECTL)" label -f - argocd.argoproj.io/secret-type=repo-creds --local -o yaml | \
+	"$(KUBECTL)" apply -f -
+
 ##@ Build
 
 .PHONY: build

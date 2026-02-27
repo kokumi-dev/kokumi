@@ -37,6 +37,9 @@ import (
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/controller"
+	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/service"
+	"github.com/spf13/afero"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -181,6 +184,10 @@ func main() {
 	if err := (&controller.RecipeReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
+		Service: *service.NewRecipeService(
+			oci.NewORASClient(true),
+			afero.NewOsFs(),
+		),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Recipe")
 		os.Exit(1)

@@ -21,6 +21,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/spf13/afero"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -28,6 +29,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/service"
 )
 
 var _ = Describe("Recipe Controller", func() {
@@ -77,9 +80,14 @@ var _ = Describe("Recipe Controller", func() {
 		})
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
+			fs := afero.NewMemMapFs()
 			controllerReconciler := &RecipeReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
+				Service: *service.NewRecipeService(
+					oci.NewFakeClient(fs),
+					fs,
+				),
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{

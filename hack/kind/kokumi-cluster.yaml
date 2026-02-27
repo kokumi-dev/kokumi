@@ -9,3 +9,7 @@ nodes:
       - containerPort: 30050
         hostPort: 5000
         protocol: TCP
+      # Port for Argo CD
+      - containerPort: 30052
+        hostPort: 8443
+        protocol: TCP
