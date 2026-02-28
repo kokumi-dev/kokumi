@@ -3,6 +3,8 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/kokumi-dev/kokumi/internal/version"
 )
 
 // InfoResponse is the response body for GET /api/v1/info.
@@ -16,7 +18,7 @@ func handleInfo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(InfoResponse{
 		Name:    "kokumi",
-		Version: "v0.1.0",
+		Version: version.Version,
 	}); err != nil {
 		http.Error(w, "failed to encode response", http.StatusInternalServerError)
 	}
