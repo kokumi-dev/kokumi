@@ -1,0 +1,140 @@
+.page {
+  padding: 32px 36px;
+}
+
+.header {
+  margin-bottom: 28px;
+}
+
+.title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--color-text-on-light);
+  letter-spacing: -0.01em;
+}
+
+.subtitle {
+  font-size: 0.95rem;
+  color: var(--color-text-muted-light);
+  margin-top: 4px;
+}
+
+/* ── Stats row ── */
+.statsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+.statCard {
+  background: var(--color-bg-card);
+  border-radius: 10px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid rgba(49, 54, 56, 0.08);
+}
+
+.statLabel {
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted-light);
+}
+
+.statValue {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--color-text-on-light);
+  line-height: 1;
+}
+
+.statValueAccent {
+  color: var(--color-accent);
+}
+
+/* ── Section ── */
+.section {
+  background: var(--color-bg-card);
+  border-radius: 10px;
+  border: 1px solid rgba(49, 54, 56, 0.08);
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid rgba(49, 54, 56, 0.07);
+}
+
+.sectionTitle {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--color-text-on-light);
+}
+
+.sectionBody {
+  padding: 20px;
+}
+
+/* ── Placeholder ── */
+.placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 48px 20px;
+  color: var(--color-text-muted-light);
+}
+
+.placeholderIcon {
+  width: 40px;
+  height: 40px;
+  opacity: 0.3;
+}
+
+.placeholderText {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+/* ── Status badge ── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 20px;
+  letter-spacing: 0.03em;
+}
+
+.badgeSuccess {
+  background: rgba(68, 190, 120, 0.15);
+  color: #2d8a5a;
+}
+
+.badgeWarning {
+  background: rgba(228, 179, 99, 0.2);
+  color: #9a6f1a;
+}
+
+.badgeError {
+  background: rgba(239, 100, 97, 0.15);
+  color: #c13a37;
+}
+
+.badgeDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}

@@ -1,0 +1,134 @@
+.sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: var(--sidebar-width);
+  height: 100vh;
+  background-color: var(--color-bg-sidebar);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 100;
+  user-select: none;
+}
+
+/* ── Logo area ── */
+.logo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 24px 20px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  flex-shrink: 0;
+  text-align: center;
+}
+
+.logoMark {
+  width: 80px;
+  height: 80px;
+  flex-shrink: 0;
+  object-fit: contain;
+  border-radius: 10px;
+  margin-bottom: 4px;
+}
+
+.logoText {
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--color-accent);
+  line-height: 1;
+}
+
+.logoSub {
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--color-text-muted-dark);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+/* ── Navigation ── */
+.nav {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 0;
+}
+
+.navSection {
+  margin-bottom: 4px;
+}
+
+.navSectionLabel {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-text-muted-dark);
+  padding: 8px 20px 4px;
+}
+
+.navItem {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 20px;
+  color: var(--color-text-muted-dark);
+  border-left: 3px solid transparent;
+  cursor: pointer;
+  background: none;
+  border-right: none;
+  border-top: none;
+  border-bottom: none;
+  width: 100%;
+  text-align: left;
+  font-size: 0.95rem;
+  font-weight: 450;
+  letter-spacing: 0.01em;
+  transition: color 0.15s, background-color 0.15s, border-color 0.15s;
+}
+
+.navItem:hover {
+  color: var(--color-text-on-dark);
+  background-color: rgba(255, 255, 255, 0.055);
+}
+
+.navItem.active {
+  color: var(--color-accent);
+  border-left-color: var(--color-accent);
+  background-color: rgba(239, 100, 97, 0.1);
+  font-weight: 600;
+}
+
+.navIcon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  opacity: 0.75;
+  transition: opacity 0.15s;
+}
+
+.navItem:hover .navIcon,
+.navItem.active .navIcon {
+  opacity: 1;
+}
+
+/* ── Footer ── */
+.footer {
+  padding: 12px 0 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  flex-shrink: 0;
+}
+
+.footerInfo {
+  padding: 6px 20px;
+  font-size: 0.68rem;
+  color: var(--color-text-muted-dark);
+  letter-spacing: 0.02em;
+}
+
+.footerInfoValue {
+  color: rgba(232, 233, 235, 0.4);
+}
