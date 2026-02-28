@@ -1,0 +1,20 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 20px;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+/* Phase variants */
+.ready    { background: rgba(52, 168, 83, 0.15); color: #1e7e34; }
+.deployed { background: rgba(52, 168, 83, 0.15); color: #1e7e34; }
+.pending  { background: rgba(228, 179, 99, 0.2);  color: #8a6200; }
+.processing { background: rgba(228, 179, 99, 0.2); color: #8a6200; }
+.deploying  { background: rgba(228, 179, 99, 0.2); color: #8a6200; }
+.failed   { background: rgba(239, 100, 97, 0.15); color: #c0312e; }
+.unknown  { background: rgba(49, 54, 56, 0.1);   color: var(--color-text-muted-light); }

@@ -1,0 +1,199 @@
+package server
+
+import (
+	"encoding/json"
+	"net/http"
+	"sort"
+
+	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+// errorResponse is the JSON body for all 4xx/5xx responses.
+type errorResponse struct {
+	Error string `json:"error"`
+}
+
+// respondJSON serialises v as JSON, sets Content-Type, and writes status.
+// Any marshalling error results in a 500 with a plain-text body instead.
+func respondJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		http.Error(w, "failed to encode response", http.StatusInternalServerError)
+	}
+}
+
+// respondError writes an errorResponse as JSON.
+func respondError(w http.ResponseWriter, status int, msg string) {
+	respondJSON(w, status, errorResponse{Error: msg})
+}
+
+// unavailable is returned when apiDeps is nil (no k8s config found).
+func unavailable(w http.ResponseWriter) {
+	respondError(w, http.StatusServiceUnavailable, "Kubernetes client not available")
+}
+
+// conditionsToDTO converts a slice of metav1.Condition to ConditionDTO.
+func conditionsToDTO(conditions []metav1.Condition) []ConditionDTO {
+	if len(conditions) == 0 {
+		return nil
+	}
+	out := make([]ConditionDTO, len(conditions))
+	for i, c := range conditions {
+		out[i] = ConditionDTO{
+			Type:               c.Type,
+			Status:             string(c.Status),
+			Reason:             c.Reason,
+			Message:            c.Message,
+			LastTransitionTime: c.LastTransitionTime.UTC().Format("2006-01-02T15:04:05Z"),
+		}
+	}
+	return out
+}
+
+// recipeToDTO converts a Recipe CRD object and the name of its currently active
+// Preparation (from the linked Serving) into a RecipeDTO.
+func recipeToDTO(r deliveryv1alpha1.Recipe, activePreparation string) RecipeDTO {
+	patches := make([]PatchDTO, len(r.Spec.Patches))
+	for i, p := range r.Spec.Patches {
+		patches[i] = PatchDTO{
+			Target: PatchTargetDTO{
+				Kind:      p.Target.Kind,
+				Name:      p.Target.Name,
+				Namespace: p.Target.Namespace,
+			},
+			Set: p.Set,
+		}
+	}
+
+	dto := RecipeDTO{
+		Name:      r.Name,
+		Namespace: r.Namespace,
+		Labels:    r.Labels,
+		Source: OCISourceDTO{
+			OCI:     r.Spec.Source.OCI,
+			Version: r.Spec.Source.Version,
+		},
+		Destination: OCIDestinationDTO{
+			OCI: r.Spec.Destination.OCI,
+		},
+		Patches:           patches,
+		AutoDeploy:        r.Spec.AutoDeploy,
+		Phase:             string(r.Status.Phase),
+		LatestRevision:    r.Status.LatestRevision,
+		ActivePreparation: activePreparation,
+		Conditions:        conditionsToDTO(r.Status.Conditions),
+	}
+	if !r.CreationTimestamp.IsZero() {
+		t := r.CreationTimestamp.UTC()
+		dto.CreatedAt = &t
+	}
+	return dto
+}
+
+// preparationToDTO converts a Preparation CRD object into a PreparationDTO.
+// isActive is true when this Preparation is the one currently deployed by its
+// Recipe's Serving.
+func preparationToDTO(p deliveryv1alpha1.Preparation, isActive bool) PreparationDTO {
+	dto := PreparationDTO{
+		Name:      p.Name,
+		Namespace: p.Namespace,
+		Recipe:    p.Spec.Recipe,
+		Artifact: ArtifactDTO{
+			OCIRef: p.Spec.Artifact.OCIRef,
+			Digest: p.Spec.Artifact.Digest,
+			Signed: p.Spec.Artifact.Signed,
+		},
+		ConfigHash: p.Spec.ConfigHash,
+		Phase:      string(p.Status.Phase),
+		IsActive:   isActive,
+		Conditions: conditionsToDTO(p.Status.Conditions),
+	}
+	if p.Status.CreatedAt != nil && !p.Status.CreatedAt.IsZero() {
+		t := p.Status.CreatedAt.UTC()
+		dto.CreatedAt = &t
+	}
+	return dto
+}
+
+// patchesFromDTO converts a slice of PatchDTO (from a request body) to the
+// equivalent CRD patch type. Used by both the create and update recipe handlers.
+func patchesFromDTO(dtos []PatchDTO) []deliveryv1alpha1.Patch {
+	patches := make([]deliveryv1alpha1.Patch, len(dtos))
+	for i, p := range dtos {
+		patches[i] = deliveryv1alpha1.Patch{
+			Target: deliveryv1alpha1.PatchTarget{
+				Kind:      p.Target.Kind,
+				Name:      p.Target.Name,
+				Namespace: p.Target.Namespace,
+			},
+			Set: p.Set,
+		}
+	}
+	return patches
+}
+
+// activePreparationFor returns the observed preparation name for the Recipe
+// identified by namespace/name from the provided list of Servings.
+// Returns an empty string when no matching Serving is found.
+func activePreparationFor(namespace, recipeName string, servings []deliveryv1alpha1.Serving) string {
+	for _, s := range servings {
+		if s.Namespace == namespace && s.Spec.Recipe == recipeName {
+			return s.Status.ObservedPreparation
+		}
+	}
+	return ""
+}
+
+// enrichRecipes joins a slice of Recipes with a slice of Servings to build
+// RecipeDTOs with ActivePreparation populated.
+func enrichRecipes(recipes []deliveryv1alpha1.Recipe, servings []deliveryv1alpha1.Serving) []RecipeDTO {
+	// serving key: "<namespace>/<spec.recipe>" → serving
+	servingMap := make(map[string]*deliveryv1alpha1.Serving, len(servings))
+	for i := range servings {
+		s := &servings[i]
+		servingMap[s.Namespace+"/"+s.Spec.Recipe] = s
+	}
+
+	out := make([]RecipeDTO, len(recipes))
+	for i, r := range recipes {
+		var activePrep string
+		if s, ok := servingMap[r.Namespace+"/"+r.Name]; ok {
+			activePrep = s.Status.ObservedPreparation
+		}
+		out[i] = recipeToDTO(r, activePrep)
+	}
+	return out
+}
+
+// enrichPreparations joins Preparations with Servings to determine IsActive.
+func enrichPreparations(preps []deliveryv1alpha1.Preparation, servings []deliveryv1alpha1.Serving) []PreparationDTO {
+	// active key: "<namespace>/<spec.recipe>" → observedPreparation name
+	activeMap := make(map[string]string, len(servings))
+	for _, s := range servings {
+		if s.Status.ObservedPreparation != "" {
+			activeMap[s.Namespace+"/"+s.Spec.Recipe] = s.Status.ObservedPreparation
+		}
+	}
+
+	out := make([]PreparationDTO, len(preps))
+	for i, p := range preps {
+		key := p.Namespace + "/" + p.Spec.Recipe
+		isActive := activeMap[key] == p.Name
+		out[i] = preparationToDTO(p, isActive)
+	}
+
+	// Sort newest-first by CreatedAt so the latest preparation is always at the top.
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt == nil {
+			return false
+		}
+		if out[j].CreatedAt == nil {
+			return true
+		}
+		return out[i].CreatedAt.After(*out[j].CreatedAt)
+	})
+
+	return out
+}

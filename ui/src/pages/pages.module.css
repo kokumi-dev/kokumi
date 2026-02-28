@@ -83,6 +83,29 @@
   padding: 20px;
 }
 
+.sectionSearch {
+  width: 260px;
+  margin-left: auto;
+  margin-right: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(49, 54, 56, 0.15);
+  background: var(--color-bg-main);
+  font-family: inherit;
+  font-size: 0.85rem;
+  color: var(--color-text-on-light);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.sectionSearch:focus {
+  border-color: var(--color-accent);
+}
+
+.sectionSearch::placeholder {
+  color: var(--color-text-muted-light);
+}
+
 /* ── Placeholder ── */
 .placeholder {
   display: flex;

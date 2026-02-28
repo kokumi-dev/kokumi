@@ -1,0 +1,229 @@
+/* Fixed-height container so Form and YAML tabs are always the same size. */
+.tabContent {
+  height: 420px;
+  overflow-y: auto;
+}
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 20px;
+  background: rgba(49, 54, 56, 0.07);
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.tab {
+  flex: 1;
+  padding: 7px 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  color: var(--color-text-muted-light);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.tabActive {
+  background: var(--color-bg-card);
+  color: var(--color-text-on-light);
+  box-shadow: 0 1px 4px rgba(49, 54, 56, 0.1);
+}
+
+.formGrid {
+  display: grid;
+  gap: 14px;
+}
+
+.row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.fieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-muted-light);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.input {
+  padding: 8px 11px;
+  border-radius: 7px;
+  border: 1px solid rgba(49, 54, 56, 0.15);
+  background: var(--color-bg-main);
+  font-family: inherit;
+  font-size: 0.875rem;
+  color: var(--color-text-on-light);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.input:focus {
+  border-color: var(--color-accent);
+}
+
+.input::placeholder {
+  color: var(--color-text-muted-light);
+}
+
+.inputDisabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.checkRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+}
+
+.checkRow input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+/* ── Patches ── */
+.patchList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.patchCard {
+  background: var(--color-bg-main);
+  border-radius: 8px;
+  border: 1px solid rgba(49, 54, 56, 0.1);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.patchCardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.patchCardTitle {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--color-text-muted-light);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.setRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.setKey,
+.setValue {
+  flex: 1;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(49, 54, 56, 0.13);
+  background: var(--color-bg-card);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.78rem;
+  color: var(--color-text-on-light);
+  outline: none;
+}
+
+.setKey:focus,
+.setValue:focus {
+  border-color: var(--color-accent);
+}
+
+.iconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted-light);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s;
+}
+
+.iconBtn:hover {
+  background: rgba(239, 100, 97, 0.12);
+  color: #c0312e;
+}
+
+.addSetBtn {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-accent);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 3px 0;
+  text-align: left;
+}
+
+.addSetBtn:hover {
+  text-decoration: underline;
+}
+
+.addPatchBtn {
+  margin-top: 4px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-accent);
+  background: rgba(239, 100, 97, 0.08);
+  border: 1px dashed rgba(239, 100, 97, 0.4);
+  border-radius: 7px;
+  padding: 9px;
+  width: 100%;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.addPatchBtn:hover {
+  background: rgba(239, 100, 97, 0.14);
+}
+
+.yamlError {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 7px;
+  background: rgba(239, 100, 97, 0.1);
+  border: 1px solid rgba(239, 100, 97, 0.25);
+  color: #c0312e;
+  font-size: 0.8rem;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.sectionTitle {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted-light);
+  margin-bottom: 8px;
+  margin-top: 4px;
+}
