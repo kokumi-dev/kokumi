@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.0](https://github.com/kokumi-dev/kokumi/compare/0.3.0...0.4.0) (2026-02-28)
+
+
+### Features
+
+* add initial implementations of controllers ([#28](https://github.com/kokumi-dev/kokumi/issues/28)) ([9f3dd5b](https://github.com/kokumi-dev/kokumi/commit/9f3dd5b851092d798987a5598b84b19f9dffb614))
+* add server component and initial ui ([#30](https://github.com/kokumi-dev/kokumi/issues/30)) ([e9568d1](https://github.com/kokumi-dev/kokumi/commit/e9568d11984475d04c93221aa0858bfa5fed19d6))
+* implement initial ui concept ([#31](https://github.com/kokumi-dev/kokumi/issues/31)) ([c4e66fd](https://github.com/kokumi-dev/kokumi/commit/c4e66fdc6f6b0dad82f0ad6e1636fb750b3915ef))
+* return version in info endpoint set by release process ([#32](https://github.com/kokumi-dev/kokumi/issues/32)) ([bcdc26a](https://github.com/kokumi-dev/kokumi/commit/bcdc26a6f34bb63e6d34f9240c21ba94940f9807))
+
 ## [0.3.0](https://github.com/kokumi-dev/kokumi/compare/0.2.0...0.3.0) (2026-02-25)
 
 
