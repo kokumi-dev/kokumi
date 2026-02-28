@@ -1,4 +1,11 @@
 import { useEffect, useState } from 'react'
+import styles from './App.module.css'
+import Sidebar, { type Page } from './components/Sidebar'
+import Dashboard from './pages/Dashboard'
+import Recipes from './pages/Recipes'
+import Preparations from './pages/Preparations'
+import Servings from './pages/Servings'
+import Settings from './pages/Settings'
 
 interface Info {
   name: string
@@ -6,8 +13,8 @@ interface Info {
 }
 
 function App() {
+  const [activePage, setActivePage] = useState<Page>('dashboard')
   const [info, setInfo] = useState<Info | null>(null)
-  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     fetch('/api/v1/info')
@@ -16,24 +23,37 @@ function App() {
         return res.json() as Promise<Info>
       })
       .then(setInfo)
-      .catch((err: unknown) => setError(String(err)))
+      .catch(() => {/* silently ignore in dev */})
   }, [])
 
+  function renderPage() {
+    switch (activePage) {
+      case 'dashboard':
+        return <Dashboard operatorName={info?.name} operatorVersion={info?.version} />
+      case 'recipes':
+        return <Recipes />
+      case 'preparations':
+        return <Preparations />
+      case 'servings':
+        return <Servings />
+      case 'settings':
+        return <Settings />
+    }
+  }
+
   return (
-    <main style={{ fontFamily: 'sans-serif', padding: '2rem' }}>
-      <h1>Kokumi</h1>
-      {error && <p style={{ color: 'red' }}>{error}</p>}
-      {!info && !error && <p>Loading…</p>}
-      {info && (
-        <dl>
-          <dt>Name</dt>
-          <dd>{info.name}</dd>
-          <dt>Version</dt>
-          <dd>{info.version}</dd>
-        </dl>
-      )}
-    </main>
+    <div className={styles.layout}>
+      <Sidebar
+        activePage={activePage}
+        onNavigate={setActivePage}
+        operatorVersion={info?.version}
+      />
+      <main className={styles.content}>
+        {renderPage()}
+      </main>
+    </div>
   )
 }
 
 export default App
+

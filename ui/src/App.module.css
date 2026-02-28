@@ -1,0 +1,12 @@
+.layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+.content {
+  margin-left: var(--sidebar-width);
+  flex: 1;
+  min-height: 100vh;
+  background-color: var(--color-bg-main);
+  overflow-y: auto;
+}
