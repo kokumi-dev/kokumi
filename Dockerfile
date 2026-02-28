@@ -7,7 +7,7 @@ COPY ui/ .
 RUN npm run build
 
 # Build the manager binary
-FROM --platform=$BUILDPLATFORM golang:1.25 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26 AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
