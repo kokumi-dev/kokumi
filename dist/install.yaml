@@ -662,6 +662,15 @@ metadata:
   name: kokumi-controller-manager
   namespace: kokumi
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app.kubernetes.io/component: server
+    app.kubernetes.io/name: kokumi
+  name: kokumi-server
+  namespace: kokumi
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -926,6 +935,26 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
+  name: kokumi-server-role
+rules:
+- apiGroups:
+  - delivery.kokumi.dev
+  resources:
+  - preparations
+  - recipes
+  - servings
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: kokumi
@@ -1040,6 +1069,19 @@ subjects:
   name: kokumi-controller-manager
   namespace: kokumi
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kokumi-server-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kokumi-server-role
+subjects:
+- kind: ServiceAccount
+  name: kokumi-server
+  namespace: kokumi
+---
 apiVersion: v1
 data:
   config.yml: |
@@ -1101,6 +1143,26 @@ spec:
     targetPort: 5000
   selector:
     app: registry
+  type: NodePort
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/component: server
+    app.kubernetes.io/name: kokumi
+  name: kokumi-server
+  namespace: kokumi
+spec:
+  ports:
+  - name: http
+    nodePort: 30051
+    port: 80
+    protocol: TCP
+    targetPort: http
+  selector:
+    app.kubernetes.io/component: server
+    app.kubernetes.io/name: kokumi
   type: NodePort
 ---
 apiVersion: v1
@@ -1243,3 +1305,71 @@ spec:
       - name: storage
         persistentVolumeClaim:
           claimName: kokumi-registry-pvc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/component: server
+    app.kubernetes.io/name: kokumi
+  name: kokumi-server
+  namespace: kokumi
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: server
+      app.kubernetes.io/name: kokumi
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: server
+        app.kubernetes.io/name: kokumi
+    spec:
+      containers:
+      - args:
+        - --bind-address=:8080
+        command:
+        - /server
+        image: ghcr.io/kokumi-dev/kokumi:latest
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        name: server
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 500m
+            memory: 128Mi
+          requests:
+            cpu: 10m
+            memory: 64Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - mountPath: /tmp
+          name: tmp
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccountName: kokumi-server
+      volumes:
+      - emptyDir: {}
+        name: tmp

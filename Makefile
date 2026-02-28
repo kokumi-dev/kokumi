@@ -158,9 +158,27 @@ argocd: ## Installs Argo CD in the cluster
 build: manifests generate fmt vet ## Build manager binary.
 	go build -o bin/manager cmd/main.go
 
+.PHONY: build-server
+build-server: ui-build fmt vet ## Build API server binary with embedded UI.
+	go build -trimpath -ldflags="-s -w" -o bin/server ./cmd/server/main.go
+
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/main.go
+
+.PHONY: run-server
+run-server: ui-build ## Run the API server locally (serves UI on :8080).
+	go run ./cmd/server/main.go
+
+.PHONY: ui-build
+ui-build: ## Build the React UI into the embed path.
+	cd ui && npm ci && npm run build
+	rm -rf internal/server/web/dist
+	cp -r ui/dist internal/server/web/dist
+
+.PHONY: ui-dev
+ui-dev: ## Start Vite dev server with proxy to local API server (requires run-server in parallel).
+	cd ui && npm run dev
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
@@ -191,6 +209,7 @@ docker-buildx: ## Build and push docker image for the manager for cross-platform
 build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
 	mkdir -p dist
 	cd config/manager && "$(KUSTOMIZE)" edit set image controller=${IMG}
+	cd config/server && "$(KUSTOMIZE)" edit set image server=${IMG}
 	"$(KUSTOMIZE)" build config/default > dist/install.yaml
 
 ##@ Deployment
@@ -212,6 +231,7 @@ uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified 
 .PHONY: deploy
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd config/manager && "$(KUSTOMIZE)" edit set image controller=${IMG}
+	cd config/server && "$(KUSTOMIZE)" edit set image server=${IMG}
 	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" apply -f -
 
 .PHONY: undeploy
