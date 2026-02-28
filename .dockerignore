@@ -9,3 +9,7 @@
 # Re-include Go module files
 !go.mod
 !go.sum
+
+# Re-include UI source files for the server build target
+!ui/
+!ui/**
