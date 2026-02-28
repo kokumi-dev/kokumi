@@ -7,8 +7,10 @@ import (
 
 func addRoutes(
 	mux *http.ServeMux,
+	h *hub,
 ) {
 	mux.HandleFunc("/api/v1/info", handleInfo)
+	mux.HandleFunc("/api/v1/events", handleEventsStream(h))
 	mux.HandleFunc("/healthz", handleHealthz)
 	mux.HandleFunc("/readyz", handleReadyz)
 

@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -21,11 +20,11 @@ type Config struct {
 }
 
 func NewServer(
-	logger logr.Logger,
 	config *Config,
+	h *hub,
 ) http.Handler {
 	mux := http.NewServeMux()
-	addRoutes(mux)
+	addRoutes(mux, h)
 	var handler http.Handler = mux
 	return handler
 }
@@ -47,7 +46,12 @@ func Run(
 
 	logger := log.FromContext(ctx)
 
-	srv := NewServer(logger, config)
+	h := newHub()
+	if err := startK8sWatcher(ctx, logger, h); err != nil {
+		_, _ = fmt.Fprintf(stderr, "Warning: failed to start Kubernetes watcher: %s\n", err)
+	}
+
+	srv := NewServer(config, h)
 	httpServer := &http.Server{
 		Addr:    net.JoinHostPort(config.Host, config.Port),
 		Handler: srv,

@@ -1,3 +1,4 @@
+import { useResourceCounts } from '../hooks/useResourceCounts'
 import styles from './pages.module.css'
 
 interface Props {
@@ -6,6 +7,8 @@ interface Props {
 }
 
 export default function Dashboard({ operatorName, operatorVersion }: Props) {
+  const counts = useResourceCounts()
+
   return (
     <div className={styles.page}>
       <div className={styles.header}>
@@ -24,15 +27,15 @@ export default function Dashboard({ operatorName, operatorVersion }: Props) {
         </div>
         <div className={styles.statCard}>
           <span className={styles.statLabel}>Recipes</span>
-          <span className={styles.statValue}>—</span>
+          <span className={styles.statValue}>{counts?.recipes ?? '—'}</span>
         </div>
         <div className={styles.statCard}>
           <span className={styles.statLabel}>Preparations</span>
-          <span className={styles.statValue}>—</span>
+          <span className={styles.statValue}>{counts?.preparations ?? '—'}</span>
         </div>
         <div className={styles.statCard}>
           <span className={styles.statLabel}>Servings</span>
-          <span className={styles.statValue}>—</span>
+          <span className={styles.statValue}>{counts?.servings ?? '—'}</span>
         </div>
       </div>
 
