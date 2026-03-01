@@ -1,0 +1,85 @@
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  padding: 7px 14px;
+  border-radius: 7px;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, opacity 0.15s, transform 0.1s;
+  line-height: 1;
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── Variants ── */
+.primary {
+  background: var(--color-accent);
+  color: #fff;
+}
+.primary:hover:not(:disabled) {
+  background: #d9554f;
+}
+
+.secondary {
+  background: rgba(49, 54, 56, 0.1);
+  color: var(--color-text-on-light);
+}
+.secondary:hover:not(:disabled) {
+  background: rgba(49, 54, 56, 0.17);
+}
+
+.danger {
+  background: rgba(239, 100, 97, 0.12);
+  color: #c0312e;
+}
+.danger:hover:not(:disabled) {
+  background: rgba(239, 100, 97, 0.22);
+}
+
+.ghost {
+  background: transparent;
+  color: var(--color-text-muted-light);
+  padding: 5px 10px;
+}
+.ghost:hover:not(:disabled) {
+  background: rgba(49, 54, 56, 0.08);
+  color: var(--color-text-on-light);
+}
+
+.promote {
+  background: rgba(52, 168, 83, 0.12);
+  color: #1e7e34;
+  font-size: 0.8rem;
+  padding: 5px 10px;
+}
+.promote:hover:not(:disabled) {
+  background: rgba(52, 168, 83, 0.22);
+}
+
+.rollback {
+  background: rgba(228, 179, 99, 0.15);
+  color: #8a6200;
+  font-size: 0.8rem;
+  padding: 5px 10px;
+}
+.rollback:hover:not(:disabled) {
+  background: rgba(228, 179, 99, 0.28);
+}
+
+/* ── Size modifier ── */
+.sm {
+  font-size: 0.8rem;
+  padding: 5px 10px;
+}

@@ -22,9 +22,10 @@ type Config struct {
 func NewServer(
 	config *Config,
 	h *hub,
+	deps *apiDeps,
 ) http.Handler {
 	mux := http.NewServeMux()
-	addRoutes(mux, h)
+	addRoutes(mux, h, deps)
 	var handler http.Handler = mux
 	return handler
 }
@@ -47,11 +48,12 @@ func Run(
 	logger := log.FromContext(ctx)
 
 	h := newHub()
-	if err := startK8sWatcher(ctx, logger, h); err != nil {
+	deps, err := startK8sWatcher(ctx, logger, h)
+	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "Warning: failed to start Kubernetes watcher: %s\n", err)
 	}
 
-	srv := NewServer(config, h)
+	srv := NewServer(config, h, deps)
 	httpServer := &http.Server{
 		Addr:    net.JoinHostPort(config.Host, config.Port),
 		Handler: srv,

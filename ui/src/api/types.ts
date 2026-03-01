@@ -1,0 +1,94 @@
+// ── Mirror of Go server DTOs ──────────────────────────────────────────────────
+
+export interface OCISource {
+  oci: string
+  version: string
+}
+
+export interface OCIDestination {
+  oci: string
+}
+
+export interface PatchTarget {
+  kind: string
+  name: string
+  namespace?: string
+}
+
+export interface Patch {
+  target: PatchTarget
+  set: Record<string, string>
+}
+
+export interface Condition {
+  type: string
+  status: string
+  reason?: string
+  message?: string
+  lastTransitionTime?: string
+}
+
+export interface Recipe {
+  name: string
+  namespace: string
+  labels?: Record<string, string>
+  source: OCISource
+  destination: OCIDestination
+  patches?: Patch[]
+  autoDeploy: boolean
+  phase: string
+  latestRevision?: string
+  activePreparation?: string
+  conditions?: Condition[]
+  createdAt?: string
+}
+
+export interface Artifact {
+  ociRef: string
+  digest: string
+  signed: boolean
+}
+
+export interface Preparation {
+  name: string
+  namespace: string
+  recipe: string
+  artifact: Artifact
+  configHash: string
+  phase: string
+  createdAt?: string
+  isActive: boolean
+  conditions?: Condition[]
+}
+
+// ── Form data types ───────────────────────────────────────────────────────────
+
+export interface RecipeFormData {
+  name: string
+  namespace: string
+  source: OCISource
+  destination: OCIDestination
+  patches: Patch[]
+  autoDeploy: boolean
+}
+
+export const emptyRecipeForm = (): RecipeFormData => ({
+  name: '',
+  namespace: 'default',
+  source: { oci: '', version: '' },
+  destination: { oci: '' },
+  patches: [],
+  autoDeploy: false,
+})
+
+export const recipeToFormData = (r: Recipe): RecipeFormData => ({
+  name: r.name,
+  namespace: r.namespace,
+  source: { ...r.source },
+  destination: { ...r.destination },
+  patches: (r.patches ?? []).map((p) => ({
+    target: { ...p.target },
+    set: { ...p.set },
+  })),
+  autoDeploy: r.autoDeploy,
+})

@@ -1,0 +1,22 @@
+.wrap {
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(49, 54, 56, 0.12);
+  font-size: 0.82rem;
+  /* Override CodeMirror's default font */
+  --cm-font: 'SF Mono', 'Fira Code', 'Fira Mono', 'Roboto Mono', monospace;
+}
+
+.wrap :global(.cm-editor) {
+  height: 100%;
+  font-family: var(--cm-font);
+}
+
+.wrap :global(.cm-scroller) {
+  overflow: auto;
+  max-height: 400px;
+}
+
+.wrapTall :global(.cm-scroller) {
+  max-height: calc(92vh - 160px);
+}

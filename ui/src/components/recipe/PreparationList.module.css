@@ -1,0 +1,90 @@
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(49, 54, 56, 0.07);
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.rowActive {
+  background: rgba(52, 168, 83, 0.04);
+  border-radius: 8px;
+  padding: 12px 10px;
+  margin: 0 -10px;
+}
+
+.rowActive .info::before {
+  content: '';
+}
+
+.info {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.nameRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.name {
+  font-size: 0.87rem;
+  font-weight: 700;
+  color: var(--color-text-on-light);
+  word-break: break-all;
+}
+
+.activePill {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 12px;
+  background: rgba(52, 168, 83, 0.15);
+  color: #1e7e34;
+  letter-spacing: 0.04em;
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.metaItem {
+  font-size: 0.75rem;
+  color: var(--color-text-muted-light);
+}
+
+.metaItemValue {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.72rem;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.empty {
+  padding: 24px 0;
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--color-text-muted-light);
+}
