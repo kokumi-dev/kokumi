@@ -161,3 +161,144 @@
   border-radius: 50%;
   background: currentColor;
 }
+
+/* ── Data table ── */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.tableHead th {
+  text-align: left;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--color-text-muted-light);
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(49, 54, 56, 0.1);
+  white-space: nowrap;
+}
+
+.tableRow td {
+  padding: 10px 12px;
+  vertical-align: middle;
+  border-bottom: 1px solid rgba(49, 54, 56, 0.06);
+  font-size: 0.875rem;
+  color: var(--color-text-on-light);
+}
+
+.tableRow:last-child td {
+  border-bottom: none;
+}
+
+.tableRow:hover td {
+  background: rgba(49, 54, 56, 0.03);
+}
+
+.activePill {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 20px;
+  background: rgba(68, 190, 120, 0.15);
+  color: #2d8a5a;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+}
+
+.truncate {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+}
+
+.iconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid rgba(49, 54, 56, 0.15);
+  background: transparent;
+  color: var(--color-text-muted-light);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  padding: 0;
+}
+
+.iconBtn:hover {
+  background: var(--color-bg-main);
+  color: var(--color-text-on-light);
+  border-color: rgba(49, 54, 56, 0.3);
+}
+
+.iconBtnDisabled {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
+}
+
+.policyPill {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 20px;
+  background: rgba(95, 137, 230, 0.12);
+  color: #3b6dc9;
+}
+
+/* ── Settings form ── */
+.settingsSection {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.fieldRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.fieldLabel {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-text-on-light);
+  min-width: 140px;
+}
+
+.fieldInput {
+  flex: 1;
+  max-width: 400px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(49, 54, 56, 0.15);
+  background: var(--color-bg-main);
+  font-family: inherit;
+  font-size: 0.875rem;
+  color: var(--color-text-on-light);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.fieldInput:focus {
+  border-color: var(--color-accent);
+}
+
+.savedMsg {
+  font-size: 0.8rem;
+  color: #2d8a5a;
+  font-weight: 500;
+}

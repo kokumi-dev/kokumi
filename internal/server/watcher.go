@@ -31,6 +31,8 @@ const (
 	eventRecipes = "recipes"
 	// eventPreparations is the SSE event type name for full preparation list snapshots.
 	eventPreparations = "preparations"
+	// eventServings is the SSE event type name for full serving list snapshots.
+	eventServings = "servings"
 )
 
 // newScheme builds a runtime Scheme with the types the server needs.
@@ -126,6 +128,10 @@ func startK8sWatcher(ctx context.Context, logger logr.Logger, h *hub) (*apiDeps,
 
 		if err := h.publish(eventPreparations, enrichPreparations(prepList.Items, servingList.Items)); err != nil {
 			logger.Error(err, "Failed to publish preparations event")
+		}
+
+		if err := h.publish(eventServings, servingsToDTO(servingList.Items)); err != nil {
+			logger.Error(err, "Failed to publish servings event")
 		}
 	}
 

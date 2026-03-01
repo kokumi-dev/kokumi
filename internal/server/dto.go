@@ -96,3 +96,17 @@ type UpdateRecipeRequest struct {
 type PromoteRequest struct {
 	Preparation string `json:"preparation"`
 }
+
+// ServingDTO is the enriched view of a Serving served to the UI.
+type ServingDTO struct {
+	Name                string         `json:"name"`
+	Namespace           string         `json:"namespace"`
+	Recipe              string         `json:"recipe"`
+	DesiredPreparation  string         `json:"desiredPreparation"`
+	ObservedPreparation string         `json:"observedPreparation,omitempty"`
+	DeployedDigest      string         `json:"deployedDigest,omitempty"`
+	PreparationPolicy   string         `json:"preparationPolicy"`
+	Phase               string         `json:"phase"`
+	Conditions          []ConditionDTO `json:"conditions,omitempty"`
+	CreatedAt           *time.Time     `json:"createdAt,omitempty"`
+}

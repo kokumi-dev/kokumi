@@ -197,3 +197,32 @@ func enrichPreparations(preps []deliveryv1alpha1.Preparation, servings []deliver
 
 	return out
 }
+
+// servingToDTO converts a Serving CRD object into a ServingDTO.
+func servingToDTO(s deliveryv1alpha1.Serving) ServingDTO {
+	dto := ServingDTO{
+		Name:                s.Name,
+		Namespace:           s.Namespace,
+		Recipe:              s.Spec.Recipe,
+		DesiredPreparation:  s.Spec.Preparation,
+		ObservedPreparation: s.Status.ObservedPreparation,
+		DeployedDigest:      s.Status.DeployedDigest,
+		PreparationPolicy:   string(s.Spec.PreparationPolicy.Type),
+		Phase:               string(s.Status.Phase),
+		Conditions:          conditionsToDTO(s.Status.Conditions),
+	}
+	if !s.CreationTimestamp.IsZero() {
+		t := s.CreationTimestamp.UTC()
+		dto.CreatedAt = &t
+	}
+	return dto
+}
+
+// servingsToDTO converts a slice of Serving CRD objects into ServingDTOs.
+func servingsToDTO(servings []deliveryv1alpha1.Serving) []ServingDTO {
+	out := make([]ServingDTO, len(servings))
+	for i, s := range servings {
+		out[i] = servingToDTO(s)
+	}
+	return out
+}
