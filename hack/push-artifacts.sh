@@ -16,24 +16,24 @@ echo "Using temporary directory: $WORK_DIR"
 echo "Pushing to: $REPO"
 echo "Version: $PKG_VERSION"
 
-mkdir -p "$WORK_DIR/kube-prometheus-stack"
+mkdir -p "$WORK_DIR/external-dns"
 
-kubectl create ns kube-prometheus-stack --dry-run=client -o yaml \
-  > "$WORK_DIR/kube-prometheus-stack/manifest.yaml"
+echo "---" >> "$WORK_DIR/external-dns/manifest.yaml"
 
-echo "---" >> "$WORK_DIR/kube-prometheus-stack/manifest.yaml"
+kubectl create ns external-dns --dry-run=client -o yaml \
+  >> "$WORK_DIR/external-dns/manifest.yaml"
 
-helm template kube-prometheus-stack prometheus-community/kube-prometheus-stack \
-  --version 82.4.0 \
-  --namespace kube-prometheus-stack \
-  >> "$WORK_DIR/kube-prometheus-stack/manifest.yaml"
+helm template external-dns external-dns/external-dns \
+  --version 1.20.0 \
+  --namespace external-dns \
+  >> "$WORK_DIR/external-dns/manifest.yaml"
 
 mkdir -p "$WORK_DIR/external-secrets"
 
-kubectl create ns external-secrets --dry-run=client -o yaml \
-  > "$WORK_DIR/external-secrets/manifest.yaml"
-
 echo "---" >> "$WORK_DIR/external-secrets/manifest.yaml"
+
+kubectl create ns external-secrets --dry-run=client -o yaml \
+  >> "$WORK_DIR/external-secrets/manifest.yaml"
 
 helm template external-secrets external-secrets-operator/external-secrets \
   --version 2.0.1 \
