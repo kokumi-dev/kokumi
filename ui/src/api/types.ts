@@ -61,6 +61,19 @@ export interface Preparation {
   conditions?: Condition[]
 }
 
+export interface Serving {
+  name: string
+  namespace: string
+  recipe: string
+  desiredPreparation: string
+  observedPreparation?: string
+  deployedDigest?: string
+  preparationPolicy: string
+  phase: string
+  conditions?: Condition[]
+  createdAt?: string
+}
+
 // ── Form data types ───────────────────────────────────────────────────────────
 
 export interface RecipeFormData {
