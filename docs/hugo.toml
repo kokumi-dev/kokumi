@@ -1,0 +1,74 @@
+baseURL = "https://kokumi.dev"
+languageCode = "en-us"
+title = "Kokumi"
+enableGitInfo = true
+
+# Hextra theme via Hugo modules
+[module]
+  [[module.imports]]
+    path = "github.com/imfing/hextra"
+
+[params]
+  description = "Kubernetes operator for structured, immutable release management"
+  displayUpdatedDate = true
+  dateFormat = "January 2, 2006"
+
+  # Navbar
+  [params.navbar]
+    displayTitle = true
+    displayLogo = true
+    [params.navbar.logo]
+      path = "images/logo.png"
+      link = "/"
+      width = 32
+      height = 32
+
+  # Footer
+  [params.footer]
+    enable = true
+    displayCopyright = true
+    displayPoweredBy = false
+
+  # Theme
+  [params.theme]
+    default = "light"
+    displayToggle = true
+
+  # Edit link (update GITHUB_REPO when the repo is known)
+  [params.editURL]
+    enable = true
+    base = "https://github.com/kokumi-dev/kokumi/edit/main/docs/content"
+
+  # Search
+  [params.search]
+    enable = true
+    type = "flexsearch"
+    [params.search.flexsearch]
+      index = "content"
+
+[menu]
+  [[menu.main]]
+    identifier = "docs"
+    name = "Docs"
+    pageRef = "/docs"
+    weight = 1
+  [[menu.main]]
+    identifier = "search"
+    name = "Search"
+    weight = 2
+    [menu.main.params]
+      type = "search"
+  [[menu.main]]
+    identifier = "github"
+    name = "GitHub"
+    url = "https://github.com/kokumi-dev/kokumi"
+    weight = 3
+    [menu.main.params]
+      icon = "github"
+
+[markup]
+  [markup.goldmark]
+    [markup.goldmark.renderer]
+      unsafe = true
+  [markup.highlight]
+    noClasses = false

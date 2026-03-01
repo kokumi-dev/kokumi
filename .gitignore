@@ -32,3 +32,7 @@ go.work
 # UI build output — generated at build time by `make ui-build` or Dockerfile
 internal/server/web/dist/*
 !internal/server/web/dist/.gitkeep
+
+# Hugo website build output
+docs/public/
+docs/.hugo_build.lock
