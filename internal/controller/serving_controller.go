@@ -223,6 +223,9 @@ func (r *ServingReconciler) reconcileArgoApplication(ctx context.Context, cd *de
 			"prune":    true,
 			"selfHeal": true,
 		},
+		"syncOptions": []any{
+			"ServerSideApply=true",
+		},
 	}
 
 	existing := &unstructured.Unstructured{}
