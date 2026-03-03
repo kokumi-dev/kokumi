@@ -131,7 +131,7 @@ export default function Sidebar({ activePage, onNavigate, operatorVersion }: Pro
         )}
         <div className={styles.footerInfo}>
           API Group{' '}
-          <span className={styles.footerInfoValue}>delivery.kokumi.io</span>
+          <span className={styles.footerInfoValue}>delivery.kokumi.dev</span>
         </div>
       </div>
     </aside>
