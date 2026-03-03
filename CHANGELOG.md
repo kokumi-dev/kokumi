@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.0](https://github.com/kokumi-dev/kokumi/compare/0.4.0...0.5.0) (2026-03-03)
+
+
+### Features
+
+* add preparations and servings ui ([#36](https://github.com/kokumi-dev/kokumi/issues/36)) ([31129f2](https://github.com/kokumi-dev/kokumi/commit/31129f2295bd3ddc3a3e5143f963e36266538dc7))
+* implement recipe management ui ([#35](https://github.com/kokumi-dev/kokumi/issues/35)) ([3f90db2](https://github.com/kokumi-dev/kokumi/commit/3f90db2f4c49f0fd9435ca672a0d9d3cd93787dd))
+* implement SSE for resource counts and update dashboard ([#33](https://github.com/kokumi-dev/kokumi/issues/33)) ([ae38537](https://github.com/kokumi-dev/kokumi/commit/ae385378a756cc60b1e6e2e68c2af118c9e8d1a8))
+* use server side apply in argocd applications ([#37](https://github.com/kokumi-dev/kokumi/issues/37)) ([966ba8a](https://github.com/kokumi-dev/kokumi/commit/966ba8a08e41bfd8127b857bae453714d9f4a426))
+
 ## [0.4.0](https://github.com/kokumi-dev/kokumi/compare/0.3.0...0.4.0) (2026-02-28)
 
 
