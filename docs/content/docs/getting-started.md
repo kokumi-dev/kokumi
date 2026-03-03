@@ -7,6 +7,19 @@ description: Install kokumi and deploy your first Recipe in minutes.
 ## Prerequisites
 
 - A Kubernetes cluster ≥ 1.26 with `kubectl` configured
+- **Argo CD ≥ 3.3** installed in the cluster in the `argocd` namespace
+
+> **Argo CD is required.** Kokumi delegates all runtime deployment to Argo CD.
+> When a Serving is created or updated, kokumi creates or updates an Argo CD
+> `Application` that points to the immutable OCI artifact of the selected
+> Preparation. Without Argo CD, no workloads will be deployed.
+
+If you don't have Argo CD installed yet:
+
+```bash
+kubectl create namespace argocd
+kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.3.0/manifests/install.yaml
+```
 
 ## Install kokumi
 
@@ -67,6 +80,10 @@ kubectl get preparations --watch
 
 A **Serving** selects which Preparation is actively deployed. There is exactly one Serving per Recipe.
 
+When you create a Serving, kokumi automatically creates an Argo CD `Application`
+in the `argocd` namespace pointing to the immutable OCI artifact of the selected
+Preparation. Argo CD then syncs the manifests into the target namespace.
+
 ```yaml
 apiVersion: delivery.kokumi.dev/v1alpha1
 kind: Serving
@@ -84,7 +101,17 @@ kubectl get servings
 # external-secrets   external-secrets   external-secrets-a1b2c3   Active   10s
 ```
 
+Verify that Argo CD picked it up:
+
+```bash
+kubectl get applications -n argocd
+# NAME               SYNC STATUS   HEALTH STATUS
+# external-secrets   Synced        Healthy
+```
+
 To roll back, update `spec.preparation` to any previous Preparation name and re-apply.
+Kokumi will update the Argo CD Application to point at the previous artifact digest —
+no re-rendering required.
 
 ## Next steps
 
