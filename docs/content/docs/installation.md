@@ -9,6 +9,12 @@ description: Deploy kokumi to any Kubernetes cluster.
 | Dependency | Version |
 |---|---|
 | Kubernetes | ≥ 1.26 |
+| Argo CD | ≥ 3.3 |
+
+Argo CD must be installed **before** kokumi is deployed. The Serving controller
+creates and updates Argo CD `Application` resources to point at the immutable
+OCI artifacts produced by Preparations. Without Argo CD, Servings will fail
+and no workloads will be deployed.
 
 ## Install
 
