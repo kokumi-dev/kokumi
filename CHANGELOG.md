@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/kokumi-dev/kokumi/compare/0.5.0...0.5.1) (2026-03-03)
+
+
+### Bug Fixes
+
+* api group in sidebar ([#46](https://github.com/kokumi-dev/kokumi/issues/46)) ([0497ad6](https://github.com/kokumi-dev/kokumi/commit/0497ad67bdda3e8162d9f167617e4e10354ac5db))
+
 ## [0.5.0](https://github.com/kokumi-dev/kokumi/compare/0.4.0...0.5.0) (2026-03-03)
 
 
