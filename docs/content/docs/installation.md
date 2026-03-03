@@ -19,7 +19,7 @@ and no workloads will be deployed.
 ## Install
 
 ```bash
-kubectl apply -f https://github.com/kokumi-dev/kokumi/releases/download/0.4.0/install.yaml
+kubectl apply -f https://github.com/kokumi-dev/kokumi/releases/download/0.5.1/install.yaml
 ```
 
 This installs:
@@ -54,7 +54,7 @@ Open [http://localhost:8080](http://localhost:8080) in your browser.
 
 ## Pin a specific version
 
-Replace `0.4.0` with any released version:
+Replace `0.5.1` with any released version:
 
 ```bash
 kubectl apply -f https://github.com/kokumi-dev/kokumi/releases/download/<VERSION>/install.yaml
@@ -71,5 +71,5 @@ kubectl apply -f https://github.com/kokumi-dev/kokumi/releases/download/<NEW_VER
 ## Uninstall
 
 ```bash
-kubectl delete -f https://github.com/kokumi-dev/kokumi/releases/download/0.4.0/install.yaml
+kubectl delete -f https://github.com/kokumi-dev/kokumi/releases/download/0.5.1/install.yaml
 ```
