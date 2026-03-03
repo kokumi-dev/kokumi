@@ -1,7 +1,7 @@
 ---
 title: Architecture & Concepts
 weight: 3
-description: How kokumi models release workflows and how its control loops operate.
+description: How Kokumi models release workflows and how its control loops operate.
 ---
 
 ## Core philosophy
@@ -12,7 +12,7 @@ Kokumi draws a hard line between three concerns that most delivery systems confl
 2. **Artifact** — what _was_ built, exactly (the Preparation)
 3. **Activation** — what is _currently running_ (the Serving)
 
-By keeping these separate and immutable at the artifact layer, kokumi gives
+By keeping these separate and immutable at the artifact layer, Kokumi gives
 you a complete, auditable history of every version ever produced — and the
 ability to promote or roll back with a single field change.
 
@@ -43,15 +43,18 @@ Menu ──coordinates──▶ { Recipe₁, Recipe₂, … }  (atomic multi-Rec
 
 ### Recipe
 
-A Recipe declares:
+The **only resource you create manually**. A Recipe declares:
 
-- **Source** — OCI image reference
-- **Patches** — Patches to apply
+- **Source** — OCI image reference containing a `manifest.yaml` at its root
+- **Patches** — Patches to apply before producing the artifact
 
-Recipes are mutable; changing a Recipe triggers a new reconciliation cycle and
-produces a new Preparation.
+Recipes are mutable; every change triggers a new reconciliation cycle and
+automatically produces a new Preparation.
 
 ### Preparation
+
+Preparations are **created automatically** by Kokumi whenever a Recipe changes.
+You never create them directly.
 
 A Preparation is the _output_ of rendering a Recipe at a specific point in time.
 It contains:
@@ -65,8 +68,15 @@ history and can promote any old Preparation to active at any time.
 
 ### Serving
 
-A Serving is the active selection. Each Recipe has at most one Serving;
-changing `spec.preparation` atomically switches the active version.
+A Serving tracks which Preparation is actively deployed. There is exactly one
+Serving per Recipe, and it is **managed automatically** — you never create one
+directly. A Serving is created or updated in three ways:
+
+- **Auto-deploy** — set `spec.autoDeployLatest: true` on the Recipe; Kokumi
+  updates the Serving automatically every time a new Preparation becomes `Ready`.
+- **Label promotion** — label a Preparation with
+  `delivery.kokumi.dev/approve-deploy: "true"`.
+- **UI** — click **Promote** on any Preparation in the Kokumi UI.
 
 When a Serving is reconciled, the controller:
 
@@ -76,17 +86,13 @@ When a Serving is reconciled, the controller:
    `spec.source.targetRevision` at its exact digest.
 3. Argo CD takes over and syncs the manifests into the target namespace.
 
-Rollback is just updating the reference:
-
-```bash
-kubectl patch serving my-app \
-  --type=merge \
-  -p '{"spec":{"preparation":{"name":"my-app-12736216279"}}}'
-```
+Rollback is promoting any previous Preparation — no re-rendering required.
 
 ### Menu
 
-A Menu groups multiple Recipes and allows coordinated rollouts — useful when
+> **Not yet implemented — planned for a future release.**
+
+A Menu will group multiple Recipes and allow coordinated rollouts — useful when
 you need frontend, backend, and config to move together in a single atomic
 operation.
 
@@ -106,7 +112,21 @@ Key properties:
 - **Idempotent** — each reconcile produces the same output for the same input
 - **Level-triggered** — the controller always acts on observed state, not events
 - **Owner references** — Preparations are owned by their Recipe; clean deletion is automatic
-- **Argo CD delegates deployment** — kokumi never applies manifests directly; it only manages the Argo CD Application resource
+- **Argo CD delegates deployment** — Kokumi never applies manifests directly; it only manages the Argo CD Application resource
+
+## OCI artifact format
+
+Kokumi currently expects the source OCI artifact to contain a single file named
+`manifest.yaml` at the root. This file must contain all Kubernetes resources
+(as a single or multi-document YAML).
+
+```
+myapp:v1.0.0  (OCI artifact)
+└── manifest.yaml   ← all Kubernetes resources
+```
+
+Support for additional source formats (Helm charts, Kustomize directories) is
+planned for a future release.
 
 ## OCI registry
 

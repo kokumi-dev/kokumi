@@ -1,7 +1,7 @@
 ---
 title: Getting Started
 weight: 1
-description: Install kokumi and deploy your first Recipe in minutes.
+description: Install Kokumi and deploy your first Recipe in minutes.
 ---
 
 ## Prerequisites
@@ -10,7 +10,7 @@ description: Install kokumi and deploy your first Recipe in minutes.
 - **Argo CD ≥ 3.3** installed in the cluster in the `argocd` namespace
 
 > **Argo CD is required.** Kokumi delegates all runtime deployment to Argo CD.
-> When a Serving is created or updated, kokumi creates or updates an Argo CD
+> When a Serving is activated, Kokumi creates or updates an Argo CD
 > `Application` that points to the immutable OCI artifact of the selected
 > Preparation. Without Argo CD, no workloads will be deployed.
 
@@ -21,7 +21,7 @@ kubectl create namespace argocd
 kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.3.0/manifests/install.yaml
 ```
 
-## Install kokumi
+## Install Kokumi
 
 ```bash
 kubectl apply -f https://github.com/kokumi-dev/kokumi/releases/download/0.4.0/install.yaml
@@ -37,7 +37,11 @@ kubectl get pods -n kokumi
 
 ## Create your first Recipe
 
-A **Recipe** declares where to pull rendered manifests from and how to patch them before producing an immutable artifact.
+**Recipe is the only resource you create directly.** Preparations and Servings
+are managed automatically by Kokumi.
+
+A Recipe declares the source OCI artifact and any patches to apply. The source
+image must contain a `manifest.yaml` file at its root with all Kubernetes resources.
 
 ```yaml
 apiVersion: delivery.kokumi.dev/v1alpha1
@@ -46,7 +50,7 @@ metadata:
   name: external-secrets
 spec:
   source:
-    oci: oci://kokumi-registry.kokumi.svc.cluster.local:5000/recipe/external-secrets
+    oci: oci://ghcr.io/kokumi-dev/external-secrets
     version: "0.1.0"
 
   patches:
@@ -68,50 +72,58 @@ kubectl apply -f recipe.yaml
 
 ## Watch a Preparation being created
 
-Kokumi reconciles the Recipe and produces an immutable **Preparation**:
+Kokumi automatically reconciles the Recipe and produces an immutable **Preparation**.
+You never create Preparations manually — every Recipe change produces a new one
+and the full history is retained indefinitely.
 
 ```bash
 kubectl get preparations --watch
-# NAME                         RECIPE              STATUS   AGE
-# external-secrets-a1b2c3      external-secrets    Ready    5s
+# NAME                            RECIPE             PHASE   CREATED   AGE
+# external-secrets-d7ce0c46a686   external-secrets   Ready   5s        5s
 ```
 
 ## Activate with a Serving
 
-A **Serving** selects which Preparation is actively deployed. There is exactly one Serving per Recipe.
+A **Serving** points Argo CD at the selected Preparation's immutable OCI artifact.
+There is exactly one Serving per Recipe, and it is **created and managed
+automatically** — you never write a Serving manifest yourself.
 
-When you create a Serving, kokumi automatically creates an Argo CD `Application`
-in the `argocd` namespace pointing to the immutable OCI artifact of the selected
-Preparation. Argo CD then syncs the manifests into the target namespace.
+Three ways to activate or change a Serving:
 
-```yaml
-apiVersion: delivery.kokumi.dev/v1alpha1
-kind: Serving
-metadata:
-  name: external-secrets
-spec:
-  recipe: external-secrets
-  preparation: external-secrets-a1b2c3
-```
+| Method | How |
+|---|---|
+| **Auto-deploy** | Set `spec.autoDeployLatest: true` on the Recipe — Kokumi updates the Serving on every new Preparation |
+| **Label promotion** | Label a Preparation with `delivery.kokumi.dev/approve-deploy: "true"` |
+| **UI** | Click **Promote** on any Preparation in the Kokumi UI |
+
+Once activated, Kokumi creates a matching Argo CD `Application` in the `argocd`
+namespace and Argo CD syncs the manifests into the cluster.
 
 ```bash
-kubectl apply -f serving.yaml
 kubectl get servings
-# NAME               RECIPE             PREPARATION                STATUS   AGE
-# external-secrets   external-secrets   external-secrets-a1b2c3   Active   10s
-```
+# NAME               RECIPE             PREPARATION                    PHASE    AGE
+# external-secrets   external-secrets   external-secrets-d7ce0c46a686   Active   10s
 
-Verify that Argo CD picked it up:
-
-```bash
 kubectl get applications -n argocd
 # NAME               SYNC STATUS   HEALTH STATUS
 # external-secrets   Synced        Healthy
 ```
 
-To roll back, update `spec.preparation` to any previous Preparation name and re-apply.
-Kokumi will update the Argo CD Application to point at the previous artifact digest —
-no re-rendering required.
+To roll back, promote any previous Preparation — no re-rendering required.
+
+## Access the UI
+
+Kokumi includes a web UI and API server deployed alongside the controller.
+Port-forward the server service to access it locally:
+
+```bash
+kubectl port-forward -n kokumi svc/kokumi-server 8080:80
+```
+
+Then open [http://localhost:8080](http://localhost:8080) in your browser.
+
+The UI lets you browse Recipes, Preparations, and Servings, promote a
+Preparation to active with one click, and view Argo CD sync status in real time.
 
 ## Next steps
 
