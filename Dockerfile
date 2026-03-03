@@ -1,5 +1,5 @@
 # Build the UI
-FROM node:24-alpine AS ui-builder
+FROM node:25-alpine AS ui-builder
 WORKDIR /ui
 COPY ui/package.json ui/package-lock.json ./
 RUN npm ci
