@@ -1,0 +1,73 @@
+/* ============================================================
+   kokumi.dev – custom theme overrides for Hextra
+   Palette mirrors the app UI at ui/src/index.css
+   ============================================================ */
+
+/* ── Google Font: Inter ─────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+/* ── Kokumi primary colour: coral-red #EF6461 ───────────────── */
+/* HSL ≈ (1°, 82%, 66%) → set lightness at 58% so shade-500    */
+/* is vivid enough for buttons while keeping the coral feel.    */
+:root {
+  --primary-hue:        1deg;
+  --primary-saturation: 80%;
+  --primary-lightness:  58%;
+}
+
+/* ── Hextra / Tailwind v4 theme variables ────────────────────── */
+/* --hx-* variables must live inside @layer theme (Hextra v0.10+) */
+@layer theme {
+  :root {
+    /* Override default font to match the app */
+    --hx-font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif,
+                    "Apple Color Emoji", "Segoe UI Emoji",
+                    "Segoe UI Symbol", "Noto Color Emoji";
+  }
+}
+
+/* Dark mode tweaks – slightly brighter coral in dark palette */
+.dark {
+  --primary-hue:        1deg;
+  --primary-saturation: 75%;
+  --primary-lightness:  65%;
+}
+
+/* ── Hero section ────────────────────────────────────────────── */
+/* Home page only: make body a fixed-height flex column so     */
+/* header + hero + footer fill exactly 100vh with no scrolling. */
+body:has(.kokumi-home) {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+/* The main wrapper grows to fill the space between navbar and footer */
+body:has(.kokumi-home) .kokumi-home {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── Navbar accent ───────────────────────────────────────────── */
+/* Thin coral bottom-border on active nav links */
+a[data-active="true"] {
+  border-bottom-color: hsl(var(--primary-hue), var(--primary-saturation), var(--primary-lightness)) !important;
+}
+
+/* ── Code blocks ─────────────────────────────────────────────── */
+/* Slightly warm background for code to complement brand tones  */
+.hextra-code-block pre,
+.content :where(pre):not(:where(.hextra-code-block pre, [class~=not-prose], [class~=not-prose] *)) {
+  background-color: #F7F5F0 !important;
+}
+
+.dark .hextra-code-block pre,
+.dark .content :where(pre):not(:where(.hextra-code-block pre, [class~=not-prose], [class~=not-prose] *)) {
+  background-color: #1e2022 !important;
+}
+
+/* ── Subtle amber secondary accent for callouts ──────────────── */
+/* The amber #E4B363 (--color-accent-secondary) appears here     */
+.hextra-callout[data-type="info"] {
+  border-color: #E4B363;
+}
