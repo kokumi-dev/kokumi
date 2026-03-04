@@ -94,12 +94,17 @@ func (r *RecipeReconciler) reconcileRender(ctx context.Context, recipe *delivery
 	logger := log.FromContext(ctx)
 	statusUpdater := status.NewRecipeUpdater(r.Client)
 
-	if recipe.Status.ObservedGeneration == recipe.Generation && recipe.Status.Phase == deliveryv1alpha1.RecipePhaseReady {
+	specHash, err := renderer.CalculateSpecHash(recipe.Spec)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to calculate spec hash: %w", err)
+	}
+
+	if recipe.Status.LatestConfigHash == specHash {
 		logger.Info("Configuration is up-to-date, skipping reconciliation")
 		return ctrl.Result{}, nil
 	}
 
-	if err := statusUpdater.Processing(ctx, recipe); err != nil {
+	if err := statusUpdater.Processing(ctx, recipe, specHash); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -123,7 +128,7 @@ func (r *RecipeReconciler) reconcileRender(ctx context.Context, recipe *delivery
 
 	recipe.Status.LatestRevision = preparation.Name
 
-	if err := statusUpdater.Ready(ctx, recipe, fmt.Sprintf("Successfully pushed to %s", result.DestRef)); err != nil {
+	if err := statusUpdater.Ready(ctx, recipe, specHash, fmt.Sprintf("Successfully pushed to %s", result.DestRef)); err != nil {
 		return ctrl.Result{}, err
 	}
 

@@ -118,6 +118,11 @@ type RecipeStatus struct {
 	// +optional
 	LatestRevision string `json:"latestRevision,omitempty"`
 
+	// latestConfigHash is a SHA-256 hash of the spec inputs (source OCI reference,
+	// version, and patches) that produced the current latestRevision.
+	// +optional
+	LatestConfigHash string `json:"latestConfigHash,omitempty"`
+
 	// phase represents the current phase of the Recipe lifecycle
 	// +optional
 	Phase RecipePhase `json:"phase,omitempty"`

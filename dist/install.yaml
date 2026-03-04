@@ -442,6 +442,11 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              latestConfigHash:
+                description: |-
+                  latestConfigHash is a SHA-256 hash of the spec inputs (source OCI reference,
+                  version, and patches) that produced the current latestRevision.
+                type: string
               latestRevision:
                 description: |-
                   latestRevision is the name of the most recent immutable Preparation

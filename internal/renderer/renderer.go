@@ -69,6 +69,33 @@ func NormalizeYAML(content []byte) ([]byte, error) {
 	return marshalYAMLNodes(documents)
 }
 
+// CalculateSpecHash computes a stable SHA-256 hash over the complete set of inputs
+// that determine the content of a rendered artifact.
+func CalculateSpecHash(spec deliveryv1alpha1.RecipeSpec) (string, error) {
+	var builder strings.Builder
+
+	encoder := yaml.NewEncoder(&builder)
+	encoder.SetIndent(2)
+
+	if err := encoder.Encode(struct {
+		OCI     string                   `yaml:"oci"`
+		Version string                   `yaml:"version"`
+		Patches []deliveryv1alpha1.Patch `yaml:"patches,omitempty"`
+	}{
+		OCI:     spec.Source.OCI,
+		Version: spec.Source.Version,
+		Patches: spec.Patches,
+	}); err != nil {
+		return "", fmt.Errorf("failed to encode spec for hashing: %w", err)
+	}
+
+	encoder.Close() //nolint:errcheck
+
+	hash := sha256.Sum256([]byte(builder.String()))
+
+	return fmt.Sprintf("sha256:%x", hash), nil
+}
+
 // CalculateConfigHash computes a stable SHA-256 hash of the patches configuration.
 // An empty patch list always returns emptyHash so callers can detect "no config".
 func CalculateConfigHash(patches []deliveryv1alpha1.Patch) (string, error) {

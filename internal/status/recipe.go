@@ -24,28 +24,37 @@ func NewRecipeUpdater(c client.Client) *RecipeUpdater {
 }
 
 // Processing marks the Recipe as actively being processed.
-func (u *RecipeUpdater) Processing(ctx context.Context, r *deliveryv1alpha1.Recipe) error {
-	return u.set(ctx, r, deliveryv1alpha1.RecipePhaseProcessing, "Processing component configuration")
+func (u *RecipeUpdater) Processing(ctx context.Context, r *deliveryv1alpha1.Recipe, configHash string) error {
+	return u.set(ctx, r, deliveryv1alpha1.RecipePhaseProcessing, configHash, "Processing component configuration")
 }
 
 // Ready marks the Recipe as successfully reconciled.
-func (u *RecipeUpdater) Ready(ctx context.Context, r *deliveryv1alpha1.Recipe, msg string) error {
-	return u.set(ctx, r, deliveryv1alpha1.RecipePhaseReady, msg)
+func (u *RecipeUpdater) Ready(ctx context.Context, r *deliveryv1alpha1.Recipe, configHash, msg string) error {
+	return u.set(ctx, r, deliveryv1alpha1.RecipePhaseReady, configHash, msg)
 }
 
 // Failed marks the Recipe as failed with the supplied error as the message.
 func (u *RecipeUpdater) Failed(ctx context.Context, r *deliveryv1alpha1.Recipe, err error) error {
-	return u.set(ctx, r, deliveryv1alpha1.RecipePhaseFailed, err.Error())
+	r.Status.LatestConfigHash = ""
+	return u.set(ctx, r, deliveryv1alpha1.RecipePhaseFailed, "", err.Error())
 }
 
 func (u *RecipeUpdater) set(
 	ctx context.Context,
 	recipe *deliveryv1alpha1.Recipe,
 	phase deliveryv1alpha1.RecipePhase,
+	configHash string,
 	msg string,
 ) error {
 	recipe.Status.Phase = phase
-	recipe.Status.ObservedGeneration = recipe.Generation
+
+	if phase == deliveryv1alpha1.RecipePhaseReady || phase == deliveryv1alpha1.RecipePhaseFailed {
+		recipe.Status.ObservedGeneration = recipe.Generation
+	}
+
+	if configHash != "" {
+		recipe.Status.LatestConfigHash = configHash
+	}
 
 	condition := metav1.Condition{
 		Type:               "Ready",

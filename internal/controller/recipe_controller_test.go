@@ -24,6 +24,7 @@ import (
 	"github.com/spf13/afero"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -94,8 +95,13 @@ var _ = Describe("Recipe Controller", func() {
 				NamespacedName: typeNamespacedName,
 			})
 			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
+
+			preparationList := &deliveryv1alpha1.PreparationList{}
+			Expect(k8sClient.List(ctx, preparationList,
+				client.InNamespace("default"),
+				client.MatchingLabels{"delivery.kokumi.dev/recipe": resourceName},
+			)).To(Succeed())
+			Expect(preparationList.Items).To(HaveLen(1))
 		})
 	})
 })
