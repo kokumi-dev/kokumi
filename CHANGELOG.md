@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.3](https://github.com/kokumi-dev/kokumi/compare/0.5.2...0.5.3) (2026-03-04)
+
+
+### Bug Fixes
+
+* use full recipe spec for config hash ([#55](https://github.com/kokumi-dev/kokumi/issues/55)) ([8c9bd8e](https://github.com/kokumi-dev/kokumi/commit/8c9bd8ef26154b20a14e9c5d2401e93ef4d185e6))
+
 ## [0.5.2](https://github.com/kokumi-dev/kokumi/compare/0.5.1...0.5.2) (2026-03-04)
 
 
