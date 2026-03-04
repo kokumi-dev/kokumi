@@ -27,7 +27,7 @@ kubectl apply -n argocd --server-side --force-conflicts \
 <!-- x-release-please-start-version -->
 ```bash
 kubectl apply -f \
-    https://github.com/kokumi-dev/kokumi/releases/download/0.5.1/install.yaml
+    https://github.com/kokumi-dev/kokumi/releases/download/0.5.3/install.yaml
 ```
 <!-- x-release-please-end -->
 
