@@ -18,13 +18,15 @@ If you don't have Argo CD installed yet:
 
 ```bash
 kubectl create namespace argocd
-kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.3.0/manifests/install.yaml
+kubectl apply -n argocd --server-side --force-conflicts \
+    -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.3.0/manifests/install.yaml
 ```
 
 ## Install Kokumi
 
 ```bash
-kubectl apply -f https://github.com/kokumi-dev/kokumi/releases/download/0.5.1/install.yaml
+kubectl apply -f \
+    https://github.com/kokumi-dev/kokumi/releases/download/0.5.1/install.yaml
 ```
 
 Verify the manager is running:

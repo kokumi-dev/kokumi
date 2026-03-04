@@ -19,7 +19,8 @@ and no workloads will be deployed.
 ## Install
 
 ```bash
-kubectl apply -f https://github.com/kokumi-dev/kokumi/releases/download/0.5.1/install.yaml
+kubectl apply -f \
+    https://github.com/kokumi-dev/kokumi/releases/download/0.5.1/install.yaml
 ```
 
 This installs:
@@ -57,7 +58,8 @@ Open [http://localhost:8080](http://localhost:8080) in your browser.
 Replace `0.5.1` with any released version:
 
 ```bash
-kubectl apply -f https://github.com/kokumi-dev/kokumi/releases/download/<VERSION>/install.yaml
+kubectl apply -f \
+    https://github.com/kokumi-dev/kokumi/releases/download/<VERSION>/install.yaml
 ```
 
 All releases are listed at [github.com/kokumi-dev/kokumi/releases](https://github.com/kokumi-dev/kokumi/releases).
@@ -65,11 +67,13 @@ All releases are listed at [github.com/kokumi-dev/kokumi/releases](https://githu
 ## Upgrade
 
 ```bash
-kubectl apply -f https://github.com/kokumi-dev/kokumi/releases/download/<NEW_VERSION>/install.yaml
+kubectl apply -f \
+    https://github.com/kokumi-dev/kokumi/releases/download/<NEW_VERSION>/install.yaml
 ```
 
 ## Uninstall
 
 ```bash
-kubectl delete -f https://github.com/kokumi-dev/kokumi/releases/download/0.5.1/install.yaml
+kubectl delete -f \
+    https://github.com/kokumi-dev/kokumi/releases/download/0.5.1/install.yaml
 ```
