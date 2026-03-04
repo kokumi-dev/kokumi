@@ -18,10 +18,12 @@ and no workloads will be deployed.
 
 ## Install
 
+<!-- x-release-please-start-version -->
 ```bash
 kubectl apply -f \
     https://github.com/kokumi-dev/kokumi/releases/download/0.5.1/install.yaml
 ```
+<!-- x-release-please-end -->
 
 This installs:
 - The Kokumi CRDs (`Recipe`, `Preparation`, `Serving`)
@@ -55,7 +57,9 @@ Open [http://localhost:8080](http://localhost:8080) in your browser.
 
 ## Pin a specific version
 
+<!-- x-release-please-start-version -->
 Replace `0.5.1` with any released version:
+<!-- x-release-please-end -->
 
 ```bash
 kubectl apply -f \
@@ -73,7 +77,9 @@ kubectl apply -f \
 
 ## Uninstall
 
+<!-- x-release-please-start-version -->
 ```bash
 kubectl delete -f \
     https://github.com/kokumi-dev/kokumi/releases/download/0.5.1/install.yaml
 ```
+<!-- x-release-please-end -->

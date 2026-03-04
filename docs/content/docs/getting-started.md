@@ -24,10 +24,12 @@ kubectl apply -n argocd --server-side --force-conflicts \
 
 ## Install Kokumi
 
+<!-- x-release-please-start-version -->
 ```bash
 kubectl apply -f \
     https://github.com/kokumi-dev/kokumi/releases/download/0.5.1/install.yaml
 ```
+<!-- x-release-please-end -->
 
 Verify the manager is running:
 

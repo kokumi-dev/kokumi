@@ -23,6 +23,14 @@
                 {
                     "type": "generic",
                     "path": "internal/version/version.go"
+                },
+                {
+                    "type": "generic",
+                    "path": "docs/content/docs/installation.md"
+                },
+                {
+                    "type": "generic",
+                    "path": "docs/content/docs/getting-started.md"
                 }
             ]
         }
