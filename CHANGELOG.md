@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/kokumi-dev/kokumi/compare/0.5.1...0.5.2) (2026-03-04)
+
+
+### Bug Fixes
+
+* issue with creation of multiple preparations ([#51](https://github.com/kokumi-dev/kokumi/issues/51)) ([04bc133](https://github.com/kokumi-dev/kokumi/commit/04bc1338e0f1ea1dcaa3fb6e107130109bdb1816))
+
 ## [0.5.1](https://github.com/kokumi-dev/kokumi/compare/0.5.0...0.5.1) (2026-03-03)
 
 
