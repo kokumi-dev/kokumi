@@ -76,7 +76,7 @@ type PreparationSpec struct {
 	// +kubebuilder:validation:Required
 	Renderer Renderer `json:"renderer"`
 
-	// configHash is the SHA256 hash of the canonicalized patches configuration
+	// configHash is the SHA256 hash of the canonicalized recipe configuration
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]+$`
 	ConfigHash string `json:"configHash"`

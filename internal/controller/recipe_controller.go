@@ -177,7 +177,7 @@ func (r *RecipeReconciler) createPreparation(
 		return nil, fmt.Errorf("failed to check for existing revision: %w", err)
 	}
 
-	configHash, err := renderer.CalculateConfigHash(recipe.Spec.Patches)
+	configHash, err := renderer.CalculateSpecHash(recipe.Spec)
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate config hash: %w", err)
 	}

@@ -13,10 +13,6 @@ import (
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 )
 
-// emptyHash is the SHA-256 digest of the empty string.
-// Returned by CalculateConfigHash when no patches are configured.
-const emptyHash = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-
 // ApplyPatches applies patches to YAML content, preserving document order, comments,
 // and formatting. Returns the modified content, or the original content unchanged if
 // no patches matched.
@@ -87,29 +83,6 @@ func CalculateSpecHash(spec deliveryv1alpha1.RecipeSpec) (string, error) {
 		Patches: spec.Patches,
 	}); err != nil {
 		return "", fmt.Errorf("failed to encode spec for hashing: %w", err)
-	}
-
-	encoder.Close() //nolint:errcheck
-
-	hash := sha256.Sum256([]byte(builder.String()))
-
-	return fmt.Sprintf("sha256:%x", hash), nil
-}
-
-// CalculateConfigHash computes a stable SHA-256 hash of the patches configuration.
-// An empty patch list always returns emptyHash so callers can detect "no config".
-func CalculateConfigHash(patches []deliveryv1alpha1.Patch) (string, error) {
-	if len(patches) == 0 {
-		return emptyHash, nil
-	}
-
-	var builder strings.Builder
-
-	encoder := yaml.NewEncoder(&builder)
-	encoder.SetIndent(2)
-
-	if err := encoder.Encode(patches); err != nil {
-		return "", fmt.Errorf("failed to encode patches: %w", err)
 	}
 
 	encoder.Close() //nolint:errcheck

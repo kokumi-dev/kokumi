@@ -82,7 +82,7 @@ spec:
                 - ociRef
                 type: object
               configHash:
-                description: configHash is the SHA256 hash of the canonicalized patches
+                description: configHash is the SHA256 hash of the canonicalized recipe
                   configuration
                 pattern: ^sha256:[a-f0-9]+$
                 type: string
