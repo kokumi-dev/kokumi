@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/kokumi-dev/kokumi/compare/0.5.3...0.6.0) (2026-03-05)
+
+
+### Features
+
+* add helm rendering support ([#57](https://github.com/kokumi-dev/kokumi/issues/57)) ([2b60801](https://github.com/kokumi-dev/kokumi/commit/2b60801b32791102f037c11d2f365b27ce58e23e))
+
 ## [0.5.3](https://github.com/kokumi-dev/kokumi/compare/0.5.2...0.5.3) (2026-03-04)
 
 
