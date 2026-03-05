@@ -88,6 +88,7 @@ var _ = Describe("Recipe Controller", func() {
 				Service: *service.NewRecipeService(
 					oci.NewFakeClient(fs),
 					fs,
+					"",
 				),
 			}
 

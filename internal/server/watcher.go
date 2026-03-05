@@ -72,7 +72,7 @@ func startK8sWatcher(ctx context.Context, logger logr.Logger, h *hub) (*apiDeps,
 	deps := &apiDeps{
 		reader:    k8sCache,
 		writer:    writer,
-		ociClient: oci.NewORASClient(true),
+		ociClient: oci.NewORASClient(),
 		fs:        afero.NewOsFs(),
 		logger:    logger,
 	}

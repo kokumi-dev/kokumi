@@ -97,11 +97,20 @@ spec:
                     description: digest is the SHA256 digest of the renderer binary/image
                     pattern: ^sha256:[a-f0-9]{64}$
                     type: string
+                  renderType:
+                    description: |-
+                      renderType records how the source was rendered to produce this Preparation.
+                      One of "Manifest" or "Helm".
+                    enum:
+                    - Manifest
+                    - Helm
+                    type: string
                   version:
                     description: version is the semantic version of the renderer
                     type: string
                 required:
                 - digest
+                - renderType
                 - version
                 type: object
               source:

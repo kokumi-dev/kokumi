@@ -2,7 +2,13 @@ package oci
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2"
@@ -12,43 +18,133 @@ import (
 )
 
 // ORASClient implements Client using the ORAS library.
-type ORASClient struct {
-	// PlainHTTP disables TLS when communicating with the registry.
-	PlainHTTP bool
-}
+// It automatically uses plain HTTP for in-cluster Kubernetes service URLs
+// (hosts ending in .svc, .svc.<domain>, or bare IP/localhost) and HTTPS
+// for all other hosts.
+type ORASClient struct{}
 
 var _ Client = (*ORASClient)(nil)
 
 // NewORASClient returns an ORASClient.
-func NewORASClient(plainHTTP bool) *ORASClient {
-	return &ORASClient{PlainHTTP: plainHTTP}
+func NewORASClient() *ORASClient {
+	return &ORASClient{}
 }
 
-// Pull fetches an OCI artifact from ref:tag into targetDir and returns its digest.
-func (c *ORASClient) Pull(ctx context.Context, ref, tag, targetDir string) (string, error) {
+// isPlainHTTP reports whether ref should be accessed over plain HTTP.
+// In-cluster Kubernetes service hostnames (*.svc, *.svc.*) and loopback /
+// bare-IP addresses are treated as plain HTTP; everything else uses HTTPS.
+func isPlainHTTP(ref string) bool {
+	host := ref
+	if before, _, ok := strings.Cut(ref, "/"); ok {
+		host = before
+	}
+
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+
+	if host == "localhost" {
+		return true
+	}
+
+	if net.ParseIP(host) != nil {
+		return true
+	}
+
+	parts := strings.Split(host, ".")
+	for i, p := range parts {
+		if p == "svc" && i > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// Pull fetches an OCI artifact from ref:tag into targetDir.
+// It inspects the manifest's first layer media type and branches accordingly:
+//   - HelmChartLayerMediaType: fetches the blob directly to targetDir/chart.tgz
+//   - anything else:           uses oras.Copy, which writes manifest.yaml
+//
+// The first return value is the layer media type (empty string for non-Helm artifacts).
+func (c *ORASClient) Pull(ctx context.Context, ref, tag, targetDir string) (string, string, error) {
 	log := ctrl.LoggerFrom(ctx)
 
 	repo, err := remote.NewRepository(ref)
 	if err != nil {
-		return "", fmt.Errorf("failed to create repository for %q: %w", ref, err)
+		return "", "", fmt.Errorf("create repository for %q: %w", ref, err)
 	}
 
-	repo.PlainHTTP = c.PlainHTTP
+	repo.PlainHTTP = isPlainHTTP(ref)
 
-	fs, err := file.New(targetDir)
+	log.Info("Resolving OCI manifest", "ref", fmt.Sprintf("%s:%s", ref, tag))
+
+	manifestDesc, err := repo.Resolve(ctx, tag)
 	if err != nil {
-		return "", fmt.Errorf("failed to create file store at %q: %w", targetDir, err)
+		return "", "", fmt.Errorf("resolve %s:%s: %w", ref, tag, err)
 	}
-	defer fs.Close() //nolint:errcheck
+
+	rc, err := repo.Fetch(ctx, manifestDesc)
+	if err != nil {
+		return "", "", fmt.Errorf("fetch manifest %s: %w", manifestDesc.Digest, err)
+	}
+	defer rc.Close() //nolint:errcheck
+
+	manifestBytes, err := io.ReadAll(rc)
+	if err != nil {
+		return "", "", fmt.Errorf("read manifest %s: %w", manifestDesc.Digest, err)
+	}
+
+	var manifest ocispec.Manifest
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+		return "", "", fmt.Errorf("parse manifest: %w", err)
+	}
+
+	digest := manifestDesc.Digest.String()
+
+	if len(manifest.Layers) > 0 && manifest.Layers[0].MediaType == HelmChartLayerMediaType {
+		log.Info("Pulling Helm chart blob", "ref", fmt.Sprintf("%s:%s", ref, tag))
+
+		if err := c.fetchBlob(ctx, repo, manifest.Layers[0], filepath.Join(targetDir, "chart.tgz")); err != nil {
+			return "", "", fmt.Errorf("fetch helm chart blob: %w", err)
+		}
+
+		return HelmChartLayerMediaType, digest, nil
+	}
 
 	log.Info("Pulling OCI artifact", "ref", fmt.Sprintf("%s:%s", ref, tag))
 
-	desc, err := oras.Copy(ctx, repo, tag, fs, "", oras.DefaultCopyOptions)
+	fs, err := file.New(targetDir)
 	if err != nil {
-		return "", fmt.Errorf("failed to pull artifact %s:%s: %w", ref, tag, err)
+		return "", "", fmt.Errorf("create file store at %q: %w", targetDir, err)
+	}
+	defer fs.Close() //nolint:errcheck
+
+	if _, err := oras.Copy(ctx, repo, tag, fs, "", oras.DefaultCopyOptions); err != nil {
+		return "", "", fmt.Errorf("pull artifact %s:%s: %w", ref, tag, err)
 	}
 
-	return desc.Digest.String(), nil
+	return "", digest, nil
+}
+
+// fetchBlob streams a single OCI layer blob to the given file path.
+func (c *ORASClient) fetchBlob(ctx context.Context, repo *remote.Repository, desc ocispec.Descriptor, destPath string) error {
+	rc, err := repo.Blobs().Fetch(ctx, desc)
+	if err != nil {
+		return fmt.Errorf("fetch blob %s: %w", desc.Digest, err)
+	}
+	defer rc.Close() //nolint:errcheck
+
+	f, err := os.Create(destPath) //nolint:gosec
+	if err != nil {
+		return fmt.Errorf("create %s: %w", destPath, err)
+	}
+	defer f.Close() //nolint:errcheck
+
+	if _, err := io.Copy(f, rc); err != nil {
+		return fmt.Errorf("write blob: %w", err)
+	}
+
+	return nil
 }
 
 // Push packages sourceDir as an OCI artifact and pushes it to ref:tag, returning its digest.
@@ -60,7 +156,7 @@ func (c *ORASClient) Push(ctx context.Context, ref, tag, sourceDir string) (stri
 		return "", fmt.Errorf("failed to create repository for %q: %w", ref, err)
 	}
 
-	repo.PlainHTTP = c.PlainHTTP
+	repo.PlainHTTP = isPlainHTTP(ref)
 
 	fs, err := file.New(sourceDir)
 	if err != nil {

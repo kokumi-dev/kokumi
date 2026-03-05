@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"sort"
 
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -78,6 +80,7 @@ func recipeToDTO(r deliveryv1alpha1.Recipe, activePreparation string) RecipeDTO 
 		Destination: OCIDestinationDTO{
 			OCI: r.Spec.Destination.OCI,
 		},
+		Render:            renderToDTO(r.Spec.Render),
 		Patches:           patches,
 		AutoDeploy:        r.Spec.AutoDeploy,
 		Phase:             string(r.Status.Phase),
@@ -90,6 +93,47 @@ func recipeToDTO(r deliveryv1alpha1.Recipe, activePreparation string) RecipeDTO 
 		dto.CreatedAt = &t
 	}
 	return dto
+}
+
+// renderToDTO converts a Render CRD spec into a RenderDTO, returning nil when r is nil.
+func renderToDTO(r *deliveryv1alpha1.Render) *RenderDTO {
+	if r == nil || r.Helm == nil {
+		return nil
+	}
+	h := r.Helm
+	var vals json.RawMessage
+	if h.Values != nil {
+		vals = h.Values.Raw
+	}
+	return &RenderDTO{
+		Helm: &HelmRenderDTO{
+			ReleaseName: h.ReleaseName,
+			Namespace:   h.Namespace,
+			IncludeCRDs: h.IncludeCRDs,
+			Values:      vals,
+		},
+	}
+}
+
+// renderFromDTO converts a RenderDTO (from a request body) into a Render CRD spec.
+// Returns nil when dto is nil or contains no helm block.
+func renderFromDTO(dto *RenderDTO) *deliveryv1alpha1.Render {
+	if dto == nil || dto.Helm == nil {
+		return nil
+	}
+	h := dto.Helm
+	var vals *apiextensionsv1.JSON
+	if len(h.Values) > 0 {
+		vals = &apiextensionsv1.JSON{Raw: h.Values}
+	}
+	return &deliveryv1alpha1.Render{
+		Helm: &deliveryv1alpha1.HelmRender{
+			ReleaseName: h.ReleaseName,
+			Namespace:   h.Namespace,
+			IncludeCRDs: h.IncludeCRDs,
+			Values:      vals,
+		},
+	}
 }
 
 // preparationToDTO converts a Preparation CRD object into a PreparationDTO.

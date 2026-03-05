@@ -1,0 +1,32 @@
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Recipe
+metadata:
+  labels:
+    app.kubernetes.io/name: kokumi
+    app.kubernetes.io/managed-by: kustomize
+  name: podinfo
+spec:
+  source:
+    oci: oci://ghcr.io/stefanprodan/charts/podinfo
+    version: "6.10.2"
+
+  render:
+    helm:
+      namespace: default
+      values:
+        ui:
+          color: "#EF6461"
+          message: "Hello from Kokumi"
+          logo: "https://kokumi.dev/images/logo.png"
+
+  patches:
+    - target:
+        kind: Deployment
+        name: podinfo
+      set:
+        .spec.replicas: "2"
+
+  destination:
+    oci: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/podinfo
+
+  autoDeploy: false

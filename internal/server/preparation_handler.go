@@ -113,7 +113,7 @@ func fetchManifest(ctx context.Context, ociClient oci.Client, fs afero.Fs, ociRe
 	}
 	defer fs.RemoveAll(tmpDir) //nolint:errcheck
 
-	if _, err := ociClient.Pull(ctx, ref, tag, tmpDir); err != nil {
+	if _, _, err := ociClient.Pull(ctx, ref, tag, tmpDir); err != nil {
 		return "", fmt.Errorf("pulling artifact %s@%s: %w", ref, tag, err)
 	}
 

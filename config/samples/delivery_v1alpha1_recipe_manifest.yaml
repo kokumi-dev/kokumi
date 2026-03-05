@@ -4,7 +4,7 @@ metadata:
   labels:
     app.kubernetes.io/name: kokumi
     app.kubernetes.io/managed-by: kustomize
-  name: recipe-sample
+  name: external-secrets
 spec:
   source:
     oci: oci://ghcr.io/kokumi-dev/external-secrets
@@ -19,3 +19,5 @@ spec:
 
   destination:
     oci: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/external-secrets
+
+  autoDeploy: false

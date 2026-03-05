@@ -62,8 +62,9 @@ var _ = Describe("Serving Controller", func() {
 							BaseDigest: fakeDigest,
 						},
 						Renderer: deliveryv1alpha1.Renderer{
-							Version: "v1.0.0",
-							Digest:  fakeDigest,
+							Version:    "v1.0.0",
+							Digest:     fakeDigest,
+							RenderType: deliveryv1alpha1.RenderTypeManifest,
 						},
 						ConfigHash: "sha256:abc123",
 						Artifact: deliveryv1alpha1.Artifact{

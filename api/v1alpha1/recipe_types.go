@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -31,6 +32,40 @@ type OCISource struct {
 	// The controller will resolve this to a digest
 	// +kubebuilder:validation:Required
 	Version string `json:"version"`
+}
+
+// HelmRender defines Helm-specific rendering options for the source artifact.
+type HelmRender struct {
+	// releaseName is the Helm release name passed to helm template.
+	// Defaults to the Recipe's metadata.name when omitted.
+	// +optional
+	ReleaseName string `json:"releaseName,omitempty"`
+
+	// namespace is the target namespace passed to helm template --namespace.
+	// Defaults to the Recipe's metadata.namespace when omitted.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+
+	// includeCRDs controls whether CRDs are included in the rendered output.
+	// Equivalent to helm template --include-crds.
+	// +optional
+	// +kubebuilder:default=false
+	IncludeCRDs bool `json:"includeCRDs,omitempty"`
+
+	// values holds inline Helm values merged last (highest priority).
+	// Equivalent to a final -f values.yaml pass.
+	// +optional
+	// +kubebuilder:pruning:PreserveUnknownFields
+	Values *apiextensionsv1.JSON `json:"values,omitempty"`
+}
+
+// Render defines optional rendering to apply to the source artifact.
+// When absent, the source is treated as a pre-rendered manifest bundle.
+type Render struct {
+	// helm renders the source OCI artifact as a Helm chart.
+	// When set, the source must be a Helm chart in OCI format.
+	// +optional
+	Helm *HelmRender `json:"helm,omitempty"`
 }
 
 // OCIDestination defines where the rendered, configured artifact
@@ -75,6 +110,12 @@ type RecipeSpec struct {
 	// source defines the immutable base artifact to render from
 	// +kubebuilder:validation:Required
 	Source OCISource `json:"source"`
+
+	// render defines optional rendering configuration for the source artifact.
+	// When absent the source OCI artifact is treated as a pre-rendered manifest bundle.
+	// When render.helm is set the source must be a Helm chart in OCI format.
+	// +optional
+	Render *Render `json:"render,omitempty"`
 
 	// destination defines where the rendered Preparation artifact will be pushed
 	// +kubebuilder:validation:Required

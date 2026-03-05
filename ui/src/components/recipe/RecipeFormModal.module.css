@@ -218,6 +218,52 @@
   font-family: 'SF Mono', 'Fira Code', monospace;
 }
 
+/* ── Helm Renderer ── */
+.helmSection {
+  margin-top: 8px;
+}
+
+.helmCard {
+  background: var(--color-bg-main);
+  border-radius: 8px;
+  border: 1px solid rgba(49, 54, 56, 0.1);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.valuesArea {
+  width: 100%;
+  min-height: 80px;
+  padding: 8px 11px;
+  border-radius: 7px;
+  border: 1px solid rgba(49, 54, 56, 0.15);
+  background: var(--color-bg-main);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.78rem;
+  color: var(--color-text-on-light);
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+
+.valuesArea:focus {
+  border-color: var(--color-accent);
+}
+
+.valuesArea::placeholder {
+  color: var(--color-text-muted-light);
+}
+
+.valuesError {
+  margin: 4px 0 0;
+  font-size: 0.78rem;
+  color: #c0312e;
+}
+
 .sectionTitle {
   font-size: 0.8rem;
   font-weight: 700;

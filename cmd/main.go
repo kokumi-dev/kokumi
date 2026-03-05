@@ -185,8 +185,9 @@ func main() {
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 		Service: *service.NewRecipeService(
-			oci.NewORASClient(true),
+			oci.NewORASClient(),
 			afero.NewOsFs(),
+			"/tmp/kokumi-pull-cache",
 		),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Recipe")

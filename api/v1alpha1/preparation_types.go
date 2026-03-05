@@ -33,6 +33,16 @@ type RecipeSource struct {
 	BaseDigest string `json:"baseDigest"`
 }
 
+// RenderType identifies how the source was rendered to produce a Preparation.
+type RenderType = string
+
+const (
+	// RenderTypeManifest indicates the source was used as-is without a templating engine.
+	RenderTypeManifest RenderType = "Manifest"
+	// RenderTypeHelm indicates the source was rendered via Helm.
+	RenderTypeHelm RenderType = "Helm"
+)
+
 // Renderer defines the tool and its version/digest used to render the source
 type Renderer struct {
 	// version is the semantic version of the renderer
@@ -43,6 +53,11 @@ type Renderer struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	Digest string `json:"digest"`
+
+	// renderType records how the source was rendered to produce this Preparation.
+	// One of "Manifest" or "Helm".
+	// +kubebuilder:validation:Enum=Manifest;Helm
+	RenderType RenderType `json:"renderType"`
 }
 
 // Artifact defines the final immutable output of the rendering process

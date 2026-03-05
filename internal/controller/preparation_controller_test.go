@@ -55,8 +55,9 @@ var _ = Describe("Preparation Controller", func() {
 						Recipe:     "recipe",
 						ConfigHash: "sha256:448093f1b28dc7147740d8e400946e9b228650aa31a54b0ed734ca9ab0ae5b6b",
 						Renderer: deliveryv1alpha1.Renderer{
-							Version: "0.1.0",
-							Digest:  "sha256:fdf90e00e7605d65cdf4a5d3a404c9823ee2e473f7468f68c29694f1b909e2bc",
+							Version:    "0.1.0",
+							Digest:     "sha256:fdf90e00e7605d65cdf4a5d3a404c9823ee2e473f7468f68c29694f1b909e2bc",
+							RenderType: deliveryv1alpha1.RenderTypeManifest,
 						},
 						Source: deliveryv1alpha1.RecipeSource{
 							OCI:        "oci://registry.kokumi.svc.cluster.local:5000/recipe/test-resource",

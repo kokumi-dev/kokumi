@@ -1,6 +1,9 @@
 package server
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // OCISourceDTO is the data-transfer representation of an OCISource.
 type OCISourceDTO struct {
@@ -35,6 +38,19 @@ type ConditionDTO struct {
 	LastTransitionTime string `json:"lastTransitionTime,omitempty"`
 }
 
+// HelmRenderDTO is the data-transfer representation of a HelmRender.
+type HelmRenderDTO struct {
+	ReleaseName string          `json:"releaseName,omitempty"`
+	Namespace   string          `json:"namespace,omitempty"`
+	IncludeCRDs bool            `json:"includeCRDs,omitempty"`
+	Values      json.RawMessage `json:"values,omitempty"`
+}
+
+// RenderDTO is the data-transfer representation of a Render.
+type RenderDTO struct {
+	Helm *HelmRenderDTO `json:"helm,omitempty"`
+}
+
 // RecipeDTO is the enriched view of a Recipe served to the UI.
 // ActivePreparation is derived from the linked Serving's status.observedPreparation.
 type RecipeDTO struct {
@@ -43,6 +59,7 @@ type RecipeDTO struct {
 	Labels            map[string]string `json:"labels,omitempty"`
 	Source            OCISourceDTO      `json:"source"`
 	Destination       OCIDestinationDTO `json:"destination"`
+	Render            *RenderDTO        `json:"render,omitempty"`
 	Patches           []PatchDTO        `json:"patches,omitempty"`
 	AutoDeploy        bool              `json:"autoDeploy"`
 	Phase             string            `json:"phase"`
@@ -80,6 +97,7 @@ type CreateRecipeRequest struct {
 	Name        string            `json:"name"`
 	Source      OCISourceDTO      `json:"source"`
 	Destination OCIDestinationDTO `json:"destination"`
+	Render      *RenderDTO        `json:"render,omitempty"`
 	Patches     []PatchDTO        `json:"patches,omitempty"`
 	AutoDeploy  bool              `json:"autoDeploy"`
 }
@@ -88,6 +106,7 @@ type CreateRecipeRequest struct {
 type UpdateRecipeRequest struct {
 	Source      OCISourceDTO      `json:"source"`
 	Destination OCIDestinationDTO `json:"destination"`
+	Render      *RenderDTO        `json:"render,omitempty"`
 	Patches     []PatchDTO        `json:"patches,omitempty"`
 	AutoDeploy  bool              `json:"autoDeploy"`
 }

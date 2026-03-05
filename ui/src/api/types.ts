@@ -20,6 +20,17 @@ export interface Patch {
   set: Record<string, string>
 }
 
+export interface HelmRender {
+  releaseName: string
+  namespace: string
+  includeCRDs: boolean
+  values: Record<string, unknown>
+}
+
+export interface Render {
+  helm?: HelmRender
+}
+
 export interface Condition {
   type: string
   status: string
@@ -34,6 +45,7 @@ export interface Recipe {
   labels?: Record<string, string>
   source: OCISource
   destination: OCIDestination
+  render?: Render
   patches?: Patch[]
   autoDeploy: boolean
   phase: string
@@ -81,6 +93,7 @@ export interface RecipeFormData {
   namespace: string
   source: OCISource
   destination: OCIDestination
+  render?: Render
   patches: Patch[]
   autoDeploy: boolean
 }
@@ -90,6 +103,7 @@ export const emptyRecipeForm = (): RecipeFormData => ({
   namespace: 'default',
   source: { oci: '', version: '' },
   destination: { oci: '' },
+  render: undefined,
   patches: [],
   autoDeploy: false,
 })
@@ -99,6 +113,16 @@ export const recipeToFormData = (r: Recipe): RecipeFormData => ({
   namespace: r.namespace,
   source: { ...r.source },
   destination: { ...r.destination },
+  render: r.render?.helm
+    ? {
+        helm: {
+          releaseName: r.render.helm.releaseName ?? '',
+          namespace: r.render.helm.namespace ?? '',
+          includeCRDs: r.render.helm.includeCRDs ?? false,
+          values: r.render.helm.values ?? {},
+        },
+      }
+    : undefined,
   patches: (r.patches ?? []).map((p) => ({
     target: { ...p.target },
     set: { ...p.set },

@@ -119,6 +119,40 @@ spec:
                   - target
                   type: object
                 type: array
+              render:
+                description: |-
+                  render defines optional rendering configuration for the source artifact.
+                  When absent the source OCI artifact is treated as a pre-rendered manifest bundle.
+                  When render.helm is set the source must be a Helm chart in OCI format.
+                properties:
+                  helm:
+                    description: |-
+                      helm renders the source OCI artifact as a Helm chart.
+                      When set, the source must be a Helm chart in OCI format.
+                    properties:
+                      includeCRDs:
+                        default: false
+                        description: |-
+                          includeCRDs controls whether CRDs are included in the rendered output.
+                          Equivalent to helm template --include-crds.
+                        type: boolean
+                      namespace:
+                        description: |-
+                          namespace is the target namespace passed to helm template --namespace.
+                          Defaults to the Recipe's metadata.namespace when omitted.
+                        type: string
+                      releaseName:
+                        description: |-
+                          releaseName is the Helm release name passed to helm template.
+                          Defaults to the Recipe's metadata.name when omitted.
+                        type: string
+                      values:
+                        description: |-
+                          values holds inline Helm values merged last (highest priority).
+                          Equivalent to a final -f values.yaml pass.
+                        x-kubernetes-preserve-unknown-fields: true
+                    type: object
+                type: object
               source:
                 description: source defines the immutable base artifact to render
                   from

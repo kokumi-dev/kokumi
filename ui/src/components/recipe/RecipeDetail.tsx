@@ -87,6 +87,26 @@ export default function RecipeDetail({ recipe, onClose, onEdit, onDelete }: Prop
               <span className={styles.specValue}>{recipe.destination.oci}</span>
               <span className={styles.specKey}>Auto Deploy</span>
               <span className={styles.specValue}>{recipe.autoDeploy ? 'Yes' : 'No'}</span>
+              {recipe.render?.helm && (
+                <>
+                  <span className={styles.specKey}>Renderer</span>
+                  <span className={styles.specValue}>Helm</span>
+                  {recipe.render.helm.releaseName && (
+                    <>
+                      <span className={styles.specKey}>Release Name</span>
+                      <span className={styles.specValue}>{recipe.render.helm.releaseName}</span>
+                    </>
+                  )}
+                  {recipe.render.helm.namespace && (
+                    <>
+                      <span className={styles.specKey}>Helm Namespace</span>
+                      <span className={styles.specValue}>{recipe.render.helm.namespace}</span>
+                    </>
+                  )}
+                  <span className={styles.specKey}>Include CRDs</span>
+                  <span className={styles.specValue}>{recipe.render.helm.includeCRDs ? 'Yes' : 'No'}</span>
+                </>
+              )}
               {recipe.activePreparation && (
                 <>
                   <span className={styles.specKey}>Active Prep</span>

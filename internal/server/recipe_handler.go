@@ -102,6 +102,7 @@ func handleCreateRecipe(deps *apiDeps) http.HandlerFunc {
 			Spec: deliveryv1alpha1.RecipeSpec{
 				Source:      deliveryv1alpha1.OCISource{OCI: req.Source.OCI, Version: req.Source.Version},
 				Destination: deliveryv1alpha1.OCIDestination{OCI: req.Destination.OCI},
+				Render:      renderFromDTO(req.Render),
 				Patches:     patchesFromDTO(req.Patches),
 				AutoDeploy:  req.AutoDeploy,
 			},
@@ -147,6 +148,7 @@ func handleUpdateRecipe(deps *apiDeps) http.HandlerFunc {
 
 		recipe.Spec.Source = deliveryv1alpha1.OCISource{OCI: req.Source.OCI, Version: req.Source.Version}
 		recipe.Spec.Destination = deliveryv1alpha1.OCIDestination{OCI: req.Destination.OCI}
+		recipe.Spec.Render = renderFromDTO(req.Render)
 		recipe.Spec.Patches = patchesFromDTO(req.Patches)
 		recipe.Spec.AutoDeploy = req.AutoDeploy
 

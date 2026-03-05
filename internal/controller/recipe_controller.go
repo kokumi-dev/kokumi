@@ -182,6 +182,11 @@ func (r *RecipeReconciler) createPreparation(
 		return nil, fmt.Errorf("failed to calculate config hash: %w", err)
 	}
 
+	renderType := deliveryv1alpha1.RenderTypeManifest
+	if recipe.Spec.Render != nil && recipe.Spec.Render.Helm != nil {
+		renderType = deliveryv1alpha1.RenderTypeHelm
+	}
+
 	now := metav1.Time{Time: time.Now()}
 
 	preparation := &deliveryv1alpha1.Preparation{
@@ -201,8 +206,9 @@ func (r *RecipeReconciler) createPreparation(
 				BaseDigest: sourceDigest,
 			},
 			Renderer: deliveryv1alpha1.Renderer{
-				Version: "v1.0.0",
-				Digest:  destDigest,
+				Version:    "v1.0.0",
+				Digest:     destDigest,
+				RenderType: renderType,
 			},
 			ConfigHash: configHash,
 			Artifact: deliveryv1alpha1.Artifact{

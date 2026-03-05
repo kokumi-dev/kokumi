@@ -3,7 +3,7 @@ import yaml from 'js-yaml'
 import Modal from '../shared/Modal'
 import Btn from '../shared/Btn'
 import YamlEditor from '../shared/YamlEditor'
-import type { Recipe, RecipeFormData, Patch } from '../../api/types'
+import type { Recipe, RecipeFormData, Patch, HelmRender } from '../../api/types'
 import { emptyRecipeForm, recipeToFormData } from '../../api/types'
 import styles from './RecipeFormModal.module.css'
 
@@ -16,11 +16,34 @@ interface Props {
 
 // ── YAML serialisation helpers ────────────────────────────────────────────────
 
+function objectToYaml(values: Record<string, unknown>): string {
+  if (!values || Object.keys(values).length === 0) return ''
+  return yaml.dump(values, { lineWidth: 100 }).trimEnd()
+}
+
+function yamlToValues(text: string): Record<string, unknown> {
+  if (!text.trim()) return {}
+  const parsed = yaml.load(text)
+  if (parsed == null) return {}
+  if (typeof parsed !== 'object' || Array.isArray(parsed))
+    throw new Error('Values must be a YAML mapping')
+  return parsed as Record<string, unknown>
+}
+
 function formToYaml(data: RecipeFormData): string {
   const doc: Record<string, unknown> = {
     source: { oci: data.source.oci, version: data.source.version },
     destination: { oci: data.destination.oci },
     autoDeploy: data.autoDeploy,
+  }
+  if (data.render?.helm) {
+    const h = data.render.helm
+    const helmDoc: Record<string, unknown> = {}
+    if (h.releaseName) helmDoc.releaseName = h.releaseName
+    if (h.namespace) helmDoc.namespace = h.namespace
+    if (h.includeCRDs) helmDoc.includeCRDs = true
+    if (Object.keys(h.values).length > 0) helmDoc.values = h.values
+    doc.render = { helm: helmDoc }
   }
   if (data.patches.length > 0) {
     doc.patches = data.patches.map((p) => ({
@@ -43,9 +66,26 @@ function yamlToPartialForm(text: string): Omit<RecipeFormData, 'name' | 'namespa
   const dst = doc.destination as Record<string, string> | undefined
   const rawPatches = Array.isArray(doc.patches) ? (doc.patches as unknown[]) : []
 
+  const rawRender = doc.render as Record<string, unknown> | undefined
+  let render: RecipeFormData['render']
+  if (rawRender?.helm) {
+    const h = rawRender.helm as Record<string, unknown>
+    render = {
+      helm: {
+        releaseName: (h.releaseName as string) ?? '',
+        namespace: (h.namespace as string) ?? '',
+        includeCRDs: Boolean(h.includeCRDs),
+        values: h.values && typeof h.values === 'object' && !Array.isArray(h.values)
+          ? (h.values as Record<string, unknown>)
+          : {},
+      },
+    }
+  }
+
   return {
     source: { oci: src?.oci ?? '', version: src?.version ?? '' },
     destination: { oci: dst?.oci ?? '' },
+    render,
     autoDeploy: Boolean(doc.autoDeploy),
     patches: rawPatches.map((p) => {
       const patch = p as Record<string, unknown>
@@ -121,6 +161,21 @@ export default function RecipeFormModal({ recipe, onClose, onSubmit }: Props) {
     setFormData((prev) => ({ ...prev, [key]: val }))
   }
 
+  function enableHelm() {
+    setFormData((prev) => ({
+      ...prev,
+      render: { helm: { releaseName: '', namespace: '', includeCRDs: false, values: {} } },
+    }))
+  }
+
+  function disableHelm() {
+    setFormData((prev) => ({ ...prev, render: undefined }))
+  }
+
+  function updateHelm(h: HelmRender) {
+    setFormData((prev) => ({ ...prev, render: { helm: h } }))
+  }
+
   function addPatch() {
     setFormData((prev) => ({
       ...prev,
@@ -184,6 +239,9 @@ export default function RecipeFormModal({ recipe, onClose, onSubmit }: Props) {
             formData={formData}
             isEdit={isEdit}
             onFieldChange={setField}
+            onEnableHelm={enableHelm}
+            onDisableHelm={disableHelm}
+            onUpdateHelm={updateHelm}
             onAddPatch={addPatch}
             onRemovePatch={removePatch}
             onUpdatePatch={updatePatch}
@@ -206,6 +264,9 @@ interface FormViewProps {
   formData: RecipeFormData
   isEdit: boolean
   onFieldChange: <K extends keyof RecipeFormData>(key: K, val: RecipeFormData[K]) => void
+  onEnableHelm: () => void
+  onDisableHelm: () => void
+  onUpdateHelm: (h: HelmRender) => void
   onAddPatch: () => void
   onRemovePatch: (idx: number) => void
   onUpdatePatch: (idx: number, p: Patch) => void
@@ -215,6 +276,9 @@ function FormView({
   formData,
   isEdit,
   onFieldChange,
+  onEnableHelm,
+  onDisableHelm,
+  onUpdateHelm,
   onAddPatch,
   onRemovePatch,
   onUpdatePatch,
@@ -290,6 +354,24 @@ function FormView({
         />
         Auto Deploy — automatically promote newly created Preparations
       </label>
+
+      {/* Renderer */}
+      <div>
+        <p className={styles.sectionTitle}>Renderer</p>
+        <label className={styles.checkRow}>
+          <input
+            type="checkbox"
+            checked={!!formData.render?.helm}
+            onChange={(e) => (e.target.checked ? onEnableHelm() : onDisableHelm())}
+          />
+          Enable Helm rendering
+        </label>
+        {formData.render?.helm && (
+          <div className={styles.helmSection}>
+            <HelmRenderEditor helm={formData.render.helm} onUpdate={onUpdateHelm} />
+          </div>
+        )}
+      </div>
 
       {/* Patches */}
       <div>
@@ -423,6 +505,76 @@ function PatchEditor({ index, patch, onUpdate, onRemove }: PatchEditorProps) {
         <button className={styles.addSetBtn} onClick={addSetEntry}>
           + Add key/value
         </button>
+      </div>
+    </div>
+  )
+}
+
+// ── HelmRenderEditor ──────────────────────────────────────────────────────────
+
+interface HelmRenderEditorProps {
+  helm: HelmRender
+  onUpdate: (h: HelmRender) => void
+}
+
+function HelmRenderEditor({ helm, onUpdate }: HelmRenderEditorProps) {
+  const [valuesYaml, setValuesYaml] = useState(() => objectToYaml(helm.values))
+  const [valuesError, setValuesError] = useState<string | null>(null)
+
+  function handleValuesChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    const text = e.target.value
+    setValuesYaml(text)
+    try {
+      const values = yamlToValues(text)
+      setValuesError(null)
+      onUpdate({ ...helm, values })
+    } catch (err) {
+      setValuesError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  return (
+    <div className={styles.helmCard}>
+      <div className={styles.row2}>
+        <div className={styles.fieldGroup}>
+          <label className={styles.label}>Release Name</label>
+          <input
+            className={styles.input}
+            value={helm.releaseName}
+            onChange={(e) => onUpdate({ ...helm, releaseName: e.target.value })}
+            placeholder="defaults to Recipe name"
+          />
+        </div>
+        <div className={styles.fieldGroup}>
+          <label className={styles.label}>Namespace</label>
+          <input
+            className={styles.input}
+            value={helm.namespace}
+            onChange={(e) => onUpdate({ ...helm, namespace: e.target.value })}
+            placeholder="defaults to Recipe namespace"
+          />
+        </div>
+      </div>
+
+      <label className={styles.checkRow}>
+        <input
+          type="checkbox"
+          checked={helm.includeCRDs}
+          onChange={(e) => onUpdate({ ...helm, includeCRDs: e.target.checked })}
+        />
+        Include CRDs
+      </label>
+
+      <div className={styles.fieldGroup}>
+        <label className={styles.label}>Values (YAML)</label>
+        <textarea
+          className={styles.valuesArea}
+          value={valuesYaml}
+          onChange={handleValuesChange}
+          placeholder={'replicaCount: 2\nimage:\n  tag: v1.0.0'}
+          spellCheck={false}
+        />
+        {valuesError && <p className={styles.valuesError}>{valuesError}</p>}
       </div>
     </div>
   )
