@@ -44,8 +44,15 @@ kubectl get pods -n kokumi
 **Recipe is the only resource you create directly.** Preparations and Servings
 are managed automatically by Kokumi.
 
-A Recipe declares the source OCI artifact and any patches to apply. The source
-image must contain a `manifest.yaml` file at its root with all Kubernetes resources.
+A Recipe declares the source OCI artifact and any patches to apply. Kokumi
+supports two source types:
+
+- **Pre-rendered manifest bundle** — an OCI artifact containing a `manifest.yaml`
+  at its root (no `spec.render` needed).
+- **Helm chart in OCI format** — a standard Helm chart pushed to an OCI registry;
+  add `spec.render.helm` to control rendering.
+
+#### Example: pre-rendered manifest bundle
 
 ```yaml
 apiVersion: delivery.kokumi.dev/v1alpha1
@@ -66,6 +73,40 @@ spec:
 
   destination:
     oci: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/external-secrets
+```
+
+#### Example: Helm chart in OCI format
+
+```yaml
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Recipe
+metadata:
+  name: podinfo
+spec:
+  source:
+    oci: oci://ghcr.io/stefanprodan/charts/podinfo
+    version: "6.10.2"
+
+  render:
+    helm:
+      namespace: default
+      values:
+        ui:
+          color: "#EF6461"
+          message: "Hello from Kokumi"
+          logo: "https://kokumi.dev/images/logo.png"
+
+  patches:
+    - target:
+        kind: Deployment
+        name: podinfo
+      set:
+        .spec.replicas: "2"
+
+  destination:
+    oci: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/podinfo
+
+  autoDeploy: false
 ```
 
 Apply it:
