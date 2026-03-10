@@ -20,79 +20,62 @@
 # Overview
 
 **Kokumi** is a Kubernetes operator for structured, immutable release management.
+It draws a hard line between three concerns that most delivery systems conflate:
 
-It separates:
+- **Intent** — what should be built and how (the Recipe)
+- **Artifact** — what was built, exactly (the Preparation)
+- **Activation** — what is currently running (the Serving)
 
-- Intent definition
-- Immutable artifact rendering
-- Activation of a single selected version
-- Atomic coordination across multiple components
+By keeping these separate and immutable at the artifact layer, your platform team can:
+
+- **Gate on human approval** before a rendered artifact ever reaches a cluster.
+- **Inspect the full rendered manifest** in the built-in UI before promoting.
+- **Roll back instantly** by selecting any previous Preparation — the artifact
+  already exists, no re-render required.
+- **Operate in restricted networks** — the entire pipeline works offline; all
+  dependencies are OCI artifacts that can be mirrored in advance.
+- **Detect drift unambiguously** — compare the deployed SHA-256 digest to the
+  desired one; any mismatch is a concrete, actionable signal.
+
+Kokumi supports both **Helm charts** and **pre-rendered manifest bundles** as
+OCI source artifacts, and delegates all runtime deployment to **Argo CD** —
+feeding your existing GitOps workflow rather than replacing it.
 
 ## Core Concepts
 
-Kokumi models release workflows using a small set of CRDs.
+Kokumi models release workflows using four composable CRDs.
 
 ### Recipe
 
-Defines how something should be built or rendered.
+The only resource you create manually. A Recipe declares the source OCI
+artifact (a Helm chart or manifest bundle), optional patches, and rendering
+configuration. It describes _what should be built_ — not a running system.
+Every change to a Recipe triggers a new render cycle and produces a new
+Preparation automatically.
 
-A Recipe contains:
+### Preparation
 
-- source definitions
-- patches or transformations
-- rendering configuration
+An immutable OCI artifact produced by rendering a Recipe at a specific point
+in time. Preparations are created automatically — you never write one directly.
+Multiple Preparations accumulate per Recipe, giving you a complete,
+reproducible history of every version ever built. Promoting or rolling back
+is simply a matter of pointing the Serving at a different Preparation.
 
-A Recipe describes intent — not a running system.
+### Serving
 
-### Preparation (immutable)
+The active deployment pointer — exactly one per Recipe. A Serving references
+one specific Preparation and creates or updates an Argo CD `Application` that
+syncs that artifact into the cluster. Switching versions (upgrading or rolling
+back) means updating which Preparation the Serving references; the artifact
+does not change.
 
-Represents the rendered, immutable OCI artifact produced from a Recipe.
+### Menu _(planned)_
 
-Properties:
+Groups multiple Recipes into a single logical unit for coordinated, atomic
+rollouts across several components at once.
 
-- Derived from exactly one Recipe
-- Immutable once created
-- Multiple Preparations may exist per Recipe
-- Comparable to a build artifact or release candidate
+## Getting Started
 
-### Serving (active selection)
+> **Kokumi is currently experimental — use with caution in production environments.**
 
-Represents the active deployment of exactly one Preparation.
-
-Properties:
-
-- Exactly one Serving per Recipe
-- References one specific Preparation
-- Mutable (can switch to a different Preparation)
-- Represents what is currently active
-
-This cleanly separates immutable history from active state.
-
-### Menu (atomic coordination)
-
-Groups multiple Recipes into a single logical unit.
-
-A Menu allows:
-
-- Coordinated updates
-- Atomic rollouts
-- Consistent activation across multiple Recipes
-
-This enables platform-level releases composed of multiple components.
-
-## License
-
-Copyright 2026.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
+Read the [Installation guide](https://kokumi.dev/docs/installation) and [Getting Started guide](https://kokumi.dev/docs/getting-started) on the docs site for full setup instructions, or explore the [Architecture & Concepts](https://kokumi.dev/docs/architecture) page to understand how the reconciliation model works before diving in.

@@ -16,6 +16,57 @@ By keeping these separate and immutable at the artifact layer, Kokumi gives
 you a complete, auditable history of every version ever produced — and the
 ability to promote or roll back with a single field change.
 
+## Key advantages
+
+### Immutability at the artifact layer
+
+A Preparation is not a live snapshot — it is an OCI artifact identified by a
+SHA-256 digest. Once a Preparation reaches `Ready`, it never changes.
+
+- Reproduce exactly what was running at any point in time by re-fetching the
+  artifact by digest.
+- Drift is unambiguous — compare the deployed digest to the desired digest;
+  any difference is a concrete, actionable signal.
+- Artifacts can be signed, attested, and audited independently of the cluster.
+
+### Separation of rendering from deployment
+
+Kokumi keeps rendering and deployment as two distinct, independently
+controllable steps:
+
+```
+Render                      Promote                    Deploy
+Recipe ──▶ Preparation ─────────────────────────▶ Serving ──▶ Argo CD Application
+           (immutable)    (human or auto)           (active pointer)
+```
+
+Because the rendered artifact is stored independently:
+
+- **Approval gates** — set `spec.autoDeploy: false` to hold the
+  Serving until a human explicitly promotes the Preparation.
+- **Pre-flight validation** — inspect the full rendered manifest in the UI
+  before it touches any cluster.
+
+### Rollback without re-rendering
+
+Rolling back means promoting any previous Preparation. The artifact already
+exists in the in-cluster registry, so the exact state that previously ran is
+restored instantly — no re-render, no drift.
+
+### Air-gap friendly by design
+
+The entire pipeline — OCI pull → render → push to in-cluster registry — has no
+requirement for outbound internet access. All external dependencies are OCI
+artifacts that can be mirrored in advance, making Kokumi suitable for
+restricted and disconnected environments.
+
+### GitOps integration, not replacement
+
+Kokumi does not apply manifests directly and does not own a sync loop. Each
+Serving creates or updates an Argo CD `Application` pointing at the
+Preparation's OCI artifact by digest. Kokumi feeds your existing GitOps
+workflow rather than replacing it.
+
 ## Dependencies
 
 Kokumi requires **Argo CD** (≥ 3.3) installed in the `argocd` namespace.
@@ -45,7 +96,9 @@ Menu ──coordinates──▶ { Recipe₁, Recipe₂, … }  (atomic multi-Rec
 
 The **only resource you create manually**. A Recipe declares:
 
-- **Source** — OCI image reference containing a `manifest.yaml` at its root
+- **Source** — OCI image reference: either a pre-rendered manifest bundle
+  (containing `manifest.yaml`) or a Helm chart in OCI format (add
+  `spec.render.helm` to configure rendering)
 - **Patches** — Patches to apply before producing the artifact
 
 Recipes are mutable; every change triggers a new reconciliation cycle and
@@ -114,19 +167,59 @@ Key properties:
 - **Owner references** — Preparations are owned by their Recipe; clean deletion is automatic
 - **Argo CD delegates deployment** — Kokumi never applies manifests directly; it only manages the Argo CD Application resource
 
-## OCI artifact format
+## OCI source formats
 
-Kokumi currently expects the source OCI artifact to contain a single file named
-`manifest.yaml` at the root. This file must contain all Kubernetes resources
-(as a single or multi-document YAML).
+Kokumi supports two source OCI artifact formats, selected by the presence or
+absence of `spec.render`.
+
+### Pre-rendered manifest bundle (default)
+
+When `spec.render` is absent, the source OCI artifact must contain a single
+`manifest.yaml` file at its root holding all Kubernetes resources (single or
+multi-document YAML). The file is stored as-is — no rendering step is applied.
 
 ```
 myapp:v1.0.0  (OCI artifact)
-└── manifest.yaml   ← all Kubernetes resources
+└── manifest.yaml   ← all Kubernetes resources (pre-rendered)
 ```
 
-Support for additional source formats (Helm charts, Kustomize directories) is
-planned for a future release.
+This is the simplest format and is well-suited to components whose manifests
+are already generated upstream and published as OCI bundles.
+
+### Helm chart in OCI format
+
+When `spec.render.helm` is present, the source OCI artifact must be a standard
+Helm chart packaged and pushed to an OCI registry (e.g. via `helm push`).
+Kokumi runs `helm template` internally to render the chart into a manifest
+bundle, then stores the output as an immutable Preparation artifact.
+
+```yaml
+spec:
+  source:
+    oci: oci://ghcr.io/stefanprodan/charts/podinfo
+    version: "6.10.2"
+  render:
+    helm:
+      namespace: default
+      values:
+        ui:
+          color: "#EF6461"
+          message: "Hello from Kokumi"
+          logo: "https://kokumi.dev/images/logo.png"
+```
+
+Available `render.helm` fields:
+
+| Field | Description | Default |
+|---|---|---|
+| `releaseName` | Helm release name passed to `helm template` | Recipe name |
+| `namespace` | Target namespace (`--namespace`) | Recipe namespace |
+| `includeCRDs` | Include CRDs in the rendered output (`--include-crds`) | `false` |
+| `values` | Inline Helm values merged last (highest priority) | — |
+
+Helm OCI charts are first-class in Kokumi. Any chart published to an OCI
+registry — whether an upstream community chart or an internally-built one —
+can be used as a Recipe source.
 
 ## OCI registry
 
