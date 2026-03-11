@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -70,9 +69,6 @@ func (u *ServingUpdater) set(
 	meta.SetStatusCondition(&serving.Status.Conditions, condition)
 
 	if err := u.client.Status().Update(ctx, serving); err != nil {
-		if apierrors.IsConflict(err) {
-			return nil
-		}
 		return fmt.Errorf("failed to update Serving status: %w", err)
 	}
 

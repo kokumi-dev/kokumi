@@ -92,10 +92,6 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 
 	statusUpdater := status.NewServingUpdater(r.Client)
 
-	if err := statusUpdater.Deploying(ctx, serving); err != nil {
-		return ctrl.Result{}, err
-	}
-
 	preparationName := serving.Spec.Preparation
 	if serving.Spec.PreparationPolicy.Type == deliveryv1alpha1.PreparationPolicyAutomatic {
 		logger.Info("Automatic preparation policy, finding latest preparation", "recipe", serving.Spec.Recipe)
@@ -155,9 +151,15 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 
 	logger.Info("Found Preparation", "preparation", preparation.Name, "digest", preparation.Spec.Artifact.Digest)
 
-	if serving.Status.ObservedPreparation == preparationName && serving.Status.DeployedDigest == preparation.Spec.Artifact.Digest {
+	if serving.Status.ObservedPreparation == preparationName &&
+		serving.Status.DeployedDigest == preparation.Spec.Artifact.Digest &&
+		serving.Status.Phase == deliveryv1alpha1.ServingPhaseDeployed {
 		logger.Info("Deployment is up-to-date", "preparation", preparationName)
 		return ctrl.Result{}, nil
+	}
+
+	if err := statusUpdater.Deploying(ctx, serving); err != nil {
+		return ctrl.Result{}, err
 	}
 
 	if err := r.reconcileArgoApplication(ctx, serving, preparation); err != nil {

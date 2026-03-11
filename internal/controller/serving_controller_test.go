@@ -97,6 +97,7 @@ var _ = Describe("Serving Controller", func() {
 			By("marking the Serving as already deployed so Argo CD creation is skipped")
 			latestServing := &deliveryv1alpha1.Serving{}
 			Expect(k8sClient.Get(ctx, typeNamespacedName, latestServing)).To(Succeed())
+			latestServing.Status.Phase = deliveryv1alpha1.ServingPhaseDeployed
 			latestServing.Status.ObservedPreparation = "preparation-fdf90e00e76"
 			latestServing.Status.DeployedDigest = fakeDigest
 			Expect(k8sClient.Status().Update(ctx, latestServing)).To(Succeed())
