@@ -21,7 +21,7 @@ and no workloads will be deployed.
 <!-- x-release-please-start-version -->
 ```bash
 kubectl apply -f \
-    https://github.com/kokumi-dev/kokumi/releases/download/0.6.0/install.yaml
+    https://github.com/kokumi-dev/kokumi/releases/download/0.6.1/install.yaml
 ```
 <!-- x-release-please-end -->
 
@@ -58,7 +58,7 @@ Open [http://localhost:8080](http://localhost:8080) in your browser.
 ## Pin a specific version
 
 <!-- x-release-please-start-version -->
-Replace `0.6.0` with any released version:
+Replace `0.6.1` with any released version:
 <!-- x-release-please-end -->
 
 ```bash
@@ -80,6 +80,6 @@ kubectl apply -f \
 <!-- x-release-please-start-version -->
 ```bash
 kubectl delete -f \
-    https://github.com/kokumi-dev/kokumi/releases/download/0.6.0/install.yaml
+    https://github.com/kokumi-dev/kokumi/releases/download/0.6.1/install.yaml
 ```
 <!-- x-release-please-end -->

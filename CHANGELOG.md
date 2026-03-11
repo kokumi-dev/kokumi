@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/kokumi-dev/kokumi/compare/0.6.0...0.6.1) (2026-03-11)
+
+
+### Bug Fixes
+
+* serving deploying status did not update ([#68](https://github.com/kokumi-dev/kokumi/issues/68)) ([7018fc0](https://github.com/kokumi-dev/kokumi/commit/7018fc024b7111eba05623f92fe47867db247644))
+
 ## [0.6.0](https://github.com/kokumi-dev/kokumi/compare/0.5.3...0.6.0) (2026-03-05)
 
 
