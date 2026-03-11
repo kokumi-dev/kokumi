@@ -87,32 +87,32 @@ func (r *ServingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 }
 
 // reconcileServing handles the serving by creating/updating an Argo CD Application
-func (r *ServingReconciler) reconcileServing(ctx context.Context, cd *deliveryv1alpha1.Serving) (ctrl.Result, error) {
+func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliveryv1alpha1.Serving) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	statusUpdater := status.NewServingUpdater(r.Client)
 
-	if err := statusUpdater.Deploying(ctx, cd); err != nil {
+	if err := statusUpdater.Deploying(ctx, serving); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	preparationName := cd.Spec.Preparation
-	if cd.Spec.PreparationPolicy.Type == deliveryv1alpha1.PreparationPolicyAutomatic {
-		logger.Info("Automatic preparation policy, finding latest preparation", "recipe", cd.Spec.Recipe)
+	preparationName := serving.Spec.Preparation
+	if serving.Spec.PreparationPolicy.Type == deliveryv1alpha1.PreparationPolicyAutomatic {
+		logger.Info("Automatic preparation policy, finding latest preparation", "recipe", serving.Spec.Recipe)
 
 		preparationList := &deliveryv1alpha1.PreparationList{}
 		if err := r.List(ctx, preparationList,
-			client.InNamespace(cd.Namespace),
-			client.MatchingLabels{"delivery.kokumi.dev/recipe": cd.Spec.Recipe},
+			client.InNamespace(serving.Namespace),
+			client.MatchingLabels{"delivery.kokumi.dev/recipe": serving.Spec.Recipe},
 		); err != nil {
 			logger.Error(err, "Failed to list Preparations")
-			_ = statusUpdater.Failed(ctx, cd, fmt.Errorf("failed to list preparations: %w", err))
+			_ = statusUpdater.Failed(ctx, serving, fmt.Errorf("failed to list preparations: %w", err))
 			return ctrl.Result{}, err
 		}
 
 		if len(preparationList.Items) == 0 {
-			logger.Info("No preparations found for recipe", "recipe", cd.Spec.Recipe)
-			_ = statusUpdater.Pending(ctx, cd, "Waiting for preparations")
+			logger.Info("No preparations found for recipe", "recipe", serving.Spec.Recipe)
+			_ = statusUpdater.Pending(ctx, serving, "Waiting for preparations")
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
 
@@ -128,17 +128,17 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, cd *deliveryv1
 		}
 
 		if latestPreparation == nil {
-			logger.Info("No ready preparations found for recipe", "recipe", cd.Spec.Recipe)
-			_ = statusUpdater.Pending(ctx, cd, "Waiting for ready preparation")
+			logger.Info("No ready preparations found for recipe", "recipe", serving.Spec.Recipe)
+			_ = statusUpdater.Pending(ctx, serving, "Waiting for ready preparation")
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
 
 		preparationName = latestPreparation.Name
 		logger.Info("Selected latest preparation", "preparation", preparationName)
 
-		if cd.Spec.Preparation != preparationName {
-			cd.Spec.Preparation = preparationName
-			if err := r.Update(ctx, cd); err != nil {
+		if serving.Spec.Preparation != preparationName {
+			serving.Spec.Preparation = preparationName
+			if err := r.Update(ctx, serving); err != nil {
 				return ctrl.Result{}, err
 			}
 			return ctrl.Result{Requeue: true}, nil
@@ -146,31 +146,31 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, cd *deliveryv1
 	}
 
 	preparation := &deliveryv1alpha1.Preparation{}
-	preparationKey := client.ObjectKey{Namespace: cd.Namespace, Name: preparationName}
+	preparationKey := client.ObjectKey{Namespace: serving.Namespace, Name: preparationName}
 	if err := r.Get(ctx, preparationKey, preparation); err != nil {
 		logger.Error(err, "Failed to get Preparation", "preparation", preparationName)
-		_ = statusUpdater.Failed(ctx, cd, fmt.Errorf("preparation not found: %w", err))
+		_ = statusUpdater.Failed(ctx, serving, fmt.Errorf("preparation not found: %w", err))
 		return ctrl.Result{}, err
 	}
 
 	logger.Info("Found Preparation", "preparation", preparation.Name, "digest", preparation.Spec.Artifact.Digest)
 
-	if cd.Status.ObservedPreparation == preparationName && cd.Status.DeployedDigest == preparation.Spec.Artifact.Digest {
+	if serving.Status.ObservedPreparation == preparationName && serving.Status.DeployedDigest == preparation.Spec.Artifact.Digest {
 		logger.Info("Deployment is up-to-date", "preparation", preparationName)
 		return ctrl.Result{}, nil
 	}
 
-	if err := r.reconcileArgoApplication(ctx, cd, preparation); err != nil {
+	if err := r.reconcileArgoApplication(ctx, serving, preparation); err != nil {
 		logger.Error(err, "Failed to reconcile Argo CD Application")
-		_ = statusUpdater.Failed(ctx, cd, fmt.Errorf("failed to create Argo CD Application: %w", err))
+		_ = statusUpdater.Failed(ctx, serving, fmt.Errorf("failed to create Argo CD Application: %w", err))
 		return ctrl.Result{}, err
 	}
 
 	logger.Info("Successfully created/updated Argo CD Application", "preparation", preparationName)
 
-	cd.Status.ObservedPreparation = preparationName
-	cd.Status.DeployedDigest = preparation.Spec.Artifact.Digest
-	if err := statusUpdater.Deployed(ctx, cd, "Successfully deployed component"); err != nil {
+	serving.Status.ObservedPreparation = preparationName
+	serving.Status.DeployedDigest = preparation.Spec.Artifact.Digest
+	if err := statusUpdater.Deployed(ctx, serving, "Successfully deployed component"); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -178,7 +178,7 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, cd *deliveryv1
 }
 
 // reconcileArgoApplication creates or updates an Argo CD Application resource
-func (r *ServingReconciler) reconcileArgoApplication(ctx context.Context, cd *deliveryv1alpha1.Serving, preparation *deliveryv1alpha1.Preparation) error {
+func (r *ServingReconciler) reconcileArgoApplication(ctx context.Context, serving *deliveryv1alpha1.Serving, preparation *deliveryv1alpha1.Preparation) error {
 	logger := log.FromContext(ctx)
 
 	ociRef := strings.TrimPrefix(preparation.Spec.Artifact.OCIRef, "oci://")
@@ -189,7 +189,7 @@ func (r *ServingReconciler) reconcileArgoApplication(ctx context.Context, cd *de
 	repoURL := "oci://" + parts[0]
 	targetRevision := preparation.Spec.Artifact.Digest
 
-	appName := cd.Name
+	appName := serving.Name
 
 	app := &unstructured.Unstructured{
 		Object: map[string]any{
@@ -199,8 +199,8 @@ func (r *ServingReconciler) reconcileArgoApplication(ctx context.Context, cd *de
 				"name":      appName,
 				"namespace": argoNamespace,
 				"labels": map[string]any{
-					"delivery.kokumi.dev/recipe":  cd.Spec.Recipe,
-					"delivery.kokumi.dev/serving": cd.Name,
+					"delivery.kokumi.dev/recipe":  serving.Spec.Recipe,
+					"delivery.kokumi.dev/serving": serving.Name,
 				},
 			},
 			"spec": map[string]any{
@@ -212,7 +212,7 @@ func (r *ServingReconciler) reconcileArgoApplication(ctx context.Context, cd *de
 				},
 				"destination": map[string]any{
 					"server":    "https://kubernetes.default.svc",
-					"namespace": cd.Namespace,
+					"namespace": serving.Namespace,
 				},
 			},
 		},
