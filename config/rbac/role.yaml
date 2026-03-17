@@ -19,6 +19,7 @@ rules:
 - apiGroups:
   - delivery.kokumi.dev
   resources:
+  - menus
   - orders
   - preparations
   - recipes
@@ -34,6 +35,7 @@ rules:
 - apiGroups:
   - delivery.kokumi.dev
   resources:
+  - menus/finalizers
   - orders/finalizers
   - preparations/finalizers
   - recipes/finalizers
@@ -43,6 +45,7 @@ rules:
 - apiGroups:
   - delivery.kokumi.dev
   resources:
+  - menus/status
   - orders/status
   - preparations/status
   - recipes/status

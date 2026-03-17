@@ -22,6 +22,9 @@ resources:
 # default, aiding admins in cluster management. Those roles are
 # not used by the kokumi itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
+- menu_admin_role.yaml
+- menu_editor_role.yaml
+- menu_viewer_role.yaml
 - order_admin_role.yaml
 - order_editor_role.yaml
 - order_viewer_role.yaml

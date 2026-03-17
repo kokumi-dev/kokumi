@@ -1,0 +1,9 @@
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Menu
+metadata:
+  labels:
+    app.kubernetes.io/name: kokumi
+    app.kubernetes.io/managed-by: kustomize
+  name: menu-sample
+spec:
+  # TODO(user): Add fields here
