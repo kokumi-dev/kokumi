@@ -34,18 +34,39 @@
 }
 
 /* ── Hero section ────────────────────────────────────────────── */
-/* Home page only: make body a fixed-height flex column so     */
-/* header + hero + footer fill exactly 100vh with no scrolling. */
+/* Home page uses a fixed one-screen layout on desktop. On small */
+/* screens, allow vertical scrolling so content never gets clipped. */
 body:has(.kokumi-home) {
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  overflow: hidden;
+  min-height: 100dvh;
 }
+
 /* The main wrapper grows to fill the space between navbar and footer */
 body:has(.kokumi-home) .kokumi-home {
   flex: 1;
   min-height: 0;
+}
+
+/* Desktop: keep the original no-scroll single-screen presentation */
+@media (min-width: 769px) {
+  body:has(.kokumi-home) {
+    height: 100dvh;
+    overflow: hidden;
+  }
+}
+
+/* Mobile/tablet: let the page scroll naturally */
+@media (max-width: 768px) {
+  body:has(.kokumi-home) {
+    height: auto;
+    overflow-y: auto;
+  }
+
+  body:has(.kokumi-home) .kokumi-home {
+    flex: 0 0 auto;
+    min-height: auto;
+  }
 }
 
 /* ── Navbar accent ───────────────────────────────────────────── */
