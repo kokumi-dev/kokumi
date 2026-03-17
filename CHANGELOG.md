@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.7.0](https://github.com/kokumi-dev/kokumi/compare/0.6.1...0.7.0) (2026-03-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* rename recipe crd to order and update related ui components ([#74](https://github.com/kokumi-dev/kokumi/issues/74))
+
+### Code Refactoring
+
+* rename recipe crd to order and update related ui components ([#74](https://github.com/kokumi-dev/kokumi/issues/74)) ([f11d482](https://github.com/kokumi-dev/kokumi/commit/f11d482da77448c1cecd727111c8ac6e29d93f79))
+
 ## [0.6.1](https://github.com/kokumi-dev/kokumi/compare/0.6.0...0.6.1) (2026-03-11)
 
 
