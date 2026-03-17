@@ -19,7 +19,7 @@ import (
 
 // Counts holds the current resource count for each CRD type.
 type Counts struct {
-	Recipes      int `json:"recipes"`
+	Orders       int `json:"orders"`
 	Preparations int `json:"preparations"`
 	Servings     int `json:"servings"`
 }
@@ -27,8 +27,8 @@ type Counts struct {
 const (
 	// eventCounts is the SSE event type name for resource count updates.
 	eventCounts = "counts"
-	// eventRecipes is the SSE event type name for full recipe list snapshots.
-	eventRecipes = "recipes"
+	// eventOrders is the SSE event type name for full order list snapshots.
+	eventOrders = "orders"
 	// eventPreparations is the SSE event type name for full preparation list snapshots.
 	eventPreparations = "preparations"
 	// eventServings is the SSE event type name for full serving list snapshots.
@@ -44,8 +44,8 @@ func newScheme() *runtime.Scheme {
 }
 
 // startK8sWatcher connects to the Kubernetes API, registers informers for
-// Recipe, Preparation, and Serving resources, and broadcasts updated Counts,
-// Recipe snapshots, and Preparation snapshots to h on every change event.
+// Order, Preparation, and Serving resources, and broadcasts updated Counts,
+// Order snapshots, and Preparation snapshots to h on every change event.
 //
 // If no Kubernetes config is found (e.g. running outside a cluster without a
 // kubeconfig) the function logs the situation and returns nil; the hub simply
@@ -77,9 +77,9 @@ func startK8sWatcher(ctx context.Context, logger logr.Logger, h *hub) (*apiDeps,
 		logger:    logger,
 	}
 
-	recipeInformer, err := k8sCache.GetInformer(ctx, &deliveryv1alpha1.Recipe{})
+	orderInformer, err := k8sCache.GetInformer(ctx, &deliveryv1alpha1.Order{})
 	if err != nil {
-		return nil, fmt.Errorf("getting Recipe informer: %w", err)
+		return nil, fmt.Errorf("getting Order informer: %w", err)
 	}
 
 	prepInformer, err := k8sCache.GetInformer(ctx, &deliveryv1alpha1.Preparation{})
@@ -93,12 +93,12 @@ func startK8sWatcher(ctx context.Context, logger logr.Logger, h *hub) (*apiDeps,
 	}
 
 	// refreshAll reads current state from the in-memory informer cache and
-	// broadcasts counts, full recipe snapshots, and full preparation snapshots
+	// broadcasts counts, full order snapshots, and full preparation snapshots
 	// to all SSE subscribers. All reads are local — no network calls.
 	refreshAll := func() {
-		recipeList := &deliveryv1alpha1.RecipeList{}
-		if err := k8sCache.List(ctx, recipeList); err != nil {
-			logger.Error(err, "Failed to list Recipes from cache")
+		orderList := &deliveryv1alpha1.OrderList{}
+		if err := k8sCache.List(ctx, orderList); err != nil {
+			logger.Error(err, "Failed to list Orders from cache")
 			return
 		}
 
@@ -115,15 +115,15 @@ func startK8sWatcher(ctx context.Context, logger logr.Logger, h *hub) (*apiDeps,
 		}
 
 		if err := h.publish(eventCounts, Counts{
-			Recipes:      len(recipeList.Items),
+			Orders:       len(orderList.Items),
 			Preparations: len(prepList.Items),
 			Servings:     len(servingList.Items),
 		}); err != nil {
 			logger.Error(err, "Failed to publish counts event")
 		}
 
-		if err := h.publish(eventRecipes, enrichRecipes(recipeList.Items, servingList.Items)); err != nil {
-			logger.Error(err, "Failed to publish recipes event")
+		if err := h.publish(eventOrders, enrichOrders(orderList.Items, servingList.Items)); err != nil {
+			logger.Error(err, "Failed to publish orders event")
 		}
 
 		if err := h.publish(eventPreparations, enrichPreparations(prepList.Items, servingList.Items)); err != nil {
@@ -141,8 +141,8 @@ func startK8sWatcher(ctx context.Context, logger logr.Logger, h *hub) (*apiDeps,
 		DeleteFunc: func(_ any) { refreshAll() },
 	}
 
-	if _, err := recipeInformer.AddEventHandler(handler); err != nil {
-		return nil, fmt.Errorf("adding Recipe event handler: %w", err)
+	if _, err := orderInformer.AddEventHandler(handler); err != nil {
+		return nil, fmt.Errorf("adding Order event handler: %w", err)
 	}
 	if _, err := prepInformer.AddEventHandler(handler); err != nil {
 		return nil, fmt.Errorf("adding Preparation event handler: %w", err)

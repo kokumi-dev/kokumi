@@ -39,7 +39,7 @@ export interface Condition {
   lastTransitionTime?: string
 }
 
-export interface Recipe {
+export interface Order {
   name: string
   namespace: string
   labels?: Record<string, string>
@@ -64,7 +64,7 @@ export interface Artifact {
 export interface Preparation {
   name: string
   namespace: string
-  recipe: string
+  order: string
   artifact: Artifact
   configHash: string
   phase: string
@@ -76,7 +76,7 @@ export interface Preparation {
 export interface Serving {
   name: string
   namespace: string
-  recipe: string
+  order: string
   desiredPreparation: string
   observedPreparation?: string
   deployedDigest?: string
@@ -88,7 +88,7 @@ export interface Serving {
 
 // ── Form data types ───────────────────────────────────────────────────────────
 
-export interface RecipeFormData {
+export interface OrderFormData {
   name: string
   namespace: string
   source: OCISource
@@ -98,7 +98,7 @@ export interface RecipeFormData {
   autoDeploy: boolean
 }
 
-export const emptyRecipeForm = (): RecipeFormData => ({
+export const emptyOrderForm = (): OrderFormData => ({
   name: '',
   namespace: 'default',
   source: { oci: '', version: '' },
@@ -108,7 +108,7 @@ export const emptyRecipeForm = (): RecipeFormData => ({
   autoDeploy: false,
 })
 
-export const recipeToFormData = (r: Recipe): RecipeFormData => ({
+export const orderToFormData = (r: Order): OrderFormData => ({
   name: r.name,
   namespace: r.namespace,
   source: { ...r.source },

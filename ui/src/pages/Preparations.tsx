@@ -32,7 +32,7 @@ export default function Preparations() {
       (p) =>
         p.name.toLowerCase().includes(q) ||
         p.namespace.toLowerCase().includes(q) ||
-        p.recipe.toLowerCase().includes(q),
+        p.order.toLowerCase().includes(q),
     )
   }, [preparations, query])
 
@@ -41,7 +41,7 @@ export default function Preparations() {
       <div className={styles.header}>
         <h1 className={styles.title}>Preparations</h1>
         <p className={styles.subtitle}>
-          Rendered manifests produced by the controller for each Recipe revision
+          Rendered manifests produced by the controller for each Order revision
         </p>
       </div>
 
@@ -84,7 +84,7 @@ export default function Preparations() {
                   <th>Phase</th>
                   <th>Name</th>
                   <th>Namespace</th>
-                  <th>Recipe</th>
+                  <th>Order</th>
                   <th>Config Hash</th>
                   <th>Created</th>
                   <th></th>
@@ -104,7 +104,7 @@ export default function Preparations() {
                     </td>
                     <td className={styles.mono}>{p.name}</td>
                     <td>{p.namespace}</td>
-                    <td>{p.recipe}</td>
+                    <td>{p.order}</td>
                     <td>
                       <span
                         className={`${styles.mono} ${styles.truncate}`}

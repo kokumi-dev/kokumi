@@ -15,8 +15,8 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.recipe
-      name: Recipe
+    - jsonPath: .spec.order
+      name: Order
       type: string
     - jsonPath: .spec.preparation
       name: Preparation
@@ -60,6 +60,9 @@ spec:
           spec:
             description: spec defines the desired state of Serving
             properties:
+              order:
+                description: order is the name of the order to serve
+                type: string
               preparation:
                 description: preparation is the desired Preparation to serve
                 type: string
@@ -78,12 +81,9 @@ spec:
                 required:
                 - type
                 type: object
-              recipe:
-                description: recipe is the name of the recipe to serve
-                type: string
             required:
+            - order
             - preparation
-            - recipe
             type: object
           status:
             description: status defines the observed state of Serving

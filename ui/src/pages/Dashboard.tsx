@@ -26,8 +26,8 @@ export default function Dashboard({ operatorName, operatorVersion }: Props) {
           </span>
         </div>
         <div className={styles.statCard}>
-          <span className={styles.statLabel}>Recipes</span>
-          <span className={styles.statValue}>{counts?.recipes ?? '—'}</span>
+          <span className={styles.statLabel}>Orders</span>
+          <span className={styles.statValue}>{counts?.orders ?? '—'}</span>
         </div>
         <div className={styles.statCard}>
           <span className={styles.statLabel}>Preparations</span>

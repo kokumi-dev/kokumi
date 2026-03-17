@@ -1,25 +1,25 @@
-import type { Recipe } from '../../api/types'
+import type { Order } from '../../api/types'
 import Badge from '../shared/Badge'
-import styles from './RecipeList.module.css'
+import styles from './OrderList.module.css'
 
 interface Props {
-  recipes: Recipe[]
+  orders: Order[]
   selectedName?: string
   query: string
-  onSelect: (recipe: Recipe) => void
+  onSelect: (order: Order) => void
 }
 
 /**
- * RecipeList renders a filterable card grid of all Recipes. Clicking a card
- * fires onSelect; the "Add Recipe" button fires onAdd.
+ * OrderList renders a filterable card grid of all Orders. Clicking a card
+ * fires onSelect; the "Add Order" button fires onAdd.
  */
-export default function RecipeList({ recipes, selectedName, query, onSelect }: Props) {
+export default function OrderList({ orders, selectedName, query, onSelect }: Props) {
   const filtered = query
-    ? recipes.filter((r) =>
+    ? orders.filter((r) =>
         r.name.toLowerCase().includes(query.toLowerCase()) ||
         r.namespace.toLowerCase().includes(query.toLowerCase()),
       )
-    : recipes
+    : orders
 
   return (
     <>
@@ -29,15 +29,15 @@ export default function RecipeList({ recipes, selectedName, query, onSelect }: P
             <path d="M10 4v32M10 14h14a6 6 0 0 1 0 12H10" />
           </svg>
           <span className={styles.emptyText}>
-            {query ? 'No recipes match your filter' : 'No recipes found'}
+            {query ? 'No orders match your filter' : 'No orders found'}
           </span>
         </div>
       ) : (
         <div className={styles.grid}>
           {filtered.map((r) => (
-            <RecipeCard
+            <OrderCard
               key={`${r.namespace}/${r.name}`}
-              recipe={r}
+              order={r}
               selected={r.name === selectedName && r.namespace === r.namespace}
               onClick={() => onSelect(r)}
             />
@@ -48,15 +48,15 @@ export default function RecipeList({ recipes, selectedName, query, onSelect }: P
   )
 }
 
-// ── RecipeCard ────────────────────────────────────────────────────────────────
+// ── OrderCard ────────────────────────────────────────────────────────────────
 
 interface CardProps {
-  recipe: Recipe
+  order: Order
   selected: boolean
   onClick: () => void
 }
 
-function RecipeCard({ recipe: r, selected, onClick }: CardProps) {
+function OrderCard({ order: r, selected, onClick }: CardProps) {
   return (
     <div
       className={`${styles.card} ${selected ? styles.cardSelected : ''}`}

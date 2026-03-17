@@ -21,17 +21,13 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/spf13/afero"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
-	"github.com/kokumi-dev/kokumi/internal/oci"
-	"github.com/kokumi-dev/kokumi/internal/service"
 )
 
 var _ = Describe("Recipe Controller", func() {
@@ -55,16 +51,7 @@ var _ = Describe("Recipe Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					Spec: deliveryv1alpha1.RecipeSpec{
-						AutoDeploy: false,
-						Source: deliveryv1alpha1.OCISource{
-							OCI:     "oci://registry.kokumi.svc.cluster.local:5000/recipe/test-resource",
-							Version: "0.1.0",
-						},
-						Destination: deliveryv1alpha1.OCIDestination{
-							OCI: "oci://registry.kokumi.svc.cluster.local:5000/preparation/test-resource",
-						},
-					},
+					// TODO(user): Specify other spec details if needed.
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
@@ -81,28 +68,15 @@ var _ = Describe("Recipe Controller", func() {
 		})
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
-			fs := afero.NewMemMapFs()
 			controllerReconciler := &RecipeReconciler{
 				Client: k8sClient,
 				Scheme: k8sClient.Scheme(),
-				Service: *service.NewRecipeService(
-					oci.NewFakeClient(fs),
-					fs,
-					"",
-				),
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
 			Expect(err).NotTo(HaveOccurred())
-
-			preparationList := &deliveryv1alpha1.PreparationList{}
-			Expect(k8sClient.List(ctx, preparationList,
-				client.InNamespace("default"),
-				client.MatchingLabels{"delivery.kokumi.dev/recipe": resourceName},
-			)).To(Succeed())
-			Expect(preparationList.Items).To(HaveLen(1))
 		})
 	})
 })

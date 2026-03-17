@@ -15,8 +15,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// handleListPreparations handles GET /api/v1/recipes/{namespace}/{name}/preparations.
-// Returns all Preparations for the given Recipe, sorted newest-first by createdAt,
+// handleListPreparations handles GET /api/v1/orders/{namespace}/{name}/preparations.
+// Returns all Preparations for the given Order, sorted newest-first by createdAt,
 // with IsActive populated from the linked Serving.
 func handleListPreparations(deps *apiDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -26,19 +26,19 @@ func handleListPreparations(deps *apiDeps) http.HandlerFunc {
 		}
 
 		namespace := r.PathValue("namespace")
-		recipeName := r.PathValue("name")
+		orderName := r.PathValue("name")
 
 		prepList := &deliveryv1alpha1.PreparationList{}
 		if err := deps.reader.List(r.Context(), prepList, client.InNamespace(namespace)); err != nil {
-			deps.logger.Error(err, "Failed to list Preparations", "namespace", namespace, "recipe", recipeName)
+			deps.logger.Error(err, "Failed to list Preparations", "namespace", namespace, "order", orderName)
 			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to list preparations: %s", err))
 			return
 		}
 
-		// Client-side filter by recipe name.
+		// Client-side filter by order name.
 		filtered := prepList.Items[:0]
 		for _, p := range prepList.Items {
-			if p.Spec.Recipe == recipeName {
+			if p.Spec.Order == orderName {
 				filtered = append(filtered, p)
 			}
 		}

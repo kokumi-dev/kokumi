@@ -8,7 +8,7 @@ description: How Kokumi models release workflows and how its control loops opera
 
 Kokumi draws a hard line between three concerns that most delivery systems conflate:
 
-1. **Intent** — what _should_ be built and how (the Recipe)
+1. **Intent** — what _should_ be built and how (the Order)
 2. **Artifact** — what _was_ built, exactly (the Preparation)
 3. **Activation** — what is _currently running_ (the Serving)
 
@@ -36,7 +36,7 @@ controllable steps:
 
 ```
 Render                      Promote                    Deploy
-Recipe ──▶ Preparation ─────────────────────────▶ Serving ──▶ Argo CD Application
+Order ──▶ Preparation ─────────────────────────▶ Serving ──▶ Argo CD Application
            (immutable)    (human or auto)           (active pointer)
 ```
 
@@ -81,7 +81,7 @@ the selected Preparation. Argo CD then syncs that artifact into the cluster.
 ## Resource model
 
 ```
-Recipe ──renders──▶ Preparation (immutable, versioned OCI artifact)
+Order ──renders──▶ Preparation (immutable, versioned OCI artifact)
                          ▲
 Serving ──selects────────┘  (mutable pointer to one Preparation)
    │
@@ -89,30 +89,49 @@ Serving ──selects────────┘  (mutable pointer to one Prepar
                               │
                               └──syncs──▶ Cluster workloads
 
-Menu ──coordinates──▶ { Recipe₁, Recipe₂, … }  (atomic multi-Recipe rollout)
+Menu (optional, planned) ──provides template──▶ Order  (consumed and parameterized)
+Recipe ──provides render profile──▶ Order  (for example Helm options)
 ```
+
+### Menu
+
+Menu is the reusable deployment template that an Order consumes and
+parameterizes for a concrete rollout.
+
+Menu consumption is not implemented yet.
 
 ### Recipe
 
-The **only resource you create manually**. A Recipe declares:
+Recipe captures rendering configuration, including options like Helm rendering
+behavior and values-related settings.
+
+### Order
+
+Order is the concrete execution request. It binds source and runtime input and
+triggers rendering to produce immutable artifacts.
+
+Order does not need Menu. It can fully define component intent on its own, and
+this standalone behavior is intended to remain a first-class mode.
+
+An Order declares:
 
 - **Source** — OCI image reference: either a pre-rendered manifest bundle
   (containing `manifest.yaml`) or a Helm chart in OCI format (add
   `spec.render.helm` to configure rendering)
 - **Patches** — Patches to apply before producing the artifact
 
-Recipes are mutable; every change triggers a new reconciliation cycle and
+Orders are mutable; every change triggers a new reconciliation cycle and
 automatically produces a new Preparation.
 
 ### Preparation
 
-Preparations are **created automatically** by Kokumi whenever a Recipe changes.
+Preparations are **created automatically** by Kokumi whenever an Order changes.
 You never create them directly.
 
-A Preparation is the _output_ of rendering a Recipe at a specific point in time.
+A Preparation is the _output_ of rendering an Order at a specific point in time.
 It contains:
 
-- A reference to the parent Recipe and the exact source revision used
+- A reference to the parent Order and the exact source revision used
 - An OCI artifact digest (stored in the in-cluster OCI registry)
 - An immutable status — once `Ready`, a Preparation never changes
 
@@ -122,10 +141,10 @@ history and can promote any old Preparation to active at any time.
 ### Serving
 
 A Serving tracks which Preparation is actively deployed. There is exactly one
-Serving per Recipe, and it is **managed automatically** — you never create one
+Serving per Order, and it is **managed automatically** — you never create one
 directly. A Serving is created or updated in three ways:
 
-- **Auto-deploy** — set `spec.autoDeployLatest: true` on the Recipe; Kokumi
+- **Auto-deploy** — set `spec.autoDeploy: true` on the Order; Kokumi
   updates the Serving automatically every time a new Preparation becomes `Ready`.
 - **Label promotion** — label a Preparation with
   `delivery.kokumi.dev/approve-deploy: "true"`.
@@ -141,18 +160,16 @@ When a Serving is reconciled, the controller:
 
 Rollback is promoting any previous Preparation — no re-rendering required.
 
-### Menu
+### Menu and Recipe lifecycle
 
-> **Not yet implemented — planned for a future release.**
-
-A Menu will group multiple Recipes and allow coordinated rollouts — useful when
-you need frontend, backend, and config to move together in a single atomic
-operation.
+Recipe defines rendering behavior. Menu provides an optional reusable template.
+Order remains the concrete execution resource, whether standalone or template-
+parameterized.
 
 ## Reconciliation loop
 
 ```
-Watch Recipe ──▶ Render source ──▶ Push OCI artifact ──▶ Create/update Preparation
+Watch Order ──▶ Render source ──▶ Push OCI artifact ──▶ Create/update Preparation
                                                                    │
 Watch Preparation status ──────────────────────────────────────────▼
 Serving selects Preparation ──▶ Create/update Argo CD Application
@@ -164,7 +181,7 @@ Key properties:
 
 - **Idempotent** — each reconcile produces the same output for the same input
 - **Level-triggered** — the controller always acts on observed state, not events
-- **Owner references** — Preparations are owned by their Recipe; clean deletion is automatic
+- **Owner references** — Preparations are owned by their Order; clean deletion is automatic
 - **Argo CD delegates deployment** — Kokumi never applies manifests directly; it only manages the Argo CD Application resource
 
 ## OCI source formats
@@ -212,14 +229,14 @@ Available `render.helm` fields:
 
 | Field | Description | Default |
 |---|---|---|
-| `releaseName` | Helm release name passed to `helm template` | Recipe name |
-| `namespace` | Target namespace (`--namespace`) | Recipe namespace |
+| `releaseName` | Helm release name passed to `helm template` | Order name |
+| `namespace` | Target namespace (`--namespace`) | Order namespace |
 | `includeCRDs` | Include CRDs in the rendered output (`--include-crds`) | `false` |
 | `values` | Inline Helm values merged last (highest priority) | — |
 
 Helm OCI charts are first-class in Kokumi. Any chart published to an OCI
 registry — whether an upstream community chart or an internally-built one —
-can be used as a Recipe source.
+can be used as an Order source.
 
 ## OCI registry
 

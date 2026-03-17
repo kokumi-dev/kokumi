@@ -16,47 +16,47 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-// RecipeResult holds the outcome of processing a Recipe artifact.
-type RecipeResult struct {
+// OrderResult holds the outcome of processing an Order artifact.
+type OrderResult struct {
 	SourceRef    string
 	SourceDigest string
 	DestRef      string
 	DestDigest   string
 }
 
-// RecipeService handles the FS and OCI operations for a Recipe.
-type RecipeService struct {
+// OrderService handles the FS and OCI operations for an Order.
+type OrderService struct {
 	client   oci.Client
 	fs       afero.Fs
 	cacheDir string // empty string disables pull caching
 }
 
-// NewRecipeService returns a new RecipeService.
+// NewOrderService returns a new OrderService.
 // cacheDir is the directory used to cache pulled OCI blobs between reconciles.
 // Pass an empty string to disable caching.
-func NewRecipeService(client oci.Client, fs afero.Fs, cacheDir string) *RecipeService {
+func NewOrderService(client oci.Client, fs afero.Fs, cacheDir string) *OrderService {
 	if cacheDir != "" {
 		_ = fs.MkdirAll(cacheDir, 0700)
 	}
 
-	return &RecipeService{
+	return &OrderService{
 		client:   client,
 		fs:       fs,
 		cacheDir: cacheDir,
 	}
 }
 
-// ProcessRecipe pulls the source artifact, applies patches or normalizes YAML,
+// ProcessOrder pulls the source artifact, applies patches or normalizes YAML,
 // pushes the result to the destination, and returns the source/dest refs and digests.
-func (rs *RecipeService) ProcessRecipe(ctx context.Context, recipe *deliveryv1alpha1.Recipe) (*RecipeResult, error) {
+func (rs *OrderService) ProcessOrder(ctx context.Context, order *deliveryv1alpha1.Order) (*OrderResult, error) {
 	logger := log.FromContext(ctx)
 
-	sourceRef := strings.TrimPrefix(recipe.Spec.Source.OCI, "oci://")
-	destRef := strings.TrimPrefix(recipe.Spec.Destination.OCI, "oci://")
+	sourceRef := strings.TrimPrefix(order.Spec.Source.OCI, "oci://")
+	destRef := strings.TrimPrefix(order.Spec.Destination.OCI, "oci://")
 
-	logger.Info("Processing artifact", "source", sourceRef, "destination", destRef, "version", recipe.Spec.Source.Version)
+	logger.Info("Processing artifact", "source", sourceRef, "destination", destRef, "version", order.Spec.Source.Version)
 
-	tempDir, err := afero.TempDir(rs.fs, "", "recipe-*")
+	tempDir, err := afero.TempDir(rs.fs, "", "order-*")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp directory: %w", err)
 	}
@@ -64,7 +64,7 @@ func (rs *RecipeService) ProcessRecipe(ctx context.Context, recipe *deliveryv1al
 
 	logger.Info("Fetching artifact from source")
 
-	mediaType, sourceDigest, err := rs.pullWithCache(ctx, sourceRef, recipe.Spec.Source.Version, tempDir)
+	mediaType, sourceDigest, err := rs.pullWithCache(ctx, sourceRef, order.Spec.Source.Version, tempDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pull artifact: %w", err)
 	}
@@ -73,25 +73,25 @@ func (rs *RecipeService) ProcessRecipe(ctx context.Context, recipe *deliveryv1al
 
 	logger.Info("Pulled source artifact", "digest", sourceDigest, "mediaType", mediaType)
 
-	if recipe.Spec.Render != nil && recipe.Spec.Render.Helm != nil {
+	if order.Spec.Render != nil && order.Spec.Render.Helm != nil {
 		if mediaType != oci.HelmChartLayerMediaType {
 			return nil, fmt.Errorf("source is not a Helm chart (got media type %q)", mediaType)
 		}
 
 		logger.Info("Applying Helm renderer")
 
-		vals, err := jsonToMap(recipe.Spec.Render.Helm.Values)
+		vals, err := jsonToMap(order.Spec.Render.Helm.Values)
 		if err != nil {
 			return nil, fmt.Errorf("failed convert values: %w", err)
 		}
 
-		releaseName := recipe.Spec.Render.Helm.ReleaseName
+		releaseName := order.Spec.Render.Helm.ReleaseName
 		if releaseName == "" {
-			releaseName = recipe.Name
+			releaseName = order.Name
 		}
-		helmNamespace := recipe.Spec.Render.Helm.Namespace
+		helmNamespace := order.Spec.Render.Helm.Namespace
 		if helmNamespace == "" {
-			helmNamespace = recipe.Namespace
+			helmNamespace = order.Namespace
 		}
 
 		chartPath := filepath.Join(tempDir, "chart.tgz")
@@ -101,7 +101,7 @@ func (rs *RecipeService) ProcessRecipe(ctx context.Context, recipe *deliveryv1al
 			chartPath,
 			releaseName,
 			helmNamespace,
-			recipe.Spec.Render.Helm.IncludeCRDs,
+			order.Spec.Render.Helm.IncludeCRDs,
 			vals,
 		)
 		if err != nil {
@@ -118,7 +118,7 @@ func (rs *RecipeService) ProcessRecipe(ctx context.Context, recipe *deliveryv1al
 		return nil, fmt.Errorf("failed to read manifest: %w", err)
 	}
 
-	processedContent, err := rs.processManifest(ctx, content, recipe.Spec.Patches)
+	processedContent, err := rs.processManifest(ctx, content, order.Spec.Patches)
 	if err != nil {
 		return nil, err
 	}
@@ -129,14 +129,14 @@ func (rs *RecipeService) ProcessRecipe(ctx context.Context, recipe *deliveryv1al
 
 	logger.Info("Pushing artifact to destination")
 
-	destDigest, err := rs.client.Push(ctx, destRef, recipe.Spec.Source.Version, tempDir)
+	destDigest, err := rs.client.Push(ctx, destRef, order.Spec.Source.Version, tempDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to push artifact: %w", err)
 	}
 
 	logger.Info("Successfully processed artifact", "digest", destDigest)
 
-	return &RecipeResult{
+	return &OrderResult{
 		SourceRef:    sourceRef,
 		SourceDigest: sourceDigest,
 		DestRef:      destRef,
@@ -145,7 +145,7 @@ func (rs *RecipeService) ProcessRecipe(ctx context.Context, recipe *deliveryv1al
 }
 
 // processManifest applies patches when present, otherwise normalizes YAML formatting.
-func (rs *RecipeService) processManifest(ctx context.Context, content []byte, patches []deliveryv1alpha1.Patch) ([]byte, error) {
+func (rs *OrderService) processManifest(ctx context.Context, content []byte, patches []deliveryv1alpha1.Patch) ([]byte, error) {
 	logger := log.FromContext(ctx)
 
 	if len(patches) > 0 {
@@ -196,7 +196,7 @@ func artifactFilename(mediaType string) string {
 // pulls from the OCI registry and caches the result for future reconciles.
 // Version tags are treated as immutable — if a tag is re-pushed with different
 // content, remove the cache directory to force a fresh pull.
-func (rs *RecipeService) pullWithCache(ctx context.Context, ref, version, workDir string) (string, string, error) {
+func (rs *OrderService) pullWithCache(ctx context.Context, ref, version, workDir string) (string, string, error) {
 	logger := log.FromContext(ctx)
 
 	if rs.cacheDir == "" {
@@ -236,7 +236,7 @@ func (rs *RecipeService) pullWithCache(ctx context.Context, ref, version, workDi
 
 // populateCache writes the pulled artifact and its metadata to the cache entry
 // directory. Errors are non-fatal and only logged as informational messages.
-func (rs *RecipeService) populateCache(ctx context.Context, entryDir, metaPath, mediaType, digest, workDir string) {
+func (rs *OrderService) populateCache(ctx context.Context, entryDir, metaPath, mediaType, digest, workDir string) {
 	logger := log.FromContext(ctx)
 
 	if err := rs.fs.MkdirAll(entryDir, 0700); err != nil {

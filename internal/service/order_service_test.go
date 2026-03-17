@@ -13,12 +13,12 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/oci"
 )
 
-func TestRecipeService_ProcessRecipe(t *testing.T) {
+func TestOrderService_ProcessOrder(t *testing.T) {
 	const fakeDigest = "sha256:fdf90e00e76bf3f0d2e5042c4c4e6c42a6d38c1e2b4f5a7d8e9f0a1b2c3d4e5f"
 
 	tests := []struct {
 		name          string
-		recipe        *deliveryv1alpha1.Recipe
+		order         *deliveryv1alpha1.Order
 		wantSourceRef string
 		wantDestRef   string
 		wantSourceDig string
@@ -28,10 +28,10 @@ func TestRecipeService_ProcessRecipe(t *testing.T) {
 	}{
 		{
 			name: "no patches",
-			recipe: &deliveryv1alpha1.Recipe{
-				Spec: deliveryv1alpha1.RecipeSpec{
+			order: &deliveryv1alpha1.Order{
+				Spec: deliveryv1alpha1.OrderSpec{
 					Source: deliveryv1alpha1.OCISource{
-						OCI:     "oci://kokumi-registry.kokumi.svc.cluster.local:5000/recipe/external-secrets",
+						OCI:     "oci://kokumi-registry.kokumi.svc.cluster.local:5000/order/external-secrets",
 						Version: "1.0.0",
 					},
 					Destination: deliveryv1alpha1.OCIDestination{
@@ -39,17 +39,17 @@ func TestRecipeService_ProcessRecipe(t *testing.T) {
 					},
 				},
 			},
-			wantSourceRef: "kokumi-registry.kokumi.svc.cluster.local:5000/recipe/external-secrets",
+			wantSourceRef: "kokumi-registry.kokumi.svc.cluster.local:5000/order/external-secrets",
 			wantDestRef:   "kokumi-registry.kokumi.svc.cluster.local:5000/preparation/external-secrets",
 			wantSourceDig: fakeDigest,
 			wantDestDig:   fakeDigest,
 		},
 		{
 			name: "helm render rejected when source is not a helm chart",
-			recipe: &deliveryv1alpha1.Recipe{
-				Spec: deliveryv1alpha1.RecipeSpec{
+			order: &deliveryv1alpha1.Order{
+				Spec: deliveryv1alpha1.OrderSpec{
 					Source: deliveryv1alpha1.OCISource{
-						OCI:     "oci://kokumi-registry.kokumi.svc.cluster.local:5000/recipe/my-app",
+						OCI:     "oci://kokumi-registry.kokumi.svc.cluster.local:5000/order/my-app",
 						Version: "1.0.0",
 					},
 					Destination: deliveryv1alpha1.OCIDestination{
@@ -71,9 +71,9 @@ func TestRecipeService_ProcessRecipe(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			fs := afero.NewMemMapFs()
-			svc := NewRecipeService(oci.NewFakeClient(fs), fs, "")
+			svc := NewOrderService(oci.NewFakeClient(fs), fs, "")
 
-			result, err := svc.ProcessRecipe(context.Background(), tc.recipe)
+			result, err := svc.ProcessOrder(context.Background(), tc.order)
 
 			if tc.wantErr {
 				require.Error(t, err)
@@ -115,16 +115,16 @@ func (c *helmFakeClient) Push(_ context.Context, _, _, _ string) (string, error)
 	return "sha256:fdf90e00e76bf3f0d2e5042c4c4e6c42a6d38c1e2b4f5a7d8e9f0a1b2c3d4e5f", nil
 }
 
-func TestRecipeService_PullCache(t *testing.T) {
+func TestOrderService_PullCache(t *testing.T) {
 	const (
 		fakeDigest = "sha256:fdf90e00e76bf3f0d2e5042c4c4e6c42a6d38c1e2b4f5a7d8e9f0a1b2c3d4e5f"
 		cacheDir   = "/cache"
 	)
 
-	recipe := &deliveryv1alpha1.Recipe{
-		Spec: deliveryv1alpha1.RecipeSpec{
+	order := &deliveryv1alpha1.Order{
+		Spec: deliveryv1alpha1.OrderSpec{
 			Source: deliveryv1alpha1.OCISource{
-				OCI:     "oci://registry.svc.cluster.local:5000/recipe/app",
+				OCI:     "oci://registry.svc.cluster.local:5000/order/app",
 				Version: "1.0.0",
 			},
 			Destination: deliveryv1alpha1.OCIDestination{
@@ -138,15 +138,15 @@ func TestRecipeService_PullCache(t *testing.T) {
 		pullCount := 0
 		client := &countingFakeClient{fs: fs, onPull: func() { pullCount++ }}
 
-		svc := NewRecipeService(client, fs, cacheDir)
-		_, err := svc.ProcessRecipe(context.Background(), recipe)
+		svc := NewOrderService(client, fs, cacheDir)
+		_, err := svc.ProcessOrder(context.Background(), order)
 		require.NoError(t, err)
 
 		assert.Equal(t, 1, pullCount, "expected one pull on cache miss")
 
 		// Verify cache entry was written.
 		key := pullCacheKey(
-			"registry.svc.cluster.local:5000/recipe/app",
+			"registry.svc.cluster.local:5000/order/app",
 			"1.0.0",
 		)
 		exists, err := afero.Exists(fs, filepath.Join(cacheDir, key, "meta.json"))
@@ -159,15 +159,15 @@ func TestRecipeService_PullCache(t *testing.T) {
 		pullCount := 0
 		client := &countingFakeClient{fs: fs, onPull: func() { pullCount++ }}
 
-		svc := NewRecipeService(client, fs, cacheDir)
+		svc := NewOrderService(client, fs, cacheDir)
 
 		// First call populates the cache.
-		_, err := svc.ProcessRecipe(context.Background(), recipe)
+		_, err := svc.ProcessOrder(context.Background(), order)
 		require.NoError(t, err)
 		require.Equal(t, 1, pullCount)
 
 		// Second call with identical spec should hit the cache.
-		_, err = svc.ProcessRecipe(context.Background(), recipe)
+		_, err = svc.ProcessOrder(context.Background(), order)
 		require.NoError(t, err)
 		assert.Equal(t, 1, pullCount, "second call should be served from cache without pulling")
 	})

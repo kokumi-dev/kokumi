@@ -54,9 +54,9 @@ func conditionsToDTO(conditions []metav1.Condition) []ConditionDTO {
 	return out
 }
 
-// recipeToDTO converts a Recipe CRD object and the name of its currently active
-// Preparation (from the linked Serving) into a RecipeDTO.
-func recipeToDTO(r deliveryv1alpha1.Recipe, activePreparation string) RecipeDTO {
+// orderToDTO converts a Order CRD object and the name of its currently active
+// Preparation (from the linked Serving) into a OrderDTO.
+func orderToDTO(r deliveryv1alpha1.Order, activePreparation string) OrderDTO {
 	patches := make([]PatchDTO, len(r.Spec.Patches))
 	for i, p := range r.Spec.Patches {
 		patches[i] = PatchDTO{
@@ -69,7 +69,7 @@ func recipeToDTO(r deliveryv1alpha1.Recipe, activePreparation string) RecipeDTO 
 		}
 	}
 
-	dto := RecipeDTO{
+	dto := OrderDTO{
 		Name:      r.Name,
 		Namespace: r.Namespace,
 		Labels:    r.Labels,
@@ -138,12 +138,12 @@ func renderFromDTO(dto *RenderDTO) *deliveryv1alpha1.Render {
 
 // preparationToDTO converts a Preparation CRD object into a PreparationDTO.
 // isActive is true when this Preparation is the one currently deployed by its
-// Recipe's Serving.
+// Order's Serving.
 func preparationToDTO(p deliveryv1alpha1.Preparation, isActive bool) PreparationDTO {
 	dto := PreparationDTO{
 		Name:      p.Name,
 		Namespace: p.Namespace,
-		Recipe:    p.Spec.Recipe,
+		Order:     p.Spec.Order,
 		Artifact: ArtifactDTO{
 			OCIRef: p.Spec.Artifact.OCIRef,
 			Digest: p.Spec.Artifact.Digest,
@@ -162,7 +162,7 @@ func preparationToDTO(p deliveryv1alpha1.Preparation, isActive bool) Preparation
 }
 
 // patchesFromDTO converts a slice of PatchDTO (from a request body) to the
-// equivalent CRD patch type. Used by both the create and update recipe handlers.
+// equivalent CRD patch type. Used by both the create and update order handlers.
 func patchesFromDTO(dtos []PatchDTO) []deliveryv1alpha1.Patch {
 	patches := make([]deliveryv1alpha1.Patch, len(dtos))
 	for i, p := range dtos {
@@ -178,52 +178,52 @@ func patchesFromDTO(dtos []PatchDTO) []deliveryv1alpha1.Patch {
 	return patches
 }
 
-// activePreparationFor returns the observed preparation name for the Recipe
+// activePreparationFor returns the observed preparation name for the Order
 // identified by namespace/name from the provided list of Servings.
 // Returns an empty string when no matching Serving is found.
-func activePreparationFor(namespace, recipeName string, servings []deliveryv1alpha1.Serving) string {
+func activePreparationFor(namespace, orderName string, servings []deliveryv1alpha1.Serving) string {
 	for _, s := range servings {
-		if s.Namespace == namespace && s.Spec.Recipe == recipeName {
+		if s.Namespace == namespace && s.Spec.Order == orderName {
 			return s.Status.ObservedPreparation
 		}
 	}
 	return ""
 }
 
-// enrichRecipes joins a slice of Recipes with a slice of Servings to build
-// RecipeDTOs with ActivePreparation populated.
-func enrichRecipes(recipes []deliveryv1alpha1.Recipe, servings []deliveryv1alpha1.Serving) []RecipeDTO {
-	// serving key: "<namespace>/<spec.recipe>" → serving
+// enrichOrders joins a slice of Orders with a slice of Servings to build
+// OrderDTOs with ActivePreparation populated.
+func enrichOrders(orders []deliveryv1alpha1.Order, servings []deliveryv1alpha1.Serving) []OrderDTO {
+	// serving key: "<namespace>/<spec.order>" → serving
 	servingMap := make(map[string]*deliveryv1alpha1.Serving, len(servings))
 	for i := range servings {
 		s := &servings[i]
-		servingMap[s.Namespace+"/"+s.Spec.Recipe] = s
+		servingMap[s.Namespace+"/"+s.Spec.Order] = s
 	}
 
-	out := make([]RecipeDTO, len(recipes))
-	for i, r := range recipes {
+	out := make([]OrderDTO, len(orders))
+	for i, r := range orders {
 		var activePrep string
 		if s, ok := servingMap[r.Namespace+"/"+r.Name]; ok {
 			activePrep = s.Status.ObservedPreparation
 		}
-		out[i] = recipeToDTO(r, activePrep)
+		out[i] = orderToDTO(r, activePrep)
 	}
 	return out
 }
 
 // enrichPreparations joins Preparations with Servings to determine IsActive.
 func enrichPreparations(preps []deliveryv1alpha1.Preparation, servings []deliveryv1alpha1.Serving) []PreparationDTO {
-	// active key: "<namespace>/<spec.recipe>" → observedPreparation name
+	// active key: "<namespace>/<spec.order>" → observedPreparation name
 	activeMap := make(map[string]string, len(servings))
 	for _, s := range servings {
 		if s.Status.ObservedPreparation != "" {
-			activeMap[s.Namespace+"/"+s.Spec.Recipe] = s.Status.ObservedPreparation
+			activeMap[s.Namespace+"/"+s.Spec.Order] = s.Status.ObservedPreparation
 		}
 	}
 
 	out := make([]PreparationDTO, len(preps))
 	for i, p := range preps {
-		key := p.Namespace + "/" + p.Spec.Recipe
+		key := p.Namespace + "/" + p.Spec.Order
 		isActive := activeMap[key] == p.Name
 		out[i] = preparationToDTO(p, isActive)
 	}
@@ -247,7 +247,7 @@ func servingToDTO(s deliveryv1alpha1.Serving) ServingDTO {
 	dto := ServingDTO{
 		Name:                s.Name,
 		Namespace:           s.Namespace,
-		Recipe:              s.Spec.Recipe,
+		Order:               s.Spec.Order,
 		DesiredPreparation:  s.Spec.Preparation,
 		ObservedPreparation: s.Status.ObservedPreparation,
 		DeployedDigest:      s.Status.DeployedDigest,

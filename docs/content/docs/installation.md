@@ -26,13 +26,16 @@ kubectl apply -f \
 <!-- x-release-please-end -->
 
 This installs:
-- The Kokumi CRDs (`Recipe`, `Preparation`, `Serving`)
+- The Kokumi CRDs (`Menu`, `Recipe`, `Order`, `Preparation`, `Serving`)
 - The controller manager in the `kokumi` namespace
 - The API server and web UI in the `kokumi` namespace
 - RBAC roles and bindings
 
-> **Note:** The `Menu` resource is not yet implemented and has no active
-> controller. It is planned for a future release.
+> **Model:** `Menu` provides the reusable template, `Recipe` carries rendering
+> options (for example Helm settings), and `Order` is the parameterized request
+> that executes delivery and produces `Preparation` artifacts. `Order` does not
+> require `Menu`: standalone Order-defined intent is supported now and intended
+> to remain supported.
 
 ## Verify
 

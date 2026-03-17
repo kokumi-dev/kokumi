@@ -17,8 +17,8 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.recipe
-      name: Recipe
+    - jsonPath: .spec.order
+      name: Order
       type: string
     - jsonPath: .status.phase
       name: Phase
@@ -82,12 +82,12 @@ spec:
                 - ociRef
                 type: object
               configHash:
-                description: configHash is the SHA256 hash of the canonicalized recipe
+                description: configHash is the SHA256 hash of the canonicalized order
                   configuration
                 pattern: ^sha256:[a-f0-9]+$
                 type: string
-              recipe:
-                description: recipe is the name of the recipe this preparation belongs
+              order:
+                description: order is the name of the order this preparation belongs
                   to
                 type: string
               renderer:
@@ -132,7 +132,7 @@ spec:
             required:
             - artifact
             - configHash
-            - recipe
+            - order
             - renderer
             - source
             type: object

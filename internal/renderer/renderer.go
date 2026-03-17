@@ -103,7 +103,7 @@ func NormalizeYAML(content []byte) ([]byte, error) {
 
 // CalculateSpecHash computes a stable SHA-256 hash over the complete set of inputs
 // that determine the content of a rendered artifact.
-func CalculateSpecHash(spec deliveryv1alpha1.RecipeSpec) (string, error) {
+func CalculateSpecHash(spec deliveryv1alpha1.OrderSpec) (string, error) {
 	var builder strings.Builder
 
 	encoder := yaml.NewEncoder(&builder)

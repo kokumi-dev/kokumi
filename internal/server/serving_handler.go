@@ -11,8 +11,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// handlePromote handles POST /api/v1/recipes/{namespace}/{name}/promote.
-// It upserts a Serving for the Recipe: if one already exists it patches
+// handlePromote handles POST /api/v1/orders/{namespace}/{name}/promote.
+// It upserts a Serving for the Order: if one already exists it patches
 // spec.preparation; otherwise a new Serving is created.
 func handlePromote(deps *apiDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -22,7 +22,7 @@ func handlePromote(deps *apiDeps) http.HandlerFunc {
 		}
 
 		namespace := r.PathValue("namespace")
-		recipeName := r.PathValue("name")
+		orderName := r.PathValue("name")
 
 		var req PromoteRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -34,19 +34,19 @@ func handlePromote(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		// Verify the Recipe exists.
-		recipe := &deliveryv1alpha1.Recipe{}
-		if err := deps.reader.Get(r.Context(), types.NamespacedName{Namespace: namespace, Name: recipeName}, recipe); err != nil {
+		// Verify the Order exists.
+		order := &deliveryv1alpha1.Order{}
+		if err := deps.reader.Get(r.Context(), types.NamespacedName{Namespace: namespace, Name: orderName}, order); err != nil {
 			if client.IgnoreNotFound(err) == nil {
-				respondError(w, http.StatusNotFound, fmt.Sprintf("recipe %s/%s not found", namespace, recipeName))
+				respondError(w, http.StatusNotFound, fmt.Sprintf("order %s/%s not found", namespace, orderName))
 				return
 			}
-			deps.logger.Error(err, "Failed to get Recipe", "namespace", namespace, "name", recipeName)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get recipe: %s", err))
+			deps.logger.Error(err, "Failed to get Order", "namespace", namespace, "name", orderName)
+			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get order: %s", err))
 			return
 		}
 
-		// Find an existing Serving for this Recipe (same namespace, spec.recipe == recipeName).
+		// Find an existing Serving for this Order (same namespace, spec.order == orderName).
 		servingList := &deliveryv1alpha1.ServingList{}
 		if err := deps.reader.List(r.Context(), servingList, client.InNamespace(namespace)); err != nil {
 			deps.logger.Error(err, "Failed to list Servings", "namespace", namespace)
@@ -56,7 +56,7 @@ func handlePromote(deps *apiDeps) http.HandlerFunc {
 
 		var existing *deliveryv1alpha1.Serving
 		for i := range servingList.Items {
-			if servingList.Items[i].Spec.Recipe == recipeName {
+			if servingList.Items[i].Spec.Order == orderName {
 				existing = &servingList.Items[i]
 				break
 			}
@@ -79,14 +79,14 @@ func handlePromote(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		// No Serving exists yet — create one named after the Recipe.
+		// No Serving exists yet — create one named after the Order.
 		newServing := &deliveryv1alpha1.Serving{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      recipeName,
+				Name:      orderName,
 				Namespace: namespace,
 			},
 			Spec: deliveryv1alpha1.ServingSpec{
-				Recipe:      recipeName,
+				Order:       orderName,
 				Preparation: req.Preparation,
 				PreparationPolicy: deliveryv1alpha1.PreparationPolicy{
 					Type: deliveryv1alpha1.PreparationPolicyManual,

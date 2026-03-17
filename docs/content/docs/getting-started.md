@@ -1,7 +1,7 @@
 ---
 title: Getting Started
 weight: 1
-description: Install Kokumi and deploy your first Recipe in minutes.
+description: Install Kokumi and deploy your first Order in minutes.
 ---
 
 ## Prerequisites
@@ -39,13 +39,18 @@ kubectl get pods -n kokumi
 # kokumi-controller-manager-xxx       1/1     Running   0          30s
 ```
 
-## Create your first Recipe
+## Create your first Order
 
-**Recipe is the only resource you create directly.** Preparations and Servings
-are managed automatically by Kokumi.
+An **Order** is the concrete delivery request.
 
-A Recipe declares the source OCI artifact and any patches to apply. Kokumi
-supports two source types:
+An Order does not require a Menu. It can fully define the intent of a single
+component on its own. This standalone Order model is supported in the current
+implementation and will remain supported in the future.
+
+Optionally, an Order will be able to consume and parameterize a Menu template
+once Menu consumption is implemented.
+
+Kokumi supports two source types:
 
 - **Pre-rendered manifest bundle** — an OCI artifact containing a `manifest.yaml`
   at its root (no `spec.render` needed).
@@ -56,7 +61,7 @@ supports two source types:
 
 ```yaml
 apiVersion: delivery.kokumi.dev/v1alpha1
-kind: Recipe
+kind: Order
 metadata:
   name: external-secrets
 spec:
@@ -79,7 +84,7 @@ spec:
 
 ```yaml
 apiVersion: delivery.kokumi.dev/v1alpha1
-kind: Recipe
+kind: Order
 metadata:
   name: podinfo
 spec:
@@ -112,32 +117,32 @@ spec:
 Apply it:
 
 ```bash
-kubectl apply -f recipe.yaml
+kubectl apply -f order.yaml
 ```
 
 ## Watch a Preparation being created
 
-Kokumi automatically reconciles the Recipe and produces an immutable **Preparation**.
-You never create Preparations manually — every Recipe change produces a new one
+Kokumi automatically reconciles the Order and produces an immutable **Preparation**.
+You never create Preparations manually — every Order change produces a new one
 and the full history is retained indefinitely.
 
 ```bash
 kubectl get preparations --watch
-# NAME                            RECIPE             PHASE   CREATED   AGE
+# NAME                            ORDER              PHASE   CREATED   AGE
 # external-secrets-d7ce0c46a686   external-secrets   Ready   5s        5s
 ```
 
 ## Activate with a Serving
 
 A **Serving** points Argo CD at the selected Preparation's immutable OCI artifact.
-There is exactly one Serving per Recipe, and it is **created and managed
+There is exactly one Serving per Order, and it is **created and managed
 automatically** — you never write a Serving manifest yourself.
 
 Three ways to activate or change a Serving:
 
 | Method | How |
 |---|---|
-| **Auto-deploy** | Set `spec.autoDeployLatest: true` on the Recipe — Kokumi updates the Serving on every new Preparation |
+| **Auto-deploy** | Set `spec.autoDeploy: true` on the Order — Kokumi updates the Serving on every new Preparation |
 | **Label promotion** | Label a Preparation with `delivery.kokumi.dev/approve-deploy: "true"` |
 | **UI** | Click **Promote** on any Preparation in the Kokumi UI |
 
@@ -146,7 +151,7 @@ namespace and Argo CD syncs the manifests into the cluster.
 
 ```bash
 kubectl get servings
-# NAME               RECIPE             PREPARATION                    PHASE    AGE
+# NAME               ORDER              PREPARATION                    PHASE    AGE
 # external-secrets   external-secrets   external-secrets-d7ce0c46a686   Active   10s
 
 kubectl get applications -n argocd
@@ -167,7 +172,7 @@ kubectl port-forward -n kokumi svc/kokumi-server 8080:80
 
 Then open [http://localhost:8080](http://localhost:8080) in your browser.
 
-The UI lets you browse Recipes, Preparations, and Servings, promote a
+The UI lets you browse Orders, Preparations, and Servings, promote a
 Preparation to active with one click, and view Argo CD sync status in real time.
 
 ## Next steps

@@ -1,76 +1,76 @@
 import { useState } from 'react'
-import type { Recipe, RecipeFormData } from '../api/types'
-import { createRecipe, updateRecipe, deleteRecipe } from '../api/client'
-import { useRecipes } from '../hooks/useRecipes'
-import RecipeList from '../components/recipe/RecipeList'
-import RecipeDetail from '../components/recipe/RecipeDetail'
-import RecipeFormModal from '../components/recipe/RecipeFormModal'
+import type { Order, OrderFormData } from '../api/types'
+import { createOrder, updateOrder, deleteOrder } from '../api/client'
+import { useOrders } from '../hooks/useOrders'
+import OrderList from '../components/recipe/OrderList'
+import OrderDetail from '../components/recipe/OrderDetail'
+import OrderFormModal from '../components/recipe/OrderFormModal'
 import Btn from '../components/shared/Btn'
 import styles from './pages.module.css'
 
-type FormModalState = null | { mode: 'add' } | { mode: 'edit'; recipe: Recipe }
+type FormModalState = null | { mode: 'add' } | { mode: 'edit'; order: Order }
 
-export default function Recipes() {
-  const recipes = useRecipes()
-  const [selected, setSelected] = useState<Recipe | null>(null)
+export default function OrdersPage() {
+  const orders = useOrders()
+  const [selected, setSelected] = useState<Order | null>(null)
   const [formModal, setFormModal] = useState<FormModalState>(null)
   const [query, setQuery] = useState('')
 
-  async function handleCreate(data: RecipeFormData) {
-    await createRecipe(data)
+  async function handleCreate(data: OrderFormData) {
+    await createOrder(data)
     setFormModal(null)
   }
 
-  async function handleUpdate(data: RecipeFormData) {
+  async function handleUpdate(data: OrderFormData) {
     if (formModal?.mode !== 'edit') return
-    const { recipe } = formModal
-    await updateRecipe(recipe.namespace, recipe.name, data)
+    const { order } = formModal
+    await updateOrder(order.namespace, order.name, data)
     setFormModal(null)
   }
 
-  async function handleDelete(recipe: Recipe) {
-    await deleteRecipe(recipe.namespace, recipe.name)
-    if (selected?.name === recipe.name && selected?.namespace === recipe.namespace) {
+  async function handleDelete(order: Order) {
+    await deleteOrder(order.namespace, order.name)
+    if (selected?.name === order.name && selected?.namespace === order.namespace) {
       setSelected(null)
     }
   }
 
-  function openEdit(recipe: Recipe) {
-    setFormModal({ mode: 'edit', recipe })
+  function openEdit(order: Order) {
+    setFormModal({ mode: 'edit', order })
   }
 
   return (
     <div className={styles.page}>
       <div className={styles.header}>
-        <h1 className={styles.title}>Recipes</h1>
+        <h1 className={styles.title}>Orders</h1>
         <p className={styles.subtitle}>
-          Manage your Recipe custom resources
+          Manage your Order custom resources
         </p>
       </div>
 
       <div className={styles.section}>
         <div className={styles.sectionHeader}>
-          <span className={styles.sectionTitle}>All Recipes</span>
+          <span className={styles.sectionTitle}>All Orders</span>
           <input
             className={styles.sectionSearch}
             type="search"
             placeholder="Filter by name or namespace…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            aria-label="Filter recipes"
+            aria-label="Filter orders"
           />
           <Btn variant="primary" size="sm" onClick={() => setFormModal({ mode: 'add' })}>
-            + Add Recipe
+            + Add Order
           </Btn>
         </div>
         <div className={styles.sectionBody}>
-          {recipes === null ? (
+          {orders === null ? (
             <div className={styles.placeholder}>
               <span className={styles.placeholderText}>Loading…</span>
             </div>
           ) : (
-            <RecipeList
-              recipes={recipes}
+            <OrderList
+              orders={orders}
               query={query}
               onSelect={setSelected}
             />
@@ -79,8 +79,8 @@ export default function Recipes() {
       </div>
 
       {selected && (
-        <RecipeDetail
-          recipe={selected}
+        <OrderDetail
+          order={selected}
           onClose={() => setSelected(null)}
           onEdit={openEdit}
           onDelete={handleDelete}
@@ -88,15 +88,15 @@ export default function Recipes() {
       )}
 
       {formModal?.mode === 'add' && (
-        <RecipeFormModal
+        <OrderFormModal
           onSubmit={handleCreate}
           onClose={() => setFormModal(null)}
         />
       )}
 
       {formModal?.mode === 'edit' && (
-        <RecipeFormModal
-          recipe={formModal.recipe}
+        <OrderFormModal
+          order={formModal.order}
           onSubmit={handleUpdate}
           onClose={() => setFormModal(null)}
         />

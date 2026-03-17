@@ -3,15 +3,15 @@ import yaml from 'js-yaml'
 import Modal from '../shared/Modal'
 import Btn from '../shared/Btn'
 import YamlEditor from '../shared/YamlEditor'
-import type { Recipe, RecipeFormData, Patch, HelmRender } from '../../api/types'
-import { emptyRecipeForm, recipeToFormData } from '../../api/types'
-import styles from './RecipeFormModal.module.css'
+import type { Order, OrderFormData, Patch, HelmRender } from '../../api/types'
+import { emptyOrderForm, orderToFormData } from '../../api/types'
+import styles from './OrderFormModal.module.css'
 
 interface Props {
   /** When provided the modal is in "edit" mode. */
-  recipe?: Recipe
+  order?: Order
   onClose: () => void
-  onSubmit: (data: RecipeFormData) => Promise<void>
+  onSubmit: (data: OrderFormData) => Promise<void>
 }
 
 // ── YAML serialisation helpers ────────────────────────────────────────────────
@@ -30,7 +30,7 @@ function yamlToValues(text: string): Record<string, unknown> {
   return parsed as Record<string, unknown>
 }
 
-function formToYaml(data: RecipeFormData): string {
+function formToYaml(data: OrderFormData): string {
   const doc: Record<string, unknown> = {
     source: { oci: data.source.oci, version: data.source.version },
     destination: { oci: data.destination.oci },
@@ -58,7 +58,7 @@ function formToYaml(data: RecipeFormData): string {
   return yaml.dump(doc, { lineWidth: 100 })
 }
 
-function yamlToPartialForm(text: string): Omit<RecipeFormData, 'name' | 'namespace'> {
+function yamlToPartialForm(text: string): Omit<OrderFormData, 'name' | 'namespace'> {
   const doc = yaml.load(text) as Record<string, unknown>
   if (!doc || typeof doc !== 'object') throw new Error('YAML must be a mapping')
 
@@ -67,7 +67,7 @@ function yamlToPartialForm(text: string): Omit<RecipeFormData, 'name' | 'namespa
   const rawPatches = Array.isArray(doc.patches) ? (doc.patches as unknown[]) : []
 
   const rawRender = doc.render as Record<string, unknown> | undefined
-  let render: RecipeFormData['render']
+  let render: OrderFormData['render']
   if (rawRender?.helm) {
     const h = rawRender.helm as Record<string, unknown>
     render = {
@@ -105,11 +105,11 @@ function yamlToPartialForm(text: string): Omit<RecipeFormData, 'name' | 'namespa
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function RecipeFormModal({ recipe, onClose, onSubmit }: Props) {
-  const isEdit = !!recipe
+export default function OrderFormModal({ order, onClose, onSubmit }: Props) {
+  const isEdit = !!order
   const [tab, setTab] = useState<'form' | 'yaml'>('form')
-  const [formData, setFormData] = useState<RecipeFormData>(
-    recipe ? recipeToFormData(recipe) : emptyRecipeForm(),
+  const [formData, setFormData] = useState<OrderFormData>(
+    order ? orderToFormData(order) : emptyOrderForm(),
   )
   const [yamlText, setYamlText] = useState(() => formToYaml(formData))
   const [yamlError, setYamlError] = useState<string | null>(null)
@@ -157,7 +157,7 @@ export default function RecipeFormModal({ recipe, onClose, onSubmit }: Props) {
 
   // ── Form field helpers ─────────────────────────────────────────────────────
 
-  function setField<K extends keyof RecipeFormData>(key: K, val: RecipeFormData[K]) {
+  function setField<K extends keyof OrderFormData>(key: K, val: OrderFormData[K]) {
     setFormData((prev) => ({ ...prev, [key]: val }))
   }
 
@@ -206,14 +206,14 @@ export default function RecipeFormModal({ recipe, onClose, onSubmit }: Props) {
         Cancel
       </Btn>
       <Btn variant="primary" onClick={handleSubmit} disabled={saving}>
-        {saving ? 'Saving…' : isEdit ? 'Save Changes' : 'Create Recipe'}
+        {saving ? 'Saving…' : isEdit ? 'Save Changes' : 'Create Order'}
       </Btn>
     </>
   )
 
   return (
     <Modal
-      title={isEdit ? `Edit Recipe — ${recipe.name}` : 'Add Recipe'}
+      title={isEdit ? `Edit Order — ${order.name}` : 'Add Order'}
       onClose={onClose}
       footer={footer}
     >
@@ -261,9 +261,9 @@ export default function RecipeFormModal({ recipe, onClose, onSubmit }: Props) {
 // ── FormView ──────────────────────────────────────────────────────────────────
 
 interface FormViewProps {
-  formData: RecipeFormData
+  formData: OrderFormData
   isEdit: boolean
-  onFieldChange: <K extends keyof RecipeFormData>(key: K, val: RecipeFormData[K]) => void
+  onFieldChange: <K extends keyof OrderFormData>(key: K, val: OrderFormData[K]) => void
   onEnableHelm: () => void
   onDisableHelm: () => void
   onUpdateHelm: (h: HelmRender) => void
@@ -294,7 +294,7 @@ function FormView({
             value={formData.name}
             onChange={(e) => onFieldChange('name', e.target.value)}
             readOnly={isEdit}
-            placeholder="my-recipe"
+            placeholder="my-order"
           />
         </div>
         <div className={styles.fieldGroup}>
@@ -471,7 +471,7 @@ function PatchEditor({ index, patch, onUpdate, onRemove }: PatchEditorProps) {
           className={styles.input}
           value={patch.target.namespace ?? ''}
           onChange={(e) => updateTarget('namespace', e.target.value)}
-          placeholder="inherit from Recipe namespace"
+          placeholder="inherit from Order namespace"
         />
       </div>
 
@@ -542,7 +542,7 @@ function HelmRenderEditor({ helm, onUpdate }: HelmRenderEditorProps) {
             className={styles.input}
             value={helm.releaseName}
             onChange={(e) => onUpdate({ ...helm, releaseName: e.target.value })}
-            placeholder="defaults to Recipe name"
+            placeholder="defaults to Order name"
           />
         </div>
         <div className={styles.fieldGroup}>
@@ -551,7 +551,7 @@ function HelmRenderEditor({ helm, onUpdate }: HelmRenderEditorProps) {
             className={styles.input}
             value={helm.namespace}
             onChange={(e) => onUpdate({ ...helm, namespace: e.target.value })}
-            placeholder="defaults to Recipe namespace"
+            placeholder="defaults to Order namespace"
           />
         </div>
       </div>

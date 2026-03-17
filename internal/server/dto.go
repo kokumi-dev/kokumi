@@ -51,9 +51,9 @@ type RenderDTO struct {
 	Helm *HelmRenderDTO `json:"helm,omitempty"`
 }
 
-// RecipeDTO is the enriched view of a Recipe served to the UI.
+// OrderDTO is the enriched view of a Order served to the UI.
 // ActivePreparation is derived from the linked Serving's status.observedPreparation.
-type RecipeDTO struct {
+type OrderDTO struct {
 	Name              string            `json:"name"`
 	Namespace         string            `json:"namespace"`
 	Labels            map[string]string `json:"labels,omitempty"`
@@ -78,11 +78,11 @@ type ArtifactDTO struct {
 
 // PreparationDTO is the enriched view of a Preparation served to the UI.
 // IsActive is true when this Preparation is the one currently deployed by the
-// Recipe's linked Serving (status.observedPreparation).
+// Order's linked Serving (status.observedPreparation).
 type PreparationDTO struct {
 	Name       string         `json:"name"`
 	Namespace  string         `json:"namespace"`
-	Recipe     string         `json:"recipe"`
+	Order      string         `json:"order"`
 	Artifact   ArtifactDTO    `json:"artifact"`
 	ConfigHash string         `json:"configHash"`
 	Phase      string         `json:"phase"`
@@ -91,8 +91,8 @@ type PreparationDTO struct {
 	Conditions []ConditionDTO `json:"conditions,omitempty"`
 }
 
-// CreateRecipeRequest is the body for POST /api/v1/recipes.
-type CreateRecipeRequest struct {
+// CreateOrderRequest is the body for POST /api/v1/orders.
+type CreateOrderRequest struct {
 	Namespace   string            `json:"namespace"`
 	Name        string            `json:"name"`
 	Source      OCISourceDTO      `json:"source"`
@@ -102,8 +102,8 @@ type CreateRecipeRequest struct {
 	AutoDeploy  bool              `json:"autoDeploy"`
 }
 
-// UpdateRecipeRequest is the body for PUT /api/v1/recipes/{namespace}/{name}.
-type UpdateRecipeRequest struct {
+// UpdateOrderRequest is the body for PUT /api/v1/orders/{namespace}/{name}.
+type UpdateOrderRequest struct {
 	Source      OCISourceDTO      `json:"source"`
 	Destination OCIDestinationDTO `json:"destination"`
 	Render      *RenderDTO        `json:"render,omitempty"`
@@ -111,7 +111,7 @@ type UpdateRecipeRequest struct {
 	AutoDeploy  bool              `json:"autoDeploy"`
 }
 
-// PromoteRequest is the body for POST /api/v1/recipes/{namespace}/{name}/promote.
+// PromoteRequest is the body for POST /api/v1/orders/{namespace}/{name}/promote.
 type PromoteRequest struct {
 	Preparation string `json:"preparation"`
 }
@@ -120,7 +120,7 @@ type PromoteRequest struct {
 type ServingDTO struct {
 	Name                string         `json:"name"`
 	Namespace           string         `json:"namespace"`
-	Recipe              string         `json:"recipe"`
+	Order               string         `json:"order"`
 	DesiredPreparation  string         `json:"desiredPreparation"`
 	ObservedPreparation string         `json:"observedPreparation,omitempty"`
 	DeployedDigest      string         `json:"deployedDigest,omitempty"`

@@ -1,7 +1,7 @@
 import { useSSEEvent } from './useSSEEvent'
 
 export interface ResourceCounts {
-  recipes: number
+  orders: number
   preparations: number
   servings: number
 }

@@ -3,16 +3,16 @@ import type { Preparation } from '../api/types'
 import { useSSEEvent } from './useSSEEvent'
 
 /**
- * Subscribes to the `preparations` SSE event. When `recipeName` is provided
+ * Subscribes to the `preparations` SSE event. When `orderName` is provided
  * the list is filtered client-side to only include Preparations for that
- * Recipe. Returns null until the first event is received.
+ * Order. Returns null until the first event is received.
  */
-export function usePreparations(recipeName?: string): Preparation[] | null {
+export function usePreparations(orderName?: string): Preparation[] | null {
   const all = useSSEEvent<Preparation[]>('/api/v1/events', 'preparations')
 
   return useMemo(() => {
     if (all === null) return null
-    if (!recipeName) return all
-    return all.filter((p) => p.recipe === recipeName)
-  }, [all, recipeName])
+    if (!orderName) return all
+    return all.filter((p) => p.order === orderName)
+  }, [all, orderName])
 }

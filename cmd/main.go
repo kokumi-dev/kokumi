@@ -25,6 +25,7 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	"github.com/spf13/afero"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -39,7 +40,6 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/controller"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/service"
-	"github.com/spf13/afero"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -184,11 +184,6 @@ func main() {
 	if err := (&controller.RecipeReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
-		Service: *service.NewRecipeService(
-			oci.NewORASClient(),
-			afero.NewOsFs(),
-			"/tmp/kokumi-pull-cache",
-		),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Recipe")
 		os.Exit(1)
@@ -205,6 +200,18 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Serving")
+		os.Exit(1)
+	}
+	if err := (&controller.OrderReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+		Service: *service.NewOrderService(
+			oci.NewORASClient(),
+			afero.NewOsFs(),
+			"/tmp/kokumi-pull-cache",
+		),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "Order")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

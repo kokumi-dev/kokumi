@@ -56,9 +56,9 @@ var _ = Describe("Serving Controller", func() {
 						Namespace: "default",
 					},
 					Spec: deliveryv1alpha1.PreparationSpec{
-						Recipe: "recipe",
-						Source: deliveryv1alpha1.RecipeSource{
-							OCI:        "oci://registry.kokumi.svc.cluster.local:5000/recipe/test-resource",
+						Order: "order",
+						Source: deliveryv1alpha1.OrderSource{
+							OCI:        "oci://registry.kokumi.svc.cluster.local:5000/order/test-resource",
 							BaseDigest: fakeDigest,
 						},
 						Renderer: deliveryv1alpha1.Renderer{
@@ -84,7 +84,7 @@ var _ = Describe("Serving Controller", func() {
 						Namespace: "default",
 					},
 					Spec: deliveryv1alpha1.ServingSpec{
-						Recipe:      "recipe",
+						Order:       "order",
 						Preparation: "preparation-fdf90e00e76",
 						PreparationPolicy: deliveryv1alpha1.PreparationPolicy{
 							Type: deliveryv1alpha1.PreparationPolicyManual,

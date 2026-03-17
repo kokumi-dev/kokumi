@@ -91,8 +91,8 @@ func (r *PreparationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 func (r *PreparationReconciler) reconcileServing(ctx context.Context, preparation *deliveryv1alpha1.Preparation, automatic bool) error {
 	logger := log.FromContext(ctx)
 
-	recipeName := preparation.Spec.Recipe
-	servingName := recipeName
+	orderName := preparation.Spec.Order
+	servingName := orderName
 
 	serving := &deliveryv1alpha1.Serving{}
 	err := r.Get(ctx, client.ObjectKey{Namespace: preparation.Namespace, Name: servingName}, serving)
@@ -109,12 +109,12 @@ func (r *PreparationReconciler) reconcileServing(ctx context.Context, preparatio
 					Name:      servingName,
 					Namespace: preparation.Namespace,
 					Labels: map[string]string{
-						"delivery.kokumi.dev/recipe":      recipeName,
+						"delivery.kokumi.dev/order":       orderName,
 						"delivery.kokumi.dev/auto-deploy": fmt.Sprintf("%v", automatic),
 					},
 				},
 				Spec: deliveryv1alpha1.ServingSpec{
-					Recipe:      recipeName,
+					Order:       orderName,
 					Preparation: preparation.Name,
 					PreparationPolicy: deliveryv1alpha1.PreparationPolicy{
 						Type: preparationPolicyType,

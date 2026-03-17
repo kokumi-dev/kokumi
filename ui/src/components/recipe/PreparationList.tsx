@@ -15,7 +15,7 @@ interface Props {
 }
 
 /**
- * PreparationList renders all Preparations for a Recipe, sorted newest-first.
+ * PreparationList renders all Preparations for a Order, sorted newest-first.
  * Each row shows phase, metadata, and context-aware action buttons:
  *   - Promote / Rollback  (hidden when this IS the active Preparation)
  *   - Manifest            (always visible)
@@ -30,7 +30,7 @@ export default function PreparationList({
   const activePrepCreatedAt = preparations.find((p) => p.isActive)?.createdAt
 
   if (preparations.length === 0) {
-    return <p className={styles.empty}>No preparations found for this recipe.</p>
+    return <p className={styles.empty}>No preparations found for this order.</p>
   }
 
   return (

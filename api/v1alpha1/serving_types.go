@@ -43,9 +43,9 @@ type PreparationPolicy struct {
 
 // ServingSpec defines the desired state of Serving
 type ServingSpec struct {
-	// recipe is the name of the recipe to serve
+	// order is the name of the order to serve
 	// +kubebuilder:validation:Required
-	Recipe string `json:"recipe"`
+	Order string `json:"order"`
 
 	// preparation is the desired Preparation to serve
 	// +kubebuilder:validation:Required
@@ -103,7 +103,7 @@ type ServingStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="Recipe",type=string,JSONPath=`.spec.recipe`
+// +kubebuilder:printcolumn:name="Order",type=string,JSONPath=`.spec.order`
 // +kubebuilder:printcolumn:name="Preparation",type=string,JSONPath=`.spec.preparation`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Policy",type=string,JSONPath=`.spec.preparationPolicy.type`,priority=1

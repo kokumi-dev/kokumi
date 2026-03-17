@@ -1,4 +1,4 @@
-import type { Recipe, Preparation, RecipeFormData } from './types'
+import type { Order, Preparation, OrderFormData } from './types'
 
 // All API calls are relative so they work both in dev (proxied by Vite) and
 // in production (served from the same Go binary).
@@ -28,45 +28,45 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>
 }
 
-// ── Recipes ───────────────────────────────────────────────────────────────────
+// ── Orders ────────────────────────────────────────────────────────────────────
 
-export function listRecipes(): Promise<Recipe[]> {
-  return request<Recipe[]>('/recipes')
+export function listOrders(): Promise<Order[]> {
+  return request<Order[]>('/orders')
 }
 
-export function getRecipe(namespace: string, name: string): Promise<Recipe> {
-  return request<Recipe>(`/recipes/${namespace}/${name}`)
+export function getOrder(namespace: string, name: string): Promise<Order> {
+  return request<Order>(`/orders/${namespace}/${name}`)
 }
 
-export function createRecipe(data: RecipeFormData): Promise<Recipe> {
-  return request<Recipe>('/recipes', {
+export function createOrder(data: OrderFormData): Promise<Order> {
+  return request<Order>('/orders', {
     method: 'POST',
     body: JSON.stringify(data),
   })
 }
 
-export function updateRecipe(
+export function updateOrder(
   namespace: string,
   name: string,
-  data: Omit<RecipeFormData, 'name' | 'namespace'>,
-): Promise<Recipe> {
-  return request<Recipe>(`/recipes/${namespace}/${name}`, {
+  data: Omit<OrderFormData, 'name' | 'namespace'>,
+): Promise<Order> {
+  return request<Order>(`/orders/${namespace}/${name}`, {
     method: 'PUT',
     body: JSON.stringify(data),
   })
 }
 
-export function deleteRecipe(namespace: string, name: string): Promise<void> {
-  return request<void>(`/recipes/${namespace}/${name}`, { method: 'DELETE' })
+export function deleteOrder(namespace: string, name: string): Promise<void> {
+  return request<void>(`/orders/${namespace}/${name}`, { method: 'DELETE' })
 }
 
 // ── Preparations ──────────────────────────────────────────────────────────────
 
 export function listPreparations(
   namespace: string,
-  recipeName: string,
+  orderName: string,
 ): Promise<Preparation[]> {
-  return request<Preparation[]>(`/recipes/${namespace}/${recipeName}/preparations`)
+  return request<Preparation[]>(`/orders/${namespace}/${orderName}/preparations`)
 }
 
 export function getManifest(
@@ -94,11 +94,11 @@ export function getManifest(
 
 export function promote(
   namespace: string,
-  recipeName: string,
+  orderName: string,
   preparation: string,
 ): Promise<{ serving: string }> {
   return request<{ serving: string }>(
-    `/recipes/${namespace}/${recipeName}/promote`,
+    `/orders/${namespace}/${orderName}/promote`,
     {
       method: 'POST',
       body: JSON.stringify({ preparation }),

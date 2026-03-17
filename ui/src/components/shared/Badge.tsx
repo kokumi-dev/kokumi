@@ -13,7 +13,7 @@ interface Props {
   phase: string
 }
 
-/** Renders a coloured phase/status pill for a Recipe, Preparation, or Serving. */
+/** Renders a coloured phase/status pill for a Order, Preparation, or Serving. */
 export default function Badge({ phase }: Props) {
   const cls = classForPhase[phase] ?? styles.unknown
   return <span className={`${styles.badge} ${cls}`}>{phase || '—'}</span>

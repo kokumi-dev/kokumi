@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import styles from './App.module.css'
 import Sidebar, { type Page } from './components/Sidebar'
 import Dashboard from './pages/Dashboard'
-import Recipes from './pages/Recipes'
+import Orders from './pages/Orders'
 import Preparations from './pages/Preparations'
 import Servings from './pages/Servings'
 import Settings from './pages/Settings'
@@ -30,8 +30,8 @@ function App() {
     switch (activePage) {
       case 'dashboard':
         return <Dashboard operatorName={info?.name} operatorVersion={info?.version} />
-      case 'recipes':
-        return <Recipes />
+      case 'orders':
+        return <Orders />
       case 'preparations':
         return <Preparations />
       case 'servings':

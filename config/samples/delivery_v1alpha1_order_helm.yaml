@@ -1,5 +1,5 @@
 apiVersion: delivery.kokumi.dev/v1alpha1
-kind: Recipe
+kind: Order
 metadata:
   labels:
     app.kubernetes.io/name: kokumi

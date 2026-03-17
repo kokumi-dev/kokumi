@@ -20,8 +20,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// RecipeSource defines the immutable base artifact for a preparation
-type RecipeSource struct {
+// OrderSource defines the immutable base artifact for a preparation
+type OrderSource struct {
 	// oci is the OCI registry URL for the source manifests
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Pattern=`^oci://.*`
@@ -79,19 +79,19 @@ type Artifact struct {
 
 // PreparationSpec defines the desired state of Preparation
 type PreparationSpec struct {
-	// recipe is the name of the recipe this preparation belongs to
+	// order is the name of the order this preparation belongs to
 	// +kubebuilder:validation:Required
-	Recipe string `json:"recipe"`
+	Order string `json:"order"`
 
 	// source defines the source artifact information
 	// +kubebuilder:validation:Required
-	Source RecipeSource `json:"source"`
+	Source OrderSource `json:"source"`
 
 	// renderer defines the renderer used to process this preparation
 	// +kubebuilder:validation:Required
 	Renderer Renderer `json:"renderer"`
 
-	// configHash is the SHA256 hash of the canonicalized recipe configuration
+	// configHash is the SHA256 hash of the canonicalized order configuration
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]+$`
 	ConfigHash string `json:"configHash"`
@@ -141,7 +141,7 @@ type PreparationStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="Recipe",type=string,JSONPath=`.spec.recipe`
+// +kubebuilder:printcolumn:name="Order",type=string,JSONPath=`.spec.order`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Digest",type=string,JSONPath=`.spec.artifact.digest`,priority=1
 // +kubebuilder:printcolumn:name="Signed",type=boolean,JSONPath=`.spec.artifact.signed`,priority=1

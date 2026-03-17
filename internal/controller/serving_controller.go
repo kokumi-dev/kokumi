@@ -94,12 +94,12 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 
 	preparationName := serving.Spec.Preparation
 	if serving.Spec.PreparationPolicy.Type == deliveryv1alpha1.PreparationPolicyAutomatic {
-		logger.Info("Automatic preparation policy, finding latest preparation", "recipe", serving.Spec.Recipe)
+		logger.Info("Automatic preparation policy, finding latest preparation", "order", serving.Spec.Order)
 
 		preparationList := &deliveryv1alpha1.PreparationList{}
 		if err := r.List(ctx, preparationList,
 			client.InNamespace(serving.Namespace),
-			client.MatchingLabels{"delivery.kokumi.dev/recipe": serving.Spec.Recipe},
+			client.MatchingLabels{"delivery.kokumi.dev/order": serving.Spec.Order},
 		); err != nil {
 			logger.Error(err, "Failed to list Preparations")
 			_ = statusUpdater.Failed(ctx, serving, fmt.Errorf("failed to list preparations: %w", err))
@@ -107,7 +107,7 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 		}
 
 		if len(preparationList.Items) == 0 {
-			logger.Info("No preparations found for recipe", "recipe", serving.Spec.Recipe)
+			logger.Info("No preparations found for order", "order", serving.Spec.Order)
 			_ = statusUpdater.Pending(ctx, serving, "Waiting for preparations")
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
@@ -124,7 +124,7 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 		}
 
 		if latestPreparation == nil {
-			logger.Info("No ready preparations found for recipe", "recipe", serving.Spec.Recipe)
+			logger.Info("No ready preparations found for order", "order", serving.Spec.Order)
 			_ = statusUpdater.Pending(ctx, serving, "Waiting for ready preparation")
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
@@ -201,7 +201,7 @@ func (r *ServingReconciler) reconcileArgoApplication(ctx context.Context, servin
 				"name":      appName,
 				"namespace": argoNamespace,
 				"labels": map[string]any{
-					"delivery.kokumi.dev/recipe":  serving.Spec.Recipe,
+					"delivery.kokumi.dev/order":   serving.Spec.Order,
 					"delivery.kokumi.dev/serving": serving.Name,
 				},
 			},
@@ -316,7 +316,7 @@ func (r *ServingReconciler) enqueueServingForPreparation() handler.EventHandler 
 					},
 				})
 			} else if serving.Spec.PreparationPolicy.Type == deliveryv1alpha1.PreparationPolicyAutomatic {
-				if preparation.Labels["delivery.kokumi.dev/recipe"] == serving.Spec.Recipe {
+				if preparation.Labels["delivery.kokumi.dev/order"] == serving.Spec.Order {
 					requests = append(requests, ctrl.Request{
 						NamespacedName: client.ObjectKey{
 							Namespace: serving.Namespace,

@@ -1,0 +1,280 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+  name: orders.delivery.kokumi.dev
+spec:
+  group: delivery.kokumi.dev
+  names:
+    kind: Order
+    listKind: OrderList
+    plural: orders
+    singular: order
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.latestRevision
+      name: Latest Revision
+      type: string
+    - jsonPath: .spec.source.oci
+      name: Source
+      priority: 1
+      type: string
+    - jsonPath: .spec.source.version
+      name: Version
+      priority: 1
+      type: string
+    - jsonPath: .spec.autoDeploy
+      name: Auto Deploy
+      priority: 1
+      type: boolean
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Order is the Schema for the orders API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of Order
+            properties:
+              autoDeploy:
+                default: false
+                description: |-
+                  autoDeploy controls whether a newly created Preparation
+                  should automatically become the active Serving.
+                  If false, activation must be performed explicitly.
+                type: boolean
+              destination:
+                description: destination defines where the rendered Preparation artifact
+                  will be pushed
+                properties:
+                  oci:
+                    description: oci is the OCI registry URL where configured manifests
+                      will be pushed
+                    pattern: ^oci://.*
+                    type: string
+                required:
+                - oci
+                type: object
+              patches:
+                description: |-
+                  patches defines deterministic transformations applied to the source artifact
+                  before producing a Preparation
+                items:
+                  description: Patch defines a modification to apply to a resource
+                  properties:
+                    set:
+                      additionalProperties:
+                        type: string
+                      description: |-
+                        set contains JSONPath expressions and their values to set
+                        Keys are JSONPath expressions (e.g., ".spec.replicas")
+                        Values are the desired values for those paths
+                      type: object
+                    target:
+                      description: target identifies which resource to patch
+                      properties:
+                        kind:
+                          description: kind specifies the Kubernetes resource kind
+                            to patch
+                          type: string
+                        name:
+                          description: name specifies the name of the resource to
+                            patch
+                          type: string
+                        namespace:
+                          description: namespace specifies the namespace of the resource
+                            (optional, defaults to same namespace as Order)
+                          type: string
+                      required:
+                      - kind
+                      - name
+                      type: object
+                  required:
+                  - set
+                  - target
+                  type: object
+                type: array
+              render:
+                description: |-
+                  render defines optional rendering configuration for the source artifact.
+                  When absent the source OCI artifact is treated as a pre-rendered manifest bundle.
+                  When render.helm is set the source must be a Helm chart in OCI format.
+                properties:
+                  helm:
+                    description: |-
+                      helm renders the source OCI artifact as a Helm chart.
+                      When set, the source must be a Helm chart in OCI format.
+                    properties:
+                      includeCRDs:
+                        default: false
+                        description: |-
+                          includeCRDs controls whether CRDs are included in the rendered output.
+                          Equivalent to helm template --include-crds.
+                        type: boolean
+                      namespace:
+                        description: |-
+                          namespace is the target namespace passed to helm template --namespace.
+                          Defaults to the Order's metadata.namespace when omitted.
+                        type: string
+                      releaseName:
+                        description: |-
+                          releaseName is the Helm release name passed to helm template.
+                          Defaults to the Order's metadata.name when omitted.
+                        type: string
+                      values:
+                        description: |-
+                          values holds inline Helm values merged last (highest priority).
+                          Equivalent to a final -f values.yaml pass.
+                        x-kubernetes-preserve-unknown-fields: true
+                    type: object
+                type: object
+              source:
+                description: source defines the immutable base artifact to render
+                  from
+                properties:
+                  oci:
+                    description: oci is the OCI registry URL for the source manifests
+                    pattern: ^oci://.*
+                    type: string
+                  version:
+                    description: |-
+                      version is the semantic version or tag of the artifact
+                      The controller will resolve this to a digest
+                    type: string
+                required:
+                - oci
+                - version
+                type: object
+            required:
+            - autoDeploy
+            - destination
+            - source
+            type: object
+          status:
+            description: status defines the observed state of Order
+            properties:
+              conditions:
+                description: |-
+                  conditions represent the current state of the Order resource.
+                  Each condition has a unique type and reflects the status of a specific aspect of the resource.
+
+                  Standard condition types include:
+                  - "Available": the resource is fully functional
+                  - "Progressing": the resource is being created or updated
+                  - "Degraded": the resource failed to reach or maintain its desired state
+
+                  The status of each condition is one of True, False, or Unknown.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              latestConfigHash:
+                description: |-
+                  latestConfigHash is a SHA-256 hash of the spec inputs (source OCI reference,
+                  version, and patches) that produced the current latestRevision.
+                type: string
+              latestRevision:
+                description: |-
+                  latestRevision is the name of the most recent immutable Preparation
+                  produced from this Order
+                type: string
+              observedGeneration:
+                description: observedGeneration is the most recent generation observed
+                  by the controller
+                format: int64
+                type: integer
+              phase:
+                description: phase represents the current phase of the Order lifecycle
+                enum:
+                - Pending
+                - Processing
+                - Ready
+                - Failed
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

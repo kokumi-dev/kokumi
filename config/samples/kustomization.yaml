@@ -3,4 +3,5 @@ resources:
 - delivery_v1alpha1_recipe.yaml
 - delivery_v1alpha1_preparation.yaml
 - delivery_v1alpha1_serving.yaml
+- delivery_v1alpha1_order.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

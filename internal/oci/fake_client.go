@@ -15,7 +15,7 @@ type FakeClient struct {
 var _ Client = (*FakeClient)(nil)
 
 // NewFakeClient returns a FakeClient that uses fs for all file operations.
-// Pass the same afero.Fs instance that is given to the RecipeService so that
+// Pass the same afero.Fs instance that is given to the OrderService so that
 // files written by Pull are visible when the service reads them.
 func NewFakeClient(fs afero.Fs) *FakeClient {
 	return &FakeClient{fs: fs}

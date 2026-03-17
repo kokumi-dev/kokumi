@@ -42,7 +42,7 @@ export default function Servings() {
       (s) =>
         s.name.toLowerCase().includes(q) ||
         s.namespace.toLowerCase().includes(q) ||
-        s.recipe.toLowerCase().includes(q),
+        s.order.toLowerCase().includes(q),
     )
   }, [servings, query])
 
@@ -51,7 +51,7 @@ export default function Servings() {
       <div className={styles.header}>
         <h1 className={styles.title}>Servings</h1>
         <p className={styles.subtitle}>
-          Active deployments managed by the controller for each Recipe
+          Active deployments managed by the controller for each Order
         </p>
       </div>
 
@@ -94,7 +94,7 @@ export default function Servings() {
                   <th>Phase</th>
                   <th>Name</th>
                   <th>Namespace</th>
-                  <th>Recipe</th>
+                  <th>Order</th>
                   <th>Desired Prep</th>
                   <th>Observed Prep</th>
                   <th>Policy</th>
@@ -118,7 +118,7 @@ export default function Servings() {
                       </td>
                       <td className={styles.mono}>{s.name}</td>
                       <td>{s.namespace}</td>
-                      <td>{s.recipe}</td>
+                      <td>{s.order}</td>
                       <td>
                         <span
                           className={`${styles.mono} ${styles.truncate}`}

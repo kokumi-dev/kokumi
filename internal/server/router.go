@@ -15,18 +15,18 @@ func addRoutes(
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /readyz", handleReadyz)
 
-	// Recipe CRUD
-	mux.HandleFunc("GET /api/v1/recipes", handleListRecipes(deps))
-	mux.HandleFunc("POST /api/v1/recipes", handleCreateRecipe(deps))
-	mux.HandleFunc("GET /api/v1/recipes/{namespace}/{name}", handleGetRecipe(deps))
-	mux.HandleFunc("PUT /api/v1/recipes/{namespace}/{name}", handleUpdateRecipe(deps))
-	mux.HandleFunc("DELETE /api/v1/recipes/{namespace}/{name}", handleDeleteRecipe(deps))
+	// Order CRUD
+	mux.HandleFunc("GET /api/v1/orders", handleListOrders(deps))
+	mux.HandleFunc("POST /api/v1/orders", handleCreateOrder(deps))
+	mux.HandleFunc("GET /api/v1/orders/{namespace}/{name}", handleGetOrder(deps))
+	mux.HandleFunc("PUT /api/v1/orders/{namespace}/{name}", handleUpdateOrder(deps))
+	mux.HandleFunc("DELETE /api/v1/orders/{namespace}/{name}", handleDeleteOrder(deps))
 
-	// Preparations scoped to a Recipe
-	mux.HandleFunc("GET /api/v1/recipes/{namespace}/{name}/preparations", handleListPreparations(deps))
+	// Preparations scoped to a Order
+	mux.HandleFunc("GET /api/v1/orders/{namespace}/{name}/preparations", handleListPreparations(deps))
 
 	// Promote / rollback a Preparation
-	mux.HandleFunc("POST /api/v1/recipes/{namespace}/{name}/promote", handlePromote(deps))
+	mux.HandleFunc("POST /api/v1/orders/{namespace}/{name}/promote", handlePromote(deps))
 
 	// Preparation manifest (rendered YAML from OCI)
 	mux.HandleFunc("GET /api/v1/preparations/{namespace}/{name}/manifest", handleGetPreparationManifest(deps))
