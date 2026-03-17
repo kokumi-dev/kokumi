@@ -42,6 +42,12 @@ Kokumi supports both **Helm charts** and **pre-rendered manifest bundles** as
 OCI source artifacts, and delegates all runtime deployment to **Argo CD** —
 feeding your existing GitOps workflow rather than replacing it.
 
+## Getting Started
+
+> **Kokumi is currently experimental — use with caution in production environments.**
+
+Read the [Installation guide](https://kokumi.dev/docs/installation) and [Getting Started guide](https://kokumi.dev/docs/getting-started) on the docs site for full setup instructions, or explore the [Architecture & Concepts](https://kokumi.dev/docs/architecture) page to understand how the reconciliation model works before diving in.
+
 ## Core Concepts
 
 Kokumi models release workflows using four composable CRDs.
@@ -80,9 +86,3 @@ one specific Preparation and creates or updates an Argo CD `Application` that
 syncs that artifact into the cluster. Switching versions (upgrading or rolling
 back) means updating which Preparation the Serving references; the artifact
 does not change.
-
-## Getting Started
-
-> **Kokumi is currently experimental — use with caution in production environments.**
-
-Read the [Installation guide](https://kokumi.dev/docs/installation) and [Getting Started guide](https://kokumi.dev/docs/getting-started) on the docs site for full setup instructions, or explore the [Architecture & Concepts](https://kokumi.dev/docs/architecture) page to understand how the reconciliation model works before diving in.
