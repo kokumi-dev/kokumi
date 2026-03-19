@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.8.0](https://github.com/kokumi-dev/kokumi/compare/0.7.0...0.8.0) (2026-03-19)
+
+
+### Features
+
+* add crd filter in ui ([#85](https://github.com/kokumi-dev/kokumi/issues/85)) ([c43e858](https://github.com/kokumi-dev/kokumi/commit/c43e8584b6e11d0fbfbf64b6a18f23693045bf36))
+* add default in-cluster registry for order destination ([#84](https://github.com/kokumi-dev/kokumi/issues/84)) ([7fd47a7](https://github.com/kokumi-dev/kokumi/commit/7fd47a796a4b4f474514b6f3b5a89ac2206f0652))
+* add menu crd ([#79](https://github.com/kokumi-dev/kokumi/issues/79)) ([0bdd765](https://github.com/kokumi-dev/kokumi/commit/0bdd7658f186fbed655a8cfc035f27c9fcc1ffb8))
+* implement menu crd and ui for creating reusable templates ([#83](https://github.com/kokumi-dev/kokumi/issues/83)) ([d32765b](https://github.com/kokumi-dev/kokumi/commit/d32765b6adf09fb9ef5fba11d73434068dc7933b))
+
 ## [0.7.0](https://github.com/kokumi-dev/kokumi/compare/0.6.1...0.7.0) (2026-03-17)
 
 
