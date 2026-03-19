@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { getManifest } from '../../api/client'
 import type { Preparation } from '../../api/types'
 import { computeDiff, filterContext } from '../../utils/diff'
 import type { DiffLine } from '../../utils/diff'
+import { filterCRDDocuments, hasCRDDocuments } from '../../utils/manifest'
 import Modal from '../shared/Modal'
 import Btn from '../shared/Btn'
 import styles from './DiffModal.module.css'
@@ -26,10 +27,11 @@ export default function DiffModal({ preparation, activePreparation, onClose }: P
   const [state, setState] = useState<
     | { status: 'loading' }
     | { status: 'error'; message: string }
-    | { status: 'ready'; lines: DiffLine[] }
+    | { status: 'ready'; before: string; after: string }
   >({ status: 'loading' })
 
   const [showFull, setShowFull] = useState(false)
+  const [hideCRDs, setHideCRDs] = useState(true)
 
   useEffect(() => {
     Promise.all([
@@ -37,16 +39,23 @@ export default function DiffModal({ preparation, activePreparation, onClose }: P
       getManifest(preparation.namespace, preparation.name),
     ])
       .then(([before, after]) => {
-        const lines = computeDiff(before, after)
-        setState({ status: 'ready', lines })
+        setState({ status: 'ready', before, after })
       })
       .catch((e: Error) => setState({ status: 'error', message: e.message }))
   }, [preparation.namespace, preparation.name, activePreparation.namespace, activePreparation.name])
 
-  const displayLines =
-    state.status === 'ready'
-      ? filterContext(state.lines, showFull ? Infinity : CONTEXT_SIZE)
-      : []
+  const hasCRDs =
+    state.status === 'ready' &&
+    (hasCRDDocuments(state.before) || hasCRDDocuments(state.after))
+
+  const allLines = useMemo(() => {
+    if (state.status !== 'ready') return []
+    const before = filterCRDDocuments(state.before, hideCRDs)
+    const after = filterCRDDocuments(state.after, hideCRDs)
+    return computeDiff(before, after)
+  }, [state, hideCRDs])
+
+  const displayLines = filterContext(allLines, showFull ? Infinity : CONTEXT_SIZE)
 
   const footer = (
     <Btn variant="secondary" onClick={onClose}>
@@ -79,13 +88,24 @@ export default function DiffModal({ preparation, activePreparation, onClose }: P
             <span className={styles.toolbarLabel}>
               {activePreparation.name} (active) → {preparation.name}
             </span>
-            <Btn
-              variant="secondary"
-              size="sm"
-              onClick={() => setShowFull((v) => !v)}
-            >
-              {showFull ? 'Show changed only' : 'Show full file'}
-            </Btn>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              {hasCRDs && (
+                <Btn
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setHideCRDs((v) => !v)}
+                >
+                  {hideCRDs ? 'Show CRDs' : 'Hide CRDs'}
+                </Btn>
+              )}
+              <Btn
+                variant="secondary"
+                size="sm"
+                onClick={() => setShowFull((v) => !v)}
+              >
+                {showFull ? 'Show changed only' : 'Show full file'}
+              </Btn>
+            </div>
           </div>
 
           <DiffView lines={displayLines} />

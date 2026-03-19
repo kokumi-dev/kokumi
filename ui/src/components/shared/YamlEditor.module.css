@@ -20,3 +20,11 @@
 .wrapTall :global(.cm-scroller) {
   max-height: calc(92vh - 160px);
 }
+
+/* Prevent the line-numbers gutter from shrinking when the document length
+   changes (e.g. toggling CRD visibility reduces line count from 5-digit to
+   3-digit numbers). 4em ≈ 52px at the editor font size, safely above the
+   ~48px a 5-digit gutter needs, so the gutter stays stable. */
+.wrap :global(.cm-lineNumbers) {
+  min-width: 4em;
+}
