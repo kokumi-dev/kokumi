@@ -50,6 +50,7 @@ export interface Order {
   source?: OCISource
   menuRef?: MenuRef
   destination: OCIDestination
+  effectiveDestination?: string
   render?: Render
   patches?: Patch[]
   autoDeploy: boolean
@@ -157,7 +158,7 @@ export const orderToFormData = (r: Order): OrderFormData => ({
   namespace: r.namespace,
   menuRef: r.menuRef,
   source: r.source ? { ...r.source } : undefined,
-  destination: { ...r.destination },
+  destination: r.destination ? { ...r.destination } : { oci: '' },
   render: r.render?.helm
     ? {
         helm: {

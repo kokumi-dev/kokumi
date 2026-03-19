@@ -345,7 +345,11 @@ func (in *OrderSpec) DeepCopyInto(out *OrderSpec) {
 		*out = new(Render)
 		(*in).DeepCopyInto(*out)
 	}
-	out.Destination = in.Destination
+	if in.Destination != nil {
+		in, out := &in.Destination, &out.Destination
+		*out = new(OCIDestination)
+		**out = **in
+	}
 	if in.Patches != nil {
 		in, out := &in.Patches, &out.Patches
 		*out = make([]Patch, len(*in))

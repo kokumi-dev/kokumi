@@ -140,7 +140,12 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 		return ctrl.Result{}, err
 	}
 
-	result, err := r.Service.ProcessOrder(ctx, order, effective.Source, effective.Render, effective.Patches)
+	effectiveDest := service.DefaultDestination(order.Namespace, order.Name)
+	if order.Spec.Destination != nil && order.Spec.Destination.OCI != "" {
+		effectiveDest = order.Spec.Destination.OCI
+	}
+
+	result, err := r.Service.ProcessOrder(ctx, order, effective.Source, effective.Render, effective.Patches, effectiveDest)
 	if err != nil {
 		logger.Error(err, "Failed to process Order")
 		_ = statusUpdater.Failed(ctx, order, err)

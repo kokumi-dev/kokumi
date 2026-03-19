@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import yaml from 'js-yaml'
 import Modal from '../shared/Modal'
 import Btn from '../shared/Btn'
 import YamlEditor from '../shared/YamlEditor'
 import type { Order, OrderFormData, Patch, HelmRender, Menu } from '../../api/types'
 import { emptyOrderForm, orderToFormData } from '../../api/types'
+import { getDefaultRegistry } from '../../api/client'
 import styles from './OrderFormModal.module.css'
 
 interface Props {
@@ -38,8 +39,10 @@ function yamlToValues(text: string): Record<string, unknown> {
 
 function formToYaml(data: OrderFormData): string {
   const doc: Record<string, unknown> = {
-    destination: { oci: data.destination.oci },
     autoDeploy: data.autoDeploy,
+  }
+  if (data.destination.oci) {
+    doc.destination = { oci: data.destination.oci }
   }
   if (data.menuRef) {
     doc.menuRef = { name: data.menuRef.name }
@@ -122,6 +125,7 @@ export default function OrderFormModal({ order, menuRef, menu, menus, onClose, o
   const isEdit = !!order
   const [tab, setTab] = useState<'form' | 'yaml'>('form')
   const [selectedMenu, setSelectedMenu] = useState<Menu | null>(null)
+  const [defaultRegistry, setDefaultRegistry] = useState('')
   const [formData, setFormData] = useState<OrderFormData>(() => {
     if (order) return orderToFormData(order)
     if (menuRef) {
@@ -138,6 +142,12 @@ export default function OrderFormModal({ order, menuRef, menu, menus, onClose, o
   const [saving, setSaving] = useState(false)
 
   const effectiveMenu = menu ?? selectedMenu
+
+  useEffect(() => {
+    getDefaultRegistry()
+      .then(({ baseURL }) => setDefaultRegistry(baseURL))
+      .catch(() => {})
+  }, [])
 
   function handleMenuSelect(menuName: string) {
     if (!menuName) {
@@ -285,6 +295,7 @@ export default function OrderFormModal({ order, menuRef, menu, menus, onClose, o
           <FormView
             formData={formData}
             isEdit={isEdit}
+            defaultRegistry={defaultRegistry}
             menu={effectiveMenu ?? undefined}
             menus={menus}
             hasPresetMenu={!!menuRef || !!menu}
@@ -314,6 +325,7 @@ export default function OrderFormModal({ order, menuRef, menu, menus, onClose, o
 interface FormViewProps {
   formData: OrderFormData
   isEdit: boolean
+  defaultRegistry: string
   menu?: Menu
   menus?: Menu[]
   hasPresetMenu: boolean
@@ -330,6 +342,7 @@ interface FormViewProps {
 function FormView({
   formData,
   isEdit,
+  defaultRegistry,
   menu,
   menus,
   hasPresetMenu,
@@ -431,13 +444,22 @@ function FormView({
 
       {/* Destination */}
       <div className={styles.fieldGroup}>
-        <p className={styles.sectionTitle}>Destination</p>
+        <label className={styles.label}>Destination OCI <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional)</span></label>
         <input
           className={styles.input}
           value={formData.destination.oci}
           onChange={(e) => onFieldChange('destination', { oci: e.target.value })}
-          placeholder="oci://registry/rendered-repo"
+          placeholder={
+            defaultRegistry
+              ? `oci://${defaultRegistry}/${formData.namespace || 'namespace'}/${formData.name || 'name'}`
+              : 'oci://registry/rendered-repo'
+          }
         />
+        {defaultRegistry && !formData.destination.oci && (
+          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted-light)', marginTop: 2 }}>
+            Leave blank to use the in-cluster registry automatically
+          </span>
+        )}
       </div>
 
       {/* AutoDeploy */}

@@ -61,7 +61,7 @@ var _ = Describe("Order Controller", func() {
 							OCI:     "oci://registry.kokumi.svc.cluster.local:5000/order/test-resource",
 							Version: "0.1.0",
 						},
-						Destination: deliveryv1alpha1.OCIDestination{
+						Destination: &deliveryv1alpha1.OCIDestination{
 							OCI: "oci://registry.kokumi.svc.cluster.local:5000/preparation/test-resource",
 						},
 					},

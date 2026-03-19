@@ -201,6 +201,21 @@
   color: var(--color-text-muted-light);
 }
 
+.autoBadge {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(49, 54, 56, 0.1);
+  color: var(--color-text-muted-light);
+  font-family: inherit;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  vertical-align: middle;
+  margin-left: 6px;
+}
+
 .divider {
   border: none;
   border-top: 1px solid rgba(49, 54, 56, 0.1);

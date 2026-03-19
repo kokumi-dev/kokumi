@@ -100,11 +100,14 @@ func handleCreateOrder(deps *apiDeps) http.HandlerFunc {
 				Namespace: req.Namespace,
 			},
 			Spec: deliveryv1alpha1.OrderSpec{
-				Destination: deliveryv1alpha1.OCIDestination{OCI: req.Destination.OCI},
-				Render:      renderFromDTO(req.Render),
-				Patches:     patchesFromDTO(req.Patches),
-				AutoDeploy:  req.AutoDeploy,
+				Render:     renderFromDTO(req.Render),
+				Patches:    patchesFromDTO(req.Patches),
+				AutoDeploy: req.AutoDeploy,
 			},
+		}
+
+		if req.Destination != nil && req.Destination.OCI != "" {
+			order.Spec.Destination = &deliveryv1alpha1.OCIDestination{OCI: req.Destination.OCI}
 		}
 
 		if req.MenuRef != nil {
@@ -151,10 +154,15 @@ func handleUpdateOrder(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		order.Spec.Destination = deliveryv1alpha1.OCIDestination{OCI: req.Destination.OCI}
 		order.Spec.Render = renderFromDTO(req.Render)
 		order.Spec.Patches = patchesFromDTO(req.Patches)
 		order.Spec.AutoDeploy = req.AutoDeploy
+
+		if req.Destination != nil && req.Destination.OCI != "" {
+			order.Spec.Destination = &deliveryv1alpha1.OCIDestination{OCI: req.Destination.OCI}
+		} else {
+			order.Spec.Destination = nil
+		}
 
 		if req.MenuRef != nil {
 			order.Spec.MenuRef = &deliveryv1alpha1.MenuRef{Name: req.MenuRef.Name}

@@ -50,17 +50,20 @@ func NewOrderService(client oci.Client, fs afero.Fs, cacheDir string) *OrderServ
 // pushes the result to the destination, and returns the source/dest refs and digests.
 // The effective source, render, and patches are passed explicitly so that
 // Menu-based Orders can supply merged values.
+// destination is the fully-qualified OCI URL to push the result to; the caller
+// is responsible for supplying the default when the Order has none configured.
 func (rs *OrderService) ProcessOrder(
 	ctx context.Context,
 	order *deliveryv1alpha1.Order,
 	source deliveryv1alpha1.OCISource,
 	render *deliveryv1alpha1.Render,
 	patches []deliveryv1alpha1.Patch,
+	destination string,
 ) (*OrderResult, error) {
 	logger := log.FromContext(ctx)
 
 	sourceRef := strings.TrimPrefix(source.OCI, "oci://")
-	destRef := strings.TrimPrefix(order.Spec.Destination.OCI, "oci://")
+	destRef := strings.TrimPrefix(destination, "oci://")
 
 	logger.Info("Processing artifact", "source", sourceRef, "destination", destRef, "version", source.Version)
 
