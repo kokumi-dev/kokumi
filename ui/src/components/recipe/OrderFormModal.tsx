@@ -3,13 +3,19 @@ import yaml from 'js-yaml'
 import Modal from '../shared/Modal'
 import Btn from '../shared/Btn'
 import YamlEditor from '../shared/YamlEditor'
-import type { Order, OrderFormData, Patch, HelmRender } from '../../api/types'
+import type { Order, OrderFormData, Patch, HelmRender, Menu } from '../../api/types'
 import { emptyOrderForm, orderToFormData } from '../../api/types'
 import styles from './OrderFormModal.module.css'
 
 interface Props {
   /** When provided the modal is in "edit" mode. */
   order?: Order
+  /** When provided, pre-fill menuRef and hide source fields. */
+  menuRef?: { name: string }
+  /** Full menu object — used to display override policy constraints. */
+  menu?: Menu
+  /** Available menus for the selector dropdown (create mode). */
+  menus?: Menu[]
   onClose: () => void
   onSubmit: (data: OrderFormData) => Promise<void>
 }
@@ -32,9 +38,14 @@ function yamlToValues(text: string): Record<string, unknown> {
 
 function formToYaml(data: OrderFormData): string {
   const doc: Record<string, unknown> = {
-    source: { oci: data.source.oci, version: data.source.version },
     destination: { oci: data.destination.oci },
     autoDeploy: data.autoDeploy,
+  }
+  if (data.menuRef) {
+    doc.menuRef = { name: data.menuRef.name }
+  }
+  if (data.source) {
+    doc.source = { oci: data.source.oci, version: data.source.version }
   }
   if (data.render?.helm) {
     const h = data.render.helm
@@ -64,6 +75,7 @@ function yamlToPartialForm(text: string): Omit<OrderFormData, 'name' | 'namespac
 
   const src = doc.source as Record<string, string> | undefined
   const dst = doc.destination as Record<string, string> | undefined
+  const rawMenuRef = doc.menuRef as Record<string, string> | undefined
   const rawPatches = Array.isArray(doc.patches) ? (doc.patches as unknown[]) : []
 
   const rawRender = doc.render as Record<string, unknown> | undefined
@@ -83,7 +95,8 @@ function yamlToPartialForm(text: string): Omit<OrderFormData, 'name' | 'namespac
   }
 
   return {
-    source: { oci: src?.oci ?? '', version: src?.version ?? '' },
+    menuRef: rawMenuRef?.name ? { name: rawMenuRef.name } : undefined,
+    source: src?.oci ? { oci: src.oci, version: src.version ?? '' } : undefined,
     destination: { oci: dst?.oci ?? '' },
     render,
     autoDeploy: Boolean(doc.autoDeploy),
@@ -105,15 +118,49 @@ function yamlToPartialForm(text: string): Omit<OrderFormData, 'name' | 'namespac
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function OrderFormModal({ order, onClose, onSubmit }: Props) {
+export default function OrderFormModal({ order, menuRef, menu, menus, onClose, onSubmit }: Props) {
   const isEdit = !!order
   const [tab, setTab] = useState<'form' | 'yaml'>('form')
-  const [formData, setFormData] = useState<OrderFormData>(
-    order ? orderToFormData(order) : emptyOrderForm(),
-  )
+  const [selectedMenu, setSelectedMenu] = useState<Menu | null>(null)
+  const [formData, setFormData] = useState<OrderFormData>(() => {
+    if (order) return orderToFormData(order)
+    if (menuRef) {
+      const base = { ...emptyOrderForm(), menuRef, source: undefined }
+      if (menu?.render?.helm) {
+        base.render = { helm: { releaseName: '', namespace: '', includeCRDs: false, values: {} } }
+      }
+      return base
+    }
+    return emptyOrderForm()
+  })
   const [yamlText, setYamlText] = useState(() => formToYaml(formData))
   const [yamlError, setYamlError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+
+  const effectiveMenu = menu ?? selectedMenu
+
+  function handleMenuSelect(menuName: string) {
+    if (!menuName) {
+      setSelectedMenu(null)
+      setFormData((prev) => ({
+        ...prev,
+        menuRef: undefined,
+        source: prev.source ?? { oci: '', version: '' },
+      }))
+      return
+    }
+    const m = menus?.find((x) => x.name === menuName)
+    if (!m) return
+    setSelectedMenu(m)
+    setFormData((prev) => ({
+      ...prev,
+      menuRef: { name: m.name },
+      source: undefined,
+      render: m.render?.helm
+        ? { helm: { releaseName: '', namespace: '', includeCRDs: false, values: {} } }
+        : prev.render,
+    }))
+  }
 
   // ── Tab switching ──────────────────────────────────────────────────────────
 
@@ -238,6 +285,10 @@ export default function OrderFormModal({ order, onClose, onSubmit }: Props) {
           <FormView
             formData={formData}
             isEdit={isEdit}
+            menu={effectiveMenu ?? undefined}
+            menus={menus}
+            hasPresetMenu={!!menuRef || !!menu}
+            onMenuSelect={handleMenuSelect}
             onFieldChange={setField}
             onEnableHelm={enableHelm}
             onDisableHelm={disableHelm}
@@ -263,6 +314,10 @@ export default function OrderFormModal({ order, onClose, onSubmit }: Props) {
 interface FormViewProps {
   formData: OrderFormData
   isEdit: boolean
+  menu?: Menu
+  menus?: Menu[]
+  hasPresetMenu: boolean
+  onMenuSelect: (menuName: string) => void
   onFieldChange: <K extends keyof OrderFormData>(key: K, val: OrderFormData[K]) => void
   onEnableHelm: () => void
   onDisableHelm: () => void
@@ -275,6 +330,10 @@ interface FormViewProps {
 function FormView({
   formData,
   isEdit,
+  menu,
+  menus,
+  hasPresetMenu,
+  onMenuSelect,
   onFieldChange,
   onEnableHelm,
   onDisableHelm,
@@ -283,6 +342,9 @@ function FormView({
   onRemovePatch,
   onUpdatePatch,
 }: FormViewProps) {
+  const valuesPolicy = menu?.overrides.values.policy
+  const patchesPolicy = menu?.overrides.patches.policy
+
   return (
     <div className={styles.formGrid}>
       {/* Name + Namespace */}
@@ -309,30 +371,63 @@ function FormView({
         </div>
       </div>
 
-      {/* Source */}
-      <div className={styles.fieldGroup}>
-        <p className={styles.sectionTitle}>Source</p>
-      </div>
-      <div className={styles.row2}>
+      {/* Menu selector (create mode, when menus are available and no preset menu) */}
+      {!isEdit && !hasPresetMenu && menus && menus.length > 0 && (
         <div className={styles.fieldGroup}>
-          <label className={styles.label}>OCI Registry</label>
-          <input
+          <label className={styles.label}>Source Type</label>
+          <select
             className={styles.input}
-            value={formData.source.oci}
-            onChange={(e) => onFieldChange('source', { ...formData.source, oci: e.target.value })}
-            placeholder="oci://registry/repo"
-          />
+            value={formData.menuRef?.name ?? ''}
+            onChange={(e) => onMenuSelect(e.target.value)}
+          >
+            <option value="">Standalone (manual source)</option>
+            {menus.map((m) => (
+              <option key={m.name} value={m.name}>Menu: {m.name}</option>
+            ))}
+          </select>
         </div>
+      )}
+
+      {/* Source or Menu Reference */}
+      {formData.menuRef ? (
         <div className={styles.fieldGroup}>
-          <label className={styles.label}>Version</label>
+          <p className={styles.sectionTitle}>Menu Reference</p>
           <input
-            className={styles.input}
-            value={formData.source.version}
-            onChange={(e) => onFieldChange('source', { ...formData.source, version: e.target.value })}
-            placeholder="1.0.0"
+            className={`${styles.input} ${styles.inputDisabled}`}
+            value={formData.menuRef.name}
+            readOnly
           />
+          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted-light)', marginTop: 4 }}>
+            Source and version are provided by the Menu
+          </span>
         </div>
-      </div>
+      ) : (
+        <>
+          <div className={styles.fieldGroup}>
+            <p className={styles.sectionTitle}>Source</p>
+          </div>
+          <div className={styles.row2}>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label}>OCI Registry</label>
+              <input
+                className={styles.input}
+                value={formData.source?.oci ?? ''}
+                onChange={(e) => onFieldChange('source', { ...(formData.source ?? { oci: '', version: '' }), oci: e.target.value })}
+                placeholder="oci://registry/repo"
+              />
+            </div>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label}>Version</label>
+              <input
+                className={styles.input}
+                value={formData.source?.version ?? ''}
+                onChange={(e) => onFieldChange('source', { ...(formData.source ?? { oci: '', version: '' }), version: e.target.value })}
+                placeholder="1.0.0"
+              />
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Destination */}
       <div className={styles.fieldGroup}>
@@ -358,38 +453,90 @@ function FormView({
       {/* Renderer */}
       <div>
         <p className={styles.sectionTitle}>Renderer</p>
-        <label className={styles.checkRow}>
-          <input
-            type="checkbox"
-            checked={!!formData.render?.helm}
-            onChange={(e) => (e.target.checked ? onEnableHelm() : onDisableHelm())}
-          />
-          Enable Helm rendering
-        </label>
-        {formData.render?.helm && (
-          <div className={styles.helmSection}>
-            <HelmRenderEditor helm={formData.render.helm} onUpdate={onUpdateHelm} />
+        {valuesPolicy === 'None' ? (
+          <div className={styles.policyBanner}>
+            <span className={styles.policyIcon}>🔒</span>
+            Value overrides are locked by the Menu
           </div>
+        ) : (
+          <>
+            {!menu && (
+              <label className={styles.checkRow}>
+                <input
+                  type="checkbox"
+                  checked={!!formData.render?.helm}
+                  onChange={(e) => (e.target.checked ? onEnableHelm() : onDisableHelm())}
+                />
+                Enable Helm rendering
+              </label>
+            )}
+            {valuesPolicy === 'Restricted' && menu?.overrides.values.allowed && (
+              <div className={styles.policyBanner}>
+                <span className={styles.policyIcon}>📋</span>
+                Allowed values:{' '}
+                {menu.overrides.values.allowed.map((k) => (
+                  <span key={k} className={styles.policyChip}>{k}</span>
+                ))}
+              </div>
+            )}
+            {valuesPolicy === 'All' && menu && (
+              <div className={styles.policyBannerOpen}>
+                <span className={styles.policyIcon}>✓</span>
+                All value overrides are allowed
+              </div>
+            )}
+            {formData.render?.helm && (
+              <div className={styles.helmSection}>
+                <HelmRenderEditor helm={formData.render.helm} onUpdate={onUpdateHelm} />
+              </div>
+            )}
+          </>
         )}
       </div>
 
       {/* Patches */}
       <div>
         <p className={styles.sectionTitle}>Patches</p>
-        <div className={styles.patchList}>
-          {formData.patches.map((patch, idx) => (
-            <PatchEditor
-              key={idx}
-              index={idx}
-              patch={patch}
-              onUpdate={(p) => onUpdatePatch(idx, p)}
-              onRemove={() => onRemovePatch(idx)}
-            />
-          ))}
-        </div>
-        <button className={styles.addPatchBtn} onClick={onAddPatch}>
-          + Add Patch
-        </button>
+        {patchesPolicy === 'None' ? (
+          <div className={styles.policyBanner}>
+            <span className={styles.policyIcon}>🔒</span>
+            Patch overrides are locked by the Menu
+          </div>
+        ) : (
+          <>
+            {patchesPolicy === 'Restricted' && menu?.overrides.patches.allowed && (
+              <div className={styles.policyBanner}>
+                <span className={styles.policyIcon}>📋</span>
+                Allowed patches:{' '}
+                {menu.overrides.patches.allowed.map((a, i) => (
+                  <span key={i} className={styles.policyChip}>
+                    {a.target.kind}/{a.target.name}: {a.paths.join(', ')}
+                  </span>
+                ))}
+              </div>
+            )}
+            {patchesPolicy === 'All' && menu && (
+              <div className={styles.policyBannerOpen}>
+                <span className={styles.policyIcon}>✓</span>
+                All patch overrides are allowed
+              </div>
+            )}
+            <div className={styles.patchList}>
+              {formData.patches.map((patch, idx) => (
+                <PatchEditor
+                  key={idx}
+                  index={idx}
+                  patch={patch}
+                  onUpdate={(p) => onUpdatePatch(idx, p)}
+                  onRemove={() => onRemovePatch(idx)}
+                />
+              ))}
+            </div>
+            <button className={styles.addPatchBtn} onClick={onAddPatch}>
+              + Add Patch
+            </button>
+          </>
+        )}
       </div>
     </div>
   )

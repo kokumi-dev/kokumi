@@ -48,13 +48,21 @@ func NewOrderService(client oci.Client, fs afero.Fs, cacheDir string) *OrderServ
 
 // ProcessOrder pulls the source artifact, applies patches or normalizes YAML,
 // pushes the result to the destination, and returns the source/dest refs and digests.
-func (rs *OrderService) ProcessOrder(ctx context.Context, order *deliveryv1alpha1.Order) (*OrderResult, error) {
+// The effective source, render, and patches are passed explicitly so that
+// Menu-based Orders can supply merged values.
+func (rs *OrderService) ProcessOrder(
+	ctx context.Context,
+	order *deliveryv1alpha1.Order,
+	source deliveryv1alpha1.OCISource,
+	render *deliveryv1alpha1.Render,
+	patches []deliveryv1alpha1.Patch,
+) (*OrderResult, error) {
 	logger := log.FromContext(ctx)
 
-	sourceRef := strings.TrimPrefix(order.Spec.Source.OCI, "oci://")
+	sourceRef := strings.TrimPrefix(source.OCI, "oci://")
 	destRef := strings.TrimPrefix(order.Spec.Destination.OCI, "oci://")
 
-	logger.Info("Processing artifact", "source", sourceRef, "destination", destRef, "version", order.Spec.Source.Version)
+	logger.Info("Processing artifact", "source", sourceRef, "destination", destRef, "version", source.Version)
 
 	tempDir, err := afero.TempDir(rs.fs, "", "order-*")
 	if err != nil {
@@ -64,7 +72,7 @@ func (rs *OrderService) ProcessOrder(ctx context.Context, order *deliveryv1alpha
 
 	logger.Info("Fetching artifact from source")
 
-	mediaType, sourceDigest, err := rs.pullWithCache(ctx, sourceRef, order.Spec.Source.Version, tempDir)
+	mediaType, sourceDigest, err := rs.pullWithCache(ctx, sourceRef, source.Version, tempDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pull artifact: %w", err)
 	}
@@ -73,23 +81,23 @@ func (rs *OrderService) ProcessOrder(ctx context.Context, order *deliveryv1alpha
 
 	logger.Info("Pulled source artifact", "digest", sourceDigest, "mediaType", mediaType)
 
-	if order.Spec.Render != nil && order.Spec.Render.Helm != nil {
+	if render != nil && render.Helm != nil {
 		if mediaType != oci.HelmChartLayerMediaType {
 			return nil, fmt.Errorf("source is not a Helm chart (got media type %q)", mediaType)
 		}
 
 		logger.Info("Applying Helm renderer")
 
-		vals, err := jsonToMap(order.Spec.Render.Helm.Values)
+		vals, err := jsonToMap(render.Helm.Values)
 		if err != nil {
 			return nil, fmt.Errorf("failed convert values: %w", err)
 		}
 
-		releaseName := order.Spec.Render.Helm.ReleaseName
+		releaseName := render.Helm.ReleaseName
 		if releaseName == "" {
 			releaseName = order.Name
 		}
-		helmNamespace := order.Spec.Render.Helm.Namespace
+		helmNamespace := render.Helm.Namespace
 		if helmNamespace == "" {
 			helmNamespace = order.Namespace
 		}
@@ -101,7 +109,7 @@ func (rs *OrderService) ProcessOrder(ctx context.Context, order *deliveryv1alpha
 			chartPath,
 			releaseName,
 			helmNamespace,
-			order.Spec.Render.Helm.IncludeCRDs,
+			render.Helm.IncludeCRDs,
 			vals,
 		)
 		if err != nil {
@@ -118,7 +126,7 @@ func (rs *OrderService) ProcessOrder(ctx context.Context, order *deliveryv1alpha
 		return nil, fmt.Errorf("failed to read manifest: %w", err)
 	}
 
-	processedContent, err := rs.processManifest(ctx, content, order.Spec.Patches)
+	processedContent, err := rs.processManifest(ctx, content, patches)
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +137,7 @@ func (rs *OrderService) ProcessOrder(ctx context.Context, order *deliveryv1alpha
 
 	logger.Info("Pushing artifact to destination")
 
-	destDigest, err := rs.client.Push(ctx, destRef, order.Spec.Source.Version, tempDir)
+	destDigest, err := rs.client.Push(ctx, destRef, source.Version, tempDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to push artifact: %w", err)
 	}

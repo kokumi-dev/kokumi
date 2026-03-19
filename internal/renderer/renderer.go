@@ -109,14 +109,27 @@ func CalculateSpecHash(spec deliveryv1alpha1.OrderSpec) (string, error) {
 	encoder := yaml.NewEncoder(&builder)
 	encoder.SetIndent(2)
 
+	var oci, version string
+	if spec.Source != nil {
+		oci = spec.Source.OCI
+		version = spec.Source.Version
+	}
+
+	var menuRef string
+	if spec.MenuRef != nil {
+		menuRef = spec.MenuRef.Name
+	}
+
 	if err := encoder.Encode(struct {
-		OCI     string                   `yaml:"oci"`
-		Version string                   `yaml:"version"`
+		OCI     string                   `yaml:"oci,omitempty"`
+		Version string                   `yaml:"version,omitempty"`
+		MenuRef string                   `yaml:"menuRef,omitempty"`
 		Render  *deliveryv1alpha1.Render `yaml:"render,omitempty"`
 		Patches []deliveryv1alpha1.Patch `yaml:"patches,omitempty"`
 	}{
-		OCI:     spec.Source.OCI,
-		Version: spec.Source.Version,
+		OCI:     oci,
+		Version: version,
+		MenuRef: menuRef,
 		Render:  spec.Render,
 		Patches: spec.Patches,
 	}); err != nil {

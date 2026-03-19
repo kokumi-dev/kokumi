@@ -30,6 +30,10 @@ export default function Dashboard({ operatorName, operatorVersion }: Props) {
           <span className={styles.statValue}>{counts?.orders ?? '—'}</span>
         </div>
         <div className={styles.statCard}>
+          <span className={styles.statLabel}>Menus</span>
+          <span className={styles.statValue}>{counts?.menus ?? '—'}</span>
+        </div>
+        <div className={styles.statCard}>
           <span className={styles.statLabel}>Preparations</span>
           <span className={styles.statValue}>{counts?.preparations ?? '—'}</span>
         </div>

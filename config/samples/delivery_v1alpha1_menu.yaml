@@ -4,6 +4,28 @@ metadata:
   labels:
     app.kubernetes.io/name: kokumi
     app.kubernetes.io/managed-by: kustomize
-  name: menu-sample
+  name: podinfo
 spec:
-  # TODO(user): Add fields here
+  source:
+    oci: oci://ghcr.io/stefanprodan/charts/podinfo
+    version: "6.10.2"
+
+  render:
+    helm:
+      namespace: default
+      values:
+        ui:
+          color: "#EF6461"
+          logo: "https://kokumi.dev/images/logo.png"
+
+  overrides:
+    values:
+      policy: Restricted
+      allowed:
+        - "ui.message"
+        - "replicaCount"
+    patches:
+      policy: None
+
+  defaults:
+    autoDeploy: false

@@ -69,7 +69,7 @@ func (u *OrderUpdater) set(
 	case deliveryv1alpha1.OrderPhaseReady:
 		condition.Status = metav1.ConditionTrue
 	case deliveryv1alpha1.OrderPhaseFailed:
-		condition.Type = "Degraded"
+		condition.Type = conditionTypeDegraded
 		condition.Reason = "ProcessingFailed"
 	}
 

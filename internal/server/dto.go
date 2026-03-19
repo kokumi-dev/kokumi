@@ -51,13 +51,19 @@ type RenderDTO struct {
 	Helm *HelmRenderDTO `json:"helm,omitempty"`
 }
 
+// MenuRefDTO is the data-transfer representation of a MenuRef.
+type MenuRefDTO struct {
+	Name string `json:"name"`
+}
+
 // OrderDTO is the enriched view of a Order served to the UI.
 // ActivePreparation is derived from the linked Serving's status.observedPreparation.
 type OrderDTO struct {
 	Name              string            `json:"name"`
 	Namespace         string            `json:"namespace"`
 	Labels            map[string]string `json:"labels,omitempty"`
-	Source            OCISourceDTO      `json:"source"`
+	Source            *OCISourceDTO     `json:"source,omitempty"`
+	MenuRef           *MenuRefDTO       `json:"menuRef,omitempty"`
 	Destination       OCIDestinationDTO `json:"destination"`
 	Render            *RenderDTO        `json:"render,omitempty"`
 	Patches           []PatchDTO        `json:"patches,omitempty"`
@@ -96,6 +102,7 @@ type CreateOrderRequest struct {
 	Namespace   string            `json:"namespace"`
 	Name        string            `json:"name"`
 	Source      OCISourceDTO      `json:"source"`
+	MenuRef     *MenuRefDTO       `json:"menuRef,omitempty"`
 	Destination OCIDestinationDTO `json:"destination"`
 	Render      *RenderDTO        `json:"render,omitempty"`
 	Patches     []PatchDTO        `json:"patches,omitempty"`
@@ -105,6 +112,7 @@ type CreateOrderRequest struct {
 // UpdateOrderRequest is the body for PUT /api/v1/orders/{namespace}/{name}.
 type UpdateOrderRequest struct {
 	Source      OCISourceDTO      `json:"source"`
+	MenuRef     *MenuRefDTO       `json:"menuRef,omitempty"`
 	Destination OCIDestinationDTO `json:"destination"`
 	Render      *RenderDTO        `json:"render,omitempty"`
 	Patches     []PatchDTO        `json:"patches,omitempty"`
@@ -128,4 +136,67 @@ type ServingDTO struct {
 	Phase               string         `json:"phase"`
 	Conditions          []ConditionDTO `json:"conditions,omitempty"`
 	CreatedAt           *time.Time     `json:"createdAt,omitempty"`
+}
+
+// --- Menu DTOs ---
+
+// ValueOverridePolicyDTO is the data-transfer representation of a ValueOverridePolicy.
+type ValueOverridePolicyDTO struct {
+	Policy  string   `json:"policy"`
+	Allowed []string `json:"allowed,omitempty"`
+}
+
+// AllowedPatchTargetDTO is the data-transfer representation of an AllowedPatchTarget.
+type AllowedPatchTargetDTO struct {
+	Target PatchTargetDTO `json:"target"`
+	Paths  []string       `json:"paths"`
+}
+
+// PatchOverridePolicyDTO is the data-transfer representation of a PatchOverridePolicy.
+type PatchOverridePolicyDTO struct {
+	Policy  string                  `json:"policy"`
+	Allowed []AllowedPatchTargetDTO `json:"allowed,omitempty"`
+}
+
+// OverridePolicyDTO is the data-transfer representation of an OverridePolicy.
+type OverridePolicyDTO struct {
+	Values  ValueOverridePolicyDTO `json:"values"`
+	Patches PatchOverridePolicyDTO `json:"patches"`
+}
+
+// MenuDefaultsDTO is the data-transfer representation of MenuDefaults.
+type MenuDefaultsDTO struct {
+	AutoDeploy bool `json:"autoDeploy"`
+}
+
+// MenuDTO is the view of a Menu served to the UI.
+type MenuDTO struct {
+	Name       string            `json:"name"`
+	Source     OCISourceDTO      `json:"source"`
+	Render     *RenderDTO        `json:"render,omitempty"`
+	Patches    []PatchDTO        `json:"patches,omitempty"`
+	Overrides  OverridePolicyDTO `json:"overrides"`
+	Defaults   MenuDefaultsDTO   `json:"defaults"`
+	Phase      string            `json:"phase,omitempty"`
+	Conditions []ConditionDTO    `json:"conditions,omitempty"`
+	CreatedAt  *time.Time        `json:"createdAt,omitempty"`
+}
+
+// CreateMenuRequest is the body for POST /api/v1/menus.
+type CreateMenuRequest struct {
+	Name      string            `json:"name"`
+	Source    OCISourceDTO      `json:"source"`
+	Render    *RenderDTO        `json:"render,omitempty"`
+	Patches   []PatchDTO        `json:"patches,omitempty"`
+	Overrides OverridePolicyDTO `json:"overrides"`
+	Defaults  MenuDefaultsDTO   `json:"defaults"`
+}
+
+// UpdateMenuRequest is the body for PUT /api/v1/menus/{name}.
+type UpdateMenuRequest struct {
+	Source    OCISourceDTO      `json:"source"`
+	Render    *RenderDTO        `json:"render,omitempty"`
+	Patches   []PatchDTO        `json:"patches,omitempty"`
+	Overrides OverridePolicyDTO `json:"overrides"`
+	Defaults  MenuDefaultsDTO   `json:"defaults"`
 }

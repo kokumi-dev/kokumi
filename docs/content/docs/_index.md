@@ -7,11 +7,11 @@ sidebar:
 Welcome to the **Kokumi** documentation.
 
 Kokumi is a Kubernetes operator for structured, immutable release management.
-It models your delivery workflow as four composable primitives:
+It models your delivery workflow as five composable primitives:
 
 | Resource | Role |
 |---|---|
-| **Menu** | Optional reusable template for Orders _(planned, not yet implemented)_ |
+| **Menu** | Optional reusable template for Orders |
 | **Recipe** | Rendering profile instructions _(planned, not yet implemented)_ |
 | **Order** | Concrete release request that can define full intent or parameterize a Menu |
 | **Preparation** | Immutable OCI artifact rendered from an Order |

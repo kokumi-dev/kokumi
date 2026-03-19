@@ -77,6 +77,17 @@
   color: var(--color-text-muted-light);
 }
 
+select.input {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5l5 4.5 5-4.5' stroke='%23999' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 12px 8px;
+  padding-right: 30px;
+  cursor: pointer;
+}
+
 .inputDisabled {
   opacity: 0.6;
   cursor: not-allowed;
@@ -272,4 +283,47 @@
   color: var(--color-text-muted-light);
   margin-bottom: 8px;
   margin-top: 4px;
+}
+
+/* ── Override Policy Indicators ── */
+.policyBanner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 7px;
+  background: rgba(49, 54, 56, 0.05);
+  border: 1px solid rgba(49, 54, 56, 0.1);
+  font-size: 0.8rem;
+  color: var(--color-text-muted-light);
+  line-height: 1.6;
+}
+
+.policyBannerOpen {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 7px;
+  background: rgba(52, 211, 153, 0.08);
+  border: 1px solid rgba(52, 211, 153, 0.2);
+  font-size: 0.8rem;
+  color: #059669;
+}
+
+.policyIcon {
+  flex-shrink: 0;
+  font-size: 0.85rem;
+}
+
+.policyChip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(49, 54, 56, 0.08);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.75rem;
+  color: var(--color-text-on-light);
+  white-space: nowrap;
 }

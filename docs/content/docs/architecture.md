@@ -89,16 +89,39 @@ Serving ──selects────────┘  (mutable pointer to one Prepar
                               │
                               └──syncs──▶ Cluster workloads
 
-Menu (optional, planned) ──provides template──▶ Order  (consumed and parameterized)
+Menu (cluster-scoped) ──provides template──▶ Order  (consumed and parameterized)
 Recipe ──provides render profile──▶ Order  (for example Helm options)
 ```
 
 ### Menu
 
-Menu is the reusable deployment template that an Order consumes and
-parameterizes for a concrete rollout.
+A Menu is a **cluster-scoped**, reusable deployment template. It pins a source
+OCI reference and version, locks the render type, and defines default values and
+patches. Consumers create Orders that reference the Menu by name instead of
+specifying source details directly.
 
-Menu consumption is not implemented yet.
+Each Menu carries an **override policy** that controls what consumers are
+allowed to customise:
+
+| Policy | Behaviour |
+|---|---|
+| `All` | Consumer may supply any values or patches |
+| `Restricted` | Consumer may only set values or patches that match the Menu's allow-list |
+| `None` | Consumer may not override values or patches at all |
+
+Values and patches have independent policies. For example a Menu can allow
+unrestricted Helm value overrides while forbidding any patches, or restrict
+values to a specific list of keys while allowing all patches.
+
+When an Order references a Menu:
+
+1. The Order controller fetches the Menu and validates the consumer's overrides
+   against the override policy.
+2. Base values and patches from the Menu are always applied first.
+3. Allowed consumer overrides are merged on top (values are deep-merged, patches
+   are appended).
+4. If the consumer supplies overrides that violate the policy, reconciliation
+   fails with a clear status message.
 
 ### Recipe
 
@@ -113,11 +136,18 @@ triggers rendering to produce immutable artifacts.
 Order does not need Menu. It can fully define component intent on its own, and
 this standalone behavior is intended to remain a first-class mode.
 
+Alternatively, an Order can reference a Menu via `spec.menuRef`. When a Menu
+reference is present, the source, render type, and base configuration are
+inherited from the Menu. The consumer provides only the overrides that the
+Menu's policy permits.
+
 An Order declares:
 
-- **Source** — OCI image reference: either a pre-rendered manifest bundle
-  (containing `manifest.yaml`) or a Helm chart in OCI format (add
-  `spec.render.helm` to configure rendering)
+- **Source** (standalone mode) — OCI image reference: either a pre-rendered
+  manifest bundle (containing `manifest.yaml`) or a Helm chart in OCI format
+  (add `spec.render.helm` to configure rendering)
+- **MenuRef** (template mode) — reference to a cluster-scoped Menu by name;
+  source and render configuration are inherited
 - **Patches** — Patches to apply before producing the artifact
 
 Orders are mutable; every change triggers a new reconciliation cycle and
@@ -162,7 +192,8 @@ Rollback is promoting any previous Preparation — no re-rendering required.
 
 ### Menu and Recipe lifecycle
 
-Recipe defines rendering behavior. Menu provides an optional reusable template.
+Recipe defines rendering behavior. Menu provides a reusable template with
+override policies controlling what consumers can customise.
 Order remains the concrete execution resource, whether standalone or template-
 parameterized.
 

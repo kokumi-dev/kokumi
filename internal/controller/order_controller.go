@@ -32,6 +32,7 @@ import (
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/renderer"
+	"github.com/kokumi-dev/kokumi/internal/resolve"
 	"github.com/kokumi-dev/kokumi/internal/service"
 	"github.com/kokumi-dev/kokumi/internal/status"
 )
@@ -50,6 +51,7 @@ type OrderReconciler struct {
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=orders/finalizers,verbs=update
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=preparations,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=preparations/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=menus,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -85,12 +87,42 @@ func (r *OrderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	}
 
-	return r.reconcileRender(ctx, order)
+	effective, err := r.resolveEffectiveSpec(ctx, order)
+	if err != nil {
+		statusUpdater := status.NewOrderUpdater(r.Client)
+		_ = statusUpdater.Failed(ctx, order, err)
+		return ctrl.Result{}, err
+	}
+
+	return r.reconcileRender(ctx, order, effective)
+}
+
+// resolveEffectiveSpec computes the effective source, render, and patches.
+// For plain Orders (no menuRef), the Order's own fields are used directly.
+// For Menu-based Orders, the Menu's base config is merged with validated consumer overrides.
+func (r *OrderReconciler) resolveEffectiveSpec(ctx context.Context, order *deliveryv1alpha1.Order) (*resolve.EffectiveSpec, error) {
+	logger := log.FromContext(ctx)
+
+	if order.Spec.MenuRef == nil {
+		return resolve.FromOrder(order)
+	}
+
+	m := &deliveryv1alpha1.Menu{}
+	if err := r.Get(ctx, client.ObjectKey{Name: order.Spec.MenuRef.Name}, m); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("referenced Menu %q not found", order.Spec.MenuRef.Name)
+		}
+		return nil, fmt.Errorf("failed to get Menu %q: %w", order.Spec.MenuRef.Name, err)
+	}
+
+	logger.Info("Resolved Menu for Order", "menu", m.Name)
+
+	return resolve.ForMenu(m, order)
 }
 
 // reconcileRender delegates FS/OCI work to the service and then handles CRD concerns:
 // updating status and creating the Preparation resource.
-func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1alpha1.Order) (ctrl.Result, error) {
+func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1alpha1.Order, effective *resolve.EffectiveSpec) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	statusUpdater := status.NewOrderUpdater(r.Client)
 
@@ -108,7 +140,7 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 		return ctrl.Result{}, err
 	}
 
-	result, err := r.Service.ProcessOrder(ctx, order)
+	result, err := r.Service.ProcessOrder(ctx, order, effective.Source, effective.Render, effective.Patches)
 	if err != nil {
 		logger.Error(err, "Failed to process Order")
 		_ = statusUpdater.Failed(ctx, order, err)
@@ -116,7 +148,7 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 		return ctrl.Result{}, err
 	}
 
-	preparation, err := r.createPreparation(ctx, order, result.SourceRef, result.SourceDigest, order.Spec.Source.Version, result.DestRef, result.DestDigest)
+	preparation, err := r.createPreparation(ctx, order, result.SourceRef, result.SourceDigest, effective.Source.Version, result.DestRef, result.DestDigest)
 	if err != nil {
 		logger.Error(err, "Failed to create Preparation")
 		_ = statusUpdater.Failed(ctx, order, fmt.Errorf("failed to create revision: %w", err))

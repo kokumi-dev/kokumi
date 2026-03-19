@@ -21,6 +21,10 @@ spec:
     - jsonPath: .status.latestRevision
       name: Latest Revision
       type: string
+    - jsonPath: .spec.menuRef.name
+      name: Menu
+      priority: 1
+      type: string
     - jsonPath: .spec.source.oci
       name: Source
       priority: 1
@@ -80,10 +84,24 @@ spec:
                 required:
                 - oci
                 type: object
+              menuRef:
+                description: |-
+                  menuRef references a cluster-scoped Menu that provides the source,
+                  base configuration, and override constraints for this Order.
+                  Must not be set when source is used.
+                properties:
+                  name:
+                    description: name is the name of the cluster-scoped Menu to use
+                      as a template.
+                    type: string
+                required:
+                - name
+                type: object
               patches:
                 description: |-
                   patches defines deterministic transformations applied to the source artifact
-                  before producing a Preparation
+                  before producing a Preparation.
+                  When menuRef is set, these patches are subject to the Menu's override policy.
                 items:
                   description: Patch defines a modification to apply to a resource
                   properties:
@@ -124,6 +142,8 @@ spec:
                   render defines optional rendering configuration for the source artifact.
                   When absent the source OCI artifact is treated as a pre-rendered manifest bundle.
                   When render.helm is set the source must be a Helm chart in OCI format.
+                  When menuRef is set, the render type is inherited from the Menu and this
+                  field is used only for consumer value overrides (render.helm.values).
                 properties:
                   helm:
                     description: |-
@@ -154,8 +174,9 @@ spec:
                     type: object
                 type: object
               source:
-                description: source defines the immutable base artifact to render
-                  from
+                description: |-
+                  source defines the immutable base artifact to render from.
+                  Must not be set when menuRef is used.
                 properties:
                   oci:
                     description: oci is the OCI registry URL for the source manifests
@@ -173,7 +194,6 @@ spec:
             required:
             - autoDeploy
             - destination
-            - source
             type: object
           status:
             description: status defines the observed state of Order

@@ -4,6 +4,7 @@ export interface ResourceCounts {
   orders: number
   preparations: number
   servings: number
+  menus: number
 }
 
 /**

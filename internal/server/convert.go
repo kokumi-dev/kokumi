@@ -73,10 +73,6 @@ func orderToDTO(r deliveryv1alpha1.Order, activePreparation string) OrderDTO {
 		Name:      r.Name,
 		Namespace: r.Namespace,
 		Labels:    r.Labels,
-		Source: OCISourceDTO{
-			OCI:     r.Spec.Source.OCI,
-			Version: r.Spec.Source.Version,
-		},
 		Destination: OCIDestinationDTO{
 			OCI: r.Spec.Destination.OCI,
 		},
@@ -88,6 +84,20 @@ func orderToDTO(r deliveryv1alpha1.Order, activePreparation string) OrderDTO {
 		ActivePreparation: activePreparation,
 		Conditions:        conditionsToDTO(r.Status.Conditions),
 	}
+
+	if r.Spec.Source != nil {
+		dto.Source = &OCISourceDTO{
+			OCI:     r.Spec.Source.OCI,
+			Version: r.Spec.Source.Version,
+		}
+	}
+
+	if r.Spec.MenuRef != nil {
+		dto.MenuRef = &MenuRefDTO{
+			Name: r.Spec.MenuRef.Name,
+		}
+	}
+
 	if !r.CreationTimestamp.IsZero() {
 		t := r.CreationTimestamp.UTC()
 		dto.CreatedAt = &t
@@ -269,4 +279,105 @@ func servingsToDTO(servings []deliveryv1alpha1.Serving) []ServingDTO {
 		out[i] = servingToDTO(s)
 	}
 	return out
+}
+
+// --- Menu Conversions ---
+
+// menuToDTO converts a Menu CRD object into a MenuDTO.
+func menuToDTO(m deliveryv1alpha1.Menu) MenuDTO {
+	patches := make([]PatchDTO, len(m.Spec.Patches))
+	for i, p := range m.Spec.Patches {
+		patches[i] = PatchDTO{
+			Target: PatchTargetDTO{
+				Kind:      p.Target.Kind,
+				Name:      p.Target.Name,
+				Namespace: p.Target.Namespace,
+			},
+			Set: p.Set,
+		}
+	}
+
+	dto := MenuDTO{
+		Name: m.Name,
+		Source: OCISourceDTO{
+			OCI:     m.Spec.Source.OCI,
+			Version: m.Spec.Source.Version,
+		},
+		Render:    renderToDTO(m.Spec.Render),
+		Patches:   patches,
+		Overrides: overridePolicyToDTO(m.Spec.Overrides),
+		Defaults: MenuDefaultsDTO{
+			AutoDeploy: m.Spec.Defaults.AutoDeploy,
+		},
+		Phase:      string(m.Status.Phase),
+		Conditions: conditionsToDTO(m.Status.Conditions),
+	}
+	if !m.CreationTimestamp.IsZero() {
+		t := m.CreationTimestamp.UTC()
+		dto.CreatedAt = &t
+	}
+	return dto
+}
+
+// overridePolicyToDTO converts an OverridePolicy to its DTO representation.
+func overridePolicyToDTO(op deliveryv1alpha1.OverridePolicy) OverridePolicyDTO {
+	valDTO := ValueOverridePolicyDTO{
+		Policy:  string(op.Values.Policy),
+		Allowed: op.Values.Allowed,
+	}
+
+	allowedPatches := make([]AllowedPatchTargetDTO, len(op.Patches.Allowed))
+	for i, a := range op.Patches.Allowed {
+		allowedPatches[i] = AllowedPatchTargetDTO{
+			Target: PatchTargetDTO{
+				Kind:      a.Target.Kind,
+				Name:      a.Target.Name,
+				Namespace: a.Target.Namespace,
+			},
+			Paths: a.Paths,
+		}
+	}
+
+	return OverridePolicyDTO{
+		Values: valDTO,
+		Patches: PatchOverridePolicyDTO{
+			Policy:  string(op.Patches.Policy),
+			Allowed: allowedPatches,
+		},
+	}
+}
+
+// menusToDTO converts a slice of Menu CRD objects into MenuDTOs.
+func menusToDTO(menus []deliveryv1alpha1.Menu) []MenuDTO {
+	out := make([]MenuDTO, len(menus))
+	for i, m := range menus {
+		out[i] = menuToDTO(m)
+	}
+	return out
+}
+
+// overridePolicyFromDTO converts an OverridePolicyDTO into the CRD type.
+func overridePolicyFromDTO(dto OverridePolicyDTO) deliveryv1alpha1.OverridePolicy {
+	allowed := make([]deliveryv1alpha1.AllowedPatchTarget, len(dto.Patches.Allowed))
+	for i, a := range dto.Patches.Allowed {
+		allowed[i] = deliveryv1alpha1.AllowedPatchTarget{
+			Target: deliveryv1alpha1.PatchTarget{
+				Kind:      a.Target.Kind,
+				Name:      a.Target.Name,
+				Namespace: a.Target.Namespace,
+			},
+			Paths: a.Paths,
+		}
+	}
+
+	return deliveryv1alpha1.OverridePolicy{
+		Values: deliveryv1alpha1.ValueOverridePolicy{
+			Policy:  deliveryv1alpha1.OverridePolicyType(dto.Values.Policy),
+			Allowed: dto.Values.Allowed,
+		},
+		Patches: deliveryv1alpha1.PatchOverridePolicy{
+			Policy:  deliveryv1alpha1.OverridePolicyType(dto.Patches.Policy),
+			Allowed: allowed,
+		},
+	}
 }

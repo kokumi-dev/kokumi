@@ -22,6 +22,7 @@ type Counts struct {
 	Orders       int `json:"orders"`
 	Preparations int `json:"preparations"`
 	Servings     int `json:"servings"`
+	Menus        int `json:"menus"`
 }
 
 const (
@@ -33,6 +34,8 @@ const (
 	eventPreparations = "preparations"
 	// eventServings is the SSE event type name for full serving list snapshots.
 	eventServings = "servings"
+	// eventMenus is the SSE event type name for full menu list snapshots.
+	eventMenus = "menus"
 )
 
 // newScheme builds a runtime Scheme with the types the server needs.
@@ -92,6 +95,11 @@ func startK8sWatcher(ctx context.Context, logger logr.Logger, h *hub) (*apiDeps,
 		return nil, fmt.Errorf("getting Serving informer: %w", err)
 	}
 
+	menuInformer, err := k8sCache.GetInformer(ctx, &deliveryv1alpha1.Menu{})
+	if err != nil {
+		return nil, fmt.Errorf("getting Menu informer: %w", err)
+	}
+
 	// refreshAll reads current state from the in-memory informer cache and
 	// broadcasts counts, full order snapshots, and full preparation snapshots
 	// to all SSE subscribers. All reads are local — no network calls.
@@ -114,10 +122,17 @@ func startK8sWatcher(ctx context.Context, logger logr.Logger, h *hub) (*apiDeps,
 			return
 		}
 
+		menuList := &deliveryv1alpha1.MenuList{}
+		if err := k8sCache.List(ctx, menuList); err != nil {
+			logger.Error(err, "Failed to list Menus from cache")
+			return
+		}
+
 		if err := h.publish(eventCounts, Counts{
 			Orders:       len(orderList.Items),
 			Preparations: len(prepList.Items),
 			Servings:     len(servingList.Items),
+			Menus:        len(menuList.Items),
 		}); err != nil {
 			logger.Error(err, "Failed to publish counts event")
 		}
@@ -132,6 +147,10 @@ func startK8sWatcher(ctx context.Context, logger logr.Logger, h *hub) (*apiDeps,
 
 		if err := h.publish(eventServings, servingsToDTO(servingList.Items)); err != nil {
 			logger.Error(err, "Failed to publish servings event")
+		}
+
+		if err := h.publish(eventMenus, menusToDTO(menuList.Items)); err != nil {
+			logger.Error(err, "Failed to publish menus event")
 		}
 	}
 
@@ -149,6 +168,9 @@ func startK8sWatcher(ctx context.Context, logger logr.Logger, h *hub) (*apiDeps,
 	}
 	if _, err := servingInformer.AddEventHandler(handler); err != nil {
 		return nil, fmt.Errorf("adding Serving event handler: %w", err)
+	}
+	if _, err := menuInformer.AddEventHandler(handler); err != nil {
+		return nil, fmt.Errorf("adding Menu event handler: %w", err)
 	}
 
 	// Start the cache in the background; it runs until ctx is cancelled.
