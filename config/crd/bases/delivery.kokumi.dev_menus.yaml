@@ -12,12 +12,37 @@ spec:
     listKind: MenuList
     plural: menus
     singular: menu
-  scope: Namespaced
+  scope: Cluster
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .spec.source.oci
+      name: Source
+      type: string
+    - jsonPath: .spec.source.version
+      name: Version
+      type: string
+    - jsonPath: .spec.overrides.values.policy
+      name: Values Policy
+      priority: 1
+      type: string
+    - jsonPath: .spec.overrides.patches.policy
+      name: Patches Policy
+      priority: 1
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: Menu is the Schema for the menus API
+        description: |-
+          Menu is the Schema for the menus API.
+          A Menu is a cluster-scoped, reusable template that operators define to pin
+          a source artifact, base configuration, and override constraints.
+          Developers consume Menus by referencing them from Orders.
         properties:
           apiVersion:
             description: |-
@@ -39,25 +64,219 @@ spec:
           spec:
             description: spec defines the desired state of Menu
             properties:
-              foo:
-                description: foo is an example field of Menu. Edit menu_types.go to
-                  remove/update
-                type: string
+              defaults:
+                description: defaults defines default values inherited by consuming
+                  Orders.
+                properties:
+                  autoDeploy:
+                    default: false
+                    description: |-
+                      autoDeploy is the default autoDeploy value for Orders using this Menu.
+                      Orders may override this.
+                    type: boolean
+                type: object
+              overrides:
+                description: overrides defines what consumers (Orders) are allowed
+                  to customize.
+                properties:
+                  patches:
+                    description: patches controls patch overrides.
+                    properties:
+                      allowed:
+                        description: |-
+                          allowed lists the patch targets and their allowed JSON paths.
+                          Only used when policy is Restricted.
+                        items:
+                          description: AllowedPatchTarget defines which patch target
+                            and JSON paths consumers may use.
+                          properties:
+                            paths:
+                              description: |-
+                                paths lists the allowed JSONPath expressions within the target
+                                (e.g. ".spec.replicas").
+                              items:
+                                type: string
+                              minItems: 1
+                              type: array
+                            target:
+                              description: target identifies the resource that consumers
+                                may patch.
+                              properties:
+                                kind:
+                                  description: kind specifies the Kubernetes resource
+                                    kind to patch
+                                  type: string
+                                name:
+                                  description: name specifies the name of the resource
+                                    to patch
+                                  type: string
+                                namespace:
+                                  description: namespace specifies the namespace of
+                                    the resource (optional, defaults to same namespace
+                                    as Order)
+                                  type: string
+                              required:
+                              - kind
+                              - name
+                              type: object
+                          required:
+                          - paths
+                          - target
+                          type: object
+                        type: array
+                      policy:
+                        default: None
+                        description: |-
+                          policy controls how consumers may apply patches.
+                          All: any patch target and path is allowed.
+                          Restricted: only the targets and paths listed in allowed are permitted.
+                          None: no patch overrides are permitted.
+                        enum:
+                        - All
+                        - Restricted
+                        - None
+                        type: string
+                    required:
+                    - policy
+                    type: object
+                    x-kubernetes-validations:
+                    - message: allowed must not be empty when policy is Restricted
+                      rule: self.policy != 'Restricted' || (has(self.allowed) && size(self.allowed)
+                        > 0)
+                  values:
+                    description: values controls Helm value overrides.
+                    properties:
+                      allowed:
+                        description: |-
+                          allowed lists the dot-separated Helm value paths that consumers may set
+                          (e.g. "ui.message", "replicaCount"). Only used when policy is Restricted.
+                        items:
+                          type: string
+                        type: array
+                      policy:
+                        default: None
+                        description: |-
+                          policy controls how consumers may override Helm values.
+                          All: any value path is allowed.
+                          Restricted: only paths listed in allowed are permitted.
+                          None: no value overrides are permitted.
+                        enum:
+                        - All
+                        - Restricted
+                        - None
+                        type: string
+                    required:
+                    - policy
+                    type: object
+                    x-kubernetes-validations:
+                    - message: allowed must not be empty when policy is Restricted
+                      rule: self.policy != 'Restricted' || (has(self.allowed) && size(self.allowed)
+                        > 0)
+                required:
+                - patches
+                - values
+                type: object
+              patches:
+                description: |-
+                  patches defines base patches always applied to consuming Orders.
+                  These are merged with (and may be overridden by) consumer patches
+                  when the override policy allows it.
+                items:
+                  description: Patch defines a modification to apply to a resource
+                  properties:
+                    set:
+                      additionalProperties:
+                        type: string
+                      description: |-
+                        set contains JSONPath expressions and their values to set
+                        Keys are JSONPath expressions (e.g., ".spec.replicas")
+                        Values are the desired values for those paths
+                      type: object
+                    target:
+                      description: target identifies which resource to patch
+                      properties:
+                        kind:
+                          description: kind specifies the Kubernetes resource kind
+                            to patch
+                          type: string
+                        name:
+                          description: name specifies the name of the resource to
+                            patch
+                          type: string
+                        namespace:
+                          description: namespace specifies the namespace of the resource
+                            (optional, defaults to same namespace as Order)
+                          type: string
+                      required:
+                      - kind
+                      - name
+                      type: object
+                  required:
+                  - set
+                  - target
+                  type: object
+                type: array
+              render:
+                description: |-
+                  render defines optional rendering configuration for the source artifact.
+                  When absent the source is treated as a pre-rendered manifest bundle.
+                  Consumers cannot change the render type.
+                properties:
+                  helm:
+                    description: |-
+                      helm renders the source OCI artifact as a Helm chart.
+                      When set, the source must be a Helm chart in OCI format.
+                    properties:
+                      includeCRDs:
+                        default: false
+                        description: |-
+                          includeCRDs controls whether CRDs are included in the rendered output.
+                          Equivalent to helm template --include-crds.
+                        type: boolean
+                      namespace:
+                        description: |-
+                          namespace is the target namespace passed to helm template --namespace.
+                          Defaults to the Order's metadata.namespace when omitted.
+                        type: string
+                      releaseName:
+                        description: |-
+                          releaseName is the Helm release name passed to helm template.
+                          Defaults to the Order's metadata.name when omitted.
+                        type: string
+                      values:
+                        description: |-
+                          values holds inline Helm values merged last (highest priority).
+                          Equivalent to a final -f values.yaml pass.
+                        x-kubernetes-preserve-unknown-fields: true
+                    type: object
+                type: object
+              source:
+                description: |-
+                  source defines the immutable OCI artifact that consuming Orders will use.
+                  Consumers cannot change the source or version.
+                properties:
+                  oci:
+                    description: oci is the OCI registry URL for the source manifests
+                    pattern: ^oci://.*
+                    type: string
+                  version:
+                    description: |-
+                      version is the semantic version or tag of the artifact
+                      The controller will resolve this to a digest
+                    type: string
+                required:
+                - oci
+                - version
+                type: object
+            required:
+            - overrides
+            - source
             type: object
           status:
             description: status defines the observed state of Menu
             properties:
               conditions:
-                description: |-
-                  conditions represent the current state of the Menu resource.
-                  Each condition has a unique type and reflects the status of a specific aspect of the resource.
-
-                  Standard condition types include:
-                  - "Available": the resource is fully functional
-                  - "Progressing": the resource is being created or updated
-                  - "Degraded": the resource failed to reach or maintain its desired state
-
-                  The status of each condition is one of True, False, or Unknown.
+                description: conditions represent the current state of the Menu resource.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -116,6 +335,17 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              observedGeneration:
+                description: observedGeneration is the most recent generation observed
+                  by the controller.
+                format: int64
+                type: integer
+              phase:
+                description: phase represents the current phase of the Menu lifecycle.
+                enum:
+                - Ready
+                - Failed
+                type: string
             type: object
         required:
         - spec

@@ -37,8 +37,7 @@ var _ = Describe("Menu Controller", func() {
 		ctx := context.Background()
 
 		typeNamespacedName := types.NamespacedName{
-			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
+			Name: resourceName,
 		}
 		menu := &deliveryv1alpha1.Menu{}
 
@@ -48,10 +47,18 @@ var _ = Describe("Menu Controller", func() {
 			if err != nil && errors.IsNotFound(err) {
 				resource := &deliveryv1alpha1.Menu{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
+						Name: resourceName,
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: deliveryv1alpha1.MenuSpec{
+						Source: deliveryv1alpha1.OCISource{
+							OCI:     "oci://registry.kokumi.svc.cluster.local:5000/order/test-resource",
+							Version: "0.1.0",
+						},
+						Overrides: deliveryv1alpha1.OverridePolicy{
+							Values:  deliveryv1alpha1.ValueOverridePolicy{Policy: deliveryv1alpha1.OverridePolicyAll},
+							Patches: deliveryv1alpha1.PatchOverridePolicy{Policy: deliveryv1alpha1.OverridePolicyNone},
+						},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}

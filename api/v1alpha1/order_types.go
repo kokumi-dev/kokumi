@@ -105,15 +105,32 @@ type Patch struct {
 	Set map[string]string `json:"set"`
 }
 
-// OrderSpec defines the desired state of Order
-type OrderSpec struct {
-	// source defines the immutable base artifact to render from
+// MenuRef references a cluster-scoped Menu by name.
+type MenuRef struct {
+	// name is the name of the cluster-scoped Menu to use as a template.
 	// +kubebuilder:validation:Required
-	Source OCISource `json:"source"`
+	Name string `json:"name"`
+}
+
+// OrderSpec defines the desired state of Order.
+// Exactly one of source or menuRef must be set.
+type OrderSpec struct {
+	// source defines the immutable base artifact to render from.
+	// Must not be set when menuRef is used.
+	// +optional
+	Source *OCISource `json:"source,omitempty"`
+
+	// menuRef references a cluster-scoped Menu that provides the source,
+	// base configuration, and override constraints for this Order.
+	// Must not be set when source is used.
+	// +optional
+	MenuRef *MenuRef `json:"menuRef,omitempty"`
 
 	// render defines optional rendering configuration for the source artifact.
 	// When absent the source OCI artifact is treated as a pre-rendered manifest bundle.
 	// When render.helm is set the source must be a Helm chart in OCI format.
+	// When menuRef is set, the render type is inherited from the Menu and this
+	// field is used only for consumer value overrides (render.helm.values).
 	// +optional
 	Render *Render `json:"render,omitempty"`
 
@@ -122,7 +139,8 @@ type OrderSpec struct {
 	Destination OCIDestination `json:"destination"`
 
 	// patches defines deterministic transformations applied to the source artifact
-	// before producing a Preparation
+	// before producing a Preparation.
+	// When menuRef is set, these patches are subject to the Menu's override policy.
 	// +optional
 	Patches []Patch `json:"patches,omitempty"`
 
@@ -187,6 +205,7 @@ type OrderStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Latest Revision",type=string,JSONPath=`.status.latestRevision`
+// +kubebuilder:printcolumn:name="Menu",type=string,JSONPath=`.spec.menuRef.name`,priority=1
 // +kubebuilder:printcolumn:name="Source",type=string,JSONPath=`.spec.source.oci`,priority=1
 // +kubebuilder:printcolumn:name="Version",type=string,JSONPath=`.spec.source.version`,priority=1
 // +kubebuilder:printcolumn:name="Auto Deploy",type=boolean,JSONPath=`.spec.autoDeploy`,priority=1

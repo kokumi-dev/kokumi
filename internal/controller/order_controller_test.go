@@ -57,7 +57,7 @@ var _ = Describe("Order Controller", func() {
 					},
 					Spec: deliveryv1alpha1.OrderSpec{
 						AutoDeploy: false,
-						Source: deliveryv1alpha1.OCISource{
+						Source: &deliveryv1alpha1.OCISource{
 							OCI:     "oci://registry.kokumi.svc.cluster.local:5000/order/test-resource",
 							Version: "0.1.0",
 						},

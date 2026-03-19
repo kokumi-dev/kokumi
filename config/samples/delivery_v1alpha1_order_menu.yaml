@@ -1,0 +1,21 @@
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Order
+metadata:
+  labels:
+    app.kubernetes.io/name: kokumi
+    app.kubernetes.io/managed-by: kustomize
+  name: podinfo-from-menu
+spec:
+  menuRef:
+    name: podinfo
+
+  render:
+    helm:
+      values:
+        ui:
+          message: "Ordered from Menu"
+
+  destination:
+    oci: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/podinfo-from-menu
+
+  autoDeploy: false

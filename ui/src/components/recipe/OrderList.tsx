@@ -75,14 +75,24 @@ function OrderCard({ order: r, selected, onClick }: CardProps) {
       </div>
 
       <div className={styles.cardMeta}>
-        <div className={styles.metaRow}>
-          <span className={styles.metaLabel}>Source</span>
-          <span className={styles.metaValue} title={r.source.oci}>{r.source.oci}</span>
-        </div>
-        <div className={styles.metaRow}>
-          <span className={styles.metaLabel}>Version</span>
-          <span className={styles.metaValue}>{r.source.version}</span>
-        </div>
+        {r.menuRef && (
+          <div className={styles.metaRow}>
+            <span className={styles.metaLabel}>Menu</span>
+            <span className={styles.metaValue}>{r.menuRef.name}</span>
+          </div>
+        )}
+        {r.source && (
+          <>
+            <div className={styles.metaRow}>
+              <span className={styles.metaLabel}>Source</span>
+              <span className={styles.metaValue} title={r.source.oci}>{r.source.oci}</span>
+            </div>
+            <div className={styles.metaRow}>
+              <span className={styles.metaLabel}>Version</span>
+              <span className={styles.metaValue}>{r.source.version}</span>
+            </div>
+          </>
+        )}
         {r.latestRevision && (
           <div className={styles.metaRow}>
             <span className={styles.metaLabel}>Latest</span>

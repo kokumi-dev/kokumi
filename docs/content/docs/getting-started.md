@@ -44,11 +44,12 @@ kubectl get pods -n kokumi
 An **Order** is the concrete delivery request.
 
 An Order does not require a Menu. It can fully define the intent of a single
-component on its own. This standalone Order model is supported in the current
-implementation and will remain supported in the future.
+component on its own. This standalone Order model is a first-class mode and will
+always be supported.
 
-Optionally, an Order will be able to consume and parameterize a Menu template
-once Menu consumption is implemented.
+Alternatively, an Order can reference a **Menu** to inherit source, render
+configuration, and base defaults while only supplying permitted overrides. See
+[Create a Menu](#create-a-menu) below for that workflow.
 
 Kokumi supports two source types:
 
@@ -161,6 +162,88 @@ kubectl get applications -n argocd
 
 To roll back, promote any previous Preparation — no re-rendering required.
 
+## Create a Menu
+
+A **Menu** is a cluster-scoped, reusable template that pins source, version, and
+render type. It defines base values and patches plus an **override policy**
+controlling what consumers may customise.
+
+```yaml
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Menu
+metadata:
+  name: podinfo
+spec:
+  source:
+    oci: oci://ghcr.io/stefanprodan/charts/podinfo
+    version: "6.10.2"
+
+  render:
+    helm:
+      namespace: default
+      values:
+        ui:
+          color: "#EF6461"
+          logo: "https://kokumi.dev/images/logo.png"
+
+  overrides:
+    values:
+      policy: Restricted
+      allowed:
+        - "ui.message"
+        - "replicaCount"
+    patches:
+      policy: None
+
+  defaults:
+    autoDeploy: false
+
+```
+
+This Menu:
+
+- Pins the podinfo Helm chart at version `6.10.2`
+- Always renders with the Kokumi logo as a base value
+- Allows consumers to set only `ui.message`, `ui.color`, and `replicaCount`
+- Forbids any patches
+
+Apply it:
+
+```bash
+kubectl apply -f menu.yaml
+```
+
+### Order from a Menu
+
+Create an Order that references the Menu instead of specifying a source directly:
+
+```yaml
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Order
+metadata:
+  name: podinfo-from-menu
+spec:
+  menuRef:
+    name: podinfo
+
+  render:
+    helm:
+      values:
+        ui:
+          message: "Ordered from Menu"
+
+  destination:
+    oci: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/podinfo-from-menu
+
+  autoDeploy: false
+
+```
+
+The Order inherits the source, version, and base values from the Menu. Only the
+allowed override keys are set. Kokumi validates the overrides against the Menu's
+policy during reconciliation — any disallowed key causes the Order to fail with
+a clear status message.
+
 ## Access the UI
 
 Kokumi includes a web UI and API server deployed alongside the controller.
@@ -172,8 +255,9 @@ kubectl port-forward -n kokumi svc/kokumi-server 8080:80
 
 Then open [http://localhost:8080](http://localhost:8080) in your browser.
 
-The UI lets you browse Orders, Preparations, and Servings, promote a
-Preparation to active with one click, and view Argo CD sync status in real time.
+The UI lets you browse Menus, Orders, Preparations, and Servings, create
+Orders from a Menu with one click, promote a Preparation to active, and view
+Argo CD sync status in real time.
 
 ## Next steps
 

@@ -22,6 +22,13 @@ func addRoutes(
 	mux.HandleFunc("PUT /api/v1/orders/{namespace}/{name}", handleUpdateOrder(deps))
 	mux.HandleFunc("DELETE /api/v1/orders/{namespace}/{name}", handleDeleteOrder(deps))
 
+	// Menu CRUD (cluster-scoped)
+	mux.HandleFunc("GET /api/v1/menus", handleListMenus(deps))
+	mux.HandleFunc("POST /api/v1/menus", handleCreateMenu(deps))
+	mux.HandleFunc("GET /api/v1/menus/{name}", handleGetMenu(deps))
+	mux.HandleFunc("PUT /api/v1/menus/{name}", handleUpdateMenu(deps))
+	mux.HandleFunc("DELETE /api/v1/menus/{name}", handleDeleteMenu(deps))
+
 	// Preparations scoped to a Order
 	mux.HandleFunc("GET /api/v1/orders/{namespace}/{name}/preparations", handleListPreparations(deps))
 

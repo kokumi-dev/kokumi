@@ -62,7 +62,7 @@ func (u *ServingUpdater) set(
 	case deliveryv1alpha1.ServingPhaseDeployed:
 		condition.Status = metav1.ConditionTrue
 	case deliveryv1alpha1.ServingPhaseFailed:
-		condition.Type = "Degraded"
+		condition.Type = conditionTypeDegraded
 		condition.Reason = "DeploymentFailed"
 	}
 

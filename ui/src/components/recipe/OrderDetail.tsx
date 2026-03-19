@@ -79,10 +79,20 @@ export default function OrderDetail({ order, onClose, onEdit, onDelete }: Props)
           <div className={styles.section}>
             <span className={styles.sectionTitle}>Spec</span>
             <div className={styles.specGrid}>
-              <span className={styles.specKey}>Source OCI</span>
-              <span className={styles.specValue}>{order.source.oci}</span>
-              <span className={styles.specKey}>Version</span>
-              <span className={styles.specValue}>{order.source.version}</span>
+              {order.menuRef && (
+                <>
+                  <span className={styles.specKey}>Menu</span>
+                  <span className={styles.specValue}>{order.menuRef.name}</span>
+                </>
+              )}
+              {order.source && (
+                <>
+                  <span className={styles.specKey}>Source OCI</span>
+                  <span className={styles.specValue}>{order.source.oci}</span>
+                  <span className={styles.specKey}>Version</span>
+                  <span className={styles.specValue}>{order.source.version}</span>
+                </>
+              )}
               <span className={styles.specKey}>Destination</span>
               <span className={styles.specValue}>{order.destination.oci}</span>
               <span className={styles.specKey}>Auto Deploy</span>

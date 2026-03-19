@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { Order, OrderFormData } from '../api/types'
 import { createOrder, updateOrder, deleteOrder } from '../api/client'
 import { useOrders } from '../hooks/useOrders'
+import { useMenus } from '../hooks/useMenus'
 import OrderList from '../components/recipe/OrderList'
 import OrderDetail from '../components/recipe/OrderDetail'
 import OrderFormModal from '../components/recipe/OrderFormModal'
@@ -12,6 +13,7 @@ type FormModalState = null | { mode: 'add' } | { mode: 'edit'; order: Order }
 
 export default function OrdersPage() {
   const orders = useOrders()
+  const menus = useMenus()
   const [selected, setSelected] = useState<Order | null>(null)
   const [formModal, setFormModal] = useState<FormModalState>(null)
   const [query, setQuery] = useState('')
@@ -89,6 +91,7 @@ export default function OrdersPage() {
 
       {formModal?.mode === 'add' && (
         <OrderFormModal
+          menus={menus ?? undefined}
           onSubmit={handleCreate}
           onClose={() => setFormModal(null)}
         />
@@ -97,6 +100,9 @@ export default function OrdersPage() {
       {formModal?.mode === 'edit' && (
         <OrderFormModal
           order={formModal.order}
+          menu={formModal.order.menuRef
+            ? menus?.find((m) => m.name === formModal.order.menuRef?.name)
+            : undefined}
           onSubmit={handleUpdate}
           onClose={() => setFormModal(null)}
         />

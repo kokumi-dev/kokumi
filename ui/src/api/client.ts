@@ -1,4 +1,4 @@
-import type { Order, Preparation, OrderFormData } from './types'
+import type { Order, Preparation, OrderFormData, Menu, MenuFormData } from './types'
 
 // All API calls are relative so they work both in dev (proxied by Vite) and
 // in production (served from the same Go binary).
@@ -104,4 +104,35 @@ export function promote(
       body: JSON.stringify({ preparation }),
     },
   )
+}
+
+// ── Menus ─────────────────────────────────────────────────────────────────────
+
+export function listMenus(): Promise<Menu[]> {
+  return request<Menu[]>('/menus')
+}
+
+export function getMenu(name: string): Promise<Menu> {
+  return request<Menu>(`/menus/${name}`)
+}
+
+export function createMenu(data: MenuFormData): Promise<Menu> {
+  return request<Menu>('/menus', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export function updateMenu(
+  name: string,
+  data: Omit<MenuFormData, 'name'>,
+): Promise<Menu> {
+  return request<Menu>(`/menus/${name}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export function deleteMenu(name: string): Promise<void> {
+  return request<void>(`/menus/${name}`, { method: 'DELETE' })
 }

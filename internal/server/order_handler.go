@@ -100,12 +100,17 @@ func handleCreateOrder(deps *apiDeps) http.HandlerFunc {
 				Namespace: req.Namespace,
 			},
 			Spec: deliveryv1alpha1.OrderSpec{
-				Source:      deliveryv1alpha1.OCISource{OCI: req.Source.OCI, Version: req.Source.Version},
 				Destination: deliveryv1alpha1.OCIDestination{OCI: req.Destination.OCI},
 				Render:      renderFromDTO(req.Render),
 				Patches:     patchesFromDTO(req.Patches),
 				AutoDeploy:  req.AutoDeploy,
 			},
+		}
+
+		if req.MenuRef != nil {
+			order.Spec.MenuRef = &deliveryv1alpha1.MenuRef{Name: req.MenuRef.Name}
+		} else {
+			order.Spec.Source = &deliveryv1alpha1.OCISource{OCI: req.Source.OCI, Version: req.Source.Version}
 		}
 
 		if err := deps.writer.Create(r.Context(), order); err != nil {
@@ -146,11 +151,18 @@ func handleUpdateOrder(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		order.Spec.Source = deliveryv1alpha1.OCISource{OCI: req.Source.OCI, Version: req.Source.Version}
 		order.Spec.Destination = deliveryv1alpha1.OCIDestination{OCI: req.Destination.OCI}
 		order.Spec.Render = renderFromDTO(req.Render)
 		order.Spec.Patches = patchesFromDTO(req.Patches)
 		order.Spec.AutoDeploy = req.AutoDeploy
+
+		if req.MenuRef != nil {
+			order.Spec.MenuRef = &deliveryv1alpha1.MenuRef{Name: req.MenuRef.Name}
+			order.Spec.Source = nil
+		} else {
+			order.Spec.Source = &deliveryv1alpha1.OCISource{OCI: req.Source.OCI, Version: req.Source.Version}
+			order.Spec.MenuRef = nil
+		}
 
 		if err := deps.writer.Update(r.Context(), order); err != nil {
 			deps.logger.Error(err, "Failed to update Order", "namespace", namespace, "name", name)
