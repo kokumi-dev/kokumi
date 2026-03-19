@@ -94,7 +94,14 @@ export default function OrderDetail({ order, onClose, onEdit, onDelete }: Props)
                 </>
               )}
               <span className={styles.specKey}>Destination</span>
-              <span className={styles.specValue}>{order.destination.oci}</span>
+              <span className={styles.specValue}>
+                {order.destination?.oci || (
+                  <>
+                    {order.effectiveDestination}
+                    <span className={styles.autoBadge}>auto</span>
+                  </>
+                )}
+              </span>
               <span className={styles.specKey}>Auto Deploy</span>
               <span className={styles.specValue}>{order.autoDeploy ? 'Yes' : 'No'}</span>
               {order.render?.helm && (

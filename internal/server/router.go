@@ -15,6 +15,8 @@ func addRoutes(
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /readyz", handleReadyz)
 
+	mux.HandleFunc("GET /api/v1/registry/default", handleGetDefaultRegistry())
+
 	// Order CRUD
 	mux.HandleFunc("GET /api/v1/orders", handleListOrders(deps))
 	mux.HandleFunc("POST /api/v1/orders", handleCreateOrder(deps))

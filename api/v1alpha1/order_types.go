@@ -72,9 +72,9 @@ type Render struct {
 // (Preparation) will be pushed as an OCI artifact
 type OCIDestination struct {
 	// oci is the OCI registry URL where configured manifests will be pushed
-	// +kubebuilder:validation:Required
+	// +optional
 	// +kubebuilder:validation:Pattern=`^oci://.*`
-	OCI string `json:"oci"`
+	OCI string `json:"oci,omitempty"`
 }
 
 // PatchTarget identifies which resource to patch
@@ -134,9 +134,10 @@ type OrderSpec struct {
 	// +optional
 	Render *Render `json:"render,omitempty"`
 
-	// destination defines where the rendered Preparation artifact will be pushed
-	// +kubebuilder:validation:Required
-	Destination OCIDestination `json:"destination"`
+	// destination defines where the rendered Preparation artifact will be pushed.
+	// When omitted, the in-cluster registry is used automatically.
+	// +optional
+	Destination *OCIDestination `json:"destination,omitempty"`
 
 	// patches defines deterministic transformations applied to the source artifact
 	// before producing a Preparation.

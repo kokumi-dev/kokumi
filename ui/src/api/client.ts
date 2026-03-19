@@ -60,6 +60,10 @@ export function deleteOrder(namespace: string, name: string): Promise<void> {
   return request<void>(`/orders/${namespace}/${name}`, { method: 'DELETE' })
 }
 
+export function getDefaultRegistry(): Promise<{ baseURL: string }> {
+  return request<{ baseURL: string }>('/registry/default')
+}
+
 // ── Preparations ──────────────────────────────────────────────────────────────
 
 export function listPreparations(

@@ -73,16 +73,15 @@ spec:
                   If false, activation must be performed explicitly.
                 type: boolean
               destination:
-                description: destination defines where the rendered Preparation artifact
-                  will be pushed
+                description: |-
+                  destination defines where the rendered Preparation artifact will be pushed.
+                  When omitted, the in-cluster registry is used automatically.
                 properties:
                   oci:
                     description: oci is the OCI registry URL where configured manifests
                       will be pushed
                     pattern: ^oci://.*
                     type: string
-                required:
-                - oci
                 type: object
               menuRef:
                 description: |-
@@ -193,7 +192,6 @@ spec:
                 type: object
             required:
             - autoDeploy
-            - destination
             type: object
           status:
             description: status defines the observed state of Order

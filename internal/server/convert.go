@@ -8,6 +8,7 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/service"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -74,8 +75,19 @@ func orderToDTO(r deliveryv1alpha1.Order, activePreparation string) OrderDTO {
 		Namespace: r.Namespace,
 		Labels:    r.Labels,
 		Destination: OCIDestinationDTO{
-			OCI: r.Spec.Destination.OCI,
+			OCI: func() string {
+				if r.Spec.Destination != nil {
+					return r.Spec.Destination.OCI
+				}
+				return ""
+			}(),
 		},
+		EffectiveDestination: func() string {
+			if r.Spec.Destination != nil && r.Spec.Destination.OCI != "" {
+				return r.Spec.Destination.OCI
+			}
+			return service.DefaultDestination(r.Namespace, r.Name)
+		}(),
 		Render:            renderToDTO(r.Spec.Render),
 		Patches:           patches,
 		AutoDeploy:        r.Spec.AutoDeploy,

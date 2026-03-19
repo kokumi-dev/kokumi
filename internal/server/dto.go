@@ -59,20 +59,21 @@ type MenuRefDTO struct {
 // OrderDTO is the enriched view of a Order served to the UI.
 // ActivePreparation is derived from the linked Serving's status.observedPreparation.
 type OrderDTO struct {
-	Name              string            `json:"name"`
-	Namespace         string            `json:"namespace"`
-	Labels            map[string]string `json:"labels,omitempty"`
-	Source            *OCISourceDTO     `json:"source,omitempty"`
-	MenuRef           *MenuRefDTO       `json:"menuRef,omitempty"`
-	Destination       OCIDestinationDTO `json:"destination"`
-	Render            *RenderDTO        `json:"render,omitempty"`
-	Patches           []PatchDTO        `json:"patches,omitempty"`
-	AutoDeploy        bool              `json:"autoDeploy"`
-	Phase             string            `json:"phase"`
-	LatestRevision    string            `json:"latestRevision,omitempty"`
-	ActivePreparation string            `json:"activePreparation,omitempty"`
-	Conditions        []ConditionDTO    `json:"conditions,omitempty"`
-	CreatedAt         *time.Time        `json:"createdAt,omitempty"`
+	Name                 string            `json:"name"`
+	Namespace            string            `json:"namespace"`
+	Labels               map[string]string `json:"labels,omitempty"`
+	Source               *OCISourceDTO     `json:"source,omitempty"`
+	MenuRef              *MenuRefDTO       `json:"menuRef,omitempty"`
+	Destination          OCIDestinationDTO `json:"destination"`
+	EffectiveDestination string            `json:"effectiveDestination,omitempty"`
+	Render               *RenderDTO        `json:"render,omitempty"`
+	Patches              []PatchDTO        `json:"patches,omitempty"`
+	AutoDeploy           bool              `json:"autoDeploy"`
+	Phase                string            `json:"phase"`
+	LatestRevision       string            `json:"latestRevision,omitempty"`
+	ActivePreparation    string            `json:"activePreparation,omitempty"`
+	Conditions           []ConditionDTO    `json:"conditions,omitempty"`
+	CreatedAt            *time.Time        `json:"createdAt,omitempty"`
 }
 
 // ArtifactDTO is the data-transfer representation of an Artifact.
@@ -99,24 +100,24 @@ type PreparationDTO struct {
 
 // CreateOrderRequest is the body for POST /api/v1/orders.
 type CreateOrderRequest struct {
-	Namespace   string            `json:"namespace"`
-	Name        string            `json:"name"`
-	Source      OCISourceDTO      `json:"source"`
-	MenuRef     *MenuRefDTO       `json:"menuRef,omitempty"`
-	Destination OCIDestinationDTO `json:"destination"`
-	Render      *RenderDTO        `json:"render,omitempty"`
-	Patches     []PatchDTO        `json:"patches,omitempty"`
-	AutoDeploy  bool              `json:"autoDeploy"`
+	Namespace   string             `json:"namespace"`
+	Name        string             `json:"name"`
+	Source      OCISourceDTO       `json:"source"`
+	MenuRef     *MenuRefDTO        `json:"menuRef,omitempty"`
+	Destination *OCIDestinationDTO `json:"destination,omitempty"`
+	Render      *RenderDTO         `json:"render,omitempty"`
+	Patches     []PatchDTO         `json:"patches,omitempty"`
+	AutoDeploy  bool               `json:"autoDeploy"`
 }
 
 // UpdateOrderRequest is the body for PUT /api/v1/orders/{namespace}/{name}.
 type UpdateOrderRequest struct {
-	Source      OCISourceDTO      `json:"source"`
-	MenuRef     *MenuRefDTO       `json:"menuRef,omitempty"`
-	Destination OCIDestinationDTO `json:"destination"`
-	Render      *RenderDTO        `json:"render,omitempty"`
-	Patches     []PatchDTO        `json:"patches,omitempty"`
-	AutoDeploy  bool              `json:"autoDeploy"`
+	Source      OCISourceDTO       `json:"source"`
+	MenuRef     *MenuRefDTO        `json:"menuRef,omitempty"`
+	Destination *OCIDestinationDTO `json:"destination,omitempty"`
+	Render      *RenderDTO         `json:"render,omitempty"`
+	Patches     []PatchDTO         `json:"patches,omitempty"`
+	AutoDeploy  bool               `json:"autoDeploy"`
 }
 
 // PromoteRequest is the body for POST /api/v1/orders/{namespace}/{name}/promote.
