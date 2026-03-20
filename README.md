@@ -42,6 +42,10 @@ Kokumi supports both **Helm charts** and **pre-rendered manifest bundles** as
 OCI source artifacts, and delegates all runtime deployment to **Argo CD** —
 feeding your existing GitOps workflow rather than replacing it.
 
+<p align="center">
+  <img src="docs/static/images/screenshot.png" alt="Kokumi UI" width="900" />
+</p>
+
 ## Getting Started
 
 > **Kokumi is currently experimental — use with caution in production environments.**
