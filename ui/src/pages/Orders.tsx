@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Order, OrderFormData } from '../api/types'
+import type { Order, OrderFormData, Menu } from '../api/types'
 import { createOrder, updateOrder, deleteOrder } from '../api/client'
 import { useOrders } from '../hooks/useOrders'
 import { useMenus } from '../hooks/useMenus'
@@ -14,9 +14,26 @@ type FormModalState = null | { mode: 'add' } | { mode: 'edit'; order: Order }
 export default function OrdersPage() {
   const orders = useOrders()
   const menus = useMenus()
-  const [selected, setSelected] = useState<Order | null>(null)
+  const [selectedKey, setSelectedKey] = useState<{ namespace: string; name: string } | null>(null)
   const [formModal, setFormModal] = useState<FormModalState>(null)
   const [query, setQuery] = useState('')
+
+  // Derive selected order from the live SSE-backed list so it stays fresh.
+  const selected = selectedKey
+    ? orders?.find((o) => o.namespace === selectedKey.namespace && o.name === selectedKey.name) ?? null
+    : null
+
+  // Resolve the menu linked to the selected order (if any).
+  const selectedMenu: Menu | undefined = selected?.menuRef
+    ? menus?.find((m) => m.name === selected.menuRef?.name)
+    : undefined
+
+  // Edits are allowed unless the menu explicitly forbids them.
+  // When a menuRef is set but the menu hasn't loaded yet, default to denying
+  // edits (fail closed) rather than allowing a forbidden action.
+  const editsAllowed = selected?.menuRef
+    ? !!selectedMenu && selectedMenu.overrides.patches.policy !== 'None'
+    : true
 
   async function handleCreate(data: OrderFormData) {
     await createOrder(data)
@@ -33,7 +50,7 @@ export default function OrdersPage() {
   async function handleDelete(order: Order) {
     await deleteOrder(order.namespace, order.name)
     if (selected?.name === order.name && selected?.namespace === order.namespace) {
-      setSelected(null)
+      setSelectedKey(null)
     }
   }
 
@@ -74,7 +91,7 @@ export default function OrdersPage() {
             <OrderList
               orders={orders}
               query={query}
-              onSelect={setSelected}
+              onSelect={(o) => setSelectedKey({ namespace: o.namespace, name: o.name })}
             />
           )}
         </div>
@@ -83,7 +100,8 @@ export default function OrdersPage() {
       {selected && (
         <OrderDetail
           order={selected}
-          onClose={() => setSelected(null)}
+          editsAllowed={editsAllowed}
+          onClose={() => setSelectedKey(null)}
           onEdit={openEdit}
           onDelete={handleDelete}
         />

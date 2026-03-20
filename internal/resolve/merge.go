@@ -189,10 +189,37 @@ func validateValuePaths(prefix string, values map[string]any, allowed map[string
 	return nil
 }
 
+// validateEdits checks that the Order's edits comply with the Menu's patch override policy.
+// Edits are consumer-only (never inherited from Menu) but still governed by the same
+// PatchOverridePolicy.
+func validateEdits(menu *deliveryv1alpha1.Menu, order *deliveryv1alpha1.Order) error {
+	if len(order.Spec.Edits) == 0 {
+		return nil
+	}
+
+	policy := menu.Spec.Overrides.Patches
+
+	if policy.Policy == deliveryv1alpha1.OverridePolicyNone {
+		return fmt.Errorf("edits are not allowed by Menu %q (patch policy is None)", menu.Name)
+	}
+
+	if policy.Policy == deliveryv1alpha1.OverridePolicyRestricted {
+		for _, e := range order.Spec.Edits {
+			if err := validatePatchAllowed(e, policy.Allowed); err != nil {
+				return fmt.Errorf("edit not allowed: %w", err)
+			}
+		}
+	}
+
+	return nil
+}
+
 // validatePatchAllowed checks if a consumer patch is permitted by the allowed list.
 func validatePatchAllowed(patch deliveryv1alpha1.Patch, allowed []deliveryv1alpha1.AllowedPatchTarget) error {
 	for _, a := range allowed {
-		if a.Target.Kind == patch.Target.Kind && a.Target.Name == patch.Target.Name {
+		if a.Target.Kind == patch.Target.Kind &&
+			a.Target.Name == patch.Target.Name &&
+			a.Target.Namespace == patch.Target.Namespace {
 			allowedPaths := make(map[string]bool, len(a.Paths))
 			for _, p := range a.Paths {
 				allowedPaths[p] = true

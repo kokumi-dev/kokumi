@@ -103,6 +103,7 @@ function yamlToPartialForm(text: string): Omit<OrderFormData, 'name' | 'namespac
     destination: { oci: dst?.oci ?? '' },
     render,
     autoDeploy: Boolean(doc.autoDeploy),
+    edits: [],
     patches: rawPatches.map((p) => {
       const patch = p as Record<string, unknown>
       const target = (patch.target ?? {}) as Record<string, string>

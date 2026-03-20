@@ -70,6 +70,18 @@ func orderToDTO(r deliveryv1alpha1.Order, activePreparation string) OrderDTO {
 		}
 	}
 
+	edits := make([]PatchDTO, len(r.Spec.Edits))
+	for i, e := range r.Spec.Edits {
+		edits[i] = PatchDTO{
+			Target: PatchTargetDTO{
+				Kind:      e.Target.Kind,
+				Name:      e.Target.Name,
+				Namespace: e.Target.Namespace,
+			},
+			Set: e.Set,
+		}
+	}
+
 	dto := OrderDTO{
 		Name:      r.Name,
 		Namespace: r.Namespace,
@@ -90,6 +102,7 @@ func orderToDTO(r deliveryv1alpha1.Order, activePreparation string) OrderDTO {
 		}(),
 		Render:            renderToDTO(r.Spec.Render),
 		Patches:           patches,
+		Edits:             edits,
 		AutoDeploy:        r.Spec.AutoDeploy,
 		Phase:             string(r.Status.Phase),
 		LatestRevision:    r.Status.LatestRevision,

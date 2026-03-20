@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import type { Order, Preparation } from '../../api/types'
-import { promote } from '../../api/client'
+import type { Order, Patch, Preparation } from '../../api/types'
+import { promote, saveOrderEdits } from '../../api/client'
 import { usePreparations } from '../../hooks/usePreparations'
 import Badge from '../shared/Badge'
 import Btn from '../shared/Btn'
@@ -11,6 +11,7 @@ import styles from './OrderDetail.module.css'
 
 interface Props {
   order: Order
+  editsAllowed: boolean
   onClose: () => void
   onEdit: (order: Order) => void
   onDelete: (order: Order) => void
@@ -25,7 +26,7 @@ type ModalState =
  * OrderDetail is a slide-in right panel that displays the full Order spec,
  * status conditions, and the live list of Preparations for that Order.
  */
-export default function OrderDetail({ order, onClose, onEdit, onDelete }: Props) {
+export default function OrderDetail({ order, editsAllowed, onClose, onEdit, onDelete }: Props) {
   const preparations = usePreparations(order.name) ?? []
   const [modal, setModal] = useState<ModalState>(null)
 
@@ -42,6 +43,25 @@ export default function OrderDetail({ order, onClose, onEdit, onDelete }: Props)
   function handleOpenDiff(prep: Preparation) {
     if (!activePrep) return
     setModal({ kind: 'diff', prep, activePrep })
+  }
+
+  async function handleRemoveEdit(editIndex: number) {
+    const edits = [...(order.edits ?? [])]
+    edits.splice(editIndex, 1)
+    await saveOrderEdits(order.namespace, order.name, edits)
+  }
+
+  async function handleRemoveEditPath(editIndex: number, path: string) {
+    const edits: Patch[] = (order.edits ?? []).map((e, i) => {
+      if (i !== editIndex) return { ...e, set: { ...e.set } }
+      const { [path]: _, ...rest } = e.set
+      return { ...e, set: rest }
+    }).filter((e) => Object.keys(e.set).length > 0)
+    await saveOrderEdits(order.namespace, order.name, edits)
+  }
+
+  async function handleClearAllEdits() {
+    await saveOrderEdits(order.namespace, order.name, [])
   }
 
   return (
@@ -165,6 +185,59 @@ export default function OrderDetail({ order, onClose, onEdit, onDelete }: Props)
             </div>
           )}
 
+          {/* Edits (UI-driven field modifications) */}
+          {order.edits && order.edits.length > 0 && (
+            <div className={styles.section}>
+              <div className={styles.sectionHeader}>
+                <span className={styles.sectionTitle}>
+                  Edits ({order.edits.length})
+                </span>
+                <Btn variant="danger" size="sm" onClick={() => handleClearAllEdits()}>
+                  Clear All
+                </Btn>
+              </div>
+              <div className={styles.patchesList}>
+                {order.edits.map((e, i) => (
+                  <div key={i} className={styles.patchItem}>
+                    <div className={styles.patchItemHeader}>
+                      <span className={styles.patchTarget}>
+                        {e.target.kind}/{e.target.name}
+                        {e.target.namespace ? ` (${e.target.namespace})` : ''}
+                      </span>
+                      <button
+                        className={styles.removeBtn}
+                        title="Remove all edits for this target"
+                        onClick={() => handleRemoveEdit(i)}
+                        aria-label={`Remove edits for ${e.target.kind}/${e.target.name}`}
+                      >
+                        <svg viewBox="0 0 14 14" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                          <path d="M2 2l10 10M12 2L2 12" />
+                        </svg>
+                      </button>
+                    </div>
+                    {Object.entries(e.set).map(([path, v]) => (
+                      <div key={path} className={styles.patchSetRow}>
+                        <span className={styles.patchSetKey}>{path}</span>
+                        <span>→</span>
+                        <span>{v}</span>
+                        <button
+                          className={styles.removeBtn}
+                          title={`Remove edit ${path}`}
+                          onClick={() => handleRemoveEditPath(i, path)}
+                          aria-label={`Remove edit ${path}`}
+                        >
+                          <svg viewBox="0 0 14 14" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                            <path d="M2 2l10 10M12 2L2 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Conditions */}
           {order.conditions && order.conditions.length > 0 && (
             <div className={styles.section}>
@@ -206,6 +279,7 @@ export default function OrderDetail({ order, onClose, onEdit, onDelete }: Props)
       {modal?.kind === 'manifest' && (
         <ManifestModal
           preparation={modal.prep}
+          order={editsAllowed ? order : undefined}
           onClose={() => setModal(null)}
         />
       )}

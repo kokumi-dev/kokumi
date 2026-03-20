@@ -126,12 +126,14 @@ func CalculateSpecHash(spec deliveryv1alpha1.OrderSpec) (string, error) {
 		MenuRef string                   `yaml:"menuRef,omitempty"`
 		Render  *deliveryv1alpha1.Render `yaml:"render,omitempty"`
 		Patches []deliveryv1alpha1.Patch `yaml:"patches,omitempty"`
+		Edits   []deliveryv1alpha1.Patch `yaml:"edits,omitempty"`
 	}{
 		OCI:     oci,
 		Version: version,
 		MenuRef: menuRef,
 		Render:  spec.Render,
 		Patches: spec.Patches,
+		Edits:   spec.Edits,
 	}); err != nil {
 		return "", fmt.Errorf("failed to encode spec for hashing: %w", err)
 	}

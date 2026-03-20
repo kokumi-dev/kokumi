@@ -68,6 +68,7 @@ type OrderDTO struct {
 	EffectiveDestination string            `json:"effectiveDestination,omitempty"`
 	Render               *RenderDTO        `json:"render,omitempty"`
 	Patches              []PatchDTO        `json:"patches,omitempty"`
+	Edits                []PatchDTO        `json:"edits,omitempty"`
 	AutoDeploy           bool              `json:"autoDeploy"`
 	Phase                string            `json:"phase"`
 	LatestRevision       string            `json:"latestRevision,omitempty"`
@@ -107,6 +108,7 @@ type CreateOrderRequest struct {
 	Destination *OCIDestinationDTO `json:"destination,omitempty"`
 	Render      *RenderDTO         `json:"render,omitempty"`
 	Patches     []PatchDTO         `json:"patches,omitempty"`
+	Edits       []PatchDTO         `json:"edits,omitempty"`
 	AutoDeploy  bool               `json:"autoDeploy"`
 }
 
@@ -117,6 +119,7 @@ type UpdateOrderRequest struct {
 	Destination *OCIDestinationDTO `json:"destination,omitempty"`
 	Render      *RenderDTO         `json:"render,omitempty"`
 	Patches     []PatchDTO         `json:"patches,omitempty"`
+	Edits       []PatchDTO         `json:"edits,omitempty"`
 	AutoDeploy  bool               `json:"autoDeploy"`
 }
 
