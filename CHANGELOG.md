@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/kokumi-dev/kokumi/compare/0.8.0...0.9.0) (2026-03-20)
+
+
+### Features
+
+* add support for ui driven edits for orders ([#89](https://github.com/kokumi-dev/kokumi/issues/89)) ([619c494](https://github.com/kokumi-dev/kokumi/commit/619c4944e6ff99525e121b6be4265ff7323467c9))
+
 ## [0.8.0](https://github.com/kokumi-dev/kokumi/compare/0.7.0...0.8.0) (2026-03-19)
 
 
