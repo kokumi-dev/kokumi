@@ -25,12 +25,13 @@ import (
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 )
 
-// EffectiveSpec holds the resolved source, render config, and patches
+// EffectiveSpec holds the resolved source, render config, patches, and edits
 // that the order service will use to process an Order.
 type EffectiveSpec struct {
 	Source  deliveryv1alpha1.OCISource
 	Render  *deliveryv1alpha1.Render
 	Patches []deliveryv1alpha1.Patch
+	Edits   []deliveryv1alpha1.Patch
 }
 
 // FromOrder builds an EffectiveSpec directly from a standalone Order
@@ -44,6 +45,7 @@ func FromOrder(order *deliveryv1alpha1.Order) (*EffectiveSpec, error) {
 		Source:  *order.Spec.Source,
 		Render:  order.Spec.Render,
 		Patches: order.Spec.Patches,
+		Edits:   order.Spec.Edits,
 	}, nil
 }
 
@@ -60,9 +62,14 @@ func ForMenu(menu *deliveryv1alpha1.Menu, order *deliveryv1alpha1.Order) (*Effec
 		return nil, fmt.Errorf("patch override violation: %w", err)
 	}
 
+	if err := validateEdits(menu, order); err != nil {
+		return nil, fmt.Errorf("edit override violation: %w", err)
+	}
+
 	return &EffectiveSpec{
 		Source:  menu.Spec.Source,
 		Render:  mergedRender,
 		Patches: mergedPatches,
+		Edits:   order.Spec.Edits,
 	}, nil
 }

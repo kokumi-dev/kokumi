@@ -1,4 +1,4 @@
-import type { Order, Preparation, OrderFormData, Menu, MenuFormData } from './types'
+import type { Order, Preparation, OrderFormData, Menu, MenuFormData, Patch } from './types'
 
 // All API calls are relative so they work both in dev (proxied by Vite) and
 // in production (served from the same Go binary).
@@ -39,9 +39,11 @@ export function getOrder(namespace: string, name: string): Promise<Order> {
 }
 
 export function createOrder(data: OrderFormData): Promise<Order> {
+  // Edits are only set via the manifest editor on existing orders, never on create.
+  const { edits: _, ...payload } = data
   return request<Order>('/orders', {
     method: 'POST',
-    body: JSON.stringify(data),
+    body: JSON.stringify(payload),
   })
 }
 
@@ -58,6 +60,17 @@ export function updateOrder(
 
 export function deleteOrder(namespace: string, name: string): Promise<void> {
   return request<void>(`/orders/${namespace}/${name}`, { method: 'DELETE' })
+}
+
+export function saveOrderEdits(
+  namespace: string,
+  name: string,
+  edits: Patch[],
+): Promise<Order> {
+  return request<Order>(`/orders/${namespace}/${name}/edits`, {
+    method: 'PUT',
+    body: JSON.stringify({ edits }),
+  })
 }
 
 export function getDefaultRegistry(): Promise<{ baseURL: string }> {

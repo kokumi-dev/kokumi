@@ -102,6 +102,7 @@ func handleCreateOrder(deps *apiDeps) http.HandlerFunc {
 			Spec: deliveryv1alpha1.OrderSpec{
 				Render:     renderFromDTO(req.Render),
 				Patches:    patchesFromDTO(req.Patches),
+				Edits:      patchesFromDTO(req.Edits),
 				AutoDeploy: req.AutoDeploy,
 			},
 		}
@@ -156,6 +157,7 @@ func handleUpdateOrder(deps *apiDeps) http.HandlerFunc {
 
 		order.Spec.Render = renderFromDTO(req.Render)
 		order.Spec.Patches = patchesFromDTO(req.Patches)
+		order.Spec.Edits = patchesFromDTO(req.Edits)
 		order.Spec.AutoDeploy = req.AutoDeploy
 
 		if req.Destination != nil && req.Destination.OCI != "" {
@@ -174,6 +176,52 @@ func handleUpdateOrder(deps *apiDeps) http.HandlerFunc {
 
 		if err := deps.writer.Update(r.Context(), order); err != nil {
 			deps.logger.Error(err, "Failed to update Order", "namespace", namespace, "name", name)
+			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to update order: %s", err))
+			return
+		}
+
+		respondJSON(w, http.StatusOK, orderToDTO(*order, ""))
+	}
+}
+
+// UpdateOrderEditsRequest is the body for PUT /api/v1/orders/{namespace}/{name}/edits.
+type UpdateOrderEditsRequest struct {
+	Edits []PatchDTO `json:"edits"`
+}
+
+// handleUpdateOrderEdits handles PUT /api/v1/orders/{namespace}/{name}/edits.
+// It updates only the edits field of an Order, leaving all other fields unchanged.
+func handleUpdateOrderEdits(deps *apiDeps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps == nil {
+			unavailable(w)
+			return
+		}
+
+		namespace := r.PathValue("namespace")
+		name := r.PathValue("name")
+
+		var req UpdateOrderEditsRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			respondError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %s", err))
+			return
+		}
+
+		order := &deliveryv1alpha1.Order{}
+		if err := deps.reader.Get(r.Context(), types.NamespacedName{Namespace: namespace, Name: name}, order); err != nil {
+			if client.IgnoreNotFound(err) == nil {
+				respondError(w, http.StatusNotFound, fmt.Sprintf("order %s/%s not found", namespace, name))
+				return
+			}
+			deps.logger.Error(err, "Failed to get Order", "namespace", namespace, "name", name)
+			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get order: %s", err))
+			return
+		}
+
+		order.Spec.Edits = patchesFromDTO(req.Edits)
+
+		if err := deps.writer.Update(r.Context(), order); err != nil {
+			deps.logger.Error(err, "Failed to update Order edits", "namespace", namespace, "name", name)
 			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to update order: %s", err))
 			return
 		}

@@ -145,6 +145,13 @@ type OrderSpec struct {
 	// +optional
 	Patches []Patch `json:"patches,omitempty"`
 
+	// edits defines UI-driven field modifications applied after patches.
+	// Unlike patches, edits are never inherited from a Menu and are intended
+	// for interactive changes made through the web UI.
+	// When menuRef is set, edits are still subject to the Menu's patch override policy.
+	// +optional
+	Edits []Patch `json:"edits,omitempty"`
+
 	// autoDeploy controls whether a newly created Preparation
 	// should automatically become the active Serving.
 	// If false, activation must be performed explicitly.

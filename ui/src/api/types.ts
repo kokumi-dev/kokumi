@@ -53,6 +53,7 @@ export interface Order {
   effectiveDestination?: string
   render?: Render
   patches?: Patch[]
+  edits?: Patch[]
   autoDeploy: boolean
   phase: string
   latestRevision?: string
@@ -140,6 +141,7 @@ export interface OrderFormData {
   destination: OCIDestination
   render?: Render
   patches: Patch[]
+  edits: Patch[]
   autoDeploy: boolean
 }
 
@@ -150,6 +152,7 @@ export const emptyOrderForm = (): OrderFormData => ({
   destination: { oci: '' },
   render: undefined,
   patches: [],
+  edits: [],
   autoDeploy: false,
 })
 
@@ -170,6 +173,10 @@ export const orderToFormData = (r: Order): OrderFormData => ({
       }
     : undefined,
   patches: (r.patches ?? []).map((p) => ({
+    target: { ...p.target },
+    set: { ...p.set },
+  })),
+  edits: (r.edits ?? []).map((p) => ({
     target: { ...p.target },
     set: { ...p.set },
   })),

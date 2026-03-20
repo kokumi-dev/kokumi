@@ -46,9 +46,9 @@ func NewOrderService(client oci.Client, fs afero.Fs, cacheDir string) *OrderServ
 	}
 }
 
-// ProcessOrder pulls the source artifact, applies patches or normalizes YAML,
+// ProcessOrder pulls the source artifact, applies patches and edits or normalizes YAML,
 // pushes the result to the destination, and returns the source/dest refs and digests.
-// The effective source, render, and patches are passed explicitly so that
+// The effective source, render, patches, and edits are passed explicitly so that
 // Menu-based Orders can supply merged values.
 // destination is the fully-qualified OCI URL to push the result to; the caller
 // is responsible for supplying the default when the Order has none configured.
@@ -58,6 +58,7 @@ func (rs *OrderService) ProcessOrder(
 	source deliveryv1alpha1.OCISource,
 	render *deliveryv1alpha1.Render,
 	patches []deliveryv1alpha1.Patch,
+	edits []deliveryv1alpha1.Patch,
 	destination string,
 ) (*OrderResult, error) {
 	logger := log.FromContext(ctx)
@@ -129,7 +130,7 @@ func (rs *OrderService) ProcessOrder(
 		return nil, fmt.Errorf("failed to read manifest: %w", err)
 	}
 
-	processedContent, err := rs.processManifest(ctx, content, patches)
+	processedContent, err := rs.processManifest(ctx, content, patches, edits)
 	if err != nil {
 		return nil, err
 	}
@@ -155,31 +156,47 @@ func (rs *OrderService) ProcessOrder(
 	}, nil
 }
 
-// processManifest applies patches when present, otherwise normalizes YAML formatting.
-func (rs *OrderService) processManifest(ctx context.Context, content []byte, patches []deliveryv1alpha1.Patch) ([]byte, error) {
+// processManifest applies patches and edits when present, otherwise normalizes YAML formatting.
+// Patches are applied first, then edits on top.
+func (rs *OrderService) processManifest(ctx context.Context, content []byte, patches, edits []deliveryv1alpha1.Patch) ([]byte, error) {
 	logger := log.FromContext(ctx)
 
-	if len(patches) > 0 {
-		logger.Info("Applying patches", "count", len(patches))
+	if len(patches) == 0 && len(edits) == 0 {
+		logger.Info("Normalizing YAML formatting")
 
-		processed, err := renderer.ApplyPatches(ctx, content, patches)
+		processed, err := renderer.NormalizeYAML(content)
 		if err != nil {
-			return nil, fmt.Errorf("failed to apply patches: %w", err)
+			return nil, fmt.Errorf("failed to normalize YAML: %w", err)
 		}
-
-		logger.Info("Successfully applied patches")
 
 		return processed, nil
 	}
 
-	logger.Info("Normalizing YAML formatting")
+	result := content
 
-	processed, err := renderer.NormalizeYAML(content)
-	if err != nil {
-		return nil, fmt.Errorf("failed to normalize YAML: %w", err)
+	if len(patches) > 0 {
+		logger.Info("Applying patches", "count", len(patches))
+
+		processed, err := renderer.ApplyPatches(ctx, result, patches)
+		if err != nil {
+			return nil, fmt.Errorf("failed to apply patches: %w", err)
+		}
+
+		result = processed
 	}
 
-	return processed, nil
+	if len(edits) > 0 {
+		logger.Info("Applying edits", "count", len(edits))
+
+		processed, err := renderer.ApplyPatches(ctx, result, edits)
+		if err != nil {
+			return nil, fmt.Errorf("failed to apply edits: %w", err)
+		}
+
+		result = processed
+	}
+
+	return result, nil
 }
 
 // cacheEntry is the metadata written alongside a cached artifact blob.

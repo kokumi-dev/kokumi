@@ -83,6 +83,47 @@ spec:
                     pattern: ^oci://.*
                     type: string
                 type: object
+              edits:
+                description: |-
+                  edits defines UI-driven field modifications applied after patches.
+                  Unlike patches, edits are never inherited from a Menu and are intended
+                  for interactive changes made through the web UI.
+                  When menuRef is set, edits are still subject to the Menu's patch override policy.
+                items:
+                  description: Patch defines a modification to apply to a resource
+                  properties:
+                    set:
+                      additionalProperties:
+                        type: string
+                      description: |-
+                        set contains JSONPath expressions and their values to set
+                        Keys are JSONPath expressions (e.g., ".spec.replicas")
+                        Values are the desired values for those paths
+                      type: object
+                    target:
+                      description: target identifies which resource to patch
+                      properties:
+                        kind:
+                          description: kind specifies the Kubernetes resource kind
+                            to patch
+                          type: string
+                        name:
+                          description: name specifies the name of the resource to
+                            patch
+                          type: string
+                        namespace:
+                          description: namespace specifies the namespace of the resource
+                            (optional, defaults to same namespace as Order)
+                          type: string
+                      required:
+                      - kind
+                      - name
+                      type: object
+                  required:
+                  - set
+                  - target
+                  type: object
+                type: array
               menuRef:
                 description: |-
                   menuRef references a cluster-scoped Menu that provides the source,

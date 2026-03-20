@@ -26,6 +26,14 @@ spec:
         - "replicaCount"
     patches:
       policy: None
+      # policy: Restricted
+      # allowed:
+      #   - target:
+      #       kind: Deployment
+      #       name: podinfo
+      #     paths:
+      #       - ".spec.replicas"
+      #       - ".spec.template.spec.terminationGracePeriodSeconds"
 
   defaults:
     autoDeploy: false
