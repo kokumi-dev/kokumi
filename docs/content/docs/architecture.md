@@ -277,3 +277,47 @@ that stores rendered manifests as OCI artifacts. This means:
 - Zero external registry dependency
 - Rendered manifests are portable — pull them with any OCI client
 - Artifact digests are content-addressed; deduplication is automatic
+
+## Deployment architecture
+
+Kokumi pulls a source artifact from a registry, renders it into an immutable artifact, and stores it in a destination registry. Argo CD then fetches the manifests by content digest and syncs them to the cluster. The source OCI reference on the Order accepts any registry (including the in-cluster one), and the destination defaults to the in-cluster registry when omitted but can be set to an external registry instead.
+
+```mermaid
+%%{init: {
+  "theme": "base",
+  "themeVariables": {
+    "lineColor": "#313638",
+    "clusterBkg": "#f7f5f0",
+    "clusterBorder": "#c5c2bb",
+    "edgeLabelBackground": "#f7f5f0"
+  }
+}}%%
+flowchart LR
+    subgraph ext["External"]
+        ER[("External<br>Registry")]
+    end
+
+    subgraph k8s["Kubernetes Cluster"]
+        direction TB
+        KC["Kokumi<br>Controller"]
+        IR[("In-Cluster<br>Registry")]
+        ARGO["Argo CD"]
+        WL(["Workloads"])
+    end
+
+    ER -- "1. Pull source<br>OCI artifact" --> KC
+    KC -- "2. Push rendered<br>artifact + digest" --> IR
+    KC -- "3. Create Application<br>(digest ref)" --> ARGO
+    ARGO -- "4. Pull manifests<br>by digest" --> IR
+    ARGO -- "5. Sync & deploy" --> WL
+
+    classDef registry   fill:#E4B363,stroke:#b8894a,color:#313638
+    classDef controller fill:#EF6461,stroke:#c94d4a,color:#ffffff
+    classDef argocd     fill:#E8E9EB,stroke:#313638,color:#313638
+    classDef workload   fill:#313638,stroke:#1a1f22,color:#E8E9EB
+
+    class ER,IR registry
+    class KC controller
+    class ARGO argocd
+    class WL workload
+```
