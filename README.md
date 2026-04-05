@@ -9,10 +9,12 @@
     Kokumi (/koʊkuːmi/, Japanese: コク味, from コク “richness” + 味 “taste”) means "heartiness" or
     "richness" — subtle compounds that enhance and harmonize flavors.
     <br /><br />
-    Kokumi applies this idea to platform delivery: Menus offers options to
-    choose from, Recipes define rendering instructions, and Orders execute 
-    delivery intent. Preparations produce immutable artifacts, and Servings
-    activate a selected preparation.
+    Kokumi applies this idea to Kubernetes delivery by introducing the missing
+    "richness" in an OCI-first workflow, preserving the subtle qualities of
+    GitOps like clarity, traceability, and review, while embracing OCI's
+    strengths in portability and immutability. The result is a system where
+    configuration isn't just shipped, but deeply understood and transparently
+    delivered.
   </em>
 </p>
 
@@ -27,10 +29,12 @@ It draws a hard line between three concerns that most delivery systems conflate:
 - **Artifact** — what was built, exactly (the Preparation)
 - **Activation** — what is currently running (the Serving)
 
-By keeping these separate and immutable at the artifact layer, your platform team can:
+By keeping these separate and immutable at the artifact layer, your engineers can:
 
 - **Gate on human approval** before a rendered artifact ever reaches a cluster.
 - **Inspect the full rendered manifest** in the built-in UI before promoting.
+- **Edit rendered manifests in the UI.** Tweak the fully-rendered manifest in the
+  browser and produce and activate a new Preparation revision.
 - **Roll back instantly** by selecting any previous Preparation — the artifact
   already exists, no re-render required.
 - **Operate in restricted networks** — the entire pipeline works offline; all
@@ -54,17 +58,7 @@ Read the [Installation guide](https://kokumi.dev/docs/installation) and [Getting
 
 ## Core Concepts
 
-Kokumi models release workflows using four composable CRDs.
-
-### Menu
-
-Menu is the reusable delivery template. It represents the base structure that
-an Order can consume and parameterize per environment or rollout.
-
-### Recipe
-
-Recipe defines rendering behavior, such as Helm render options and related
-render-time configuration.
+Kokumi models delivery using four Kubernetes primitives.
 
 ### Order
 
@@ -90,3 +84,8 @@ one specific Preparation and creates or updates an Argo CD `Application` that
 syncs that artifact into the cluster. Switching versions (upgrading or rolling
 back) means updating which Preparation the Serving references; the artifact
 does not change.
+
+### Menu
+
+Menu is the reusable delivery template. It represents the base structure that
+an Order can consume and parameterize per environment or rollout.
