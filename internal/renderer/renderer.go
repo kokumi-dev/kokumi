@@ -2,52 +2,15 @@ package renderer
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
-	"helm.sh/helm/v4/pkg/action"
-	"helm.sh/helm/v4/pkg/chart/v2/loader"
-	"helm.sh/helm/v4/pkg/release"
-	"helm.sh/helm/v4/pkg/storage"
-	"helm.sh/helm/v4/pkg/storage/driver"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 )
-
-// RenderChart renders a Helm chart from a local chart tarball and returns the rendered manifest.
-// chartPath must point to a .tgz file previously fetched from the OCI registry.
-func RenderChart(ctx context.Context, chartPath, releaseName, namespace string, includeCRDs bool, vals map[string]any) (string, error) {
-	cfg := action.NewConfiguration()
-	cfg.Releases = storage.Init(driver.NewMemory())
-
-	client := action.NewInstall(cfg)
-	client.DryRunStrategy = action.DryRunClient
-	client.ReleaseName = releaseName
-	client.Namespace = namespace
-	client.Replace = true
-	client.IncludeCRDs = includeCRDs
-
-	chrt, err := loader.Load(chartPath)
-	if err != nil {
-		return "", fmt.Errorf("load chart: %w", err)
-	}
-
-	rel, err := client.RunWithContext(ctx, chrt, vals)
-	if err != nil {
-		return "", fmt.Errorf("render: %w", err)
-	}
-
-	acc, err := release.NewAccessor(rel)
-	if err != nil {
-		return "", fmt.Errorf("accessor: %w", err)
-	}
-
-	return strings.TrimSpace(acc.Manifest()), nil
-}
 
 // ApplyPatches applies patches to YAML content, preserving document order, comments,
 // and formatting. Returns the modified content, or the original content unchanged if
@@ -99,50 +62,6 @@ func NormalizeYAML(content []byte) ([]byte, error) {
 	}
 
 	return marshalYAMLNodes(documents)
-}
-
-// CalculateSpecHash computes a stable SHA-256 hash over the complete set of inputs
-// that determine the content of a rendered artifact.
-func CalculateSpecHash(spec deliveryv1alpha1.OrderSpec) (string, error) {
-	var builder strings.Builder
-
-	encoder := yaml.NewEncoder(&builder)
-	encoder.SetIndent(2)
-
-	var oci, version string
-	if spec.Source != nil {
-		oci = spec.Source.OCI
-		version = spec.Source.Version
-	}
-
-	var menuRef string
-	if spec.MenuRef != nil {
-		menuRef = spec.MenuRef.Name
-	}
-
-	if err := encoder.Encode(struct {
-		OCI     string                   `yaml:"oci,omitempty"`
-		Version string                   `yaml:"version,omitempty"`
-		MenuRef string                   `yaml:"menuRef,omitempty"`
-		Render  *deliveryv1alpha1.Render `yaml:"render,omitempty"`
-		Patches []deliveryv1alpha1.Patch `yaml:"patches,omitempty"`
-		Edits   []deliveryv1alpha1.Patch `yaml:"edits,omitempty"`
-	}{
-		OCI:     oci,
-		Version: version,
-		MenuRef: menuRef,
-		Render:  spec.Render,
-		Patches: spec.Patches,
-		Edits:   spec.Edits,
-	}); err != nil {
-		return "", fmt.Errorf("failed to encode spec for hashing: %w", err)
-	}
-
-	encoder.Close() //nolint:errcheck
-
-	hash := sha256.Sum256([]byte(builder.String()))
-
-	return fmt.Sprintf("sha256:%x", hash), nil
 }
 
 // applyPatchesToNode applies patches to a single YAML document node.
