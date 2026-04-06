@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/kokumi-dev/kokumi/compare/0.9.0...0.9.1) (2026-04-06)
+
+
+### Bug Fixes
+
+* include helm hooks for helm renderer in rendered manifest ([#101](https://github.com/kokumi-dev/kokumi/issues/101)) ([1cef450](https://github.com/kokumi-dev/kokumi/commit/1cef45043e49df6868599f32fcdd19928b2a8e68))
+
 ## [0.9.0](https://github.com/kokumi-dev/kokumi/compare/0.8.0...0.9.0) (2026-03-20)
 
 
