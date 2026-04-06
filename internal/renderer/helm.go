@@ -15,6 +15,8 @@ import (
 // RenderChart renders a Helm chart from a local chart tarball and returns the rendered manifest.
 // chartPath must point to a .tgz file previously fetched from the OCI registry.
 func RenderChart(ctx context.Context, chartPath, releaseName, namespace string, includeCRDs bool, vals map[string]any) (string, error) {
+	var renderedManifest strings.Builder
+
 	cfg := action.NewConfiguration()
 	cfg.Releases = storage.Init(driver.NewMemory())
 
@@ -40,5 +42,22 @@ func RenderChart(ctx context.Context, chartPath, releaseName, namespace string, 
 		return "", fmt.Errorf("accessor: %w", err)
 	}
 
-	return strings.TrimSpace(acc.Manifest()), nil
+	if strings.TrimSpace(acc.Manifest()) != "" {
+		renderedManifest.WriteString(strings.TrimSpace(acc.Manifest()))
+		renderedManifest.WriteString("\n")
+	}
+
+	for _, hook := range acc.Hooks() {
+		hook, err := release.NewHookAccessor(hook)
+		if err != nil {
+			return "", fmt.Errorf("access hook: %w", err)
+		}
+
+		renderedManifest.WriteString("\n---\n")
+		renderedManifest.WriteString(fmt.Sprintf("# Source: %s\n", hook.Path()))
+		renderedManifest.WriteString(strings.TrimSpace(hook.Manifest()))
+		renderedManifest.WriteString("\n")
+	}
+
+	return renderedManifest.String(), nil
 }
