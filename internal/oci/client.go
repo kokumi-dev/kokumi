@@ -14,5 +14,6 @@ type Client interface {
 	Pull(ctx context.Context, ref, tag, targetDir string) (mediaType, digest string, err error)
 
 	// Push pushes an OCI artifact from sourceDir to a registry and returns its digest.
-	Push(ctx context.Context, ref, tag, sourceDir string) (digest string, err error)
+	// annotations are attached as OCI manifest annotations; pass nil for none.
+	Push(ctx context.Context, ref, tag, sourceDir string, annotations map[string]string) (digest string, err error)
 }

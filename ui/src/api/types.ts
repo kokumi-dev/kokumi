@@ -77,6 +77,7 @@ export interface Preparation {
   phase: string
   createdAt?: string
   isActive: boolean
+  commitMessage?: string
   conditions?: Condition[]
 }
 

@@ -35,15 +35,15 @@ export default function OrdersPage() {
     ? !!selectedMenu && selectedMenu.overrides.patches.policy !== 'None'
     : true
 
-  async function handleCreate(data: OrderFormData) {
-    await createOrder(data)
+  async function handleCreate(data: OrderFormData, commitMessage: string) {
+    await createOrder(data, commitMessage)
     setFormModal(null)
   }
 
-  async function handleUpdate(data: OrderFormData) {
+  async function handleUpdate(data: OrderFormData, commitMessage: string) {
     if (formModal?.mode !== 'edit') return
     const { order } = formModal
-    await updateOrder(order.namespace, order.name, data)
+    await updateOrder(order.namespace, order.name, data, commitMessage)
     setFormModal(null)
   }
 

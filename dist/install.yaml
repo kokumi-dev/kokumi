@@ -784,6 +784,11 @@ spec:
                 - digest
                 - ociRef
                 type: object
+              commitMessage:
+                description: |-
+                  commitMessage is the human-readable description of why this Preparation was created.
+                  It is stored as the org.opencontainers.image.description annotation on the OCI artifact.
+                type: string
               configHash:
                 description: configHash is the SHA256 hash of the canonicalized order
                   configuration

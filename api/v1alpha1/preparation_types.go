@@ -99,6 +99,11 @@ type PreparationSpec struct {
 	// artifact defines the output artifact information
 	// +kubebuilder:validation:Required
 	Artifact Artifact `json:"artifact"`
+
+	// commitMessage is the human-readable description of why this Preparation was created.
+	// It is stored as the org.opencontainers.image.description annotation on the OCI artifact.
+	// +optional
+	CommitMessage string `json:"commitMessage,omitempty"`
 }
 
 // PreparationPhase represents the current phase of the Preparation

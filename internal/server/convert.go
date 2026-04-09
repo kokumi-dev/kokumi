@@ -184,10 +184,11 @@ func preparationToDTO(p deliveryv1alpha1.Preparation, isActive bool) Preparation
 			Digest: p.Spec.Artifact.Digest,
 			Signed: p.Spec.Artifact.Signed,
 		},
-		ConfigHash: p.Spec.ConfigHash,
-		Phase:      string(p.Status.Phase),
-		IsActive:   isActive,
-		Conditions: conditionsToDTO(p.Status.Conditions),
+		ConfigHash:    p.Spec.ConfigHash,
+		Phase:         string(p.Status.Phase),
+		IsActive:      isActive,
+		CommitMessage: p.Spec.CommitMessage,
+		Conditions:    conditionsToDTO(p.Status.Conditions),
 	}
 	if p.Status.CreatedAt != nil && !p.Status.CreatedAt.IsZero() {
 		t := p.Status.CreatedAt.UTC()

@@ -7,6 +7,7 @@ import Btn from '../shared/Btn'
 import PreparationList from './PreparationList'
 import ManifestModal from './ManifestModal'
 import DiffModal from './DiffModal'
+import CommitMessageModal from './CommitMessageModal'
 import styles from './OrderDetail.module.css'
 
 interface Props {
@@ -21,6 +22,7 @@ type ModalState =
   | null
   | { kind: 'manifest'; prep: Preparation }
   | { kind: 'diff'; prep: Preparation; activePrep: Preparation }
+  | { kind: 'commit'; edits: Patch[] }
 
 /**
  * OrderDetail is a slide-in right panel that displays the full Order spec,
@@ -29,6 +31,7 @@ type ModalState =
 export default function OrderDetail({ order, editsAllowed, onClose, onEdit, onDelete }: Props) {
   const preparations = usePreparations(order.name) ?? []
   const [modal, setModal] = useState<ModalState>(null)
+  const [commitLoading, setCommitLoading] = useState(false)
 
   const activePrep = preparations.find((p) => p.isActive)
 
@@ -45,23 +48,34 @@ export default function OrderDetail({ order, editsAllowed, onClose, onEdit, onDe
     setModal({ kind: 'diff', prep, activePrep })
   }
 
-  async function handleRemoveEdit(editIndex: number) {
+  function handleRemoveEdit(editIndex: number) {
     const edits = [...(order.edits ?? [])]
     edits.splice(editIndex, 1)
-    await saveOrderEdits(order.namespace, order.name, edits)
+    setModal({ kind: 'commit', edits })
   }
 
-  async function handleRemoveEditPath(editIndex: number, path: string) {
+  function handleRemoveEditPath(editIndex: number, path: string) {
     const edits: Patch[] = (order.edits ?? []).map((e, i) => {
       if (i !== editIndex) return { ...e, set: { ...e.set } }
       const { [path]: _, ...rest } = e.set
       return { ...e, set: rest }
     }).filter((e) => Object.keys(e.set).length > 0)
-    await saveOrderEdits(order.namespace, order.name, edits)
+    setModal({ kind: 'commit', edits })
   }
 
-  async function handleClearAllEdits() {
-    await saveOrderEdits(order.namespace, order.name, [])
+  function handleClearAllEdits() {
+    setModal({ kind: 'commit', edits: [] })
+  }
+
+  async function handleCommitEdits(commitMessage: string) {
+    if (modal?.kind !== 'commit') return
+    setCommitLoading(true)
+    try {
+      await saveOrderEdits(order.namespace, order.name, modal.edits, commitMessage)
+      setModal(null)
+    } finally {
+      setCommitLoading(false)
+    }
   }
 
   return (
@@ -289,6 +303,14 @@ export default function OrderDetail({ order, editsAllowed, onClose, onEdit, onDe
           preparation={modal.prep}
           activePreparation={modal.activePrep}
           onClose={() => setModal(null)}
+        />
+      )}
+
+      {modal?.kind === 'commit' && (
+        <CommitMessageModal
+          onClose={() => setModal(null)}
+          onCommit={handleCommitEdits}
+          loading={commitLoading}
         />
       )}
     </>

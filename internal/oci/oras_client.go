@@ -148,7 +148,8 @@ func (c *ORASClient) fetchBlob(ctx context.Context, repo *remote.Repository, des
 }
 
 // Push packages sourceDir as an OCI artifact and pushes it to ref:tag, returning its digest.
-func (c *ORASClient) Push(ctx context.Context, ref, tag, sourceDir string) (string, error) {
+// annotations are attached as OCI manifest annotations; pass nil for none.
+func (c *ORASClient) Push(ctx context.Context, ref, tag, sourceDir string, annotations map[string]string) (string, error) {
 	log := ctrl.LoggerFrom(ctx)
 
 	repo, err := remote.NewRepository(ref)
@@ -170,7 +171,8 @@ func (c *ORASClient) Push(ctx context.Context, ref, tag, sourceDir string) (stri
 	}
 
 	packOpts := oras.PackManifestOptions{
-		Layers: []ocispec.Descriptor{layerDesc},
+		Layers:              []ocispec.Descriptor{layerDesc},
+		ManifestAnnotations: annotations,
 	}
 
 	manifest, err := oras.PackManifest(ctx, fs, oras.PackManifestVersion1_1, oras.MediaTypeUnknownArtifact, packOpts)

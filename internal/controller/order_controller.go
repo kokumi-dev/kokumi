@@ -145,7 +145,7 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 		effectiveDest = order.Spec.Destination.OCI
 	}
 
-	result, err := r.Service.ProcessOrder(ctx, order, effective.Source, effective.Render, effective.Patches, effective.Edits, effectiveDest)
+	result, err := r.Service.ProcessOrder(ctx, order, effective.Source, effective.Render, effective.Patches, effective.Edits, effectiveDest, order.Annotations["delivery.kokumi.dev/commit-message"])
 	if err != nil {
 		logger.Error(err, "Failed to process Order")
 		_ = statusUpdater.Failed(ctx, order, err)
@@ -153,7 +153,7 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 		return ctrl.Result{}, err
 	}
 
-	preparation, err := r.createPreparation(ctx, order, result.SourceRef, result.SourceDigest, effective.Source.Version, result.DestRef, result.DestDigest)
+	preparation, err := r.createPreparation(ctx, order, result.SourceRef, result.SourceDigest, effective.Source.Version, result.DestRef, result.DestDigest, order.Annotations["delivery.kokumi.dev/commit-message"])
 	if err != nil {
 		logger.Error(err, "Failed to create Preparation")
 		_ = statusUpdater.Failed(ctx, order, fmt.Errorf("failed to create revision: %w", err))
@@ -167,6 +167,15 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 
 	if err := statusUpdater.Ready(ctx, order, specHash, fmt.Sprintf("Successfully pushed to %s", result.DestRef)); err != nil {
 		return ctrl.Result{}, err
+	}
+
+	// Remove the transient commit-message annotation now that it has been consumed.
+	if _, hasAnnotation := order.Annotations["delivery.kokumi.dev/commit-message"]; hasAnnotation {
+		patch := client.MergeFrom(order.DeepCopy())
+		delete(order.Annotations, "delivery.kokumi.dev/commit-message")
+		if err := r.Patch(ctx, order, patch); err != nil {
+			logger.Error(err, "Failed to remove commit-message annotation from Order")
+		}
 	}
 
 	return ctrl.Result{}, nil
@@ -196,6 +205,7 @@ func (r *OrderReconciler) createPreparation(
 	ctx context.Context,
 	order *deliveryv1alpha1.Order,
 	sourceRef, sourceDigest, sourceVersion, destRef, destDigest string,
+	commitMessage string,
 ) (*deliveryv1alpha1.Preparation, error) {
 	logger := log.FromContext(ctx)
 
@@ -253,6 +263,7 @@ func (r *OrderReconciler) createPreparation(
 				Digest: destDigest,
 				Signed: false,
 			},
+			CommitMessage: commitMessage,
 		},
 		Status: deliveryv1alpha1.PreparationStatus{
 			Phase:     deliveryv1alpha1.PreparationPhaseReady,

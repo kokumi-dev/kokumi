@@ -88,39 +88,42 @@ type ArtifactDTO struct {
 // IsActive is true when this Preparation is the one currently deployed by the
 // Order's linked Serving (status.observedPreparation).
 type PreparationDTO struct {
-	Name       string         `json:"name"`
-	Namespace  string         `json:"namespace"`
-	Order      string         `json:"order"`
-	Artifact   ArtifactDTO    `json:"artifact"`
-	ConfigHash string         `json:"configHash"`
-	Phase      string         `json:"phase"`
-	CreatedAt  *time.Time     `json:"createdAt,omitempty"`
-	IsActive   bool           `json:"isActive"`
-	Conditions []ConditionDTO `json:"conditions,omitempty"`
+	Name          string         `json:"name"`
+	Namespace     string         `json:"namespace"`
+	Order         string         `json:"order"`
+	Artifact      ArtifactDTO    `json:"artifact"`
+	ConfigHash    string         `json:"configHash"`
+	Phase         string         `json:"phase"`
+	CreatedAt     *time.Time     `json:"createdAt,omitempty"`
+	IsActive      bool           `json:"isActive"`
+	CommitMessage string         `json:"commitMessage,omitempty"`
+	Conditions    []ConditionDTO `json:"conditions,omitempty"`
 }
 
 // CreateOrderRequest is the body for POST /api/v1/orders.
 type CreateOrderRequest struct {
-	Namespace   string             `json:"namespace"`
-	Name        string             `json:"name"`
-	Source      OCISourceDTO       `json:"source"`
-	MenuRef     *MenuRefDTO        `json:"menuRef,omitempty"`
-	Destination *OCIDestinationDTO `json:"destination,omitempty"`
-	Render      *RenderDTO         `json:"render,omitempty"`
-	Patches     []PatchDTO         `json:"patches,omitempty"`
-	Edits       []PatchDTO         `json:"edits,omitempty"`
-	AutoDeploy  bool               `json:"autoDeploy"`
+	Namespace     string             `json:"namespace"`
+	Name          string             `json:"name"`
+	Source        OCISourceDTO       `json:"source"`
+	MenuRef       *MenuRefDTO        `json:"menuRef,omitempty"`
+	Destination   *OCIDestinationDTO `json:"destination,omitempty"`
+	Render        *RenderDTO         `json:"render,omitempty"`
+	Patches       []PatchDTO         `json:"patches,omitempty"`
+	Edits         []PatchDTO         `json:"edits,omitempty"`
+	AutoDeploy    bool               `json:"autoDeploy"`
+	CommitMessage string             `json:"commitMessage,omitempty"`
 }
 
 // UpdateOrderRequest is the body for PUT /api/v1/orders/{namespace}/{name}.
 type UpdateOrderRequest struct {
-	Source      OCISourceDTO       `json:"source"`
-	MenuRef     *MenuRefDTO        `json:"menuRef,omitempty"`
-	Destination *OCIDestinationDTO `json:"destination,omitempty"`
-	Render      *RenderDTO         `json:"render,omitempty"`
-	Patches     []PatchDTO         `json:"patches,omitempty"`
-	Edits       []PatchDTO         `json:"edits,omitempty"`
-	AutoDeploy  bool               `json:"autoDeploy"`
+	Source        OCISourceDTO       `json:"source"`
+	MenuRef       *MenuRefDTO        `json:"menuRef,omitempty"`
+	Destination   *OCIDestinationDTO `json:"destination,omitempty"`
+	Render        *RenderDTO         `json:"render,omitempty"`
+	Patches       []PatchDTO         `json:"patches,omitempty"`
+	Edits         []PatchDTO         `json:"edits,omitempty"`
+	AutoDeploy    bool               `json:"autoDeploy"`
+	CommitMessage string             `json:"commitMessage,omitempty"`
 }
 
 // PromoteRequest is the body for POST /api/v1/orders/{namespace}/{name}/promote.

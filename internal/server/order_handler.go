@@ -117,6 +117,13 @@ func handleCreateOrder(deps *apiDeps) http.HandlerFunc {
 			order.Spec.Source = &deliveryv1alpha1.OCISource{OCI: req.Source.OCI, Version: req.Source.Version}
 		}
 
+		if req.CommitMessage != "" {
+			if order.Annotations == nil {
+				order.Annotations = map[string]string{}
+			}
+			order.Annotations["delivery.kokumi.dev/commit-message"] = req.CommitMessage
+		}
+
 		if err := deps.writer.Create(r.Context(), order); err != nil {
 			deps.logger.Error(err, "Failed to create Order", "namespace", req.Namespace, "name", req.Name)
 			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create order: %s", err))
@@ -174,6 +181,13 @@ func handleUpdateOrder(deps *apiDeps) http.HandlerFunc {
 			order.Spec.MenuRef = nil
 		}
 
+		if req.CommitMessage != "" {
+			if order.Annotations == nil {
+				order.Annotations = map[string]string{}
+			}
+			order.Annotations["delivery.kokumi.dev/commit-message"] = req.CommitMessage
+		}
+
 		if err := deps.writer.Update(r.Context(), order); err != nil {
 			deps.logger.Error(err, "Failed to update Order", "namespace", namespace, "name", name)
 			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to update order: %s", err))
@@ -186,7 +200,8 @@ func handleUpdateOrder(deps *apiDeps) http.HandlerFunc {
 
 // UpdateOrderEditsRequest is the body for PUT /api/v1/orders/{namespace}/{name}/edits.
 type UpdateOrderEditsRequest struct {
-	Edits []PatchDTO `json:"edits"`
+	Edits         []PatchDTO `json:"edits"`
+	CommitMessage string     `json:"commitMessage,omitempty"`
 }
 
 // handleUpdateOrderEdits handles PUT /api/v1/orders/{namespace}/{name}/edits.
@@ -219,6 +234,13 @@ func handleUpdateOrderEdits(deps *apiDeps) http.HandlerFunc {
 		}
 
 		order.Spec.Edits = patchesFromDTO(req.Edits)
+
+		if req.CommitMessage != "" {
+			if order.Annotations == nil {
+				order.Annotations = map[string]string{}
+			}
+			order.Annotations["delivery.kokumi.dev/commit-message"] = req.CommitMessage
+		}
 
 		if err := deps.writer.Update(r.Context(), order); err != nil {
 			deps.logger.Error(err, "Failed to update Order edits", "namespace", namespace, "name", name)

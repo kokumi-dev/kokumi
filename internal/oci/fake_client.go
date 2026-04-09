@@ -33,6 +33,6 @@ func (c *FakeClient) Pull(ctx context.Context, ref, tag, targetDir string) (stri
 }
 
 // Push returns a deterministic fake digest.
-func (c *FakeClient) Push(ctx context.Context, ref, tag, sourceDir string) (string, error) {
+func (c *FakeClient) Push(_ context.Context, _, _, _ string, _ map[string]string) (string, error) {
 	return "sha256:fdf90e00e76bf3f0d2e5042c4c4e6c42a6d38c1e2b4f5a7d8e9f0a1b2c3d4e5f", nil
 }

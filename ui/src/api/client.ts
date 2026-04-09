@@ -38,12 +38,12 @@ export function getOrder(namespace: string, name: string): Promise<Order> {
   return request<Order>(`/orders/${namespace}/${name}`)
 }
 
-export function createOrder(data: OrderFormData): Promise<Order> {
+export function createOrder(data: OrderFormData, commitMessage?: string): Promise<Order> {
   // Edits are only set via the manifest editor on existing orders, never on create.
   const { edits: _, ...payload } = data
   return request<Order>('/orders', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ ...payload, commitMessage: commitMessage ?? '' }),
   })
 }
 
@@ -51,10 +51,11 @@ export function updateOrder(
   namespace: string,
   name: string,
   data: Omit<OrderFormData, 'name' | 'namespace'>,
+  commitMessage?: string,
 ): Promise<Order> {
   return request<Order>(`/orders/${namespace}/${name}`, {
     method: 'PUT',
-    body: JSON.stringify(data),
+    body: JSON.stringify({ ...data, commitMessage: commitMessage ?? '' }),
   })
 }
 
@@ -66,10 +67,11 @@ export function saveOrderEdits(
   namespace: string,
   name: string,
   edits: Patch[],
+  commitMessage?: string,
 ): Promise<Order> {
   return request<Order>(`/orders/${namespace}/${name}/edits`, {
     method: 'PUT',
-    body: JSON.stringify({ edits }),
+    body: JSON.stringify({ edits, commitMessage: commitMessage ?? '' }),
   })
 }
 

@@ -3,6 +3,7 @@ import yaml from 'js-yaml'
 import Modal from '../shared/Modal'
 import Btn from '../shared/Btn'
 import YamlEditor from '../shared/YamlEditor'
+import CommitMessageModal from './CommitMessageModal'
 import type { Order, OrderFormData, Patch, HelmRender, Menu } from '../../api/types'
 import { emptyOrderForm, orderToFormData } from '../../api/types'
 import { getDefaultRegistry } from '../../api/client'
@@ -18,7 +19,7 @@ interface Props {
   /** Available menus for the selector dropdown (create mode). */
   menus?: Menu[]
   onClose: () => void
-  onSubmit: (data: OrderFormData) => Promise<void>
+  onSubmit: (data: OrderFormData, commitMessage: string) => Promise<void>
 }
 
 // ── YAML serialisation helpers ────────────────────────────────────────────────
@@ -141,6 +142,8 @@ export default function OrderFormModal({ order, menuRef, menu, menus, onClose, o
   const [yamlText, setYamlText] = useState(() => formToYaml(formData))
   const [yamlError, setYamlError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [showCommitModal, setShowCommitModal] = useState(false)
+  const [pendingFormData, setPendingFormData] = useState<OrderFormData | null>(null)
 
   const effectiveMenu = menu ?? selectedMenu
 
@@ -205,11 +208,19 @@ export default function OrderFormModal({ order, menuRef, menu, menus, onClose, o
         return
       }
     }
+    setPendingFormData(data)
+    setShowCommitModal(true)
+  }
+
+  async function handleCommit(commitMessage: string) {
+    if (!pendingFormData) return
     setSaving(true)
     try {
-      await onSubmit(data)
+      await onSubmit(pendingFormData, commitMessage)
     } finally {
       setSaving(false)
+      setShowCommitModal(false)
+      setPendingFormData(null)
     }
   }
 
@@ -275,6 +286,13 @@ export default function OrderFormModal({ order, menuRef, menu, menus, onClose, o
       onClose={onClose}
       footer={footer}
     >
+      {showCommitModal && (
+        <CommitMessageModal
+          onClose={() => { setShowCommitModal(false); setPendingFormData(null) }}
+          onCommit={handleCommit}
+          loading={saving}
+        />
+      )}
       {/* ── Tabs ── */}
       <div className={styles.tabs}>
         <button

@@ -11,6 +11,7 @@ import (
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/renderer"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/spf13/afero"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -52,6 +53,8 @@ func NewOrderService(client oci.Client, fs afero.Fs, cacheDir string) *OrderServ
 // Menu-based Orders can supply merged values.
 // destination is the fully-qualified OCI URL to push the result to; the caller
 // is responsible for supplying the default when the Order has none configured.
+// commitMessage is attached as org.opencontainers.image.description on the OCI manifest.
+// An empty string defaults to "automatically generated".
 func (rs *OrderService) ProcessOrder(
 	ctx context.Context,
 	order *deliveryv1alpha1.Order,
@@ -60,6 +63,7 @@ func (rs *OrderService) ProcessOrder(
 	patches []deliveryv1alpha1.Patch,
 	edits []deliveryv1alpha1.Patch,
 	destination string,
+	commitMessage string,
 ) (*OrderResult, error) {
 	logger := log.FromContext(ctx)
 
@@ -141,7 +145,15 @@ func (rs *OrderService) ProcessOrder(
 
 	logger.Info("Pushing artifact to destination")
 
-	destDigest, err := rs.client.Push(ctx, destRef, source.Version, tempDir)
+	if commitMessage == "" {
+		commitMessage = "automatically generated"
+	}
+
+	ociAnnotations := map[string]string{
+		ocispec.AnnotationDescription: commitMessage,
+	}
+
+	destDigest, err := rs.client.Push(ctx, destRef, source.Version, tempDir, ociAnnotations)
 	if err != nil {
 		return nil, fmt.Errorf("failed to push artifact: %w", err)
 	}

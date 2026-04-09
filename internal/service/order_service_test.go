@@ -77,7 +77,7 @@ func TestOrderService_ProcessOrder(t *testing.T) {
 			if tc.order.Spec.Destination != nil {
 				dest = tc.order.Spec.Destination.OCI
 			}
-			result, err := svc.ProcessOrder(context.Background(), tc.order, *tc.order.Spec.Source, tc.order.Spec.Render, tc.order.Spec.Patches, tc.order.Spec.Edits, dest)
+			result, err := svc.ProcessOrder(context.Background(), tc.order, *tc.order.Spec.Source, tc.order.Spec.Render, tc.order.Spec.Patches, tc.order.Spec.Edits, dest, "")
 
 			if tc.wantErr {
 				require.Error(t, err)
@@ -115,7 +115,7 @@ func (c *helmFakeClient) Pull(_ context.Context, _, _, targetDir string) (string
 	return oci.HelmChartLayerMediaType, "sha256:fdf90e00e76bf3f0d2e5042c4c4e6c42a6d38c1e2b4f5a7d8e9f0a1b2c3d4e5f", nil
 }
 
-func (c *helmFakeClient) Push(_ context.Context, _, _, _ string) (string, error) {
+func (c *helmFakeClient) Push(_ context.Context, _, _, _ string, _ map[string]string) (string, error) {
 	return "sha256:fdf90e00e76bf3f0d2e5042c4c4e6c42a6d38c1e2b4f5a7d8e9f0a1b2c3d4e5f", nil
 }
 
@@ -143,7 +143,7 @@ func TestOrderService_PullCache(t *testing.T) {
 		client := &countingFakeClient{fs: fs, onPull: func() { pullCount++ }}
 
 		svc := NewOrderService(client, fs, cacheDir)
-		_, err := svc.ProcessOrder(context.Background(), order, *order.Spec.Source, order.Spec.Render, order.Spec.Patches, order.Spec.Edits, order.Spec.Destination.OCI)
+		_, err := svc.ProcessOrder(context.Background(), order, *order.Spec.Source, order.Spec.Render, order.Spec.Patches, order.Spec.Edits, order.Spec.Destination.OCI, "")
 		require.NoError(t, err)
 
 		assert.Equal(t, 1, pullCount, "expected one pull on cache miss")
@@ -166,12 +166,12 @@ func TestOrderService_PullCache(t *testing.T) {
 		svc := NewOrderService(client, fs, cacheDir)
 
 		// First call populates the cache.
-		_, err := svc.ProcessOrder(context.Background(), order, *order.Spec.Source, order.Spec.Render, order.Spec.Patches, order.Spec.Edits, order.Spec.Destination.OCI)
+		_, err := svc.ProcessOrder(context.Background(), order, *order.Spec.Source, order.Spec.Render, order.Spec.Patches, order.Spec.Edits, order.Spec.Destination.OCI, "")
 		require.NoError(t, err)
 		require.Equal(t, 1, pullCount)
 
 		// Second call with identical spec should hit the cache.
-		_, err = svc.ProcessOrder(context.Background(), order, *order.Spec.Source, order.Spec.Render, order.Spec.Patches, order.Spec.Edits, order.Spec.Destination.OCI)
+		_, err = svc.ProcessOrder(context.Background(), order, *order.Spec.Source, order.Spec.Render, order.Spec.Patches, order.Spec.Edits, order.Spec.Destination.OCI, "")
 		require.NoError(t, err)
 		assert.Equal(t, 1, pullCount, "second call should be served from cache without pulling")
 	})
@@ -190,6 +190,6 @@ func (c *countingFakeClient) Pull(ctx context.Context, ref, tag, targetDir strin
 	return oci.NewFakeClient(c.fs).Pull(ctx, ref, tag, targetDir)
 }
 
-func (c *countingFakeClient) Push(ctx context.Context, ref, tag, sourceDir string) (string, error) {
-	return oci.NewFakeClient(c.fs).Push(ctx, ref, tag, sourceDir)
+func (c *countingFakeClient) Push(ctx context.Context, ref, tag, sourceDir string, annotations map[string]string) (string, error) {
+	return oci.NewFakeClient(c.fs).Push(ctx, ref, tag, sourceDir, annotations)
 }

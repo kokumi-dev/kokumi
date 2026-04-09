@@ -6,6 +6,7 @@ import { filterCRDDocuments, hasCRDDocuments } from '../../utils/manifest'
 import Modal from '../shared/Modal'
 import Btn from '../shared/Btn'
 import YamlEditor from '../shared/YamlEditor'
+import CommitMessageModal from './CommitMessageModal'
 
 interface Props {
   preparation: Preparation
@@ -27,6 +28,8 @@ export default function ManifestModal({ preparation: prep, order, onClose }: Pro
   const [editing, setEditing] = useState(false)
   const [editedContent, setEditedContent] = useState('')
   const [saving, setSaving] = useState(false)
+  const [showCommitModal, setShowCommitModal] = useState(false)
+  const [pendingEdits, setPendingEdits] = useState<ReturnType<typeof computeEdits> | null>(null)
 
   useEffect(() => {
     getManifest(prep.namespace, prep.name)
@@ -53,18 +56,26 @@ export default function ManifestModal({ preparation: prep, order, onClose }: Pro
 
   const handleSave = useCallback(async () => {
     if (!content || !displayContent || !order) return
+    const edits = computeEdits(displayContent, editedContent, order.edits ?? [])
+    setPendingEdits(edits)
+    setShowCommitModal(true)
+  }, [content, displayContent, editedContent, order])
+
+  const handleCommit = useCallback(async (commitMessage: string) => {
+    if (!order || pendingEdits === null) return
     setSaving(true)
     try {
-      const edits = computeEdits(displayContent, editedContent, order.edits ?? [])
-      await saveOrderEdits(order.namespace, order.name, edits)
+      await saveOrderEdits(order.namespace, order.name, pendingEdits, commitMessage)
       setEditing(false)
       setEditedContent('')
+      setShowCommitModal(false)
+      setPendingEdits(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save edits')
     } finally {
       setSaving(false)
     }
-  }, [content, displayContent, editedContent, order])
+  }, [order, pendingEdits])
 
   function copyToClipboard() {
     const text = editing ? editedContent : displayContent
@@ -102,49 +113,59 @@ export default function ManifestModal({ preparation: prep, order, onClose }: Pro
   )
 
   return (
-    <Modal
-      title={`Manifest — ${prep.name}${editing ? ' (editing)' : ''}`}
-      onClose={onClose}
-      footer={footer}
-      wide
-    >
-      {error ? (
-        <p style={{ color: '#c0312e', fontSize: '0.875rem' }}>
-          Failed to load manifest: {error}
-        </p>
-      ) : displayContent === null ? (
-        <p style={{ color: 'var(--color-text-muted-light)', fontSize: '0.875rem' }}>
-          Loading…
-        </p>
-      ) : (
-        <>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              {hasEdits && (
-                <span style={{
-                  fontSize: '0.75rem',
-                  color: 'var(--color-accent)',
-                  background: 'var(--color-accent-dim, rgba(99, 102, 241, 0.1))',
-                  padding: '2px 8px',
-                  borderRadius: '4px',
-                }}>
-                  {order!.edits!.reduce((n, e) => n + Object.keys(e.set).length, 0)} edit(s) applied
-                </span>
+    <>
+      <Modal
+        title={`Manifest — ${prep.name}${editing ? ' (editing)' : ''}`}
+        onClose={onClose}
+        footer={footer}
+        wide
+      >
+        {error ? (
+          <p style={{ color: '#c0312e', fontSize: '0.875rem' }}>
+            Failed to load manifest: {error}
+          </p>
+        ) : displayContent === null ? (
+          <p style={{ color: 'var(--color-text-muted-light)', fontSize: '0.875rem' }}>
+            Loading…
+          </p>
+        ) : (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                {hasEdits && (
+                  <span style={{
+                    fontSize: '0.75rem',
+                    color: 'var(--color-accent)',
+                    background: 'var(--color-accent-dim, rgba(99, 102, 241, 0.1))',
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                  }}>
+                    {order!.edits!.reduce((n, e) => n + Object.keys(e.set).length, 0)} edit(s) applied
+                  </span>
+                )}
+              </div>
+              {hasCRDs && !editing && (
+                <Btn variant="secondary" size="sm" onClick={() => setHideCRDs((v) => !v)}>
+                  {hideCRDs ? 'Show CRDs' : 'Hide CRDs'}
+                </Btn>
               )}
             </div>
-            {hasCRDs && !editing && (
-              <Btn variant="secondary" size="sm" onClick={() => setHideCRDs((v) => !v)}>
-                {hideCRDs ? 'Show CRDs' : 'Hide CRDs'}
-              </Btn>
+            {editing ? (
+              <YamlEditor value={editedContent} onChange={setEditedContent} tall />
+            ) : (
+              <YamlEditor value={displayContent} readOnly tall />
             )}
-          </div>
-          {editing ? (
-            <YamlEditor value={editedContent} onChange={setEditedContent} tall />
-          ) : (
-            <YamlEditor value={displayContent} readOnly tall />
-          )}
-        </>
+          </>
+        )}
+      </Modal>
+
+      {showCommitModal && (
+        <CommitMessageModal
+          onClose={() => { setShowCommitModal(false); setPendingEdits(null) }}
+          onCommit={handleCommit}
+          loading={saving}
+        />
       )}
-    </Modal>
+    </>
   )
 }
