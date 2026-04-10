@@ -9,11 +9,13 @@
     "ghcr.io/devcontainers/features/git:1": {},
     "ghcr.io/devcontainers/features/common-utils:2": {
       "upgradePackages": true
-    }
+    },
+    "ghcr.io/devcontainers/features/node:1": {}
   },
-
-  "runArgs": ["--privileged", "--init"],
-
+  "runArgs": [
+    "--privileged",
+    "--init"
+  ],
   "customizations": {
     "vscode": {
       "settings": {
@@ -25,11 +27,8 @@
       ]
     }
   },
-
   "remoteEnv": {
     "GO111MODULE": "on"
   },
-
   "onCreateCommand": "bash .devcontainer/post-install.sh"
 }
-
