@@ -27,6 +27,7 @@ export default function ManifestModal({ preparation: prep, order, onClose }: Pro
   const [hideCRDs, setHideCRDs] = useState(true)
   const [editing, setEditing] = useState(false)
   const [editedContent, setEditedContent] = useState('')
+  const [initialEditContent, setInitialEditContent] = useState('')
   const [saving, setSaving] = useState(false)
   const [showCommitModal, setShowCommitModal] = useState(false)
   const [pendingEdits, setPendingEdits] = useState<ReturnType<typeof computeEdits> | null>(null)
@@ -45,6 +46,7 @@ export default function ManifestModal({ preparation: prep, order, onClose }: Pro
   const handleStartEdit = useCallback(() => {
     if (displayContent) {
       setEditedContent(displayContent)
+      setInitialEditContent(displayContent)
       setEditing(true)
     }
   }, [displayContent])
@@ -52,6 +54,7 @@ export default function ManifestModal({ preparation: prep, order, onClose }: Pro
   const handleDiscard = useCallback(() => {
     setEditing(false)
     setEditedContent('')
+    setInitialEditContent('')
   }, [])
 
   const handleSave = useCallback(async () => {
@@ -83,6 +86,7 @@ export default function ManifestModal({ preparation: prep, order, onClose }: Pro
   }
 
   const hasEdits = (order?.edits ?? []).length > 0
+  const isDirty = editing && editedContent !== initialEditContent
 
   const footer = (
     <>
@@ -93,7 +97,7 @@ export default function ManifestModal({ preparation: prep, order, onClose }: Pro
       )}
       {editing && (
         <>
-          <Btn variant="primary" size="sm" onClick={handleSave} disabled={saving}>
+          <Btn variant="primary" size="sm" onClick={handleSave} disabled={saving || !isDirty}>
             {saving ? 'Saving…' : 'Save Edits'}
           </Btn>
           <Btn variant="secondary" size="sm" onClick={handleDiscard} disabled={saving}>

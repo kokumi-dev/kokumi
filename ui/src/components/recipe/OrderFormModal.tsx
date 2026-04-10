@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import yaml from 'js-yaml'
 import Modal from '../shared/Modal'
 import Btn from '../shared/Btn'
@@ -145,6 +145,8 @@ export default function OrderFormModal({ order, menuRef, menu, menus, onClose, o
   const [showCommitModal, setShowCommitModal] = useState(false)
   const [pendingFormData, setPendingFormData] = useState<OrderFormData | null>(null)
 
+  const initialYamlRef = useRef(isEdit ? formToYaml(orderToFormData(order!)) : '')
+
   const effectiveMenu = menu ?? selectedMenu
 
   useEffect(() => {
@@ -269,12 +271,26 @@ export default function OrderFormModal({ order, menuRef, menu, menus, onClose, o
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
+  let isDirty = true
+  if (isEdit) {
+    if (tab === 'form') {
+      isDirty = formToYaml(formData) !== initialYamlRef.current
+    } else {
+      try {
+        const partial = yamlToPartialForm(yamlText)
+        isDirty = formToYaml({ ...formData, ...partial }) !== initialYamlRef.current
+      } catch {
+        isDirty = true
+      }
+    }
+  }
+
   const footer = (
     <>
       <Btn variant="secondary" onClick={onClose} disabled={saving}>
         Cancel
       </Btn>
-      <Btn variant="primary" onClick={handleSubmit} disabled={saving}>
+      <Btn variant="primary" onClick={handleSubmit} disabled={saving || !isDirty}>
         {saving ? 'Saving…' : isEdit ? 'Save Changes' : 'Create Order'}
       </Btn>
     </>
