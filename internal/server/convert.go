@@ -188,6 +188,7 @@ func preparationToDTO(p deliveryv1alpha1.Preparation, isActive bool) Preparation
 		Phase:         string(p.Status.Phase),
 		IsActive:      isActive,
 		CommitMessage: p.Spec.CommitMessage,
+		ParentDigest:  p.Spec.ParentDigest,
 		Conditions:    conditionsToDTO(p.Status.Conditions),
 	}
 	if p.Status.CreatedAt != nil && !p.Status.CreatedAt.IsZero() {

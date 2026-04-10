@@ -104,6 +104,13 @@ type PreparationSpec struct {
 	// It is stored as the org.opencontainers.image.description annotation on the OCI artifact.
 	// +optional
 	CommitMessage string `json:"commitMessage,omitempty"`
+
+	// parentDigest is the SHA256 digest of the artifact produced by the immediately preceding
+	// Preparation for this Order. It is empty for the first Preparation and is stored as the
+	// kokumi.dev/parent annotation on the OCI artifact, forming a git-like revision chain.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
+	ParentDigest string `json:"parentDigest,omitempty"`
 }
 
 // PreparationPhase represents the current phase of the Preparation

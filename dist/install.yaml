@@ -670,6 +670,13 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              latestArtifactDigest:
+                description: |-
+                  latestArtifactDigest is the SHA256 digest of the OCI artifact produced by the
+                  most recent Preparation. It is used as the pointer for the parentDigest of
+                  the next Preparation.
+                pattern: ^sha256:[a-f0-9]{64}$
+                type: string
               latestConfigHash:
                 description: |-
                   latestConfigHash is a SHA-256 hash of the spec inputs (source OCI reference,
@@ -797,6 +804,13 @@ spec:
               order:
                 description: order is the name of the order this preparation belongs
                   to
+                type: string
+              parentDigest:
+                description: |-
+                  parentDigest is the SHA256 digest of the artifact produced by the immediately preceding
+                  Preparation for this Order. It is empty for the first Preparation and is stored as the
+                  kokumi.dev/parent annotation on the OCI artifact, forming a git-like revision chain.
+                pattern: ^sha256:[a-f0-9]{64}$
                 type: string
               renderer:
                 description: renderer defines the renderer used to process this preparation

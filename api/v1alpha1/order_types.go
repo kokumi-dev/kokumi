@@ -185,6 +185,13 @@ type OrderStatus struct {
 	// +optional
 	LatestRevision string `json:"latestRevision,omitempty"`
 
+	// latestArtifactDigest is the SHA256 digest of the OCI artifact produced by the
+	// most recent Preparation. It is used as the pointer for the parentDigest of
+	// the next Preparation.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
+	LatestArtifactDigest string `json:"latestArtifactDigest,omitempty"`
+
 	// latestConfigHash is a SHA-256 hash of the spec inputs (source OCI reference,
 	// version, and patches) that produced the current latestRevision.
 	// +optional

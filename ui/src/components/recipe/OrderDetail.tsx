@@ -10,6 +10,26 @@ import DiffModal from './DiffModal'
 import CommitMessageModal from './CommitMessageModal'
 import styles from './OrderDetail.module.css'
 
+/**
+ * Sorts preparations latest-to-oldest by following parentDigest links backwards
+ * from the tip (the entry whose digest no other entry claims as a parent).
+ * Assumes linear history.
+ */
+function sortByChain(preps: Preparation[]): Preparation[] {
+  if (preps.length <= 1) return preps
+  const byDigest = new Map(preps.map((p) => [p.artifact.digest, p]))
+  const parentDigests = new Set(preps.map((p) => p.parentDigest).filter(Boolean))
+  const tip = preps.find((p) => !parentDigests.has(p.artifact.digest))
+  if (!tip) return preps
+  const ordered: Preparation[] = []
+  let cur: Preparation | undefined = tip
+  while (cur) {
+    ordered.push(cur)
+    cur = cur.parentDigest ? byDigest.get(cur.parentDigest) : undefined
+  }
+  return ordered
+}
+
 interface Props {
   order: Order
   editsAllowed: boolean
@@ -29,7 +49,7 @@ type ModalState =
  * status conditions, and the live list of Preparations for that Order.
  */
 export default function OrderDetail({ order, editsAllowed, onClose, onEdit, onDelete }: Props) {
-  const preparations = usePreparations(order.name) ?? []
+  const preparations = sortByChain(usePreparations(order.name) ?? [])
   const [modal, setModal] = useState<ModalState>(null)
   const [commitLoading, setCommitLoading] = useState(false)
 

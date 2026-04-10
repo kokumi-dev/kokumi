@@ -55,6 +55,9 @@ func NewOrderService(client oci.Client, fs afero.Fs, cacheDir string) *OrderServ
 // is responsible for supplying the default when the Order has none configured.
 // commitMessage is attached as org.opencontainers.image.description on the OCI manifest.
 // An empty string defaults to "automatically generated".
+// parentDigest is the digest of the artifact produced by the immediately preceding
+// Preparation for this Order. When non-empty it is stored as the kokumi.dev/parent
+// annotation on the pushed OCI manifest. Pass an empty string for the first Preparation.
 func (rs *OrderService) ProcessOrder(
 	ctx context.Context,
 	order *deliveryv1alpha1.Order,
@@ -64,6 +67,7 @@ func (rs *OrderService) ProcessOrder(
 	edits []deliveryv1alpha1.Patch,
 	destination string,
 	commitMessage string,
+	parentDigest string,
 ) (*OrderResult, error) {
 	logger := log.FromContext(ctx)
 
@@ -151,6 +155,9 @@ func (rs *OrderService) ProcessOrder(
 
 	ociAnnotations := map[string]string{
 		ocispec.AnnotationDescription: commitMessage,
+	}
+	if parentDigest != "" {
+		ociAnnotations[oci.AnnotationParentDigest] = parentDigest
 	}
 
 	destDigest, err := rs.client.Push(ctx, destRef, source.Version, tempDir, ociAnnotations)

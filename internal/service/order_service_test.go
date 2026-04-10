@@ -77,7 +77,7 @@ func TestOrderService_ProcessOrder(t *testing.T) {
 			if tc.order.Spec.Destination != nil {
 				dest = tc.order.Spec.Destination.OCI
 			}
-			result, err := svc.ProcessOrder(context.Background(), tc.order, *tc.order.Spec.Source, tc.order.Spec.Render, tc.order.Spec.Patches, tc.order.Spec.Edits, dest, "")
+			result, err := svc.ProcessOrder(context.Background(), tc.order, *tc.order.Spec.Source, tc.order.Spec.Render, tc.order.Spec.Patches, tc.order.Spec.Edits, dest, "", "")
 
 			if tc.wantErr {
 				require.Error(t, err)
@@ -143,7 +143,7 @@ func TestOrderService_PullCache(t *testing.T) {
 		client := &countingFakeClient{fs: fs, onPull: func() { pullCount++ }}
 
 		svc := NewOrderService(client, fs, cacheDir)
-		_, err := svc.ProcessOrder(context.Background(), order, *order.Spec.Source, order.Spec.Render, order.Spec.Patches, order.Spec.Edits, order.Spec.Destination.OCI, "")
+		_, err := svc.ProcessOrder(context.Background(), order, *order.Spec.Source, order.Spec.Render, order.Spec.Patches, order.Spec.Edits, order.Spec.Destination.OCI, "", "")
 		require.NoError(t, err)
 
 		assert.Equal(t, 1, pullCount, "expected one pull on cache miss")
@@ -166,12 +166,12 @@ func TestOrderService_PullCache(t *testing.T) {
 		svc := NewOrderService(client, fs, cacheDir)
 
 		// First call populates the cache.
-		_, err := svc.ProcessOrder(context.Background(), order, *order.Spec.Source, order.Spec.Render, order.Spec.Patches, order.Spec.Edits, order.Spec.Destination.OCI, "")
+		_, err := svc.ProcessOrder(context.Background(), order, *order.Spec.Source, order.Spec.Render, order.Spec.Patches, order.Spec.Edits, order.Spec.Destination.OCI, "", "")
 		require.NoError(t, err)
 		require.Equal(t, 1, pullCount)
 
 		// Second call with identical spec should hit the cache.
-		_, err = svc.ProcessOrder(context.Background(), order, *order.Spec.Source, order.Spec.Render, order.Spec.Patches, order.Spec.Edits, order.Spec.Destination.OCI, "")
+		_, err = svc.ProcessOrder(context.Background(), order, *order.Spec.Source, order.Spec.Render, order.Spec.Patches, order.Spec.Edits, order.Spec.Destination.OCI, "", "")
 		require.NoError(t, err)
 		assert.Equal(t, 1, pullCount, "second call should be served from cache without pulling")
 	})

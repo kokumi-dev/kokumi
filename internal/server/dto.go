@@ -97,6 +97,7 @@ type PreparationDTO struct {
 	CreatedAt     *time.Time     `json:"createdAt,omitempty"`
 	IsActive      bool           `json:"isActive"`
 	CommitMessage string         `json:"commitMessage,omitempty"`
+	ParentDigest  string         `json:"parentDigest,omitempty"`
 	Conditions    []ConditionDTO `json:"conditions,omitempty"`
 }
 

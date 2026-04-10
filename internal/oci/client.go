@@ -5,6 +5,11 @@ import "context"
 // HelmChartLayerMediaType is the CNCF Helm OCI media type for chart content.
 const HelmChartLayerMediaType = "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
 
+// AnnotationParentDigest is the OCI manifest annotation key that records the digest
+// of the artifact produced by the immediately preceding Preparation for the same Order.
+// Its presence on a manifest makes the revision chain explicit and tamper-evident.
+const AnnotationParentDigest = "kokumi.dev/parent"
+
 // Client defines the interface for interacting with an OCI registry.
 type Client interface {
 	// Pull fetches an OCI artifact from a registry into targetDir.

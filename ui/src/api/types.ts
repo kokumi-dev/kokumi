@@ -78,6 +78,7 @@ export interface Preparation {
   createdAt?: string
   isActive: boolean
   commitMessage?: string
+  parentDigest?: string
   conditions?: Condition[]
 }
 
