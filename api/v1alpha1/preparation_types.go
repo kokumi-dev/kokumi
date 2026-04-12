@@ -24,11 +24,13 @@ import (
 type OrderSource struct {
 	// oci is the OCI registry URL for the source manifests
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:Pattern=`^oci://.*`
 	OCI string `json:"oci"`
 
 	// baseDigest is the SHA256 digest of the base source artifact
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	BaseDigest string `json:"baseDigest"`
 }
@@ -47,15 +49,18 @@ const (
 type Renderer struct {
 	// version is the semantic version of the renderer
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MaxLength=64
 	Version string `json:"version"`
 
 	// digest is the SHA256 digest of the renderer binary/image
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	Digest string `json:"digest"`
 
 	// renderType records how the source was rendered to produce this Preparation.
 	// One of "Manifest" or "Helm".
+	// +kubebuilder:validation:MaxLength=8
 	// +kubebuilder:validation:Enum=Manifest;Helm
 	RenderType RenderType `json:"renderType"`
 }
@@ -64,11 +69,13 @@ type Renderer struct {
 type Artifact struct {
 	// ociRef is the full OCI reference including digest
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:Pattern=`^oci://.*@sha256:[a-f0-9]{64}$`
 	OCIRef string `json:"ociRef"`
 
 	// digest is the SHA256 digest of the artifact
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	Digest string `json:"digest"`
 
@@ -78,9 +85,11 @@ type Artifact struct {
 }
 
 // PreparationSpec defines the desired state of Preparation
+// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Preparation spec is immutable"
 type PreparationSpec struct {
 	// order is the name of the order this preparation belongs to
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MaxLength=253
 	Order string `json:"order"`
 
 	// source defines the source artifact information
@@ -93,6 +102,7 @@ type PreparationSpec struct {
 
 	// configHash is the SHA256 hash of the canonicalized order configuration
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]+$`
 	ConfigHash string `json:"configHash"`
 
@@ -103,12 +113,14 @@ type PreparationSpec struct {
 	// commitMessage is the human-readable description of why this Preparation was created.
 	// It is stored as the org.opencontainers.image.description annotation on the OCI artifact.
 	// +optional
+	// +kubebuilder:validation:MaxLength=512
 	CommitMessage string `json:"commitMessage,omitempty"`
 
 	// parentDigest is the SHA256 digest of the artifact produced by the immediately preceding
 	// Preparation for this Order. It is empty for the first Preparation and is stored as the
 	// kokumi.dev/parent annotation on the OCI artifact, forming a git-like revision chain.
 	// +optional
+	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	ParentDigest string `json:"parentDigest,omitempty"`
 }
