@@ -777,10 +777,12 @@ spec:
                 properties:
                   digest:
                     description: digest is the SHA256 digest of the artifact
+                    maxLength: 71
                     pattern: ^sha256:[a-f0-9]{64}$
                     type: string
                   ociRef:
                     description: ociRef is the full OCI reference including digest
+                    maxLength: 2048
                     pattern: ^oci://.*@sha256:[a-f0-9]{64}$
                     type: string
                   signed:
@@ -795,21 +797,25 @@ spec:
                 description: |-
                   commitMessage is the human-readable description of why this Preparation was created.
                   It is stored as the org.opencontainers.image.description annotation on the OCI artifact.
+                maxLength: 512
                 type: string
               configHash:
                 description: configHash is the SHA256 hash of the canonicalized order
                   configuration
+                maxLength: 71
                 pattern: ^sha256:[a-f0-9]+$
                 type: string
               order:
                 description: order is the name of the order this preparation belongs
                   to
+                maxLength: 253
                 type: string
               parentDigest:
                 description: |-
                   parentDigest is the SHA256 digest of the artifact produced by the immediately preceding
                   Preparation for this Order. It is empty for the first Preparation and is stored as the
                   kokumi.dev/parent annotation on the OCI artifact, forming a git-like revision chain.
+                maxLength: 71
                 pattern: ^sha256:[a-f0-9]{64}$
                 type: string
               renderer:
@@ -817,6 +823,7 @@ spec:
                 properties:
                   digest:
                     description: digest is the SHA256 digest of the renderer binary/image
+                    maxLength: 71
                     pattern: ^sha256:[a-f0-9]{64}$
                     type: string
                   renderType:
@@ -826,9 +833,11 @@ spec:
                     enum:
                     - Manifest
                     - Helm
+                    maxLength: 8
                     type: string
                   version:
                     description: version is the semantic version of the renderer
+                    maxLength: 64
                     type: string
                 required:
                 - digest
@@ -841,10 +850,12 @@ spec:
                   baseDigest:
                     description: baseDigest is the SHA256 digest of the base source
                       artifact
+                    maxLength: 71
                     pattern: ^sha256:[a-f0-9]{64}$
                     type: string
                   oci:
                     description: oci is the OCI registry URL for the source manifests
+                    maxLength: 2048
                     pattern: ^oci://.*
                     type: string
                 required:
@@ -858,6 +869,9 @@ spec:
             - renderer
             - source
             type: object
+            x-kubernetes-validations:
+            - message: Preparation spec is immutable
+              rule: self == oldSelf
           status:
             description: status defines the observed state of Preparation
             properties:
