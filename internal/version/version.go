@@ -1,4 +1,4 @@
 package version
 
 // Version is the current version of the application.
-const Version = "0.9.1" // x-release-please-version
+const Version = "0.10.0" // x-release-please-version
