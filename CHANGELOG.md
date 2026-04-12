@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.10.0](https://github.com/kokumi-dev/kokumi/compare/0.9.1...0.10.0) (2026-04-12)
+
+
+### Features
+
+* add commit message support for Order creation and updates ([#107](https://github.com/kokumi-dev/kokumi/issues/107)) ([d32ff53](https://github.com/kokumi-dev/kokumi/commit/d32ff5311afe80755c4cf887d82011b52ab4f66c))
+* disable save changes button when no changes are present ([#109](https://github.com/kokumi-dev/kokumi/issues/109)) ([d901813](https://github.com/kokumi-dev/kokumi/commit/d901813281502443aa4185253ee59c447e3d0b0f))
+* link preparations trough parent digest revision chain ([#111](https://github.com/kokumi-dev/kokumi/issues/111)) ([744f99b](https://github.com/kokumi-dev/kokumi/commit/744f99b40f1379f5266b7bc328ec167272728c1e))
+
 ## [0.9.1](https://github.com/kokumi-dev/kokumi/compare/0.9.0...0.9.1) (2026-04-06)
 
 
