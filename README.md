@@ -20,6 +20,18 @@
 
 ---
 
+# Why Kokumi?
+
+GitOps made Git the source of truth. That was a good deal. You got history,
+blame, diffs, and PR-based review essentially for free. OCI is increasingly
+taking over as the delivery mechanism for Kubernetes config, and it brings real
+strengths: content-addressability, immutability, and airgap compatibility that
+Git was never designed for. But the industry is swapping one for the other as
+though Git's review and traceability properties were incidental. They weren't.
+Kokumi is built on the premise that you shouldn't have to choose: it embraces
+OCI as the artifact layer while preserving the visibility and human-in-the-loop
+qualities that made GitOps worth adopting in the first place.
+
 # Overview
 
 **Kokumi** is a Kubernetes operator for structured, immutable release management.

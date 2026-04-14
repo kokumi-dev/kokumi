@@ -6,7 +6,13 @@ sidebar:
 
 Welcome to the **Kokumi** documentation.
 
-Kokumi is a Kubernetes operator for structured, immutable release management.
+Kokumi is a Kubernetes operator for OCI-first GitOps config delivery that preserves
+the review and traceability properties of Git. As OCI becomes the standard
+mechanism for shipping Kubernetes config, most tools trade away Git's human
+review and audit trail to get there. Kokumi keeps both: OCI artifacts as the
+immutable source of truth, with approval gates and full render visibility
+before anything reaches your cluster.
+
 It models your delivery workflow as five composable primitives:
 
 | Resource | Role |
