@@ -77,25 +77,3 @@ spec:
             httpGet:
               path: /
               port: http
-
----
-# Source: sample-chart/templates/tests/test-connection.yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  name: "sample-sample-chart-test-connection"
-  labels:
-    helm.sh/chart: sample-chart-0.1.0
-    app.kubernetes.io/name: sample-chart
-    app.kubernetes.io/instance: sample
-    app.kubernetes.io/version: "1.16.0"
-    app.kubernetes.io/managed-by: Helm
-  annotations:
-    "helm.sh/hook": test
-spec:
-  containers:
-    - name: wget
-      image: busybox
-      command: ['wget']
-      args: ['sample-sample-chart:80']
-  restartPolicy: Never
