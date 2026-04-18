@@ -11,7 +11,7 @@ interface Props {
 
 /**
  * OrderList renders a filterable card grid of all Orders. Clicking a card
- * fires onSelect; the "Add Order" button fires onAdd.
+ * fires onSelect.
  */
 export default function OrderList({ orders, selectedName, query, onSelect }: Props) {
   const filtered = query

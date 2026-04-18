@@ -1,7 +1,7 @@
 import type { Menu } from '../../api/types'
 import Badge from '../shared/Badge'
 import Btn from '../shared/Btn'
-import styles from '../recipe/OrderDetail.module.css'
+import styles from './MenuDetail.module.css'
 
 interface Props {
   menu: Menu

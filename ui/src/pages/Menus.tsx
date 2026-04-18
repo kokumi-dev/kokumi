@@ -5,7 +5,7 @@ import { useMenus } from '../hooks/useMenus'
 import MenuList from '../components/menu/MenuList'
 import MenuDetail from '../components/menu/MenuDetail'
 import MenuFormModal from '../components/menu/MenuFormModal'
-import OrderFormModal from '../components/recipe/OrderFormModal'
+import OrderFormModal from '../components/order/OrderFormModal'
 import Btn from '../components/shared/Btn'
 import styles from './pages.module.css'
 

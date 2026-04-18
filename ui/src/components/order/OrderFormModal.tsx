@@ -3,11 +3,12 @@ import yaml from 'js-yaml'
 import Modal from '../shared/Modal'
 import Btn from '../shared/Btn'
 import YamlEditor from '../shared/YamlEditor'
-import CommitMessageModal from './CommitMessageModal'
+import CommitMessageModal from '../shared/CommitMessageModal'
 import PreviewTab from './PreviewTab'
 import DiffTab from './DiffTab'
 import type { Order, OrderFormData, Patch, HelmRender, Menu } from '../../api/types'
 import { emptyOrderForm, orderToFormData } from '../../api/types'
+import { objectToYaml, yamlToValues } from '../../utils/yaml'
 import { getDefaultRegistry } from '../../api/client'
 import styles from './OrderFormModal.module.css'
 
@@ -25,20 +26,6 @@ interface Props {
 }
 
 // ── YAML serialisation helpers ────────────────────────────────────────────────
-
-function objectToYaml(values: Record<string, unknown>): string {
-  if (!values || Object.keys(values).length === 0) return ''
-  return yaml.dump(values, { lineWidth: 100 }).trimEnd()
-}
-
-function yamlToValues(text: string): Record<string, unknown> {
-  if (!text.trim()) return {}
-  const parsed = yaml.load(text)
-  if (parsed == null) return {}
-  if (typeof parsed !== 'object' || Array.isArray(parsed))
-    throw new Error('Values must be a YAML mapping')
-  return parsed as Record<string, unknown>
-}
 
 function formToYaml(data: OrderFormData): string {
   const doc: Record<string, unknown> = {

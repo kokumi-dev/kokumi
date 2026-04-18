@@ -1,21 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useServings } from '../hooks/useServings'
+import { formatDate, phaseToStatusKey } from '../utils/format'
 import styles from './pages.module.css'
-
-function phaseBadgeClass(phase: string): string {
-  const p = phase.toLowerCase()
-  if (p === 'deployed' || p === 'ready' || p === 'succeeded') return styles.badgeSuccess
-  if (p === 'failed' || p === 'error') return styles.badgeError
-  return styles.badgeWarning
-}
-
-function formatDate(iso?: string): string {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleString(undefined, {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  })
-}
 
 export default function Servings() {
   const servings = useServings()
@@ -111,7 +97,7 @@ export default function Servings() {
                   return (
                     <tr key={`${s.namespace}/${s.name}`} className={styles.tableRow}>
                       <td>
-                        <span className={`${styles.badge} ${phaseBadgeClass(s.phase)}`}>
+                        <span className={`${styles.badge} ${styles[phaseToStatusKey(s.phase)]}`}>
                           <span className={styles.badgeDot} />
                           {s.phase}
                         </span>

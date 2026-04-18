@@ -5,7 +5,8 @@ import Btn from '../shared/Btn'
 import YamlEditor from '../shared/YamlEditor'
 import type { Menu, MenuFormData, Patch, HelmRender, OverridePolicy } from '../../api/types'
 import { emptyMenuForm, menuToFormData } from '../../api/types'
-import formStyles from '../recipe/OrderFormModal.module.css'
+import { objectToYaml, yamlToValues } from '../../utils/yaml'
+import formStyles from './MenuFormModal.module.css'
 
 interface Props {
   menu?: Menu
@@ -85,20 +86,6 @@ function yamlToPartialForm(text: string): Omit<MenuFormData, 'name'> {
     overrides: rawOverrides ?? { values: { policy: 'None' }, patches: { policy: 'None' } },
     defaults: { autoDeploy: Boolean(rawDefaults?.autoDeploy) },
   }
-}
-
-function objectToYaml(values: Record<string, unknown>): string {
-  if (!values || Object.keys(values).length === 0) return ''
-  return yaml.dump(values, { lineWidth: 100 }).trimEnd()
-}
-
-function yamlToValues(text: string): Record<string, unknown> {
-  if (!text.trim()) return {}
-  const parsed = yaml.load(text)
-  if (parsed == null) return {}
-  if (typeof parsed !== 'object' || Array.isArray(parsed))
-    throw new Error('Values must be a YAML mapping')
-  return parsed as Record<string, unknown>
 }
 
 export default function MenuFormModal({ menu, onClose, onSubmit }: Props) {
