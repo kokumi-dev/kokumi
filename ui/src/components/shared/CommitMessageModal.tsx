@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import Modal from '../shared/Modal'
-import Btn from '../shared/Btn'
+import Modal from './Modal'
+import Btn from './Btn'
 import styles from './CommitMessageModal.module.css'
 
 interface Props {

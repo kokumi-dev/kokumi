@@ -15,7 +15,7 @@ interface Props {
 }
 
 /**
- * PreparationList renders all Preparations for a Order, sorted newest-first.
+ * PreparationList renders all Preparations for an Order, sorted newest-first.
  * Each row shows phase, metadata, and context-aware action buttons:
  *   - Promote / Rollback  (hidden when this IS the active Preparation)
  *   - Manifest            (always visible)

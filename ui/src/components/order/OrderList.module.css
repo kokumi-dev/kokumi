@@ -1,0 +1,150 @@
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.search {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 7px;
+  border: 1px solid rgba(49, 54, 56, 0.15);
+  background: var(--color-bg-main);
+  font-family: inherit;
+  font-size: 0.875rem;
+  color: var(--color-text-on-light);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.search:focus {
+  border-color: var(--color-accent);
+}
+
+.search::placeholder {
+  color: var(--color-text-muted-light);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.card {
+  background: var(--color-bg-main);
+  border: 1px solid rgba(49, 54, 56, 0.08);
+  border-radius: 10px;
+  padding: 16px 18px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.card:hover {
+  border-color: var(--color-accent);
+  box-shadow: 0 2px 12px rgba(239, 100, 97, 0.1);
+}
+
+.cardSelected {
+  border-color: var(--color-accent);
+  box-shadow: 0 2px 12px rgba(239, 100, 97, 0.14);
+}
+
+.cardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cardName {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--color-text-on-light);
+  word-break: break-all;
+}
+
+.cardNs {
+  font-size: 0.75rem;
+  color: var(--color-text-muted-light);
+  margin-top: 2px;
+}
+
+.cardMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.metaRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--color-text-muted-light);
+  overflow: hidden;
+}
+
+.metaLabel {
+  font-weight: 600;
+  min-width: 70px;
+  flex-shrink: 0;
+}
+
+.metaValue {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.75rem;
+}
+
+.orderBtn {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--color-accent);
+  background: transparent;
+  color: var(--color-accent);
+  cursor: pointer;
+  letter-spacing: 0.03em;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.orderBtn:hover {
+  background: var(--color-accent);
+  color: #fff;
+}
+
+.autoDeployPill {
+  font-size: 0.7rem;
+  padding: 2px 7px;
+  border-radius: 12px;
+  background: rgba(228, 179, 99, 0.2);
+  color: #8a6200;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  align-self: flex-start;
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 48px 20px;
+  color: var(--color-text-muted-light);
+  margin-top: 16px;
+}
+
+.emptyText {
+  font-size: 0.875rem;
+  font-weight: 500;
+}

@@ -1,23 +1,9 @@
 import { useMemo, useState } from 'react'
 import type { Preparation } from '../api/types'
 import { usePreparations } from '../hooks/usePreparations'
-import ManifestModal from '../components/recipe/ManifestModal'
+import ManifestModal from '../components/preparation/ManifestModal'
+import { formatDate, phaseToStatusKey } from '../utils/format'
 import styles from './pages.module.css'
-
-function phaseBadgeClass(phase: string): string {
-  const p = phase.toLowerCase()
-  if (p === 'ready' || p === 'succeeded') return styles.badgeSuccess
-  if (p === 'failed' || p === 'error') return styles.badgeError
-  return styles.badgeWarning
-}
-
-function formatDate(iso?: string): string {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleString(undefined, {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  })
-}
 
 export default function Preparations() {
   const preparations = usePreparations()
@@ -97,7 +83,7 @@ export default function Preparations() {
                       {p.isActive && <span className={styles.activePill}>active</span>}
                     </td>
                     <td>
-                      <span className={`${styles.badge} ${phaseBadgeClass(p.phase)}`}>
+                      <span className={`${styles.badge} ${styles[phaseToStatusKey(p.phase)]}`}>
                         <span className={styles.badgeDot} />
                         {p.phase}
                       </span>

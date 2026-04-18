@@ -5,7 +5,7 @@ import { computeDiff, filterContext } from '../../utils/diff'
 import { filterCRDDocuments, hasCRDDocuments } from '../../utils/manifest'
 import Modal from '../shared/Modal'
 import Btn from '../shared/Btn'
-import DiffView from './DiffView'
+import DiffView from '../shared/DiffView'
 import styles from './DiffModal.module.css'
 
 interface Props {
@@ -114,5 +114,3 @@ export default function DiffModal({ preparation, activePreparation, onClose }: P
     </Modal>
   )
 }
-
-

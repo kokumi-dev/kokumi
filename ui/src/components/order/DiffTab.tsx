@@ -4,7 +4,7 @@ import type { Order, OrderFormData } from '../../api/types'
 import { computeDiff, filterContext } from '../../utils/diff'
 import { filterCRDDocuments, hasCRDDocuments } from '../../utils/manifest'
 import Btn from '../shared/Btn'
-import DiffView from './DiffView'
+import DiffView from '../shared/DiffView'
 import styles from './DiffTab.module.css'
 
 interface Props {

@@ -6,7 +6,7 @@ import { filterCRDDocuments, hasCRDDocuments } from '../../utils/manifest'
 import Modal from '../shared/Modal'
 import Btn from '../shared/Btn'
 import YamlEditor from '../shared/YamlEditor'
-import CommitMessageModal from './CommitMessageModal'
+import CommitMessageModal from '../shared/CommitMessageModal'
 
 interface Props {
   preparation: Preparation
