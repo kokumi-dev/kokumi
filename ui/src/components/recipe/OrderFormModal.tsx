@@ -4,6 +4,8 @@ import Modal from '../shared/Modal'
 import Btn from '../shared/Btn'
 import YamlEditor from '../shared/YamlEditor'
 import CommitMessageModal from './CommitMessageModal'
+import PreviewTab from './PreviewTab'
+import DiffTab from './DiffTab'
 import type { Order, OrderFormData, Patch, HelmRender, Menu } from '../../api/types'
 import { emptyOrderForm, orderToFormData } from '../../api/types'
 import { getDefaultRegistry } from '../../api/client'
@@ -125,7 +127,8 @@ function yamlToPartialForm(text: string): Omit<OrderFormData, 'name' | 'namespac
 
 export default function OrderFormModal({ order, menuRef, menu, menus, onClose, onSubmit }: Props) {
   const isEdit = !!order
-  const [tab, setTab] = useState<'form' | 'yaml'>('form')
+  const showDiffTab = isEdit && !!order?.activePreparation
+  const [tab, setTab] = useState<'form' | 'yaml' | 'preview' | 'diff'>('form')
   const [selectedMenu, setSelectedMenu] = useState<Menu | null>(null)
   const [defaultRegistry, setDefaultRegistry] = useState('')
   const [formData, setFormData] = useState<OrderFormData>(() => {
@@ -273,7 +276,7 @@ export default function OrderFormModal({ order, menuRef, menu, menus, onClose, o
 
   let isDirty = true
   if (isEdit) {
-    if (tab === 'form') {
+    if (tab === 'form' || tab === 'preview' || tab === 'diff') {
       isDirty = formToYaml(formData) !== initialYamlRef.current
     } else {
       try {
@@ -313,20 +316,62 @@ export default function OrderFormModal({ order, menuRef, menu, menus, onClose, o
       <div className={styles.tabs}>
         <button
           className={`${styles.tab} ${tab === 'form' ? styles.tabActive : ''}`}
-          onClick={() => (tab === 'yaml' ? switchToForm() : undefined)}
+          onClick={() => {
+            if (tab === 'yaml') switchToForm()
+            else if (tab === 'preview' || tab === 'diff') setTab('form')
+          }}
         >
           Form
         </button>
         <button
           className={`${styles.tab} ${tab === 'yaml' ? styles.tabActive : ''}`}
-          onClick={() => (tab === 'form' ? switchToYaml() : undefined)}
+          onClick={() => {
+            if (tab === 'form') switchToYaml()
+            else if (tab === 'preview' || tab === 'diff') setTab('yaml')
+          }}
         >
           YAML
         </button>
+        <button
+          className={`${styles.tab} ${tab === 'preview' ? styles.tabActive : ''}`}
+          onClick={() => {
+            if (tab === 'yaml') {
+              try {
+                const partial = yamlToPartialForm(yamlText)
+                setFormData((prev) => ({ ...prev, ...partial }))
+                setYamlError(null)
+              } catch {
+                // keep current formData
+              }
+            }
+            setTab('preview')
+          }}
+        >
+          Preview
+        </button>
+        {showDiffTab && (
+          <button
+            className={`${styles.tab} ${tab === 'diff' ? styles.tabActive : ''}`}
+            onClick={() => {
+              if (tab === 'yaml') {
+                try {
+                  const partial = yamlToPartialForm(yamlText)
+                  setFormData((prev) => ({ ...prev, ...partial }))
+                  setYamlError(null)
+                } catch {
+                  // keep current formData
+                }
+              }
+              setTab('diff')
+            }}
+          >
+            Diff
+          </button>
+        )}
       </div>
 
       <div className={styles.tabContent}>
-        {tab === 'form' ? (
+        {tab === 'form' && (
           <FormView
             formData={formData}
             isEdit={isEdit}
@@ -343,12 +388,19 @@ export default function OrderFormModal({ order, menuRef, menu, menus, onClose, o
             onRemovePatch={removePatch}
             onUpdatePatch={updatePatch}
           />
-        ) : (
+        )}
+        {tab === 'yaml' && (
           <YamlView
             yamlText={yamlText}
             yamlError={yamlError}
             onChange={(v) => { setYamlText(v); setYamlError(null) }}
           />
+        )}
+        {tab === 'preview' && (
+          <PreviewTab formData={formData} />
+        )}
+        {tab === 'diff' && showDiffTab && (
+          <DiffTab formData={formData} order={order!} />
         )}
       </div>
     </Modal>

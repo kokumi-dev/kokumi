@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { getManifest } from '../../api/client'
 import type { Preparation } from '../../api/types'
 import { computeDiff, filterContext } from '../../utils/diff'
-import type { DiffLine } from '../../utils/diff'
 import { filterCRDDocuments, hasCRDDocuments } from '../../utils/manifest'
 import Modal from '../shared/Modal'
 import Btn from '../shared/Btn'
+import DiffView from './DiffView'
 import styles from './DiffModal.module.css'
 
 interface Props {
@@ -115,57 +115,4 @@ export default function DiffModal({ preparation, activePreparation, onClose }: P
   )
 }
 
-// ── DiffView ──────────────────────────────────────────────────────────────────
 
-function DiffView({ lines }: { lines: DiffLine[] }) {
-  if (lines.length === 0) {
-    return (
-      <p style={{ textAlign: 'center', color: 'var(--color-text-muted-light)', padding: '24px 0', fontSize: '0.875rem' }}>
-        No differences found.
-      </p>
-    )
-  }
-
-  return (
-    <div className={styles.diffWrap}>
-      <table className={styles.diffTable}>
-        <tbody>
-          {lines.map((line, i) => (
-            <DiffRow key={i} line={line} />
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
-
-function DiffRow({ line }: { line: DiffLine }) {
-  if (line.type === 'omitted') {
-    return (
-      <tr className={styles.lineOmitted}>
-        <td colSpan={3}>{line.content}</td>
-      </tr>
-    )
-  }
-
-  const rowClass =
-    line.type === 'added'
-      ? styles.lineAdded
-      : line.type === 'removed'
-        ? styles.lineRemoved
-        : ''
-
-  const prefix =
-    line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' '
-
-  return (
-    <tr className={rowClass}>
-      <td className={styles.lineGutter}>{line.lineNoBefore ?? ''}</td>
-      <td className={styles.lineGutter}>{line.lineNoAfter ?? ''}</td>
-      <td className={styles.lineContent}>
-        <span className={styles.linePrefix}>{prefix}</span>
-        {line.content}
-      </td>
-    </tr>
-  )
-}

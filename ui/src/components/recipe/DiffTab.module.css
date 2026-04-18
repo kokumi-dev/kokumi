@@ -1,0 +1,28 @@
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.toolbarLabel {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-muted-light);
+}
+
+.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 120px;
+  color: var(--color-text-muted-light);
+  font-size: 0.875rem;
+}
+
+.error {
+  color: #c0312e;
+  font-size: 0.875rem;
+  padding: 8px 0;
+}

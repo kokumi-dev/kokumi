@@ -1,0 +1,22 @@
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 120px;
+  color: var(--color-text-muted-light);
+  font-size: 0.875rem;
+}
+
+.error {
+  color: #c0312e;
+  font-size: 0.875rem;
+  padding: 8px 0;
+}

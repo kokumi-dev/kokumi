@@ -20,6 +20,7 @@ func addRoutes(
 	// Order CRUD
 	mux.HandleFunc("GET /api/v1/orders", handleListOrders(deps))
 	mux.HandleFunc("POST /api/v1/orders", handleCreateOrder(deps))
+	mux.HandleFunc("POST /api/v1/orders/preview", handlePreviewOrder(deps))
 	mux.HandleFunc("GET /api/v1/orders/{namespace}/{name}", handleGetOrder(deps))
 	mux.HandleFunc("PUT /api/v1/orders/{namespace}/{name}", handleUpdateOrder(deps))
 	mux.HandleFunc("PUT /api/v1/orders/{namespace}/{name}/edits", handleUpdateOrderEdits(deps))
