@@ -88,6 +88,26 @@ export function listPreparations(
   return request<Preparation[]>(`/orders/${namespace}/${orderName}/preparations`)
 }
 
+export function previewOrder(data: OrderFormData): Promise<string> {
+  return fetch(`${BASE}/orders/preview`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  }).then(async (res) => {
+    if (!res.ok) {
+      let message = `HTTP ${res.status}`
+      try {
+        const body = (await res.json()) as { error?: string }
+        if (body.error) message = body.error
+      } catch {
+        // ignore
+      }
+      throw new Error(message)
+    }
+    return res.text()
+  })
+}
+
 export function getManifest(
   namespace: string,
   prepName: string,

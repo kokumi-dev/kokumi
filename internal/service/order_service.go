@@ -175,6 +175,77 @@ func (rs *OrderService) ProcessOrder(
 	}, nil
 }
 
+// PreviewOrder pulls the source artifact, applies patches and edits (or normalises YAML),
+// and returns the processed manifest bytes without pushing anything to a registry.
+// name and namespace are used only as Helm releaseName/namespace fallbacks when the
+// Render config does not specify them explicitly.
+func (rs *OrderService) PreviewOrder(
+	ctx context.Context,
+	source deliveryv1alpha1.OCISource,
+	render *deliveryv1alpha1.Render,
+	patches []deliveryv1alpha1.Patch,
+	edits []deliveryv1alpha1.Patch,
+	name string,
+	namespace string,
+) ([]byte, error) {
+	logger := log.FromContext(ctx)
+
+	sourceRef := strings.TrimPrefix(source.OCI, "oci://")
+
+	logger.Info("Previewing artifact", "source", sourceRef, "version", source.Version)
+
+	tempDir, err := afero.TempDir(rs.fs, "", "order-preview-*")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp directory: %w", err)
+	}
+	defer rs.fs.RemoveAll(tempDir) //nolint:errcheck
+
+	mediaType, _, err := rs.pullWithCache(ctx, sourceRef, source.Version, tempDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to pull artifact: %w", err)
+	}
+
+	manifestPath := filepath.Join(tempDir, "manifest.yaml")
+
+	if render != nil && render.Helm != nil {
+		if mediaType != oci.HelmChartLayerMediaType {
+			return nil, fmt.Errorf("source is not a Helm chart (got media type %q)", mediaType)
+		}
+
+		vals, err := jsonToMap(render.Helm.Values)
+		if err != nil {
+			return nil, fmt.Errorf("failed convert values: %w", err)
+		}
+
+		releaseName := render.Helm.ReleaseName
+		if releaseName == "" {
+			releaseName = name
+		}
+		helmNamespace := render.Helm.Namespace
+		if helmNamespace == "" {
+			helmNamespace = namespace
+		}
+
+		chartPath := filepath.Join(tempDir, "chart.tgz")
+
+		manifest, err := renderer.RenderChart(ctx, chartPath, releaseName, helmNamespace, render.Helm.IncludeCRDs, vals)
+		if err != nil {
+			return nil, fmt.Errorf("failed to render Helm chart: %w", err)
+		}
+
+		if err := afero.WriteFile(rs.fs, manifestPath, []byte(manifest), 0600); err != nil {
+			return nil, fmt.Errorf("failed to write manifest: %w", err)
+		}
+	}
+
+	content, err := afero.ReadFile(rs.fs, manifestPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read manifest: %w", err)
+	}
+
+	return rs.processManifest(ctx, content, patches, edits)
+}
+
 // processManifest applies patches and edits when present, otherwise normalizes YAML formatting.
 // Patches are applied first, then edits on top.
 func (rs *OrderService) processManifest(ctx context.Context, content []byte, patches, edits []deliveryv1alpha1.Patch) ([]byte, error) {
