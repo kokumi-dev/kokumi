@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.11.0](https://github.com/kokumi-dev/kokumi/compare/0.10.0...0.11.0) (2026-04-19)
+
+
+### Features
+
+* add manifest preview in create and update order ([#130](https://github.com/kokumi-dev/kokumi/issues/130)) ([ee6eeaa](https://github.com/kokumi-dev/kokumi/commit/ee6eeaaf28fae486a0d4065a662a0d064416d7e3))
+* enforce immutability of PreparationSpec using CEL validation ([#112](https://github.com/kokumi-dev/kokumi/issues/112)) ([9425b21](https://github.com/kokumi-dev/kokumi/commit/9425b219d1ed6a5b9e3f0f6021be7e980aae455e))
+* exclude test helm hooks in rendered manifest ([#129](https://github.com/kokumi-dev/kokumi/issues/129)) ([78f8fbd](https://github.com/kokumi-dev/kokumi/commit/78f8fbdfeee309f414c845a525b5fefd1a4d96f1))
+
 ## [0.10.0](https://github.com/kokumi-dev/kokumi/compare/0.9.1...0.10.0) (2026-04-12)
 
 
