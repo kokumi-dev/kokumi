@@ -36,3 +36,9 @@ func (c *FakeClient) Pull(ctx context.Context, ref, tag, targetDir string) (stri
 func (c *FakeClient) Push(_ context.Context, _, _, _ string, _ map[string]string) (string, error) {
 	return "sha256:fdf90e00e76bf3f0d2e5042c4c4e6c42a6d38c1e2b4f5a7d8e9f0a1b2c3d4e5f", nil
 }
+
+// ListTags returns an empty tag list. To return specific tags in a test,
+// embed FakeClient in a local struct and override the ListTags method.
+func (c *FakeClient) ListTags(_ context.Context, _ string) ([]string, error) {
+	return nil, nil
+}

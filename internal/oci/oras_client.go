@@ -147,6 +147,27 @@ func (c *ORASClient) fetchBlob(ctx context.Context, repo *remote.Repository, des
 	return nil
 }
 
+// ListTags returns all tags available for the repository at ref.
+func (c *ORASClient) ListTags(ctx context.Context, ref string) ([]string, error) {
+	repo, err := remote.NewRepository(ref)
+	if err != nil {
+		return nil, fmt.Errorf("create repository for %q: %w", ref, err)
+	}
+
+	repo.PlainHTTP = isPlainHTTP(ref)
+
+	var tags []string
+	err = repo.Tags(ctx, "", func(t []string) error {
+		tags = append(tags, t...)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list tags for %q: %w", ref, err)
+	}
+
+	return tags, nil
+}
+
 // Push packages sourceDir as an OCI artifact and pushes it to ref:tag, returning its digest.
 // annotations are attached as OCI manifest annotations; pass nil for none.
 func (c *ORASClient) Push(ctx context.Context, ref, tag, sourceDir string, annotations map[string]string) (string, error) {

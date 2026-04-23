@@ -327,3 +327,81 @@ select.input {
   color: var(--color-text-on-light);
   white-space: nowrap;
 }
+
+/* ── Version Picker ───────────────────────────────────────────────────────── */
+.versionPicker {
+  position: relative;
+}
+
+.versionInputWrap {
+  position: relative;
+  width: 100%;
+}
+
+.versionInputWrap input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.versionLoadingOverlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 11px;
+  font-size: 0.875rem;
+  color: var(--color-text-muted-light);
+  background: var(--color-bg-main);
+  border-radius: 7px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.versionSpinner {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(49, 54, 56, 0.2);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: versionSpin 0.7s linear infinite;
+}
+
+@keyframes versionSpin {
+  to { transform: rotate(360deg); }
+}
+
+.versionDropdown {
+  position: absolute;
+  top: calc(100% + 3px);
+  left: 0;
+  right: 0;
+  z-index: 200;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  background: var(--color-bg-card);
+  border: 1px solid rgba(49, 54, 56, 0.15);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.versionDropdownItem {
+  padding: 7px 12px;
+  font-size: 0.875rem;
+  color: var(--color-text-on-light);
+  cursor: pointer;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.versionDropdownItem:hover {
+  background: rgba(49, 54, 56, 0.07);
+}
+
+.versionDropdownItemActive {
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  color: var(--color-accent);
+}

@@ -9,7 +9,7 @@ import DiffTab from './DiffTab'
 import type { Order, OrderFormData, Patch, HelmRender, Menu } from '../../api/types'
 import { emptyOrderForm, orderToFormData } from '../../api/types'
 import { objectToYaml, yamlToValues } from '../../utils/yaml'
-import { getDefaultRegistry } from '../../api/client'
+import { getDefaultRegistry, listOCITags } from '../../api/client'
 import styles from './OrderFormModal.module.css'
 
 interface Props {
@@ -432,6 +432,23 @@ function FormView({
   const valuesPolicy = menu?.overrides.values.policy
   const patchesPolicy = menu?.overrides.patches.policy
 
+  const [versionTags, setVersionTags] = useState<string[]>([])
+  const [versionTagsLoading, setVersionTagsLoading] = useState(false)
+  const lastFetchedRef = useRef<string>('')
+  const fetchSeqRef = useRef(0)
+
+  function handleOciBlur() {
+    const oci = formData.source?.oci ?? ''
+    if (!oci || oci === lastFetchedRef.current) return
+    lastFetchedRef.current = oci
+    const seq = ++fetchSeqRef.current
+    setVersionTagsLoading(true)
+    listOCITags(oci)
+      .then((tags) => { if (fetchSeqRef.current === seq) setVersionTags(tags) })
+      .catch(() => { /* non-blocking: keep previous tags */ })
+      .finally(() => { if (fetchSeqRef.current === seq) setVersionTagsLoading(false) })
+  }
+
   return (
     <div className={styles.formGrid}>
       {/* Name + Namespace */}
@@ -500,16 +517,17 @@ function FormView({
                 className={styles.input}
                 value={formData.source?.oci ?? ''}
                 onChange={(e) => onFieldChange('source', { ...(formData.source ?? { oci: '', version: '' }), oci: e.target.value })}
+                onBlur={handleOciBlur}
                 placeholder="oci://registry/repo"
               />
             </div>
             <div className={styles.fieldGroup}>
               <label className={styles.label}>Version</label>
-              <input
-                className={styles.input}
+              <VersionPicker
                 value={formData.source?.version ?? ''}
-                onChange={(e) => onFieldChange('source', { ...(formData.source ?? { oci: '', version: '' }), version: e.target.value })}
-                placeholder="1.0.0"
+                tags={versionTags}
+                loading={versionTagsLoading}
+                onChange={(v) => onFieldChange('source', { ...(formData.source ?? { oci: '', version: '' }), version: v })}
               />
             </div>
           </div>
@@ -837,5 +855,100 @@ function YamlView({ yamlText, yamlError, onChange }: YamlViewProps) {
       <YamlEditor value={yamlText} onChange={onChange} />
       {yamlError && <p className={styles.yamlError}>Parse error: {yamlError}</p>}
     </>
+  )
+}
+
+// ── VersionPicker ─────────────────────────────────────────────────────────────
+
+interface VersionPickerProps {
+  value: string
+  tags: string[]
+  loading: boolean
+  onChange: (value: string) => void
+}
+
+function VersionPicker({ value, tags, loading, onChange }: VersionPickerProps) {
+  const [open, setOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+  // Set to true when the user focuses the input while a fetch is in progress,
+  // so we can auto-open the dropdown once loading finishes.
+  const pendingOpenRef = useRef(false)
+
+  // Close dropdown when clicking outside.
+  useEffect(() => {
+    function handleMouseDown(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleMouseDown)
+    return () => document.removeEventListener('mousedown', handleMouseDown)
+  }, [])
+
+  // When loading finishes, open the dropdown if the user already focused the field.
+  useEffect(() => {
+    if (!loading && pendingOpenRef.current) {
+      pendingOpenRef.current = false
+      const id = setTimeout(() => setOpen(true), 0)
+      return () => clearTimeout(id)
+    }
+  }, [loading])
+
+  function handleSelect(tag: string) {
+    onChange(tag)
+    setOpen(false)
+  }
+
+  const filteredTags = value
+    ? tags.filter((t) => t.toLowerCase().includes(value.toLowerCase()))
+    : tags
+
+  const showDropdown = open && (filteredTags.length > 0 || loading)
+
+  return (
+    <div ref={containerRef} className={styles.versionPicker}>
+      <div className={styles.versionInputWrap}>
+        {loading && (
+          <div className={styles.versionLoadingOverlay} aria-hidden="true">
+            <span className={styles.versionSpinner} />
+            Fetching versions…
+          </div>
+        )}
+        <input
+          className={styles.input}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onFocus={() => {
+            if (loading) {
+              pendingOpenRef.current = true
+            } else {
+              setOpen(true)
+            }
+          }}
+          placeholder="1.0.0"
+          readOnly={loading}
+        />
+      </div>
+      {showDropdown && (
+        <ul className={styles.versionDropdown} role="listbox">
+          {loading && filteredTags.length === 0 && (
+            <li className={styles.versionDropdownItem} style={{ opacity: 0.6, cursor: 'default' }}>
+              Loading…
+            </li>
+          )}
+          {filteredTags.map((tag) => (
+            <li
+              key={tag}
+              className={`${styles.versionDropdownItem} ${tag === value ? styles.versionDropdownItemActive : ''}`}
+              role="option"
+              aria-selected={tag === value}
+              onMouseDown={(e) => { e.preventDefault(); handleSelect(tag) }}
+            >
+              {tag}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }

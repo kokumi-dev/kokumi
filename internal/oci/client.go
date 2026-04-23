@@ -21,4 +21,9 @@ type Client interface {
 	// Push pushes an OCI artifact from sourceDir to a registry and returns its digest.
 	// annotations are attached as OCI manifest annotations; pass nil for none.
 	Push(ctx context.Context, ref, tag, sourceDir string, annotations map[string]string) (digest string, err error)
+
+	// ListTags returns the list of tags available for the given repository reference.
+	// The ref should not include a tag or digest. Returns an error if the registry
+	// is unreachable or the repository does not exist.
+	ListTags(ctx context.Context, ref string) ([]string, error)
 }

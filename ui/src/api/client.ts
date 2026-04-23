@@ -79,6 +79,12 @@ export function getDefaultRegistry(): Promise<{ baseURL: string }> {
   return request<{ baseURL: string }>('/registry/default')
 }
 
+export function listOCITags(ref: string): Promise<string[]> {
+  return request<{ tags: string[] }>(`/registry/tags?ref=${encodeURIComponent(ref)}`).then(
+    (r) => r.tags ?? [],
+  )
+}
+
 // ── Preparations ──────────────────────────────────────────────────────────────
 
 export function listPreparations(
