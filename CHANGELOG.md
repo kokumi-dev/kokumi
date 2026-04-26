@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/kokumi-dev/kokumi/compare/0.11.0...0.12.0) (2026-04-26)
+
+
+### Features
+
+* fetch available tags for oci repository ([#141](https://github.com/kokumi-dev/kokumi/issues/141)) ([9a89ff9](https://github.com/kokumi-dev/kokumi/commit/9a89ff93cfd467ee9b9e4573911876ff62ddf5f9))
+
 ## [0.11.0](https://github.com/kokumi-dev/kokumi/compare/0.10.0...0.11.0) (2026-04-19)
 
 
