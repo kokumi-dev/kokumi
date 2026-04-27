@@ -133,6 +133,20 @@ export interface Menu {
   createdAt?: string
 }
 
+// ── Registry / chart types ────────────────────────────────────────────────────
+
+export interface ChartInfo {
+  isHelm: boolean
+  name: string
+  description: string
+  chartVersion: string
+  /** YAML string of the chart's default values. */
+  defaultValues: string
+  /** Contents of README.md, empty when absent. */
+  readme: string
+  hasSchema: boolean
+}
+
 // ── Form data types ───────────────────────────────────────────────────────────
 
 export interface OrderFormData {

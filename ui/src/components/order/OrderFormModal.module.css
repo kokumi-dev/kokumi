@@ -275,6 +275,172 @@ select.input {
   color: #c0312e;
 }
 
+/* ── Chart Reference Panel ── */
+.chartRef {
+  border-top: 1px solid rgba(49, 54, 56, 0.1);
+  margin-top: 4px;
+  padding-top: 6px;
+}
+
+.chartRefToggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 2px 0;
+  cursor: pointer;
+  text-align: left;
+  color: var(--color-text-muted-light);
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-family: inherit;
+  transition: color 0.15s;
+}
+
+.chartRefToggle:hover {
+  color: var(--color-text-on-light);
+}
+
+.chartRefChevron {
+  display: inline-block;
+  font-size: 1rem;
+  line-height: 1;
+  transition: transform 0.15s;
+  transform: rotate(0deg);
+  color: var(--color-text-muted-light);
+}
+
+.chartRefChevronOpen {
+  transform: rotate(90deg);
+}
+
+.chartRefToggleLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chartRefSpinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid rgba(49, 54, 56, 0.2);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.chartRefBody {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chartRefDescription {
+  font-size: 0.8rem;
+  color: var(--color-text-muted-light);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.chartRefSearch {
+  font-size: 0.8rem !important;
+  padding: 6px 10px !important;
+}
+
+.chartRefEmpty {
+  font-size: 0.8rem;
+  color: var(--color-text-muted-light);
+  margin: 0;
+  padding: 4px 0;
+}
+
+.chartRefList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 180px;
+  overflow-y: auto;
+  border-radius: 6px;
+  border: 1px solid rgba(49, 54, 56, 0.1);
+}
+
+.chartRefItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: background 0.1s;
+  border-bottom: 1px solid rgba(49, 54, 56, 0.06);
+}
+
+.chartRefItem:last-child {
+  border-bottom: none;
+}
+
+.chartRefItem:hover {
+  background: rgba(49, 54, 56, 0.05);
+}
+
+.chartRefItem:focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.chartRefPath {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.75rem;
+  color: var(--color-text-on-light);
+  flex-shrink: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chartRefValue {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.75rem;
+  color: var(--color-text-muted-light);
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+  flex-shrink: 1;
+}
+
+.chartRefReadme {
+  border-top: 1px solid rgba(49, 54, 56, 0.1);
+  padding-top: 6px;
+}
+
+.chartRefReadmeContent {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: rgba(49, 54, 56, 0.03);
+  border-radius: 6px;
+  border: 1px solid rgba(49, 54, 56, 0.08);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.75rem;
+  color: var(--color-text-on-light);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
 .sectionTitle {
   font-size: 0.8rem;
   font-weight: 700;
