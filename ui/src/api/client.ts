@@ -1,4 +1,4 @@
-import type { Order, Preparation, OrderFormData, Menu, MenuFormData, Patch } from './types'
+import type { Order, Preparation, OrderFormData, Menu, MenuFormData, Patch, ChartInfo } from './types'
 
 // All API calls are relative so they work both in dev (proxied by Vite) and
 // in production (served from the same Go binary).
@@ -82,6 +82,12 @@ export function getDefaultRegistry(): Promise<{ baseURL: string }> {
 export function listOCITags(ref: string): Promise<string[]> {
   return request<{ tags: string[] }>(`/registry/tags?ref=${encodeURIComponent(ref)}`).then(
     (r) => r.tags ?? [],
+  )
+}
+
+export function getChartInfo(ref: string, version: string): Promise<ChartInfo> {
+  return request<ChartInfo>(
+    `/registry/chart-info?ref=${encodeURIComponent(ref)}&version=${encodeURIComponent(version)}`,
   )
 }
 
