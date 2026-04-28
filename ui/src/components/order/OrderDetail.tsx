@@ -77,7 +77,8 @@ export default function OrderDetail({ order, editsAllowed, onClose, onEdit, onDe
   function handleRemoveEditPath(editIndex: number, path: string) {
     const edits: Patch[] = (order.edits ?? []).map((e, i) => {
       if (i !== editIndex) return { ...e, set: { ...e.set } }
-      const { [path]: _, ...rest } = e.set
+      const rest = { ...e.set }
+      delete rest[path]
       return { ...e, set: rest }
     }).filter((e) => Object.keys(e.set).length > 0)
     setModal({ kind: 'commit', edits })

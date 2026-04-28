@@ -135,7 +135,7 @@ export default function OrderFormModal({ order, menuRef, menu, menus, onClose, o
   const [showCommitModal, setShowCommitModal] = useState(false)
   const [pendingFormData, setPendingFormData] = useState<OrderFormData | null>(null)
 
-  const initialYamlRef = useRef(isEdit ? formToYaml(orderToFormData(order!)) : '')
+  const [initialYaml] = useState(() => isEdit ? formToYaml(orderToFormData(order!)) : '')
 
   const effectiveMenu = menu ?? selectedMenu
 
@@ -264,11 +264,11 @@ export default function OrderFormModal({ order, menuRef, menu, menus, onClose, o
   let isDirty = true
   if (isEdit) {
     if (tab === 'form' || tab === 'preview' || tab === 'diff') {
-      isDirty = formToYaml(formData) !== initialYamlRef.current
+      isDirty = formToYaml(formData) !== initialYaml
     } else {
       try {
         const partial = yamlToPartialForm(yamlText)
-        isDirty = formToYaml({ ...formData, ...partial }) !== initialYamlRef.current
+        isDirty = formToYaml({ ...formData, ...partial }) !== initialYaml
       } catch {
         isDirty = true
       }
