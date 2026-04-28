@@ -57,7 +57,7 @@ export default function DiffTab({ formData, order }: Props) {
         clearTimeout(timerRef.current)
       }
     }
-  }, [formData, order.namespace, activePrepName]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [formData, order.namespace, activePrepName])
 
   if (loading) {
     return <div className={styles.placeholder}>Loading diff…</div>

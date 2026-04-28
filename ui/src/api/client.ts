@@ -40,10 +40,9 @@ export function getOrder(namespace: string, name: string): Promise<Order> {
 
 export function createOrder(data: OrderFormData, commitMessage?: string): Promise<Order> {
   // Edits are only set via the manifest editor on existing orders, never on create.
-  const { edits: _, ...payload } = data
   return request<Order>('/orders', {
     method: 'POST',
-    body: JSON.stringify({ ...payload, commitMessage: commitMessage ?? '' }),
+    body: JSON.stringify({ ...data, edits: undefined, commitMessage: commitMessage ?? '' }),
   })
 }
 
