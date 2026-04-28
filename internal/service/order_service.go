@@ -149,10 +149,6 @@ func (rs *OrderService) ProcessOrder(
 
 	logger.Info("Pushing artifact to destination")
 
-	if commitMessage == "" {
-		commitMessage = "automatically generated"
-	}
-
 	ociAnnotations := map[string]string{
 		ocispec.AnnotationDescription: commitMessage,
 	}

@@ -112,7 +112,7 @@ type CreateOrderRequest struct {
 	Patches       []PatchDTO         `json:"patches,omitempty"`
 	Edits         []PatchDTO         `json:"edits,omitempty"`
 	AutoDeploy    bool               `json:"autoDeploy"`
-	CommitMessage string             `json:"commitMessage,omitempty"`
+	CommitMessage *string            `json:"commitMessage,omitempty"`
 }
 
 // UpdateOrderRequest is the body for PUT /api/v1/orders/{namespace}/{name}.
@@ -124,7 +124,7 @@ type UpdateOrderRequest struct {
 	Patches       []PatchDTO         `json:"patches,omitempty"`
 	Edits         []PatchDTO         `json:"edits,omitempty"`
 	AutoDeploy    bool               `json:"autoDeploy"`
-	CommitMessage string             `json:"commitMessage,omitempty"`
+	CommitMessage *string            `json:"commitMessage,omitempty"`
 }
 
 // PromoteRequest is the body for POST /api/v1/orders/{namespace}/{name}/promote.

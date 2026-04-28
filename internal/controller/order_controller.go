@@ -147,7 +147,10 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 
 	parentDigest := order.Status.LatestArtifactDigest
 
-	result, err := r.Service.ProcessOrder(ctx, order, effective.Source, effective.Render, effective.Patches, effective.Edits, effectiveDest, order.Annotations["delivery.kokumi.dev/commit-message"], parentDigest)
+	userMessage, messageProvided := order.Annotations["delivery.kokumi.dev/commit-message"]
+	commitMessage := service.DefaultCommitMessage(userMessage, messageProvided, parentDigest == "")
+
+	result, err := r.Service.ProcessOrder(ctx, order, effective.Source, effective.Render, effective.Patches, effective.Edits, effectiveDest, commitMessage, parentDigest)
 	if err != nil {
 		logger.Error(err, "Failed to process Order")
 		_ = statusUpdater.Failed(ctx, order, err)
@@ -155,7 +158,7 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 		return ctrl.Result{}, err
 	}
 
-	preparation, err := r.createPreparation(ctx, order, result.SourceRef, result.SourceDigest, effective.Source.Version, result.DestRef, result.DestDigest, order.Annotations["delivery.kokumi.dev/commit-message"], parentDigest)
+	preparation, err := r.createPreparation(ctx, order, result.SourceRef, result.SourceDigest, effective.Source.Version, result.DestRef, result.DestDigest, commitMessage, parentDigest)
 	if err != nil {
 		logger.Error(err, "Failed to create Preparation")
 		_ = statusUpdater.Failed(ctx, order, fmt.Errorf("failed to create revision: %w", err))
