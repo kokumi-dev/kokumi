@@ -1,3 +1,4 @@
+import OpenPromotions from '../components/dashboard/OpenPromotions'
 import { useResourceCounts } from '../hooks/useResourceCounts'
 import styles from './pages.module.css'
 
@@ -45,24 +46,10 @@ export default function Dashboard({ operatorName, operatorVersion }: Props) {
 
       <div className={styles.section}>
         <div className={styles.sectionHeader}>
-          <span className={styles.sectionTitle}>Operator Status</span>
-          <span className={`${styles.badge} ${styles.badgeSuccess}`}>
-            <span className={styles.badgeDot} />
-            Online
-          </span>
+          <span className={styles.sectionTitle}>Open Promotions</span>
         </div>
-        <div className={styles.sectionBody}>
-          <div className={styles.placeholder}>
-            <svg className={styles.placeholderIcon} viewBox="0 0 40 40" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <rect x="2" y="2" width="16" height="16" rx="2" />
-              <rect x="22" y="2" width="16" height="16" rx="2" />
-              <rect x="2" y="22" width="16" height="16" rx="2" />
-              <rect x="22" y="22" width="16" height="16" rx="2" />
-            </svg>
-            <span className={styles.placeholderText}>
-              Resource metrics coming soon
-            </span>
-          </div>
+        <div>
+          <OpenPromotions />
         </div>
       </div>
     </div>

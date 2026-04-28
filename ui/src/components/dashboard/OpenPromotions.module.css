@@ -1,0 +1,58 @@
+.loading {
+  font-size: 0.875rem;
+  color: var(--color-text-muted-light);
+  padding: 16px 0;
+}
+
+/* ── Empty state ── */
+.emptyState {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 40px 20px;
+  color: var(--color-text-muted-light);
+}
+
+.emptyIcon {
+  width: 22px;
+  height: 22px;
+  color: #2d8a5a;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.emptyText {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+/* ── Table cell helpers ── */
+.commitMessage {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.muted {
+  color: var(--color-text-muted-light);
+}
+
+.hashChip {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.72rem;
+  background: rgba(49, 54, 56, 0.07);
+  border-radius: 4px;
+  padding: 2px 6px;
+  color: var(--color-text-muted-light);
+  white-space: nowrap;
+}
+
+/* ── Actions cell ── */
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+}
