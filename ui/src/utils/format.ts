@@ -11,6 +11,14 @@ export function formatDate(iso?: string): string {
 }
 
 /**
+ * Returns the first 8 hex characters of a digest, stripping the "sha256:" prefix.
+ * Used to render compact digest chips in tables and lists.
+ */
+export function shortDigest(digest: string): string {
+  return digest.replace('sha256:', '').slice(0, 8)
+}
+
+/**
  * Maps a Kubernetes resource phase string to a CSS module class key.
  * Used by pages that render inline phase badges without the shared Badge component.
  */
