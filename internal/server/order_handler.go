@@ -121,7 +121,7 @@ func handleCreateOrder(deps *apiDeps) http.HandlerFunc {
 			if order.Annotations == nil {
 				order.Annotations = map[string]string{}
 			}
-			order.Annotations["delivery.kokumi.dev/commit-message"] = *req.CommitMessage
+			order.Annotations[deliveryv1alpha1.AnnotationCommitMessage] = *req.CommitMessage
 		}
 
 		if err := deps.writer.Create(r.Context(), order); err != nil {
@@ -185,7 +185,7 @@ func handleUpdateOrder(deps *apiDeps) http.HandlerFunc {
 			if order.Annotations == nil {
 				order.Annotations = map[string]string{}
 			}
-			order.Annotations["delivery.kokumi.dev/commit-message"] = *req.CommitMessage
+			order.Annotations[deliveryv1alpha1.AnnotationCommitMessage] = *req.CommitMessage
 		}
 
 		if err := deps.writer.Update(r.Context(), order); err != nil {
@@ -239,7 +239,7 @@ func handleUpdateOrderEdits(deps *apiDeps) http.HandlerFunc {
 			if order.Annotations == nil {
 				order.Annotations = map[string]string{}
 			}
-			order.Annotations["delivery.kokumi.dev/commit-message"] = *req.CommitMessage
+			order.Annotations[deliveryv1alpha1.AnnotationCommitMessage] = *req.CommitMessage
 		}
 
 		if err := deps.writer.Update(r.Context(), order); err != nil {

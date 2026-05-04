@@ -65,8 +65,8 @@ func (r *PreparationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, nil
 	}
 
-	autoDeploy := preparation.Labels["delivery.kokumi.dev/auto-deploy"]
-	approveLabel := preparation.Labels["delivery.kokumi.dev/approve-deploy"]
+	autoDeploy := preparation.Labels[deliveryv1alpha1.LabelAutoDeploy]
+	approveLabel := preparation.Labels[deliveryv1alpha1.LabelApproveDeploy]
 
 	if autoDeploy == "true" {
 		logger.Info("AutoDeploy enabled, reconciling Serving")
@@ -109,8 +109,8 @@ func (r *PreparationReconciler) reconcileServing(ctx context.Context, preparatio
 					Name:      servingName,
 					Namespace: preparation.Namespace,
 					Labels: map[string]string{
-						"delivery.kokumi.dev/order":       orderName,
-						"delivery.kokumi.dev/auto-deploy": fmt.Sprintf("%v", automatic),
+						deliveryv1alpha1.LabelOrder:      orderName,
+						deliveryv1alpha1.LabelAutoDeploy: fmt.Sprintf("%v", automatic),
 					},
 				},
 				Spec: deliveryv1alpha1.ServingSpec{

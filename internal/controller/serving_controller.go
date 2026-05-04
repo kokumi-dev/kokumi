@@ -37,8 +37,7 @@ import (
 )
 
 const (
-	servingFinalizerName = "delivery.kokumi.dev/serving-finalizer"
-	argoNamespace        = "argocd"
+	argoNamespace = "argocd"
 )
 
 // ServingReconciler reconciles a Serving object
@@ -76,8 +75,8 @@ func (r *ServingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return r.reconcileDelete(ctx, serving)
 	}
 
-	if !controllerutil.ContainsFinalizer(serving, servingFinalizerName) {
-		controllerutil.AddFinalizer(serving, servingFinalizerName)
+	if !controllerutil.ContainsFinalizer(serving, deliveryv1alpha1.Finalizer) {
+		controllerutil.AddFinalizer(serving, deliveryv1alpha1.Finalizer)
 		if err := r.Update(ctx, serving); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -99,7 +98,7 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 		preparationList := &deliveryv1alpha1.PreparationList{}
 		if err := r.List(ctx, preparationList,
 			client.InNamespace(serving.Namespace),
-			client.MatchingLabels{"delivery.kokumi.dev/order": serving.Spec.Order},
+			client.MatchingLabels{deliveryv1alpha1.LabelOrder: serving.Spec.Order},
 		); err != nil {
 			logger.Error(err, "Failed to list Preparations")
 			_ = statusUpdater.Failed(ctx, serving, fmt.Errorf("failed to list preparations: %w", err))
@@ -201,8 +200,8 @@ func (r *ServingReconciler) reconcileArgoApplication(ctx context.Context, servin
 				"name":      appName,
 				"namespace": argoNamespace,
 				"labels": map[string]any{
-					"delivery.kokumi.dev/order":   serving.Spec.Order,
-					"delivery.kokumi.dev/serving": serving.Name,
+					deliveryv1alpha1.LabelOrder:   serving.Spec.Order,
+					deliveryv1alpha1.LabelServing: serving.Name,
 				},
 			},
 			"spec": map[string]any{
@@ -261,7 +260,7 @@ func (r *ServingReconciler) reconcileDelete(ctx context.Context, serving *delive
 	logger := log.FromContext(ctx)
 	logger.Info("Handling deletion of Serving")
 
-	if controllerutil.ContainsFinalizer(serving, servingFinalizerName) {
+	if controllerutil.ContainsFinalizer(serving, deliveryv1alpha1.Finalizer) {
 		logger.Info("Cleaning up Argo CD Application")
 
 		argoNamespace := "argocd"
@@ -285,7 +284,7 @@ func (r *ServingReconciler) reconcileDelete(ctx context.Context, serving *delive
 			logger.Info("Deleted Argo CD Application", "name", serving.Name)
 		}
 
-		controllerutil.RemoveFinalizer(serving, servingFinalizerName)
+		controllerutil.RemoveFinalizer(serving, deliveryv1alpha1.Finalizer)
 		if err := r.Update(ctx, serving); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -316,7 +315,7 @@ func (r *ServingReconciler) enqueueServingForPreparation() handler.EventHandler 
 					},
 				})
 			} else if serving.Spec.PreparationPolicy.Type == deliveryv1alpha1.PreparationPolicyAutomatic {
-				if preparation.Labels["delivery.kokumi.dev/order"] == serving.Spec.Order {
+				if preparation.Labels[deliveryv1alpha1.LabelOrder] == serving.Spec.Order {
 					requests = append(requests, ctrl.Request{
 						NamespacedName: client.ObjectKey{
 							Namespace: serving.Namespace,

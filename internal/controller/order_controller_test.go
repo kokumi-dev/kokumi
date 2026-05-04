@@ -100,7 +100,7 @@ var _ = Describe("Order Controller", func() {
 			preparationList := &deliveryv1alpha1.PreparationList{}
 			Expect(k8sClient.List(ctx, preparationList,
 				client.InNamespace("default"),
-				client.MatchingLabels{"delivery.kokumi.dev/order": resourceName},
+				client.MatchingLabels{deliveryv1alpha1.LabelOrder: resourceName},
 			)).To(Succeed())
 			Expect(preparationList.Items).To(HaveLen(1))
 		})

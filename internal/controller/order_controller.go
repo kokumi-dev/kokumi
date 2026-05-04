@@ -37,8 +37,6 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/status"
 )
 
-const finalizerName = "delivery.kokumi.dev/finalizer"
-
 // OrderReconciler reconciles an Order object.
 type OrderReconciler struct {
 	client.Client
@@ -79,8 +77,8 @@ func (r *OrderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return r.reconcileDelete(ctx, order)
 	}
 
-	if !controllerutil.ContainsFinalizer(order, finalizerName) {
-		controllerutil.AddFinalizer(order, finalizerName)
+	if !controllerutil.ContainsFinalizer(order, deliveryv1alpha1.Finalizer) {
+		controllerutil.AddFinalizer(order, deliveryv1alpha1.Finalizer)
 
 		if err := r.Update(ctx, order); err != nil {
 			return ctrl.Result{}, err
@@ -147,7 +145,7 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 
 	parentDigest := order.Status.LatestArtifactDigest
 
-	userMessage, messageProvided := order.Annotations["delivery.kokumi.dev/commit-message"]
+	userMessage, messageProvided := order.Annotations[deliveryv1alpha1.AnnotationCommitMessage]
 	commitMessage := service.DefaultCommitMessage(userMessage, messageProvided, parentDigest == "")
 
 	result, err := r.Service.ProcessOrder(ctx, order, effective.Source, effective.Render, effective.Patches, effective.Edits, effectiveDest, commitMessage, parentDigest)
@@ -176,9 +174,9 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 	}
 
 	// Remove the transient commit-message annotation now that it has been consumed.
-	if _, hasAnnotation := order.Annotations["delivery.kokumi.dev/commit-message"]; hasAnnotation {
+	if _, hasAnnotation := order.Annotations[deliveryv1alpha1.AnnotationCommitMessage]; hasAnnotation {
 		patch := client.MergeFrom(order.DeepCopy())
-		delete(order.Annotations, "delivery.kokumi.dev/commit-message")
+		delete(order.Annotations, deliveryv1alpha1.AnnotationCommitMessage)
 		if err := r.Patch(ctx, order, patch); err != nil {
 			logger.Error(err, "Failed to remove commit-message annotation from Order")
 		}
@@ -192,10 +190,10 @@ func (r *OrderReconciler) reconcileDelete(ctx context.Context, order *deliveryv1
 	logger := log.FromContext(ctx)
 	logger.Info("Handling deletion of Order")
 
-	if controllerutil.ContainsFinalizer(order, finalizerName) {
+	if controllerutil.ContainsFinalizer(order, deliveryv1alpha1.Finalizer) {
 		logger.Info("Cleaning up Order resources")
 
-		controllerutil.RemoveFinalizer(order, finalizerName)
+		controllerutil.RemoveFinalizer(order, deliveryv1alpha1.Finalizer)
 
 		if err := r.Update(ctx, order); err != nil {
 			return ctrl.Result{}, err
@@ -248,9 +246,9 @@ func (r *OrderReconciler) createPreparation(
 			Name:      revisionName,
 			Namespace: order.Namespace,
 			Labels: map[string]string{
-				"delivery.kokumi.dev/order":       order.Name,
-				"delivery.kokumi.dev/version":     sourceVersion,
-				"delivery.kokumi.dev/auto-deploy": strconv.FormatBool(order.Spec.AutoDeploy),
+				deliveryv1alpha1.LabelOrder:      order.Name,
+				deliveryv1alpha1.LabelVersion:    sourceVersion,
+				deliveryv1alpha1.LabelAutoDeploy: strconv.FormatBool(order.Spec.AutoDeploy),
 			},
 		},
 		Spec: deliveryv1alpha1.PreparationSpec{
