@@ -263,8 +263,6 @@ func (r *ServingReconciler) reconcileDelete(ctx context.Context, serving *delive
 	if controllerutil.ContainsFinalizer(serving, deliveryv1alpha1.Finalizer) {
 		logger.Info("Cleaning up Argo CD Application")
 
-		argoNamespace := "argocd"
-
 		app := &unstructured.Unstructured{}
 		app.SetGroupVersionKind(schema.GroupVersionKind{
 			Group:   "argoproj.io",
