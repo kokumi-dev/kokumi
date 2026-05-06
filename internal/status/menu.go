@@ -25,38 +25,30 @@ func NewMenuUpdater(c client.Client) *MenuUpdater {
 
 // Ready marks the Menu as valid and available for use.
 func (u *MenuUpdater) Ready(ctx context.Context, m *deliveryv1alpha1.Menu, msg string) error {
-	return u.set(ctx, m, deliveryv1alpha1.MenuPhaseReady, msg)
+	return u.set(ctx, m, metav1.ConditionTrue, "Ready", msg)
 }
 
 // Failed marks the Menu as having a configuration error.
 func (u *MenuUpdater) Failed(ctx context.Context, m *deliveryv1alpha1.Menu, err error) error {
-	return u.set(ctx, m, deliveryv1alpha1.MenuPhaseFailed, err.Error())
+	return u.set(ctx, m, metav1.ConditionFalse, "Failed", err.Error())
 }
 
 func (u *MenuUpdater) set(
 	ctx context.Context,
 	menu *deliveryv1alpha1.Menu,
-	phase deliveryv1alpha1.MenuPhase,
+	condStatus metav1.ConditionStatus,
+	reason string,
 	msg string,
 ) error {
-	menu.Status.Phase = phase
 	menu.Status.ObservedGeneration = menu.Generation
 
 	condition := metav1.Condition{
-		Type:               "Ready",
-		Status:             metav1.ConditionFalse,
-		Reason:             string(phase),
+		Type:               deliveryv1alpha1.ConditionTypeReady,
+		Status:             condStatus,
+		Reason:             reason,
 		Message:            msg,
 		ObservedGeneration: menu.Generation,
 		LastTransitionTime: metav1.NewTime(time.Now()),
-	}
-
-	switch phase {
-	case deliveryv1alpha1.MenuPhaseReady:
-		condition.Status = metav1.ConditionTrue
-	case deliveryv1alpha1.MenuPhaseFailed:
-		condition.Type = conditionTypeDegraded
-		condition.Reason = "ValidationFailed"
 	}
 
 	meta.SetStatusCondition(&menu.Status.Conditions, condition)

@@ -71,7 +71,7 @@ function OrderCard({ order: r, selected, onClick }: CardProps) {
           <div className={styles.cardName}>{r.name}</div>
           <div className={styles.cardNs}>{r.namespace}</div>
         </div>
-        <Badge phase={r.phase} />
+        <Badge state={r.state} />
       </div>
 
       <div className={styles.cardMeta}>

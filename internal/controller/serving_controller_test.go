@@ -22,10 +22,10 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 )
@@ -97,7 +97,13 @@ var _ = Describe("Serving Controller", func() {
 			By("marking the Serving as already deployed so Argo CD creation is skipped")
 			latestServing := &deliveryv1alpha1.Serving{}
 			Expect(k8sClient.Get(ctx, typeNamespacedName, latestServing)).To(Succeed())
-			latestServing.Status.Phase = deliveryv1alpha1.ServingPhaseDeployed
+			apimeta.SetStatusCondition(&latestServing.Status.Conditions, metav1.Condition{
+				Type:               deliveryv1alpha1.ConditionTypeReady,
+				Status:             metav1.ConditionTrue,
+				Reason:             "Deployed",
+				Message:            "Successfully deployed component",
+				LastTransitionTime: metav1.Now(),
+			})
 			latestServing.Status.ObservedPreparation = "preparation-fdf90e00e76"
 			latestServing.Status.DeployedDigest = fakeDigest
 			Expect(k8sClient.Status().Update(ctx, latestServing)).To(Succeed())

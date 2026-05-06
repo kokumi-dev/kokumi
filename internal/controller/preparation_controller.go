@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -60,8 +61,8 @@ func (r *PreparationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, fmt.Errorf("failed to get Preparation: %w", err)
 	}
 
-	if preparation.Status.Phase != deliveryv1alpha1.PreparationPhaseReady {
-		logger.Info("Preparation not ready, skipping", "phase", preparation.Status.Phase)
+	if !apimeta.IsStatusConditionTrue(preparation.Status.Conditions, deliveryv1alpha1.ConditionTypeReady) {
+		logger.Info("Preparation not ready, skipping")
 		return ctrl.Result{}, nil
 	}
 

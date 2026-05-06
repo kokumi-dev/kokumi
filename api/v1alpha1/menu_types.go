@@ -130,26 +130,11 @@ type MenuSpec struct {
 	Defaults MenuDefaults `json:"defaults,omitempty"`
 }
 
-// MenuPhase represents the current phase of the Menu.
-// +kubebuilder:validation:Enum=Ready;Failed
-type MenuPhase string
-
-const (
-	// MenuPhaseReady indicates the Menu is valid and available for use.
-	MenuPhaseReady MenuPhase = "Ready"
-	// MenuPhaseFailed indicates the Menu has a configuration error.
-	MenuPhaseFailed MenuPhase = "Failed"
-)
-
 // MenuStatus defines the observed state of Menu.
 type MenuStatus struct {
 	// observedGeneration is the most recent generation observed by the controller.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-
-	// phase represents the current phase of the Menu lifecycle.
-	// +optional
-	Phase MenuPhase `json:"phase,omitempty"`
 
 	// conditions represent the current state of the Menu resource.
 	// +listType=map
@@ -161,7 +146,8 @@ type MenuStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster
-// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
+// +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].reason`
 // +kubebuilder:printcolumn:name="Source",type=string,JSONPath=`.spec.source.oci`
 // +kubebuilder:printcolumn:name="Version",type=string,JSONPath=`.spec.source.version`
 // +kubebuilder:printcolumn:name="Values Policy",type=string,JSONPath=`.spec.overrides.values.policy`,priority=1

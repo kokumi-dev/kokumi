@@ -15,8 +15,11 @@ spec:
   scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.phase
-      name: Phase
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].reason
+      name: Reason
       type: string
     - jsonPath: .spec.source.oci
       name: Source
@@ -340,12 +343,6 @@ spec:
                   by the controller.
                 format: int64
                 type: integer
-              phase:
-                description: phase represents the current phase of the Menu lifecycle.
-                enum:
-                - Ready
-                - Failed
-                type: string
             type: object
         required:
         - spec

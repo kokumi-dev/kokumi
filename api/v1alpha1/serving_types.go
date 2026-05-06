@@ -56,21 +56,6 @@ type ServingSpec struct {
 	PreparationPolicy PreparationPolicy `json:"preparationPolicy,omitempty"`
 }
 
-// ServingPhase represents the current phase of the Serving
-// +kubebuilder:validation:Enum=Pending;Deploying;Deployed;Failed
-type ServingPhase string
-
-const (
-	// ServingPhasePending indicates the serving is pending
-	ServingPhasePending ServingPhase = "Pending"
-	// ServingPhaseDeploying indicates the serving is in progress
-	ServingPhaseDeploying ServingPhase = "Deploying"
-	// ServingPhaseDeployed indicates the serving is complete and active
-	ServingPhaseDeployed ServingPhase = "Deployed"
-	// ServingPhaseFailed indicates the serving failed
-	ServingPhaseFailed ServingPhase = "Failed"
-)
-
 // ServingStatus defines the observed state of Serving.
 type ServingStatus struct {
 	// observedPreparation is the preparation that was last observed by the controller
@@ -82,19 +67,7 @@ type ServingStatus struct {
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	DeployedDigest string `json:"deployedDigest,omitempty"`
 
-	// phase represents the current phase of the Serving lifecycle
-	// +optional
-	Phase ServingPhase `json:"phase,omitempty"`
-
 	// conditions represent the current state of the Serving resource.
-	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
-	//
-	// Standard condition types include:
-	// - "Available": the resource is fully functional
-	// - "Progressing": the resource is being created or updated
-	// - "Degraded": the resource failed to reach or maintain its desired state
-	//
-	// The status of each condition is one of True, False, or Unknown.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
@@ -105,7 +78,8 @@ type ServingStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Order",type=string,JSONPath=`.spec.order`
 // +kubebuilder:printcolumn:name="Preparation",type=string,JSONPath=`.spec.preparation`
-// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
+// +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].reason`
 // +kubebuilder:printcolumn:name="Policy",type=string,JSONPath=`.spec.preparationPolicy.type`,priority=1
 // +kubebuilder:printcolumn:name="Observed",type=string,JSONPath=`.status.observedPreparation`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`

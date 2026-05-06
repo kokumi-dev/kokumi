@@ -24,7 +24,7 @@ export default function MenuDetail({ menu, onClose, onEdit, onDelete, onOrder }:
             <span className={styles.subtitle}>cluster-scoped</span>
           </div>
           <div className={styles.headerActions}>
-            <Badge phase={menu.phase ?? ''} />
+            <Badge state={menu.state ?? ''} />
             {onOrder && (
               <Btn variant="primary" size="sm" onClick={() => onOrder(menu)}>
                 Order

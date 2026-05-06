@@ -23,6 +23,7 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -114,7 +115,7 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 		var latestPreparation *deliveryv1alpha1.Preparation
 		for i := range preparationList.Items {
 			prep := &preparationList.Items[i]
-			if prep.Status.Phase != deliveryv1alpha1.PreparationPhaseReady {
+			if !apimeta.IsStatusConditionTrue(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeReady) {
 				continue
 			}
 			if latestPreparation == nil || prep.CreationTimestamp.After(latestPreparation.CreationTimestamp.Time) {
@@ -152,7 +153,7 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 
 	if serving.Status.ObservedPreparation == preparationName &&
 		serving.Status.DeployedDigest == preparation.Spec.Artifact.Digest &&
-		serving.Status.Phase == deliveryv1alpha1.ServingPhaseDeployed {
+		apimeta.IsStatusConditionTrue(serving.Status.Conditions, deliveryv1alpha1.ConditionTypeReady) {
 		logger.Info("Deployment is up-to-date", "preparation", preparationName)
 		return ctrl.Result{}, nil
 	}

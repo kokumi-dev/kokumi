@@ -70,7 +70,7 @@ type OrderDTO struct {
 	Patches              []PatchDTO        `json:"patches,omitempty"`
 	Edits                []PatchDTO        `json:"edits,omitempty"`
 	AutoDeploy           bool              `json:"autoDeploy"`
-	Phase                string            `json:"phase"`
+	State                string            `json:"state"`
 	LatestRevision       string            `json:"latestRevision,omitempty"`
 	ActivePreparation    string            `json:"activePreparation,omitempty"`
 	Conditions           []ConditionDTO    `json:"conditions,omitempty"`
@@ -93,7 +93,7 @@ type PreparationDTO struct {
 	Order         string         `json:"order"`
 	Artifact      ArtifactDTO    `json:"artifact"`
 	ConfigHash    string         `json:"configHash"`
-	Phase         string         `json:"phase"`
+	State         string         `json:"state"`
 	CreatedAt     *time.Time     `json:"createdAt,omitempty"`
 	IsActive      bool           `json:"isActive"`
 	CommitMessage string         `json:"commitMessage,omitempty"`
@@ -141,7 +141,7 @@ type ServingDTO struct {
 	ObservedPreparation string         `json:"observedPreparation,omitempty"`
 	DeployedDigest      string         `json:"deployedDigest,omitempty"`
 	PreparationPolicy   string         `json:"preparationPolicy"`
-	Phase               string         `json:"phase"`
+	State               string         `json:"state"`
 	Conditions          []ConditionDTO `json:"conditions,omitempty"`
 	CreatedAt           *time.Time     `json:"createdAt,omitempty"`
 }
@@ -185,7 +185,7 @@ type MenuDTO struct {
 	Patches    []PatchDTO        `json:"patches,omitempty"`
 	Overrides  OverridePolicyDTO `json:"overrides"`
 	Defaults   MenuDefaultsDTO   `json:"defaults"`
-	Phase      string            `json:"phase,omitempty"`
+	State      string            `json:"state,omitempty"`
 	Conditions []ConditionDTO    `json:"conditions,omitempty"`
 	CreatedAt  *time.Time        `json:"createdAt,omitempty"`
 }

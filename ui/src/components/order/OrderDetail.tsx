@@ -113,7 +113,7 @@ export default function OrderDetail({ order, editsAllowed, onClose, onEdit, onDe
             <span className={styles.subtitle}>{order.namespace}</span>
           </div>
           <div className={styles.headerActions}>
-            <Badge phase={order.phase} />
+            <Badge state={order.state} />
             <Btn variant="secondary" size="sm" onClick={() => onEdit(order)}>
               Edit
             </Btn>
@@ -282,7 +282,7 @@ export default function OrderDetail({ order, editsAllowed, onClose, onEdit, onDe
                   <div key={c.type} className={styles.conditionItem}>
                     <div className={styles.conditionHeader}>
                       <span className={styles.conditionType}>{c.type}</span>
-                      <Badge phase={c.status === 'True' ? 'Ready' : c.status === 'False' ? 'Failed' : 'Pending'} />
+                      <Badge state={c.status === 'True' ? 'Ready' : c.status === 'False' ? 'Failed' : 'Pending'} />
                     </div>
                     {c.message && (
                       <span className={styles.conditionMessage}>{c.message}</span>
