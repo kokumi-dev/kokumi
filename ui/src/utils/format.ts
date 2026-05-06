@@ -19,11 +19,11 @@ export function shortDigest(digest: string): string {
 }
 
 /**
- * Maps a Kubernetes resource phase string to a CSS module class key.
- * Used by pages that render inline phase badges without the shared Badge component.
+ * Maps a Kubernetes resource state string to a CSS module class key.
+ * Used by pages that render inline state badges without the shared Badge component.
  */
-export function phaseToStatusKey(phase: string): 'badgeSuccess' | 'badgeError' | 'badgeWarning' {
-  const p = phase.toLowerCase()
+export function stateToStatusKey(state: string): 'badgeSuccess' | 'badgeError' | 'badgeWarning' {
+  const p = state.toLowerCase()
   if (p === 'ready' || p === 'succeeded' || p === 'deployed') return 'badgeSuccess'
   if (p === 'failed' || p === 'error') return 'badgeError'
   return 'badgeWarning'

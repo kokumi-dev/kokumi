@@ -76,7 +76,7 @@ function MenuCard({ menu: m, selected, onClick, onOrder }: CardProps) {
               Order
             </button>
           )}
-          <Badge phase={m.phase ?? ''} />
+          <Badge state={m.state ?? ''} />
         </div>
       </div>
 

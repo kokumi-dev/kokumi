@@ -129,8 +129,8 @@ and the full history is retained indefinitely.
 
 ```bash
 kubectl get preparations --watch
-# NAME                            ORDER              PHASE   CREATED   AGE
-# external-secrets-d7ce0c46a686   external-secrets   Ready   5s        5s
+# NAME                            ORDER              READY   REASON   CREATED   AGE
+# external-secrets-d7ce0c46a686   external-secrets   True    Ready    5s        5s
 ```
 
 ## Activate with a Serving
@@ -152,8 +152,8 @@ namespace and Argo CD syncs the manifests into the cluster.
 
 ```bash
 kubectl get servings
-# NAME               ORDER              PREPARATION                    PHASE    AGE
-# external-secrets   external-secrets   external-secrets-d7ce0c46a686   Active   10s
+# NAME               ORDER              PREPARATION                     READY   REASON     AGE
+# external-secrets   external-secrets   external-secrets-d7ce0c46a686   True    Deployed   10s
 
 kubectl get applications -n argocd
 # NAME               SYNC STATUS   HEALTH STATUS

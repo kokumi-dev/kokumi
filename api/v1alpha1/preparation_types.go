@@ -125,38 +125,13 @@ type PreparationSpec struct {
 	ParentDigest string `json:"parentDigest,omitempty"`
 }
 
-// PreparationPhase represents the current phase of the Preparation
-// +kubebuilder:validation:Enum=Pending;Ready;Failed
-type PreparationPhase string
-
-const (
-	// PreparationPhasePending indicates the preparation is being created
-	PreparationPhasePending PreparationPhase = "Pending"
-	// PreparationPhaseReady indicates the preparation is ready for serving
-	PreparationPhaseReady PreparationPhase = "Ready"
-	// PreparationPhaseFailed indicates the preparation creation failed
-	PreparationPhaseFailed PreparationPhase = "Failed"
-)
-
 // PreparationStatus defines the observed state of Preparation.
 type PreparationStatus struct {
-	// phase represents the current phase of the Preparation lifecycle
-	// +optional
-	Phase PreparationPhase `json:"phase,omitempty"`
-
 	// createdAt is the timestamp when the preparation was created
 	// +optional
 	CreatedAt *metav1.Time `json:"createdAt,omitempty"`
 
 	// conditions represent the current state of the Preparation resource.
-	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
-	//
-	// Standard condition types include:
-	// - "Available": the resource is fully functional
-	// - "Progressing": the resource is being created or updated
-	// - "Degraded": the resource failed to reach or maintain its desired state
-	//
-	// The status of each condition is one of True, False, or Unknown.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
@@ -166,7 +141,8 @@ type PreparationStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Order",type=string,JSONPath=`.spec.order`
-// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
+// +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].reason`
 // +kubebuilder:printcolumn:name="Digest",type=string,JSONPath=`.spec.artifact.digest`,priority=1
 // +kubebuilder:printcolumn:name="Signed",type=boolean,JSONPath=`.spec.artifact.signed`,priority=1
 // +kubebuilder:printcolumn:name="Created",type=date,JSONPath=`.status.createdAt`

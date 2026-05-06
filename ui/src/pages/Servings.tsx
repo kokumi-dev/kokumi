@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useServings } from '../hooks/useServings'
-import { formatDate, phaseToStatusKey } from '../utils/format'
+import { formatDate, stateToStatusKey } from '../utils/format'
 import styles from './pages.module.css'
 
 export default function Servings() {
@@ -77,7 +77,7 @@ export default function Servings() {
             <table className={styles.table}>
               <thead className={styles.tableHead}>
                 <tr>
-                  <th>Phase</th>
+                  <th>State</th>
                   <th>Name</th>
                   <th>Namespace</th>
                   <th>Order</th>
@@ -97,9 +97,9 @@ export default function Servings() {
                   return (
                     <tr key={`${s.namespace}/${s.name}`} className={styles.tableRow}>
                       <td>
-                        <span className={`${styles.badge} ${styles[phaseToStatusKey(s.phase)]}`}>
+                        <span className={`${styles.badge} ${styles[stateToStatusKey(s.state)]}`}>
                           <span className={styles.badgeDot} />
-                          {s.phase}
+                          {s.state}
                         </span>
                       </td>
                       <td className={styles.mono}>{s.name}</td>

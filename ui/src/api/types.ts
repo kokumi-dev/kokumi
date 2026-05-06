@@ -55,7 +55,7 @@ export interface Order {
   patches?: Patch[]
   edits?: Patch[]
   autoDeploy: boolean
-  phase: string
+  state: string
   latestRevision?: string
   activePreparation?: string
   conditions?: Condition[]
@@ -74,7 +74,7 @@ export interface Preparation {
   order: string
   artifact: Artifact
   configHash: string
-  phase: string
+  state: string
   createdAt?: string
   isActive: boolean
   commitMessage?: string
@@ -90,7 +90,7 @@ export interface Serving {
   observedPreparation?: string
   deployedDigest?: string
   preparationPolicy: string
-  phase: string
+  state: string
   conditions?: Condition[]
   createdAt?: string
 }
@@ -128,7 +128,7 @@ export interface Menu {
   patches?: Patch[]
   overrides: OverridePolicy
   defaults: MenuDefaults
-  phase?: string
+  state?: string
   conditions?: Condition[]
   createdAt?: string
 }

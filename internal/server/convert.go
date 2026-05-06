@@ -55,6 +55,19 @@ func conditionsToDTO(conditions []metav1.Condition) []ConditionDTO {
 	return out
 }
 
+// stateFromConditions derives a UI-friendly state string from a conditions slice.
+func stateFromConditions(conditions []metav1.Condition) string {
+	for _, c := range conditions {
+		if c.Type == deliveryv1alpha1.ConditionTypeReady {
+			if c.Status == metav1.ConditionFalse {
+				return "Failed"
+			}
+			return c.Reason
+		}
+	}
+	return ""
+}
+
 // orderToDTO converts a Order CRD object and the name of its currently active
 // Preparation (from the linked Serving) into a OrderDTO.
 func orderToDTO(r deliveryv1alpha1.Order, activePreparation string) OrderDTO {
@@ -104,7 +117,7 @@ func orderToDTO(r deliveryv1alpha1.Order, activePreparation string) OrderDTO {
 		Patches:           patches,
 		Edits:             edits,
 		AutoDeploy:        r.Spec.AutoDeploy,
-		Phase:             string(r.Status.Phase),
+		State:             stateFromConditions(r.Status.Conditions),
 		LatestRevision:    r.Status.LatestRevision,
 		ActivePreparation: activePreparation,
 		Conditions:        conditionsToDTO(r.Status.Conditions),
@@ -185,7 +198,7 @@ func preparationToDTO(p deliveryv1alpha1.Preparation, isActive bool) Preparation
 			Signed: p.Spec.Artifact.Signed,
 		},
 		ConfigHash:    p.Spec.ConfigHash,
-		Phase:         string(p.Status.Phase),
+		State:         stateFromConditions(p.Status.Conditions),
 		IsActive:      isActive,
 		CommitMessage: p.Spec.CommitMessage,
 		ParentDigest:  p.Spec.ParentDigest,
@@ -289,7 +302,7 @@ func servingToDTO(s deliveryv1alpha1.Serving) ServingDTO {
 		ObservedPreparation: s.Status.ObservedPreparation,
 		DeployedDigest:      s.Status.DeployedDigest,
 		PreparationPolicy:   string(s.Spec.PreparationPolicy.Type),
-		Phase:               string(s.Status.Phase),
+		State:               stateFromConditions(s.Status.Conditions),
 		Conditions:          conditionsToDTO(s.Status.Conditions),
 	}
 	if !s.CreationTimestamp.IsZero() {
@@ -336,7 +349,7 @@ func menuToDTO(m deliveryv1alpha1.Menu) MenuDTO {
 		Defaults: MenuDefaultsDTO{
 			AutoDeploy: m.Spec.Defaults.AutoDeploy,
 		},
-		Phase:      string(m.Status.Phase),
+		State:      stateFromConditions(m.Status.Conditions),
 		Conditions: conditionsToDTO(m.Status.Conditions),
 	}
 	if !m.CreationTimestamp.IsZero() {

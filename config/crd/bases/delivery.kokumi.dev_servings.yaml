@@ -21,8 +21,11 @@ spec:
     - jsonPath: .spec.preparation
       name: Preparation
       type: string
-    - jsonPath: .status.phase
-      name: Phase
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].reason
+      name: Reason
       type: string
     - jsonPath: .spec.preparationPolicy.type
       name: Policy
@@ -89,16 +92,8 @@ spec:
             description: status defines the observed state of Serving
             properties:
               conditions:
-                description: |-
-                  conditions represent the current state of the Serving resource.
-                  Each condition has a unique type and reflects the status of a specific aspect of the resource.
-
-                  Standard condition types include:
-                  - "Available": the resource is fully functional
-                  - "Progressing": the resource is being created or updated
-                  - "Degraded": the resource failed to reach or maintain its desired state
-
-                  The status of each condition is one of True, False, or Unknown.
+                description: conditions represent the current state of the Serving
+                  resource.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -165,14 +160,6 @@ spec:
               observedPreparation:
                 description: observedPreparation is the preparation that was last
                   observed by the controller
-                type: string
-              phase:
-                description: phase represents the current phase of the Serving lifecycle
-                enum:
-                - Pending
-                - Deploying
-                - Deployed
-                - Failed
                 type: string
             type: object
         required:

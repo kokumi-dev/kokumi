@@ -159,21 +159,6 @@ type OrderSpec struct {
 	AutoDeploy bool `json:"autoDeploy"`
 }
 
-// OrderPhase represents the current phase of the Order
-// +kubebuilder:validation:Enum=Pending;Processing;Ready;Failed
-type OrderPhase string
-
-const (
-	// OrderPhasePending indicates the config is waiting to be processed
-	OrderPhasePending OrderPhase = "Pending"
-	// OrderPhaseProcessing indicates the config is being processed
-	OrderPhaseProcessing OrderPhase = "Processing"
-	// OrderPhaseReady indicates the latest Preparation was successfully rendered
-	OrderPhaseReady OrderPhase = "Ready"
-	// OrderPhaseFailed indicates the config processing failed
-	OrderPhaseFailed OrderPhase = "Failed"
-)
-
 // OrderStatus defines the observed state of Order.
 type OrderStatus struct {
 	// observedGeneration is the most recent generation observed by the controller
@@ -197,19 +182,7 @@ type OrderStatus struct {
 	// +optional
 	LatestConfigHash string `json:"latestConfigHash,omitempty"`
 
-	// phase represents the current phase of the Order lifecycle
-	// +optional
-	Phase OrderPhase `json:"phase,omitempty"`
-
 	// conditions represent the current state of the Order resource.
-	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
-	//
-	// Standard condition types include:
-	// - "Available": the resource is fully functional
-	// - "Progressing": the resource is being created or updated
-	// - "Degraded": the resource failed to reach or maintain its desired state
-	//
-	// The status of each condition is one of True, False, or Unknown.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
@@ -218,7 +191,8 @@ type OrderStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
+// +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].reason`
 // +kubebuilder:printcolumn:name="Latest Revision",type=string,JSONPath=`.status.latestRevision`
 // +kubebuilder:printcolumn:name="Menu",type=string,JSONPath=`.spec.menuRef.name`,priority=1
 // +kubebuilder:printcolumn:name="Source",type=string,JSONPath=`.spec.source.oci`,priority=1

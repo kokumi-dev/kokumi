@@ -16,7 +16,7 @@ interface Props {
 
 /**
  * PreparationList renders all Preparations for an Order, sorted newest-first.
- * Each row shows phase, metadata, and context-aware action buttons:
+ * Each row shows state, metadata, and context-aware action buttons:
  *   - Promote / Rollback  (hidden when this IS the active Preparation)
  *   - Manifest            (always visible)
  *   - Diff                (visible when there is an active Preparation to diff against)
@@ -89,7 +89,7 @@ function PreparationRow({
         <div className={styles.nameRow}>
           <span className={styles.name}>{prep.name}</span>
           {prep.isActive && <span className={styles.activePill}>ACTIVE</span>}
-          <Badge phase={prep.phase} />
+          <Badge state={prep.state} />
         </div>
 
         <div className={styles.meta}>

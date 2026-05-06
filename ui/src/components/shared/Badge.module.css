@@ -10,7 +10,7 @@
   white-space: nowrap;
 }
 
-/* Phase variants */
+/* State variants */
 .ready    { background: rgba(52, 168, 83, 0.15); color: #1e7e34; }
 .deployed { background: rgba(52, 168, 83, 0.15); color: #1e7e34; }
 .pending  { background: rgba(228, 179, 99, 0.2);  color: #8a6200; }

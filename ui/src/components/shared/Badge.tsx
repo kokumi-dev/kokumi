@@ -1,6 +1,6 @@
 import styles from './Badge.module.css'
 
-const classForPhase: Record<string, string> = {
+const classForState: Record<string, string> = {
   Ready: styles.ready,
   Deployed: styles.deployed,
   Pending: styles.pending,
@@ -10,11 +10,11 @@ const classForPhase: Record<string, string> = {
 }
 
 interface Props {
-  phase: string
+  state: string
 }
 
-/** Renders a coloured phase/status pill for a Order, Preparation, or Serving. */
-export default function Badge({ phase }: Props) {
-  const cls = classForPhase[phase] ?? styles.unknown
-  return <span className={`${styles.badge} ${cls}`}>{phase || '—'}</span>
+/** Renders a coloured state pill for an Order, Preparation, or Serving. */
+export default function Badge({ state }: Props) {
+  const cls = classForState[state] ?? styles.unknown
+  return <span className={`${styles.badge} ${cls}`}>{state || '—'}</span>
 }

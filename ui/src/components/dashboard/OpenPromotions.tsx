@@ -44,7 +44,7 @@ export default function OpenPromotions() {
   const promotable = orders
     .filter((o): o is PromotableOrder =>
       !!o.latestRevision &&
-      o.phase === 'Ready' &&
+      o.state === 'Ready' &&
       o.latestRevision !== o.activePreparation,
     )
     .sort((a, b) => {

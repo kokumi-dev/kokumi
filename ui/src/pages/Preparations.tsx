@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import type { Preparation } from '../api/types'
 import { usePreparations } from '../hooks/usePreparations'
 import ManifestModal from '../components/preparation/ManifestModal'
-import { formatDate, phaseToStatusKey } from '../utils/format'
+import { formatDate, stateToStatusKey } from '../utils/format'
 import styles from './pages.module.css'
 
 export default function Preparations() {
@@ -67,7 +67,7 @@ export default function Preparations() {
               <thead className={styles.tableHead}>
                 <tr>
                   <th></th>
-                  <th>Phase</th>
+                  <th>State</th>
                   <th>Name</th>
                   <th>Namespace</th>
                   <th>Order</th>
@@ -83,9 +83,9 @@ export default function Preparations() {
                       {p.isActive && <span className={styles.activePill}>active</span>}
                     </td>
                     <td>
-                      <span className={`${styles.badge} ${styles[phaseToStatusKey(p.phase)]}`}>
+                      <span className={`${styles.badge} ${styles[stateToStatusKey(p.state)]}`}>
                         <span className={styles.badgeDot} />
-                        {p.phase}
+                        {p.state}
                       </span>
                     </td>
                     <td className={styles.mono}>{p.name}</td>

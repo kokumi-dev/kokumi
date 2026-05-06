@@ -239,8 +239,6 @@ func (r *OrderReconciler) createPreparation(
 		renderType = deliveryv1alpha1.RenderTypeHelm
 	}
 
-	now := metav1.Time{Time: time.Now()}
-
 	preparation := &deliveryv1alpha1.Preparation{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      revisionName,
@@ -271,10 +269,6 @@ func (r *OrderReconciler) createPreparation(
 			CommitMessage: commitMessage,
 			ParentDigest:  parentDigest,
 		},
-		Status: deliveryv1alpha1.PreparationStatus{
-			Phase:     deliveryv1alpha1.PreparationPhaseReady,
-			CreatedAt: &now,
-		},
 	}
 
 	if err := controllerutil.SetControllerReference(order, preparation, r.Scheme); err != nil {
@@ -285,10 +279,9 @@ func (r *OrderReconciler) createPreparation(
 		return nil, fmt.Errorf("failed to create Preparation: %w", err)
 	}
 
-	preparation.Status.Phase = deliveryv1alpha1.PreparationPhaseReady
+	prepStatusUpdater := status.NewPreparationUpdater(r.Client)
 	preparation.Status.CreatedAt = &metav1.Time{Time: time.Now()}
-
-	if err := r.Status().Update(ctx, preparation); err != nil {
+	if err := prepStatusUpdater.Ready(ctx, preparation, "Preparation is ready for serving"); err != nil {
 		logger.Error(err, "Failed to update Preparation status")
 	}
 
