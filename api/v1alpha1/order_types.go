@@ -166,10 +166,10 @@ type OrderStatus struct {
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
-	// latestRevision is the name of the most recent immutable Preparation
+	// latestPreparationName is the name of the most recent immutable Preparation
 	// produced from this Order
 	// +optional
-	LatestRevision string `json:"latestRevision,omitempty"`
+	LatestPreparationName string `json:"latestPreparationName,omitempty"`
 
 	// latestArtifactDigest is the SHA256 digest of the OCI artifact produced by the
 	// most recent Preparation. It is used as the pointer for the parentDigest of
@@ -194,7 +194,7 @@ type OrderStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
 // +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].reason`
-// +kubebuilder:printcolumn:name="Latest Revision",type=string,JSONPath=`.status.latestRevision`
+// +kubebuilder:printcolumn:name="Latest Preparation",type=string,JSONPath=`.status.latestPreparationName`
 // +kubebuilder:printcolumn:name="Menu",type=string,JSONPath=`.spec.menuRef.name`,priority=1
 // +kubebuilder:printcolumn:name="Source",type=string,JSONPath=`.spec.source.oci`,priority=1
 // +kubebuilder:printcolumn:name="Version",type=string,JSONPath=`.spec.source.version`,priority=1

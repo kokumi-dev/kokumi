@@ -38,7 +38,7 @@ func handleListPreparations(deps *apiDeps) http.HandlerFunc {
 		// Client-side filter by order name.
 		filtered := prepList.Items[:0]
 		for _, p := range prepList.Items {
-			if p.Spec.Order == orderName {
+			if p.Spec.OrderName == orderName {
 				filtered = append(filtered, p)
 			}
 		}

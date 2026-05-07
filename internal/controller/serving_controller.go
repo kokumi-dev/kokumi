@@ -92,14 +92,14 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 
 	statusUpdater := status.NewServingUpdater(r.Client)
 
-	preparationName := serving.Spec.Preparation
+	preparationName := serving.Spec.PreparationName
 	if serving.Spec.PreparationPolicy.Type == deliveryv1alpha1.PreparationPolicyAutomatic {
-		logger.Info("Automatic preparation policy, finding latest preparation", "order", serving.Spec.Order)
+		logger.Info("Automatic preparation policy, finding latest preparation", "order", serving.Spec.OrderName)
 
 		preparationList := &deliveryv1alpha1.PreparationList{}
 		if err := r.List(ctx, preparationList,
 			client.InNamespace(serving.Namespace),
-			client.MatchingLabels{deliveryv1alpha1.LabelOrder: serving.Spec.Order},
+			client.MatchingLabels{deliveryv1alpha1.LabelOrder: serving.Spec.OrderName},
 		); err != nil {
 			logger.Error(err, "Failed to list Preparations")
 			_ = statusUpdater.Failed(ctx, serving, fmt.Errorf("failed to list preparations: %w", err))
@@ -107,7 +107,7 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 		}
 
 		if len(preparationList.Items) == 0 {
-			logger.Info("No preparations found for order", "order", serving.Spec.Order)
+			logger.Info("No preparations found for order", "order", serving.Spec.OrderName)
 			_ = statusUpdater.Pending(ctx, serving, "Waiting for preparations")
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
@@ -124,7 +124,7 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 		}
 
 		if latestPreparation == nil {
-			logger.Info("No ready preparations found for order", "order", serving.Spec.Order)
+			logger.Info("No ready preparations found for order", "order", serving.Spec.OrderName)
 			_ = statusUpdater.Pending(ctx, serving, "Waiting for ready preparation")
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
@@ -132,8 +132,8 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 		preparationName = latestPreparation.Name
 		logger.Info("Selected latest preparation", "preparation", preparationName)
 
-		if serving.Spec.Preparation != preparationName {
-			serving.Spec.Preparation = preparationName
+		if serving.Spec.PreparationName != preparationName {
+			serving.Spec.PreparationName = preparationName
 			if err := r.Update(ctx, serving); err != nil {
 				return ctrl.Result{}, err
 			}
@@ -151,7 +151,7 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 
 	logger.Info("Found Preparation", "preparation", preparation.Name, "digest", preparation.Spec.Artifact.Digest)
 
-	if serving.Status.ObservedPreparation == preparationName &&
+	if serving.Status.ObservedPreparationName == preparationName &&
 		serving.Status.DeployedDigest == preparation.Spec.Artifact.Digest &&
 		apimeta.IsStatusConditionTrue(serving.Status.Conditions, deliveryv1alpha1.ConditionTypeReady) {
 		logger.Info("Deployment is up-to-date", "preparation", preparationName)
@@ -170,7 +170,7 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 
 	logger.Info("Successfully created/updated Argo CD Application", "preparation", preparationName)
 
-	serving.Status.ObservedPreparation = preparationName
+	serving.Status.ObservedPreparationName = preparationName
 	serving.Status.DeployedDigest = preparation.Spec.Artifact.Digest
 	if err := statusUpdater.Deployed(ctx, serving, "Successfully deployed component"); err != nil {
 		return ctrl.Result{}, err
@@ -201,7 +201,7 @@ func (r *ServingReconciler) reconcileArgoApplication(ctx context.Context, servin
 				"name":      appName,
 				"namespace": argoNamespace,
 				"labels": map[string]any{
-					deliveryv1alpha1.LabelOrder:   serving.Spec.Order,
+					deliveryv1alpha1.LabelOrder:   serving.Spec.OrderName,
 					deliveryv1alpha1.LabelServing: serving.Name,
 				},
 			},
@@ -306,7 +306,7 @@ func (r *ServingReconciler) enqueueServingForPreparation() handler.EventHandler 
 
 		requests := []ctrl.Request{}
 		for _, serving := range servings.Items {
-			if serving.Spec.Preparation == preparation.Name {
+			if serving.Spec.PreparationName == preparation.Name {
 				requests = append(requests, ctrl.Request{
 					NamespacedName: client.ObjectKey{
 						Namespace: serving.Namespace,
@@ -314,7 +314,7 @@ func (r *ServingReconciler) enqueueServingForPreparation() handler.EventHandler 
 					},
 				})
 			} else if serving.Spec.PreparationPolicy.Type == deliveryv1alpha1.PreparationPolicyAutomatic {
-				if preparation.Labels[deliveryv1alpha1.LabelOrder] == serving.Spec.Order {
+				if preparation.Labels[deliveryv1alpha1.LabelOrder] == serving.Spec.OrderName {
 					requests = append(requests, ctrl.Request{
 						NamespacedName: client.ObjectKey{
 							Namespace: serving.Namespace,

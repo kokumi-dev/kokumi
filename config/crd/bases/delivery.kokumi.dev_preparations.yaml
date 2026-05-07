@@ -17,7 +17,7 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.order
+    - jsonPath: .spec.orderName
       name: Order
       type: string
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
@@ -34,7 +34,7 @@ spec:
       name: Signed
       priority: 1
       type: boolean
-    - jsonPath: .status.createdAt
+    - jsonPath: .status.creationTime
       name: Created
       type: date
     - jsonPath: .metadata.creationTimestamp
@@ -98,8 +98,8 @@ spec:
                 maxLength: 71
                 pattern: ^sha256:[a-f0-9]+$
                 type: string
-              order:
-                description: order is the name of the order this preparation belongs
+              orderName:
+                description: orderName is the name of the Order this preparation belongs
                   to
                 maxLength: 253
                 type: string
@@ -158,7 +158,7 @@ spec:
             required:
             - artifact
             - configHash
-            - order
+            - orderName
             - renderer
             - source
             type: object
@@ -229,8 +229,9 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              createdAt:
-                description: createdAt is the timestamp when the preparation was created
+              creationTime:
+                description: creationTime is the timestamp when the preparation was
+                  created
                 format: date-time
                 type: string
             type: object

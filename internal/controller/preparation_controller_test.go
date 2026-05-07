@@ -52,7 +52,7 @@ var _ = Describe("Preparation Controller", func() {
 						Namespace: "default",
 					},
 					Spec: deliveryv1alpha1.PreparationSpec{
-						Order:      "order",
+						OrderName:  "order",
 						ConfigHash: "sha256:448093f1b28dc7147740d8e400946e9b228650aa31a54b0ed734ca9ab0ae5b6b",
 						Renderer: deliveryv1alpha1.Renderer{
 							Version:    "0.1.0",

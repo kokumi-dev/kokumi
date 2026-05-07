@@ -87,10 +87,10 @@ type Artifact struct {
 // PreparationSpec defines the desired state of Preparation
 // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Preparation spec is immutable"
 type PreparationSpec struct {
-	// order is the name of the order this preparation belongs to
+	// orderName is the name of the Order this preparation belongs to
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MaxLength=253
-	Order string `json:"order"`
+	OrderName string `json:"orderName"`
 
 	// source defines the source artifact information
 	// +kubebuilder:validation:Required
@@ -127,9 +127,9 @@ type PreparationSpec struct {
 
 // PreparationStatus defines the observed state of Preparation.
 type PreparationStatus struct {
-	// createdAt is the timestamp when the preparation was created
+	// creationTime is the timestamp when the preparation was created
 	// +optional
-	CreatedAt *metav1.Time `json:"createdAt,omitempty"`
+	CreationTime *metav1.Time `json:"creationTime,omitempty"`
 
 	// conditions represent the current state of the Preparation resource.
 	// +listType=map
@@ -140,12 +140,12 @@ type PreparationStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="Order",type=string,JSONPath=`.spec.order`
+// +kubebuilder:printcolumn:name="Order",type=string,JSONPath=`.spec.orderName`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
 // +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].reason`
 // +kubebuilder:printcolumn:name="Digest",type=string,JSONPath=`.spec.artifact.digest`,priority=1
 // +kubebuilder:printcolumn:name="Signed",type=boolean,JSONPath=`.spec.artifact.signed`,priority=1
-// +kubebuilder:printcolumn:name="Created",type=date,JSONPath=`.status.createdAt`
+// +kubebuilder:printcolumn:name="Created",type=date,JSONPath=`.status.creationTime`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 // +kubebuilder:resource:shortName=prep
 

@@ -166,7 +166,7 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 
 	logger.Info("Created Preparation", "revision", preparation.Name)
 
-	order.Status.LatestRevision = preparation.Name
+	order.Status.LatestPreparationName = preparation.Name
 	order.Status.LatestArtifactDigest = result.DestDigest
 
 	if err := statusUpdater.Ready(ctx, order, specHash, fmt.Sprintf("Successfully pushed to %s", result.DestRef)); err != nil {
@@ -250,7 +250,7 @@ func (r *OrderReconciler) createPreparation(
 			},
 		},
 		Spec: deliveryv1alpha1.PreparationSpec{
-			Order: order.Name,
+			OrderName: order.Name,
 			Source: deliveryv1alpha1.OrderSource{
 				OCI:        fmt.Sprintf("oci://%s", sourceRef),
 				BaseDigest: sourceDigest,
@@ -280,7 +280,7 @@ func (r *OrderReconciler) createPreparation(
 	}
 
 	prepStatusUpdater := status.NewPreparationUpdater(r.Client)
-	preparation.Status.CreatedAt = &metav1.Time{Time: time.Now()}
+	preparation.Status.CreationTime = &metav1.Time{Time: time.Now()}
 	if err := prepStatusUpdater.Ready(ctx, preparation, "Preparation is ready for serving"); err != nil {
 		logger.Error(err, "Failed to update Preparation status")
 	}
