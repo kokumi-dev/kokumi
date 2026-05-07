@@ -157,6 +157,11 @@ spec:
                   deployed artifact
                 pattern: ^sha256:[a-f0-9]{64}$
                 type: string
+              observedGeneration:
+                description: observedGeneration is the most recent generation observed
+                  by the controller
+                format: int64
+                type: integer
               observedPreparation:
                 description: observedPreparation is the preparation that was last
                   observed by the controller

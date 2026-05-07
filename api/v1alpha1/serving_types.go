@@ -58,6 +58,10 @@ type ServingSpec struct {
 
 // ServingStatus defines the observed state of Serving.
 type ServingStatus struct {
+	// observedGeneration is the most recent generation observed by the controller
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
 	// observedPreparation is the preparation that was last observed by the controller
 	// +optional
 	ObservedPreparation string `json:"observedPreparation,omitempty"`
