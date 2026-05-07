@@ -36,7 +36,7 @@ type OrderSource struct {
 }
 
 // RenderType identifies how the source was rendered to produce a Preparation.
-type RenderType = string
+type RenderType string
 
 const (
 	// RenderTypeManifest indicates the source was used as-is without a templating engine.

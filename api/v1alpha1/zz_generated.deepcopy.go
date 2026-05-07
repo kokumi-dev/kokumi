@@ -480,7 +480,7 @@ func (in *Preparation) DeepCopyInto(out *Preparation) {
 	*out = *in
 	out.TypeMeta = in.TypeMeta
 	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
-	in.Spec.DeepCopyInto(&out.Spec)
+	out.Spec = in.Spec
 	in.Status.DeepCopyInto(&out.Status)
 }
 
@@ -553,7 +553,7 @@ func (in *PreparationPolicy) DeepCopy() *PreparationPolicy {
 func (in *PreparationSpec) DeepCopyInto(out *PreparationSpec) {
 	*out = *in
 	out.Source = in.Source
-	in.Renderer.DeepCopyInto(&out.Renderer)
+	out.Renderer = in.Renderer
 	out.Artifact = in.Artifact
 }
 
