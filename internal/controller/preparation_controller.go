@@ -92,7 +92,7 @@ func (r *PreparationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 func (r *PreparationReconciler) reconcileServing(ctx context.Context, preparation *deliveryv1alpha1.Preparation, automatic bool) error {
 	logger := log.FromContext(ctx)
 
-	orderName := preparation.Spec.Order
+	orderName := preparation.Spec.OrderName
 	servingName := orderName
 
 	serving := &deliveryv1alpha1.Serving{}
@@ -115,8 +115,8 @@ func (r *PreparationReconciler) reconcileServing(ctx context.Context, preparatio
 					},
 				},
 				Spec: deliveryv1alpha1.ServingSpec{
-					Order:       orderName,
-					Preparation: preparation.Name,
+					OrderName:       orderName,
+					PreparationName: preparation.Name,
 					PreparationPolicy: deliveryv1alpha1.PreparationPolicy{
 						Type: preparationPolicyType,
 					},
@@ -135,9 +135,9 @@ func (r *PreparationReconciler) reconcileServing(ctx context.Context, preparatio
 
 	needsUpdate := false
 
-	if serving.Spec.Preparation != preparation.Name {
-		logger.Info("Updating Serving preparation", "from", serving.Spec.Preparation, "to", preparation.Name)
-		serving.Spec.Preparation = preparation.Name
+	if serving.Spec.PreparationName != preparation.Name {
+		logger.Info("Updating Serving preparation", "from", serving.Spec.PreparationName, "to", preparation.Name)
+		serving.Spec.PreparationName = preparation.Name
 		needsUpdate = true
 	}
 

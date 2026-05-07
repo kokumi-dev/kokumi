@@ -118,7 +118,7 @@ func orderToDTO(r deliveryv1alpha1.Order, activePreparation string) OrderDTO {
 		Edits:             edits,
 		AutoDeploy:        r.Spec.AutoDeploy,
 		State:             stateFromConditions(r.Status.Conditions),
-		LatestRevision:    r.Status.LatestRevision,
+		LatestRevision:    r.Status.LatestPreparationName,
 		ActivePreparation: activePreparation,
 		Conditions:        conditionsToDTO(r.Status.Conditions),
 	}
@@ -191,7 +191,7 @@ func preparationToDTO(p deliveryv1alpha1.Preparation, isActive bool) Preparation
 	dto := PreparationDTO{
 		Name:      p.Name,
 		Namespace: p.Namespace,
-		Order:     p.Spec.Order,
+		Order:     p.Spec.OrderName,
 		Artifact: ArtifactDTO{
 			OCIRef: p.Spec.Artifact.OCIRef,
 			Digest: p.Spec.Artifact.Digest,
@@ -204,8 +204,8 @@ func preparationToDTO(p deliveryv1alpha1.Preparation, isActive bool) Preparation
 		ParentDigest:  p.Spec.ParentDigest,
 		Conditions:    conditionsToDTO(p.Status.Conditions),
 	}
-	if p.Status.CreatedAt != nil && !p.Status.CreatedAt.IsZero() {
-		t := p.Status.CreatedAt.UTC()
+	if p.Status.CreationTime != nil && !p.Status.CreationTime.IsZero() {
+		t := p.Status.CreationTime.UTC()
 		dto.CreatedAt = &t
 	}
 	return dto
@@ -233,8 +233,8 @@ func patchesFromDTO(dtos []PatchDTO) []deliveryv1alpha1.Patch {
 // Returns an empty string when no matching Serving is found.
 func activePreparationFor(namespace, orderName string, servings []deliveryv1alpha1.Serving) string {
 	for _, s := range servings {
-		if s.Namespace == namespace && s.Spec.Order == orderName {
-			return s.Status.ObservedPreparation
+		if s.Namespace == namespace && s.Spec.OrderName == orderName {
+			return s.Status.ObservedPreparationName
 		}
 	}
 	return ""
@@ -247,14 +247,14 @@ func enrichOrders(orders []deliveryv1alpha1.Order, servings []deliveryv1alpha1.S
 	servingMap := make(map[string]*deliveryv1alpha1.Serving, len(servings))
 	for i := range servings {
 		s := &servings[i]
-		servingMap[s.Namespace+"/"+s.Spec.Order] = s
+		servingMap[s.Namespace+"/"+s.Spec.OrderName] = s
 	}
 
 	out := make([]OrderDTO, len(orders))
 	for i, r := range orders {
 		var activePrep string
 		if s, ok := servingMap[r.Namespace+"/"+r.Name]; ok {
-			activePrep = s.Status.ObservedPreparation
+			activePrep = s.Status.ObservedPreparationName
 		}
 		out[i] = orderToDTO(r, activePrep)
 	}
@@ -266,14 +266,14 @@ func enrichPreparations(preps []deliveryv1alpha1.Preparation, servings []deliver
 	// active key: "<namespace>/<spec.order>" → observedPreparation name
 	activeMap := make(map[string]string, len(servings))
 	for _, s := range servings {
-		if s.Status.ObservedPreparation != "" {
-			activeMap[s.Namespace+"/"+s.Spec.Order] = s.Status.ObservedPreparation
+		if s.Status.ObservedPreparationName != "" {
+			activeMap[s.Namespace+"/"+s.Spec.OrderName] = s.Status.ObservedPreparationName
 		}
 	}
 
 	out := make([]PreparationDTO, len(preps))
 	for i, p := range preps {
-		key := p.Namespace + "/" + p.Spec.Order
+		key := p.Namespace + "/" + p.Spec.OrderName
 		isActive := activeMap[key] == p.Name
 		out[i] = preparationToDTO(p, isActive)
 	}
@@ -297,9 +297,9 @@ func servingToDTO(s deliveryv1alpha1.Serving) ServingDTO {
 	dto := ServingDTO{
 		Name:                s.Name,
 		Namespace:           s.Namespace,
-		Order:               s.Spec.Order,
-		DesiredPreparation:  s.Spec.Preparation,
-		ObservedPreparation: s.Status.ObservedPreparation,
+		Order:               s.Spec.OrderName,
+		DesiredPreparation:  s.Spec.PreparationName,
+		ObservedPreparation: s.Status.ObservedPreparationName,
 		DeployedDigest:      s.Status.DeployedDigest,
 		PreparationPolicy:   string(s.Spec.PreparationPolicy.Type),
 		State:               stateFromConditions(s.Status.Conditions),

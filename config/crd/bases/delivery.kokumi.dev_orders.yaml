@@ -21,8 +21,8 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Ready')].reason
       name: Reason
       type: string
-    - jsonPath: .status.latestRevision
-      name: Latest Revision
+    - jsonPath: .status.latestPreparationName
+      name: Latest Preparation
       type: string
     - jsonPath: .spec.menuRef.name
       name: Menu
@@ -312,9 +312,9 @@ spec:
                   latestConfigHash is a SHA-256 hash of the spec inputs (source OCI reference,
                   version, and patches) that produced the current latestRevision.
                 type: string
-              latestRevision:
+              latestPreparationName:
                 description: |-
-                  latestRevision is the name of the most recent immutable Preparation
+                  latestPreparationName is the name of the most recent immutable Preparation
                   produced from this Order
                 type: string
               observedGeneration:

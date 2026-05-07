@@ -56,7 +56,7 @@ var _ = Describe("Serving Controller", func() {
 						Namespace: "default",
 					},
 					Spec: deliveryv1alpha1.PreparationSpec{
-						Order: "order",
+						OrderName: "order",
 						Source: deliveryv1alpha1.OrderSource{
 							OCI:        "oci://registry.kokumi.svc.cluster.local:5000/order/test-resource",
 							BaseDigest: fakeDigest,
@@ -84,8 +84,8 @@ var _ = Describe("Serving Controller", func() {
 						Namespace: "default",
 					},
 					Spec: deliveryv1alpha1.ServingSpec{
-						Order:       "order",
-						Preparation: "preparation-fdf90e00e76",
+						OrderName:       "order",
+						PreparationName: "preparation-fdf90e00e76",
 						PreparationPolicy: deliveryv1alpha1.PreparationPolicy{
 							Type: deliveryv1alpha1.PreparationPolicyManual,
 						},
@@ -104,7 +104,7 @@ var _ = Describe("Serving Controller", func() {
 				Message:            "Successfully deployed component",
 				LastTransitionTime: metav1.Now(),
 			})
-			latestServing.Status.ObservedPreparation = "preparation-fdf90e00e76"
+			latestServing.Status.ObservedPreparationName = "preparation-fdf90e00e76"
 			latestServing.Status.DeployedDigest = fakeDigest
 			Expect(k8sClient.Status().Update(ctx, latestServing)).To(Succeed())
 		})

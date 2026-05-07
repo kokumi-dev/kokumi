@@ -382,8 +382,8 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Ready')].reason
       name: Reason
       type: string
-    - jsonPath: .status.latestRevision
-      name: Latest Revision
+    - jsonPath: .status.latestPreparationName
+      name: Latest Preparation
       type: string
     - jsonPath: .spec.menuRef.name
       name: Menu
@@ -673,9 +673,9 @@ spec:
                   latestConfigHash is a SHA-256 hash of the spec inputs (source OCI reference,
                   version, and patches) that produced the current latestRevision.
                 type: string
-              latestRevision:
+              latestPreparationName:
                 description: |-
-                  latestRevision is the name of the most recent immutable Preparation
+                  latestPreparationName is the name of the most recent immutable Preparation
                   produced from this Order
                 type: string
               observedGeneration:
@@ -710,7 +710,7 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.order
+    - jsonPath: .spec.orderName
       name: Order
       type: string
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
@@ -727,7 +727,7 @@ spec:
       name: Signed
       priority: 1
       type: boolean
-    - jsonPath: .status.createdAt
+    - jsonPath: .status.creationTime
       name: Created
       type: date
     - jsonPath: .metadata.creationTimestamp
@@ -791,8 +791,8 @@ spec:
                 maxLength: 71
                 pattern: ^sha256:[a-f0-9]+$
                 type: string
-              order:
-                description: order is the name of the order this preparation belongs
+              orderName:
+                description: orderName is the name of the Order this preparation belongs
                   to
                 maxLength: 253
                 type: string
@@ -851,7 +851,7 @@ spec:
             required:
             - artifact
             - configHash
-            - order
+            - orderName
             - renderer
             - source
             type: object
@@ -922,8 +922,9 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              createdAt:
-                description: createdAt is the timestamp when the preparation was created
+              creationTime:
+                description: creationTime is the timestamp when the preparation was
+                  created
                 format: date-time
                 type: string
             type: object
@@ -1077,10 +1078,10 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.order
+    - jsonPath: .spec.orderName
       name: Order
       type: string
-    - jsonPath: .spec.preparation
+    - jsonPath: .spec.preparationName
       name: Preparation
       type: string
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
@@ -1093,7 +1094,7 @@ spec:
       name: Policy
       priority: 1
       type: string
-    - jsonPath: .status.observedPreparation
+    - jsonPath: .status.observedPreparationName
       name: Observed
       priority: 1
       type: string
@@ -1125,11 +1126,12 @@ spec:
           spec:
             description: spec defines the desired state of Serving
             properties:
-              order:
-                description: order is the name of the order to serve
+              orderName:
+                description: orderName is the name of the Order to serve
                 type: string
-              preparation:
-                description: preparation is the desired Preparation to serve
+              preparationName:
+                description: preparationName is the name of the desired Preparation
+                  to serve
                 type: string
               preparationPolicy:
                 description: preparationPolicy defines how preparation updates are
@@ -1147,8 +1149,8 @@ spec:
                 - type
                 type: object
             required:
-            - order
-            - preparation
+            - orderName
+            - preparationName
             type: object
           status:
             description: status defines the observed state of Serving
@@ -1224,9 +1226,9 @@ spec:
                   by the controller
                 format: int64
                 type: integer
-              observedPreparation:
-                description: observedPreparation is the preparation that was last
-                  observed by the controller
+              observedPreparationName:
+                description: observedPreparationName is the name of the Preparation
+                  that was last observed by the controller
                 type: string
             type: object
         required:

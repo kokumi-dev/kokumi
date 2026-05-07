@@ -56,7 +56,7 @@ func handlePromote(deps *apiDeps) http.HandlerFunc {
 
 		var existing *deliveryv1alpha1.Serving
 		for i := range servingList.Items {
-			if servingList.Items[i].Spec.Order == orderName {
+			if servingList.Items[i].Spec.OrderName == orderName {
 				existing = &servingList.Items[i]
 				break
 			}
@@ -64,7 +64,7 @@ func handlePromote(deps *apiDeps) http.HandlerFunc {
 
 		if existing != nil {
 			// Update the existing Serving's desired preparation.
-			existing.Spec.Preparation = req.Preparation
+			existing.Spec.PreparationName = req.Preparation
 			if err := deps.writer.Update(r.Context(), existing); err != nil {
 				deps.logger.Error(err, "Failed to update Serving",
 					"namespace", namespace, "name", existing.Name)
@@ -86,8 +86,8 @@ func handlePromote(deps *apiDeps) http.HandlerFunc {
 				Namespace: namespace,
 			},
 			Spec: deliveryv1alpha1.ServingSpec{
-				Order:       orderName,
-				Preparation: req.Preparation,
+				OrderName:       orderName,
+				PreparationName: req.Preparation,
 				PreparationPolicy: deliveryv1alpha1.PreparationPolicy{
 					Type: deliveryv1alpha1.PreparationPolicyManual,
 				},

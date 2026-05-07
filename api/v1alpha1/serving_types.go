@@ -43,13 +43,13 @@ type PreparationPolicy struct {
 
 // ServingSpec defines the desired state of Serving
 type ServingSpec struct {
-	// order is the name of the order to serve
+	// orderName is the name of the Order to serve
 	// +kubebuilder:validation:Required
-	Order string `json:"order"`
+	OrderName string `json:"orderName"`
 
-	// preparation is the desired Preparation to serve
+	// preparationName is the name of the desired Preparation to serve
 	// +kubebuilder:validation:Required
-	Preparation string `json:"preparation"`
+	PreparationName string `json:"preparationName"`
 
 	// preparationPolicy defines how preparation updates are handled
 	// +optional
@@ -62,9 +62,9 @@ type ServingStatus struct {
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
-	// observedPreparation is the preparation that was last observed by the controller
+	// observedPreparationName is the name of the Preparation that was last observed by the controller
 	// +optional
-	ObservedPreparation string `json:"observedPreparation,omitempty"`
+	ObservedPreparationName string `json:"observedPreparationName,omitempty"`
 
 	// deployedDigest is the SHA256 digest of the currently deployed artifact
 	// +optional
@@ -80,12 +80,12 @@ type ServingStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="Order",type=string,JSONPath=`.spec.order`
-// +kubebuilder:printcolumn:name="Preparation",type=string,JSONPath=`.spec.preparation`
+// +kubebuilder:printcolumn:name="Order",type=string,JSONPath=`.spec.orderName`
+// +kubebuilder:printcolumn:name="Preparation",type=string,JSONPath=`.spec.preparationName`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
 // +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].reason`
 // +kubebuilder:printcolumn:name="Policy",type=string,JSONPath=`.spec.preparationPolicy.type`,priority=1
-// +kubebuilder:printcolumn:name="Observed",type=string,JSONPath=`.status.observedPreparation`,priority=1
+// +kubebuilder:printcolumn:name="Observed",type=string,JSONPath=`.status.observedPreparationName`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Serving is the Schema for the servings API
