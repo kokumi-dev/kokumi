@@ -50,11 +50,14 @@ func (u *ServingUpdater) set(
 	reason string,
 	msg string,
 ) error {
+	serving.Status.ObservedGeneration = serving.Generation
+
 	condition := metav1.Condition{
 		Type:               deliveryv1alpha1.ConditionTypeReady,
 		Status:             condStatus,
 		Reason:             reason,
 		Message:            msg,
+		ObservedGeneration: serving.Generation,
 		LastTransitionTime: metav1.NewTime(time.Now()),
 	}
 
