@@ -114,6 +114,7 @@ type MenuRef struct {
 
 // OrderSpec defines the desired state of Order.
 // Exactly one of source or menuRef must be set.
+// +kubebuilder:validation:XValidation:rule="(has(self.source) && !has(self.menuRef)) || (!has(self.source) && has(self.menuRef))",message="exactly one of source or menuRef must be set"
 type OrderSpec struct {
 	// source defines the immutable base artifact to render from.
 	// Must not be set when menuRef is used.
