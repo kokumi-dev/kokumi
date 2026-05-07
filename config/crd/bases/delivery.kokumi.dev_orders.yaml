@@ -237,6 +237,10 @@ spec:
             required:
             - autoDeploy
             type: object
+            x-kubernetes-validations:
+            - message: exactly one of source or menuRef must be set
+              rule: (has(self.source) && !has(self.menuRef)) || (!has(self.source)
+                && has(self.menuRef))
           status:
             description: status defines the observed state of Order
             properties:
