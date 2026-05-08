@@ -96,8 +96,8 @@ type MenuDefaults struct {
 	// autoDeploy is the default autoDeploy value for Orders using this Menu.
 	// Orders may override this.
 	// +optional
-	// +kubebuilder:default=false
-	AutoDeploy bool `json:"autoDeploy,omitempty"`
+	// +kubebuilder:default=Disabled
+	AutoDeploy AutoDeployPolicy `json:"autoDeploy,omitempty"`
 }
 
 // MenuSpec defines the desired state of Menu.

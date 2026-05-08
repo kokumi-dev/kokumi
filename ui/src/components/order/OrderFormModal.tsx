@@ -92,7 +92,7 @@ function yamlToPartialForm(text: string): Omit<OrderFormData, 'name' | 'namespac
     source: src?.oci ? { oci: src.oci, version: src.version ?? '' } : undefined,
     destination: { oci: dst?.oci ?? '' },
     render,
-    autoDeploy: Boolean(doc.autoDeploy),
+    autoDeploy: doc.autoDeploy === 'Enabled' ? 'Enabled' : 'Disabled',
     edits: [],
     patches: rawPatches.map((p) => {
       const patch = p as Record<string, unknown>
@@ -601,8 +601,8 @@ function FormView({
       <label className={styles.checkRow}>
         <input
           type="checkbox"
-          checked={formData.autoDeploy}
-          onChange={(e) => onFieldChange('autoDeploy', e.target.checked)}
+          checked={formData.autoDeploy === 'Enabled'}
+          onChange={(e) => onFieldChange('autoDeploy', e.target.checked ? 'Enabled' : 'Disabled')}
         />
         Auto Deploy — automatically promote newly created Preparations
       </label>

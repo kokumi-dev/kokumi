@@ -55,7 +55,7 @@ export default function MenuDetail({ menu, onClose, onEdit, onDelete, onOrder }:
               <span className={styles.specKey}>Version</span>
               <span className={styles.specValue}>{menu.source.version}</span>
               <span className={styles.specKey}>Auto Deploy Default</span>
-              <span className={styles.specValue}>{menu.defaults.autoDeploy ? 'Yes' : 'No'}</span>
+              <span className={styles.specValue}>{menu.defaults.autoDeploy}</span>
               {menu.render?.helm && (
                 <>
                   <span className={styles.specKey}>Renderer</span>

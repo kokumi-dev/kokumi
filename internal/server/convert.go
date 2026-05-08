@@ -116,7 +116,7 @@ func orderToDTO(r deliveryv1alpha1.Order, activePreparation string) OrderDTO {
 		Render:            renderToDTO(r.Spec.Render),
 		Patches:           patches,
 		Edits:             edits,
-		AutoDeploy:        r.Spec.AutoDeploy,
+		AutoDeploy:        string(r.Spec.AutoDeploy),
 		State:             stateFromConditions(r.Status.Conditions),
 		LatestRevision:    r.Status.LatestPreparationName,
 		ActivePreparation: activePreparation,
@@ -347,7 +347,7 @@ func menuToDTO(m deliveryv1alpha1.Menu) MenuDTO {
 		Patches:   patches,
 		Overrides: overridePolicyToDTO(m.Spec.Overrides),
 		Defaults: MenuDefaultsDTO{
-			AutoDeploy: m.Spec.Defaults.AutoDeploy,
+			AutoDeploy: string(m.Spec.Defaults.AutoDeploy),
 		},
 		State:      stateFromConditions(m.Status.Conditions),
 		Conditions: conditionsToDTO(m.Status.Conditions),
