@@ -80,11 +80,14 @@ spec:
                   Orders.
                 properties:
                   autoDeploy:
-                    default: false
+                    default: Disabled
                     description: |-
                       autoDeploy is the default autoDeploy value for Orders using this Menu.
                       Orders may override this.
-                    type: boolean
+                    enum:
+                    - Enabled
+                    - Disabled
+                    type: string
                 type: object
               overrides:
                 description: overrides defines what consumers (Orders) are allowed
@@ -400,7 +403,7 @@ spec:
     - jsonPath: .spec.autoDeploy
       name: Auto Deploy
       priority: 1
-      type: boolean
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -430,12 +433,15 @@ spec:
             description: spec defines the desired state of Order
             properties:
               autoDeploy:
-                default: false
+                default: Disabled
                 description: |-
                   autoDeploy controls whether a newly created Preparation
                   should automatically become the active Serving.
-                  If false, activation must be performed explicitly.
-                type: boolean
+                  If Disabled, activation must be performed explicitly.
+                enum:
+                - Enabled
+                - Disabled
+                type: string
               destination:
                 description: |-
                   destination defines where the rendered Preparation artifact will be pushed.
@@ -595,8 +601,6 @@ spec:
                 - oci
                 - version
                 type: object
-            required:
-            - autoDeploy
             type: object
             x-kubernetes-validations:
             - message: exactly one of source or menuRef must be set

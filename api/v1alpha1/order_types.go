@@ -21,6 +21,17 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// AutoDeployPolicy controls whether newly created Preparations are automatically promoted to active.
+// +kubebuilder:validation:Enum=Enabled;Disabled
+type AutoDeployPolicy string
+
+const (
+	// AutoDeployEnabled automatically promotes new Preparations to active.
+	AutoDeployEnabled AutoDeployPolicy = "Enabled"
+	// AutoDeployDisabled requires explicit promotion of Preparations.
+	AutoDeployDisabled AutoDeployPolicy = "Disabled"
+)
+
 // OCISource defines the OCI location of the base manifest artifact
 type OCISource struct {
 	// oci is the OCI registry URL for the source manifests
@@ -155,9 +166,10 @@ type OrderSpec struct {
 
 	// autoDeploy controls whether a newly created Preparation
 	// should automatically become the active Serving.
-	// If false, activation must be performed explicitly.
-	// +kubebuilder:default=false
-	AutoDeploy bool `json:"autoDeploy"`
+	// If Disabled, activation must be performed explicitly.
+	// +optional
+	// +kubebuilder:default=Disabled
+	AutoDeploy AutoDeployPolicy `json:"autoDeploy,omitempty"`
 }
 
 // OrderStatus defines the observed state of Order.
@@ -198,7 +210,7 @@ type OrderStatus struct {
 // +kubebuilder:printcolumn:name="Menu",type=string,JSONPath=`.spec.menuRef.name`,priority=1
 // +kubebuilder:printcolumn:name="Source",type=string,JSONPath=`.spec.source.oci`,priority=1
 // +kubebuilder:printcolumn:name="Version",type=string,JSONPath=`.spec.source.version`,priority=1
-// +kubebuilder:printcolumn:name="Auto Deploy",type=boolean,JSONPath=`.spec.autoDeploy`,priority=1
+// +kubebuilder:printcolumn:name="Auto Deploy",type=string,JSONPath=`.spec.autoDeploy`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Order is the Schema for the orders API

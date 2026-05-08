@@ -20,4 +20,4 @@ spec:
   destination:
     oci: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/external-secrets
 
-  autoDeploy: false
+  autoDeploy: Disabled

@@ -107,7 +107,7 @@ function OrderCard({ order: r, selected, onClick }: CardProps) {
         )}
       </div>
 
-      {r.autoDeploy && <span className={styles.autoDeployPill}>AUTO DEPLOY</span>}
+      {r.autoDeploy === 'Enabled' && <span className={styles.autoDeployPill}>AUTO DEPLOY</span>}
     </div>
   )
 }

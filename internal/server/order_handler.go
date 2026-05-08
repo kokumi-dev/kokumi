@@ -103,7 +103,7 @@ func handleCreateOrder(deps *apiDeps) http.HandlerFunc {
 				Render:     renderFromDTO(req.Render),
 				Patches:    patchesFromDTO(req.Patches),
 				Edits:      patchesFromDTO(req.Edits),
-				AutoDeploy: req.AutoDeploy,
+				AutoDeploy: deliveryv1alpha1.AutoDeployPolicy(req.AutoDeploy),
 			},
 		}
 
@@ -165,7 +165,7 @@ func handleUpdateOrder(deps *apiDeps) http.HandlerFunc {
 		order.Spec.Render = renderFromDTO(req.Render)
 		order.Spec.Patches = patchesFromDTO(req.Patches)
 		order.Spec.Edits = patchesFromDTO(req.Edits)
-		order.Spec.AutoDeploy = req.AutoDeploy
+		order.Spec.AutoDeploy = deliveryv1alpha1.AutoDeployPolicy(req.AutoDeploy)
 
 		if req.Destination != nil && req.Destination.OCI != "" {
 			order.Spec.Destination = &deliveryv1alpha1.OCIDestination{OCI: req.Destination.OCI}

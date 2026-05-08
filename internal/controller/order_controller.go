@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -246,7 +245,7 @@ func (r *OrderReconciler) createPreparation(
 			Labels: map[string]string{
 				deliveryv1alpha1.LabelOrder:      order.Name,
 				deliveryv1alpha1.LabelVersion:    sourceVersion,
-				deliveryv1alpha1.LabelAutoDeploy: strconv.FormatBool(order.Spec.AutoDeploy),
+				deliveryv1alpha1.LabelAutoDeploy: string(order.Spec.AutoDeploy),
 			},
 		},
 		Spec: deliveryv1alpha1.PreparationSpec{

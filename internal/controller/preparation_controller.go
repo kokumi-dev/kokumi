@@ -66,10 +66,10 @@ func (r *PreparationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, nil
 	}
 
-	autoDeploy := preparation.Labels[deliveryv1alpha1.LabelAutoDeploy]
+	autoDeploy := deliveryv1alpha1.AutoDeployPolicy(preparation.Labels[deliveryv1alpha1.LabelAutoDeploy])
 	approveLabel := preparation.Labels[deliveryv1alpha1.LabelApproveDeploy]
 
-	if autoDeploy == "true" {
+	if autoDeploy == deliveryv1alpha1.AutoDeployEnabled {
 		logger.Info("AutoDeploy enabled, reconciling Serving")
 		if err := r.reconcileServing(ctx, preparation, true); err != nil {
 			logger.Error(err, "Failed to reconcile Serving")

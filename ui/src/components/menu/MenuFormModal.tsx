@@ -84,7 +84,7 @@ function yamlToPartialForm(text: string): Omit<MenuFormData, 'name'> {
       } satisfies Patch
     }),
     overrides: rawOverrides ?? { values: { policy: 'None' }, patches: { policy: 'None' } },
-    defaults: { autoDeploy: Boolean(rawDefaults?.autoDeploy) },
+    defaults: { autoDeploy: rawDefaults?.autoDeploy === 'Enabled' ? 'Enabled' : 'Disabled' },
   }
 }
 
@@ -297,8 +297,8 @@ function MenuFormView({
       <label className={formStyles.checkRow}>
         <input
           type="checkbox"
-          checked={formData.defaults.autoDeploy}
-          onChange={(e) => onFieldChange('defaults', { ...formData.defaults, autoDeploy: e.target.checked })}
+          checked={formData.defaults.autoDeploy === 'Enabled'}
+          onChange={(e) => onFieldChange('defaults', { ...formData.defaults, autoDeploy: e.target.checked ? 'Enabled' : 'Disabled' })}
         />
         Default Auto Deploy — Orders using this Menu inherit auto-deploy
       </label>

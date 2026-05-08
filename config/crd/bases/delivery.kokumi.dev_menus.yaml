@@ -72,11 +72,14 @@ spec:
                   Orders.
                 properties:
                   autoDeploy:
-                    default: false
+                    default: Disabled
                     description: |-
                       autoDeploy is the default autoDeploy value for Orders using this Menu.
                       Orders may override this.
-                    type: boolean
+                    enum:
+                    - Enabled
+                    - Disabled
+                    type: string
                 type: object
               overrides:
                 description: overrides defines what consumers (Orders) are allowed

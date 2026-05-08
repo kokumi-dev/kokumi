@@ -36,4 +36,4 @@ spec:
       #       - ".spec.template.spec.terminationGracePeriodSeconds"
 
   defaults:
-    autoDeploy: false
+    autoDeploy: Disabled
