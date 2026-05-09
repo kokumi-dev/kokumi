@@ -144,7 +144,7 @@ Menu's policy permits.
 An Order declares:
 
 - **Source** (standalone mode) — OCI image reference: either a pre-rendered
-  manifest bundle (containing `manifest.yaml`) or a Helm chart in OCI format
+  manifest bundle (containing `*.yaml` files) or a Helm chart in OCI format
   (add `spec.render.helm` to configure rendering)
 - **MenuRef** (template mode) — reference to a cluster-scoped Menu by name;
   source and render configuration are inherited
@@ -222,13 +222,23 @@ absence of `spec.render`.
 
 ### Pre-rendered manifest bundle (default)
 
-When `spec.render` is absent, the source OCI artifact must contain a single
-`manifest.yaml` file at its root holding all Kubernetes resources (single or
-multi-document YAML). The file is stored as-is — no rendering step is applied.
+When `spec.render` is absent, the source OCI artifact must contain one or more
+`*.yaml` files at its root holding all Kubernetes resources (single or multi-
+document YAML). The files are stored as-is, with no rendering step applied.
 
+Supported layouts include:
+
+**Single manifest file**
 ```
 myapp:v1.0.0  (OCI artifact)
 └── manifest.yaml   ← all Kubernetes resources (pre-rendered)
+```
+
+**Multiple manifest files**
+```
+myapp:v1.0.0  (OCI artifact)
+|── deployment.yaml   ← Kubernetes Deployment
+└── service.yaml      ← Kubernetes Service
 ```
 
 This is the simplest format and is well-suited to components whose manifests

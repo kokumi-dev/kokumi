@@ -13,11 +13,14 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/oci"
 )
 
-func TestOrderService_ProcessOrder(t *testing.T) {
-	const fakeDigest = "sha256:fdf90e00e76bf3f0d2e5042c4c4e6c42a6d38c1e2b4f5a7d8e9f0a1b2c3d4e5f"
+const (
+	fakeDigest = "sha256:fdf90e00e76bf3f0d2e5042c4c4e6c42a6d38c1e2b4f5a7d8e9f0a1b2c3d4e5f"
+)
 
+func TestOrderService_ProcessOrder(t *testing.T) {
 	tests := []struct {
 		name          string
+		makeClient    func(fs afero.Fs) oci.Client
 		order         *deliveryv1alpha1.Order
 		wantSourceRef string
 		wantDestRef   string
@@ -66,12 +69,39 @@ func TestOrderService_ProcessOrder(t *testing.T) {
 			wantErr:    true,
 			wantErrMsg: "source is not a Helm chart",
 		},
+		{
+			name: "multiple yaml files consolidated into single manifest",
+			makeClient: func(fs afero.Fs) oci.Client {
+				return &multiFileFakeClient{fs: fs}
+			},
+			order: &deliveryv1alpha1.Order{
+				Spec: deliveryv1alpha1.OrderSpec{
+					Source: &deliveryv1alpha1.OCISource{
+						OCI:     "oci://registry.svc.cluster.local:5000/order/multi-file-app",
+						Version: "1.0.0",
+					},
+					Destination: &deliveryv1alpha1.OCIDestination{
+						OCI: "oci://registry.svc.cluster.local:5000/preparation/multi-file-app",
+					},
+				},
+			},
+			wantSourceRef: "registry.svc.cluster.local:5000/order/multi-file-app",
+			wantDestRef:   "registry.svc.cluster.local:5000/preparation/multi-file-app",
+			wantSourceDig: fakeDigest,
+			wantDestDig:   fakeDigest,
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			fs := afero.NewMemMapFs()
-			svc := NewOrderService(oci.NewFakeClient(fs), fs, "")
+
+			var client oci.Client = oci.NewFakeClient(fs)
+			if tc.makeClient != nil {
+				client = tc.makeClient(fs)
+			}
+
+			svc := NewOrderService(client, fs, "")
 
 			var dest string
 			if tc.order.Spec.Destination != nil {
@@ -97,37 +127,8 @@ func TestOrderService_ProcessOrder(t *testing.T) {
 	}
 }
 
-// helmFakeClient is a FakeClient variant that simulates an OCI artifact whose
-// primary layer is a Helm chart. It writes a minimal (empty) chart.tgz so that
-// the Helm loader can be invoked in tests that exercise the full service pipeline.
-type helmFakeClient struct {
-	fs afero.Fs
-}
-
-var _ oci.Client = (*helmFakeClient)(nil)
-
-func (c *helmFakeClient) Pull(_ context.Context, _, _, targetDir string) (string, string, error) {
-	chartPath := filepath.Join(targetDir, "chart.tgz")
-	if err := afero.WriteFile(c.fs, chartPath, []byte{}, 0600); err != nil {
-		return "", "", err
-	}
-
-	return oci.HelmChartLayerMediaType, "sha256:fdf90e00e76bf3f0d2e5042c4c4e6c42a6d38c1e2b4f5a7d8e9f0a1b2c3d4e5f", nil
-}
-
-func (c *helmFakeClient) Push(_ context.Context, _, _, _ string, _ map[string]string) (string, error) {
-	return "sha256:fdf90e00e76bf3f0d2e5042c4c4e6c42a6d38c1e2b4f5a7d8e9f0a1b2c3d4e5f", nil
-}
-
-func (c *helmFakeClient) ListTags(_ context.Context, _ string) ([]string, error) {
-	return nil, nil
-}
-
 func TestOrderService_PullCache(t *testing.T) {
-	const (
-		fakeDigest = "sha256:fdf90e00e76bf3f0d2e5042c4c4e6c42a6d38c1e2b4f5a7d8e9f0a1b2c3d4e5f"
-		cacheDir   = "/cache"
-	)
+	const cacheDir = "/cache"
 
 	order := &deliveryv1alpha1.Order{
 		Spec: deliveryv1alpha1.OrderSpec{
@@ -181,6 +182,35 @@ func TestOrderService_PullCache(t *testing.T) {
 	})
 }
 
+// multiFileFakeClient simulates an OCI artifact that contains multiple individual
+// YAML files instead of a single manifest.yaml.
+type multiFileFakeClient struct {
+	fs afero.Fs
+}
+
+var _ oci.Client = (*multiFileFakeClient)(nil)
+
+func (c *multiFileFakeClient) Pull(_ context.Context, _, _, targetDir string) (string, string, error) {
+	files := map[string]string{
+		"deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: my-app\nspec:\n  replicas: 1\n",
+		"service.yaml":    "apiVersion: v1\nkind: Service\nmetadata:\n  name: my-app\nspec:\n  port: 80\n",
+	}
+	for name, content := range files {
+		if err := afero.WriteFile(c.fs, filepath.Join(targetDir, name), []byte(content), 0600); err != nil {
+			return "", "", err
+		}
+	}
+	return "", fakeDigest, nil
+}
+
+func (c *multiFileFakeClient) Push(_ context.Context, _, _, _ string, _ map[string]string) (string, error) {
+	return fakeDigest, nil
+}
+
+func (c *multiFileFakeClient) ListTags(_ context.Context, _ string) ([]string, error) {
+	return nil, nil
+}
+
 // countingFakeClient wraps FakeClient and invokes onPull on every Pull call.
 type countingFakeClient struct {
 	fs     afero.Fs
@@ -200,4 +230,66 @@ func (c *countingFakeClient) Push(ctx context.Context, ref, tag, sourceDir strin
 
 func (c *countingFakeClient) ListTags(_ context.Context, _ string) ([]string, error) {
 	return nil, nil
+}
+
+func TestMergeYAMLFiles(t *testing.T) {
+	tests := []struct {
+		name         string
+		setup        map[string]string
+		wantManifest string
+		wantGone     []string
+	}{
+		{
+			name:         "no-op when only manifest.yaml exists",
+			setup:        map[string]string{"manifest.yaml": "---\nkind: Pod\n"},
+			wantManifest: "---\nkind: Pod\n",
+		},
+		{
+			name:  "no-op when directory has no yaml files",
+			setup: map[string]string{"chart.tgz": "binary"},
+		},
+		{
+			name: "multiple yaml files are merged in sorted order",
+			setup: map[string]string{
+				"service.yaml":    "kind: Service\n",
+				"deployment.yaml": "kind: Deployment\n",
+			},
+			wantManifest: "---\n# Source: deployment.yaml\nkind: Deployment\n---\n# Source: service.yaml\nkind: Service\n",
+			wantGone:     []string{"deployment.yaml", "service.yaml"},
+		},
+		{
+			name: "existing manifest.yaml included and removed before rewrite",
+			setup: map[string]string{
+				"manifest.yaml": "kind: ConfigMap\n",
+				"service.yaml":  "kind: Service\n",
+			},
+			wantManifest: "---\n# Source: manifest.yaml\nkind: ConfigMap\n---\n# Source: service.yaml\nkind: Service\n",
+			wantGone:     []string{"service.yaml"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := afero.NewMemMapFs()
+			for name, content := range tc.setup {
+				_ = afero.WriteFile(fs, filepath.Join("/dir", name), []byte(content), 0600)
+			}
+
+			require.NoError(t, mergeYAMLFiles(fs, "/dir"))
+
+			if tc.wantManifest == "" {
+				exists, _ := afero.Exists(fs, "/dir/manifest.yaml")
+				assert.False(t, exists)
+			} else {
+				data, err := afero.ReadFile(fs, "/dir/manifest.yaml")
+				require.NoError(t, err)
+				assert.Equal(t, tc.wantManifest, string(data))
+			}
+
+			for _, name := range tc.wantGone {
+				exists, _ := afero.Exists(fs, filepath.Join("/dir", name))
+				assert.False(t, exists, "%s should be removed after merge", name)
+			}
+		})
+	}
 }

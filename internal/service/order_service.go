@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
@@ -314,7 +315,18 @@ func (rs *OrderService) pullWithCache(ctx context.Context, ref, version, workDir
 	logger := log.FromContext(ctx)
 
 	if rs.cacheDir == "" {
-		return rs.client.Pull(ctx, ref, version, workDir)
+		mediaType, digest, err := rs.client.Pull(ctx, ref, version, workDir)
+		if err != nil {
+			return "", "", err
+		}
+
+		if mediaType != oci.HelmChartLayerMediaType {
+			if err := mergeYAMLFiles(rs.fs, workDir); err != nil {
+				return "", "", fmt.Errorf("failed to merge manifest files: %w", err)
+			}
+		}
+
+		return mediaType, digest, nil
 	}
 
 	key := pullCacheKey(ref, version)
@@ -341,6 +353,12 @@ func (rs *OrderService) pullWithCache(ctx context.Context, ref, version, workDir
 	mediaType, digest, err := rs.client.Pull(ctx, ref, version, workDir)
 	if err != nil {
 		return "", "", err
+	}
+
+	if mediaType != oci.HelmChartLayerMediaType {
+		if err := mergeYAMLFiles(rs.fs, workDir); err != nil {
+			return "", "", fmt.Errorf("failed to merge manifest files: %w", err)
+		}
 	}
 
 	rs.populateCache(ctx, entryDir, metaPath, mediaType, digest, workDir)
@@ -380,6 +398,50 @@ func (rs *OrderService) populateCache(ctx context.Context, entryDir, metaPath, m
 	if err := afero.WriteFile(rs.fs, metaPath, metaBytes, 0600); err != nil {
 		logger.Info("Could not write cache metadata, skipping cache", "error", err)
 	}
+}
+
+// mergeYAMLFiles merges all *.yaml files in dir into a single manifest.yaml
+func mergeYAMLFiles(fs afero.Fs, dir string) error {
+	pattern := filepath.Join(dir, "*.yaml")
+	files, err := afero.Glob(fs, pattern)
+	if err != nil {
+		return fmt.Errorf("read directory %q: %w", dir, err)
+	}
+
+	if len(files) == 0 {
+		return nil
+	}
+
+	if len(files) == 1 && filepath.Base(files[0]) == "manifest.yaml" {
+		return nil
+	}
+
+	sort.Strings(files)
+
+	var renderedManifest strings.Builder
+	for _, file := range files {
+		content, err := afero.ReadFile(fs, file)
+		if err != nil {
+			return fmt.Errorf("read %q: %w", file, err)
+		}
+
+		renderedManifest.WriteString("---\n")
+		renderedManifest.WriteString(fmt.Sprintf("# Source: %s\n", filepath.Base(file)))
+		renderedManifest.WriteString(strings.TrimSpace(string(content)))
+		renderedManifest.WriteString("\n")
+	}
+
+	for _, file := range files {
+		if err := fs.Remove(file); err != nil {
+			return fmt.Errorf("remove %q: %w", file, err)
+		}
+	}
+
+	if err := afero.WriteFile(fs, filepath.Join(dir, "manifest.yaml"), []byte(renderedManifest.String()), 0600); err != nil {
+		return fmt.Errorf("write manifest.yaml: %w", err)
+	}
+
+	return nil
 }
 
 func jsonToMap(j *apiextensionsv1.JSON) (map[string]any, error) {
