@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.13.0](https://github.com/kokumi-dev/kokumi/compare/0.12.0...0.13.0) (2026-05-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* conform to kubernetes api naming conventions ([#179](https://github.com/kokumi-dev/kokumi/issues/179))
+* remove phase field from status ([#175](https://github.com/kokumi-dev/kokumi/issues/175))
+
+### Features
+
+* add observedGeneration to preparation status ([#177](https://github.com/kokumi-dev/kokumi/issues/177)) ([9cf0818](https://github.com/kokumi-dev/kokumi/commit/9cf0818b91aaa4c8bc5e282756030569b51ca6b2))
+* add pending promotions list to dashboard ([#162](https://github.com/kokumi-dev/kokumi/issues/162)) ([38e559d](https://github.com/kokumi-dev/kokumi/commit/38e559deb8b61aa0af5b26e6188c4eae0d2a3465))
+* add validation for order to ensure source or menuref is set ([#178](https://github.com/kokumi-dev/kokumi/issues/178)) ([20cb2f0](https://github.com/kokumi-dev/kokumi/commit/20cb2f014f251a0d84cdf550a0b76b9fdb1fbc47))
+* improve default commit message handling ([#163](https://github.com/kokumi-dev/kokumi/issues/163)) ([8713b6c](https://github.com/kokumi-dev/kokumi/commit/8713b6cce0b0a9e5a1ec0cb9e5792c7cc53b30b0))
+* make autodeploy property an enum ([#184](https://github.com/kokumi-dev/kokumi/issues/184)) ([95670f6](https://github.com/kokumi-dev/kokumi/commit/95670f623b612081896ca5c37cf8ee7d9e47d7b6))
+* preview helm chart values and readme ([#158](https://github.com/kokumi-dev/kokumi/issues/158)) ([e628847](https://github.com/kokumi-dev/kokumi/commit/e628847d035fd3d17e89f9af9c83a8144502bfe5))
+* support multiple YAML files in pre-rendered manifest bundles ([#185](https://github.com/kokumi-dev/kokumi/issues/185)) ([befeb40](https://github.com/kokumi-dev/kokumi/commit/befeb40d32e3d6bbd1da87f6a38e3a682e417534))
+
+
+### Code Refactoring
+
+* conform to kubernetes api naming conventions ([#179](https://github.com/kokumi-dev/kokumi/issues/179)) ([8ebc3f1](https://github.com/kokumi-dev/kokumi/commit/8ebc3f14ebf07a7416bad81c88835f9758456e93))
+* remove phase field from status ([#175](https://github.com/kokumi-dev/kokumi/issues/175)) ([27dd557](https://github.com/kokumi-dev/kokumi/commit/27dd55739cc1d70a2bf370aa3f1b8357675aa030))
+
 ## [0.12.0](https://github.com/kokumi-dev/kokumi/compare/0.11.0...0.12.0) (2026-04-26)
 
 
