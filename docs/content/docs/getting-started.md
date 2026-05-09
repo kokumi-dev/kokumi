@@ -53,7 +53,7 @@ configuration, and base defaults while only supplying permitted overrides. See
 
 Kokumi supports two source types:
 
-- **Pre-rendered manifest bundle** — an OCI artifact containing a `manifest.yaml`
+- **Pre-rendered manifest bundle** — an OCI artifact containing `*.yaml` files
   at its root (no `spec.render` needed).
 - **Helm chart in OCI format** — a standard Helm chart pushed to an OCI registry;
   add `spec.render.helm` to control rendering.
