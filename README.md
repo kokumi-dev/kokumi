@@ -68,6 +68,10 @@ feeding your existing GitOps workflow rather than replacing it.
 
 Read the [Installation guide](https://kokumi.dev/docs/installation) and [Getting Started guide](https://kokumi.dev/docs/getting-started) on the docs site for full setup instructions, or explore the [Architecture & Concepts](https://kokumi.dev/docs/architecture) page to understand how the reconciliation model works before diving in.
 
+## Contributing
+
+Contributions are highly welcome! See the [Contribution Guide](https://kokumi.dev/docs/contribution-guide) for details on how to get involved.
+
 ## Core Concepts
 
 Kokumi models delivery using four Kubernetes primitives.
