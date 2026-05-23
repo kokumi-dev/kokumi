@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/resolve"
 	"github.com/kokumi-dev/kokumi/internal/service"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -45,7 +46,7 @@ func handlePreviewOrder(deps *apiDeps) http.HandlerFunc {
 		name := req.Name
 		namespace := req.Namespace
 		if namespace == "" {
-			namespace = "default"
+			namespace = defaultNamespace
 		}
 
 		order := &deliveryv1alpha1.Order{
@@ -60,12 +61,7 @@ func handlePreviewOrder(deps *apiDeps) http.HandlerFunc {
 			},
 		}
 
-		if req.Source.OCI != "" {
-			order.Spec.Source = &deliveryv1alpha1.OCISource{
-				OCI:     req.Source.OCI,
-				Version: req.Source.Version,
-			}
-		}
+		order.Spec.Source = sourceFromDTO(req.Source)
 
 		if req.MenuRef != nil {
 			order.Spec.MenuRef = &deliveryv1alpha1.MenuRef{Name: req.MenuRef.Name}
@@ -90,16 +86,23 @@ func handlePreviewOrder(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
+		resolvedSource, sourceClient, err := credential.NewKubeResolver(deps.reader).ResolveSource(r.Context(), spec.Source, namespace)
+		if err != nil {
+			respondError(w, http.StatusUnprocessableEntity, fmt.Sprintf("failed to resolve source: %s", err))
+			return
+		}
+
 		svc := service.NewOrderService(deps.ociClient, deps.fs, "")
 
 		manifest, err := svc.PreviewOrder(
 			r.Context(),
-			spec.Source,
+			resolvedSource,
 			spec.Render,
 			spec.Patches,
 			spec.Edits,
 			name,
 			namespace,
+			sourceClient,
 		)
 		if err != nil {
 			deps.logger.Error(err, "Failed to preview Order")

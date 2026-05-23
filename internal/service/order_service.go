@@ -1,6 +1,7 @@
 package service
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -59,6 +60,8 @@ func NewOrderService(client oci.Client, fs afero.Fs, cacheDir string) *OrderServ
 // parentDigest is the digest of the artifact produced by the immediately preceding
 // Preparation for this Order. When non-empty it is stored as the kokumi.dev/parent
 // annotation on the pushed OCI manifest. Pass an empty string for the first Preparation.
+// sourceClient and destClient are optional authenticated OCI clients. When nil, the
+// service's default client (usually anonymous) is used for that operation.
 func (rs *OrderService) ProcessOrder(
 	ctx context.Context,
 	order *deliveryv1alpha1.Order,
@@ -69,8 +72,13 @@ func (rs *OrderService) ProcessOrder(
 	destination string,
 	commitMessage string,
 	parentDigest string,
+	sourceClient oci.Client,
+	destClient oci.Client,
 ) (*OrderResult, error) {
 	logger := log.FromContext(ctx)
+
+	srcClient := cmp.Or(sourceClient, rs.client)
+	dstClient := cmp.Or(destClient, rs.client)
 
 	sourceRef := strings.TrimPrefix(source.OCI, "oci://")
 	destRef := strings.TrimPrefix(destination, "oci://")
@@ -85,7 +93,7 @@ func (rs *OrderService) ProcessOrder(
 
 	logger.Info("Fetching artifact from source")
 
-	mediaType, sourceDigest, err := rs.pullWithCache(ctx, sourceRef, source.Version, tempDir)
+	mediaType, sourceDigest, err := rs.pullWithCache(ctx, srcClient, sourceRef, source.Version, tempDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pull artifact: %w", err)
 	}
@@ -157,7 +165,7 @@ func (rs *OrderService) ProcessOrder(
 		ociAnnotations[oci.AnnotationParentDigest] = parentDigest
 	}
 
-	destDigest, err := rs.client.Push(ctx, destRef, source.Version, tempDir, ociAnnotations)
+	destDigest, err := dstClient.Push(ctx, destRef, source.Version, tempDir, ociAnnotations)
 	if err != nil {
 		return nil, fmt.Errorf("failed to push artifact: %w", err)
 	}
@@ -176,6 +184,8 @@ func (rs *OrderService) ProcessOrder(
 // and returns the processed manifest bytes without pushing anything to a registry.
 // name and namespace are used only as Helm releaseName/namespace fallbacks when the
 // Render config does not specify them explicitly.
+// sourceClient is an optional authenticated OCI client; when nil the service's
+// default client is used.
 func (rs *OrderService) PreviewOrder(
 	ctx context.Context,
 	source deliveryv1alpha1.OCISource,
@@ -184,9 +194,11 @@ func (rs *OrderService) PreviewOrder(
 	edits []deliveryv1alpha1.Patch,
 	name string,
 	namespace string,
+	sourceClient oci.Client,
 ) ([]byte, error) {
 	logger := log.FromContext(ctx)
 
+	srcClient := cmp.Or(sourceClient, rs.client)
 	sourceRef := strings.TrimPrefix(source.OCI, "oci://")
 
 	logger.Info("Previewing artifact", "source", sourceRef, "version", source.Version)
@@ -197,7 +209,7 @@ func (rs *OrderService) PreviewOrder(
 	}
 	defer rs.fs.RemoveAll(tempDir) //nolint:errcheck
 
-	mediaType, _, err := rs.pullWithCache(ctx, sourceRef, source.Version, tempDir)
+	mediaType, _, err := rs.pullWithCache(ctx, srcClient, sourceRef, source.Version, tempDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pull artifact: %w", err)
 	}
@@ -311,11 +323,11 @@ func artifactFilename(mediaType string) string {
 // pulls from the OCI registry and caches the result for future reconciles.
 // Version tags are treated as immutable — if a tag is re-pushed with different
 // content, remove the cache directory to force a fresh pull.
-func (rs *OrderService) pullWithCache(ctx context.Context, ref, version, workDir string) (string, string, error) {
+func (rs *OrderService) pullWithCache(ctx context.Context, client oci.Client, ref, version, workDir string) (string, string, error) {
 	logger := log.FromContext(ctx)
 
 	if rs.cacheDir == "" {
-		mediaType, digest, err := rs.client.Pull(ctx, ref, version, workDir)
+		mediaType, digest, err := client.Pull(ctx, ref, version, workDir)
 		if err != nil {
 			return "", "", err
 		}
@@ -350,7 +362,7 @@ func (rs *OrderService) pullWithCache(ctx context.Context, ref, version, workDir
 		logger.Info("Cache entry invalid, re-pulling source artifact", "ref", ref, "version", version)
 	}
 
-	mediaType, digest, err := rs.client.Pull(ctx, ref, version, workDir)
+	mediaType, digest, err := client.Pull(ctx, ref, version, workDir)
 	if err != nil {
 		return "", "", err
 	}

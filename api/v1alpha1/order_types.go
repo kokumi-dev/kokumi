@@ -34,16 +34,30 @@ const (
 )
 
 // OCISource defines the OCI location of the base manifest artifact
+// +kubebuilder:validation:XValidation:rule="(has(self.oci) && !has(self.pantryRef)) || (!has(self.oci) && has(self.pantryRef))",message="exactly one of oci or pantryRef must be set"
 type OCISource struct {
-	// oci is the OCI registry URL for the source manifests
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Pattern=`^oci://.*`
-	OCI string `json:"oci"`
+	// oci is the full OCI URL for the source manifests.
+	// Mutually exclusive with pantryRef.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="self == '' || (isURL(self) && url(self).getScheme() == 'oci')",message="must be a valid OCI URL"
+	OCI string `json:"oci,omitempty"`
+
+	// pantryRef references a Pantry resource whose URL is used as the source.
+	// Mutually exclusive with oci.
+	// +optional
+	PantryRef *PantryRef `json:"pantryRef,omitempty"`
 
 	// version is the semantic version or tag of the artifact
 	// The controller will resolve this to a digest
 	// +kubebuilder:validation:Required
 	Version string `json:"version"`
+}
+
+// PantryRef references a Pantry resource for authentication.
+type PantryRef struct {
+	// name is the name of the Pantry resource.
+	// +kubebuilder:validation:Required
+	Name string `json:"name"`
 }
 
 // HelmRender defines Helm-specific rendering options for the source artifact.
@@ -82,11 +96,17 @@ type Render struct {
 
 // OCIDestination defines where the rendered, configured artifact
 // (Preparation) will be pushed as an OCI artifact
+// +kubebuilder:validation:XValidation:rule="!(has(self.oci) && has(self.pantryRef))",message="oci and pantryRef are mutually exclusive"
 type OCIDestination struct {
 	// oci is the OCI registry URL where configured manifests will be pushed
 	// +optional
-	// +kubebuilder:validation:Pattern=`^oci://.*`
+	// +kubebuilder:validation:XValidation:rule="self == '' || (isURL(self) && url(self).getScheme() == 'oci')",message="must be a valid OCI URL"
 	OCI string `json:"oci,omitempty"`
+
+	// pantryRef references a Pantry resource whose URL is used as the destination.
+	// Mutually exclusive with oci.
+	// +optional
+	PantryRef *PantryRef `json:"pantryRef,omitempty"`
 }
 
 // PatchTarget identifies which resource to patch

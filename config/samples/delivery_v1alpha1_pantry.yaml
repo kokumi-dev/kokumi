@@ -1,0 +1,10 @@
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Pantry
+metadata:
+  labels:
+    app.kubernetes.io/name: kokumi
+    app.kubernetes.io/managed-by: kustomize
+  name: pantry-sample
+spec:
+  url: oci://ghcr.io/example/charts/podinfo
+  description: "Public podinfo Helm chart"

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
 type Config struct {
@@ -43,6 +44,12 @@ func Run(
 ) error {
 	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
 	defer cancel()
+
+	opts := zap.Options{
+		Development: true,
+	}
+
+	log.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	config := &Config{
 		Host: "0.0.0.0",

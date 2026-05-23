@@ -14,6 +14,8 @@ import (
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content/file"
 	"oras.land/oras-go/v2/registry/remote"
+	"oras.land/oras-go/v2/registry/remote/auth"
+	"oras.land/oras-go/v2/registry/remote/credentials"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
@@ -21,13 +23,40 @@ import (
 // It automatically uses plain HTTP for in-cluster Kubernetes service URLs
 // (hosts ending in .svc, .svc.<domain>, or bare IP/localhost) and HTTPS
 // for all other hosts.
-type ORASClient struct{}
+type ORASClient struct {
+	credStore credentials.Store
+}
 
 var _ Client = (*ORASClient)(nil)
 
-// NewORASClient returns an ORASClient.
+// NewORASClient returns an anonymous ORASClient.
 func NewORASClient() *ORASClient {
 	return &ORASClient{}
+}
+
+// NewAuthenticatedORASClient returns an ORASClient that authenticates requests
+// using the provided credential store.
+func NewAuthenticatedORASClient(credStore credentials.Store) *ORASClient {
+	return &ORASClient{credStore: credStore}
+}
+
+// newRepository creates a configured remote.Repository for the given ref,
+// applying plain-HTTP and credential settings.
+func (c *ORASClient) newRepository(ref string) (*remote.Repository, error) {
+	repo, err := remote.NewRepository(ref)
+	if err != nil {
+		return nil, err
+	}
+
+	repo.PlainHTTP = isPlainHTTP(ref)
+
+	if c.credStore != nil {
+		repo.Client = &auth.Client{
+			Credential: c.credStore.Get,
+		}
+	}
+
+	return repo, nil
 }
 
 // isPlainHTTP reports whether ref should be accessed over plain HTTP.
@@ -69,13 +98,10 @@ func isPlainHTTP(ref string) bool {
 func (c *ORASClient) Pull(ctx context.Context, ref, tag, targetDir string) (string, string, error) {
 	log := ctrl.LoggerFrom(ctx)
 
-	repo, err := remote.NewRepository(ref)
+	repo, err := c.newRepository(ref)
 	if err != nil {
 		return "", "", fmt.Errorf("create repository for %q: %w", ref, err)
 	}
-
-	repo.PlainHTTP = isPlainHTTP(ref)
-
 	log.Info("Resolving OCI manifest", "ref", fmt.Sprintf("%s:%s", ref, tag))
 
 	manifestDesc, err := repo.Resolve(ctx, tag)
@@ -149,13 +175,10 @@ func (c *ORASClient) fetchBlob(ctx context.Context, repo *remote.Repository, des
 
 // ListTags returns all tags available for the repository at ref.
 func (c *ORASClient) ListTags(ctx context.Context, ref string) ([]string, error) {
-	repo, err := remote.NewRepository(ref)
+	repo, err := c.newRepository(ref)
 	if err != nil {
 		return nil, fmt.Errorf("create repository for %q: %w", ref, err)
 	}
-
-	repo.PlainHTTP = isPlainHTTP(ref)
-
 	var tags []string
 	err = repo.Tags(ctx, "", func(t []string) error {
 		tags = append(tags, t...)
@@ -173,13 +196,10 @@ func (c *ORASClient) ListTags(ctx context.Context, ref string) ([]string, error)
 func (c *ORASClient) Push(ctx context.Context, ref, tag, sourceDir string, annotations map[string]string) (string, error) {
 	log := ctrl.LoggerFrom(ctx)
 
-	repo, err := remote.NewRepository(ref)
+	repo, err := c.newRepository(ref)
 	if err != nil {
 		return "", fmt.Errorf("failed to create repository for %q: %w", ref, err)
 	}
-
-	repo.PlainHTTP = isPlainHTTP(ref)
-
 	fs, err := file.New(sourceDir)
 	if err != nil {
 		return "", fmt.Errorf("failed to create file store at %q: %w", sourceDir, err)

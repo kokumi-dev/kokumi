@@ -85,7 +85,11 @@ function OrderCard({ order: r, selected, onClick }: CardProps) {
           <>
             <div className={styles.metaRow}>
               <span className={styles.metaLabel}>Source</span>
-              <span className={styles.metaValue} title={r.source.oci}>{r.source.oci}</span>
+              <span className={styles.metaValue}>
+                {r.source.pantryRef && !r.source.oci
+                  ? `pantry: ${r.source.pantryRef.name}`
+                  : r.source.oci}
+              </span>
             </div>
             <div className={styles.metaRow}>
               <span className={styles.metaLabel}>Version</span>
