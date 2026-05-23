@@ -51,7 +51,7 @@ export default function MenuDetail({ menu, onClose, onEdit, onDelete, onOrder }:
             <span className={styles.sectionTitle}>Spec</span>
             <div className={styles.specGrid}>
               <span className={styles.specKey}>Source OCI</span>
-              <span className={styles.specValue}>{menu.source.oci}</span>
+              <span className={styles.specValue}>{menu.source.pantryRef?.name ? `pantry: ${menu.source.pantryRef.name}` : menu.source.oci}</span>
               <span className={styles.specKey}>Version</span>
               <span className={styles.specValue}>{menu.source.version}</span>
               <span className={styles.specKey}>Auto Deploy Default</span>

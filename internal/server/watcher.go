@@ -8,6 +8,7 @@ import (
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/spf13/afero"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -23,6 +24,7 @@ type Counts struct {
 	Preparations int `json:"preparations"`
 	Servings     int `json:"servings"`
 	Menus        int `json:"menus"`
+	Pantries     int `json:"pantries"`
 }
 
 const (
@@ -36,6 +38,8 @@ const (
 	eventServings = "servings"
 	// eventMenus is the SSE event type name for full menu list snapshots.
 	eventMenus = "menus"
+	// eventPantries is the SSE event type name for full pantry list snapshots.
+	eventPantries = "pantries"
 )
 
 // newScheme builds a runtime Scheme with the types the server needs.
@@ -62,7 +66,18 @@ func startK8sWatcher(ctx context.Context, logger logr.Logger, h *hub) (*apiDeps,
 
 	scheme := newScheme()
 
-	k8sCache, err := cache.New(cfg, cache.Options{Scheme: scheme})
+	k8sCache, err := cache.New(cfg, cache.Options{
+		Scheme: scheme,
+		// Restrict Secret watches to the server's own namespace so that the
+		// namespaced RBAC Role (not a ClusterRole) is sufficient.
+		ByObject: map[client.Object]cache.ByObject{
+			&corev1.Secret{}: {
+				Namespaces: map[string]cache.Config{
+					"kokumi": {},
+				},
+			},
+		},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("creating Kubernetes cache: %w", err)
 	}
@@ -100,6 +115,11 @@ func startK8sWatcher(ctx context.Context, logger logr.Logger, h *hub) (*apiDeps,
 		return nil, fmt.Errorf("getting Menu informer: %w", err)
 	}
 
+	pantryInformer, err := k8sCache.GetInformer(ctx, &deliveryv1alpha1.Pantry{})
+	if err != nil {
+		return nil, fmt.Errorf("getting Pantry informer: %w", err)
+	}
+
 	// refreshAll reads current state from the in-memory informer cache and
 	// broadcasts counts, full order snapshots, and full preparation snapshots
 	// to all SSE subscribers. All reads are local — no network calls.
@@ -128,11 +148,18 @@ func startK8sWatcher(ctx context.Context, logger logr.Logger, h *hub) (*apiDeps,
 			return
 		}
 
+		pantryList := &deliveryv1alpha1.PantryList{}
+		if err := k8sCache.List(ctx, pantryList); err != nil {
+			logger.Error(err, "Failed to list Pantries from cache")
+			return
+		}
+
 		if err := h.publish(eventCounts, Counts{
 			Orders:       len(orderList.Items),
 			Preparations: len(prepList.Items),
 			Servings:     len(servingList.Items),
 			Menus:        len(menuList.Items),
+			Pantries:     len(pantryList.Items),
 		}); err != nil {
 			logger.Error(err, "Failed to publish counts event")
 		}
@@ -151,6 +178,10 @@ func startK8sWatcher(ctx context.Context, logger logr.Logger, h *hub) (*apiDeps,
 
 		if err := h.publish(eventMenus, menusToDTO(menuList.Items)); err != nil {
 			logger.Error(err, "Failed to publish menus event")
+		}
+
+		if err := h.publish(eventPantries, pantriesFromList(*pantryList)); err != nil {
+			logger.Error(err, "Failed to publish pantries event")
 		}
 	}
 
@@ -171,6 +202,9 @@ func startK8sWatcher(ctx context.Context, logger logr.Logger, h *hub) (*apiDeps,
 	}
 	if _, err := menuInformer.AddEventHandler(handler); err != nil {
 		return nil, fmt.Errorf("adding Menu event handler: %w", err)
+	}
+	if _, err := pantryInformer.AddEventHandler(handler); err != nil {
+		return nil, fmt.Errorf("adding Pantry event handler: %w", err)
 	}
 
 	// Start the cache in the background; it runs until ctx is cancelled.

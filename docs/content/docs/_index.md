@@ -22,6 +22,7 @@ It models your delivery workflow as five composable primitives:
 | **Order** | Concrete release request that can define full intent or parameterize a Menu |
 | **Preparation** | Immutable OCI artifact rendered from an Order |
 | **Serving** | Active deployment selecting exactly one Preparation |
+| **Pantry** | Registry credential store for private OCI registries |
 
 ## Where to start
 
@@ -29,4 +30,5 @@ It models your delivery workflow as five composable primitives:
   {{< card link="getting-started" title="Getting Started" icon="play" subtitle="Install Kokumi and create your first Order in minutes." >}}
   {{< card link="installation" title="Installation" icon="download" subtitle="Requirements, install, upgrade, and uninstall." >}}
   {{< card link="architecture" title="Architecture" icon="cube-transparent" subtitle="Understand the reconciliation model and key concepts." >}}
+  {{< card link="user-guide" title="User Guide" icon="book-open" subtitle="How-to guides for Kokumi features." >}}
 {{< /cards >}}

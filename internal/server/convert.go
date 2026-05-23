@@ -99,17 +99,28 @@ func orderToDTO(r deliveryv1alpha1.Order, activePreparation string) OrderDTO {
 		Name:      r.Name,
 		Namespace: r.Namespace,
 		Labels:    r.Labels,
-		Destination: OCIDestinationDTO{
-			OCI: func() string {
-				if r.Spec.Destination != nil {
-					return r.Spec.Destination.OCI
+		Destination: func() OCIDestinationDTO {
+			if r.Spec.Destination == nil {
+				return OCIDestinationDTO{}
+			}
+			d := OCIDestinationDTO{OCI: r.Spec.Destination.OCI}
+			if r.Spec.Destination.PantryRef != nil {
+				d.PantryRef = &PantryRefDTO{
+					Name: r.Spec.Destination.PantryRef.Name,
 				}
-				return ""
-			}(),
-		},
+			}
+			return d
+		}(),
 		EffectiveDestination: func() string {
-			if r.Spec.Destination != nil && r.Spec.Destination.OCI != "" {
+			if r.Spec.Destination == nil {
+				return service.DefaultDestination(r.Namespace, r.Name)
+			}
+			if r.Spec.Destination.OCI != "" {
 				return r.Spec.Destination.OCI
+			}
+			if r.Spec.Destination.PantryRef != nil {
+				// URL is resolved at runtime from the Pantry; omit from DTO.
+				return ""
 			}
 			return service.DefaultDestination(r.Namespace, r.Name)
 		}(),
@@ -124,10 +135,16 @@ func orderToDTO(r deliveryv1alpha1.Order, activePreparation string) OrderDTO {
 	}
 
 	if r.Spec.Source != nil {
-		dto.Source = &OCISourceDTO{
+		src := &OCISourceDTO{
 			OCI:     r.Spec.Source.OCI,
 			Version: r.Spec.Source.Version,
 		}
+		if r.Spec.Source.PantryRef != nil {
+			src.PantryRef = &PantryRefDTO{
+				Name: r.Spec.Source.PantryRef.Name,
+			}
+		}
+		dto.Source = src
 	}
 
 	if r.Spec.MenuRef != nil {
@@ -226,6 +243,36 @@ func patchesFromDTO(dtos []PatchDTO) []deliveryv1alpha1.Patch {
 		}
 	}
 	return patches
+}
+
+// sourceFromDTO converts an OCISourceDTO to an OCISource spec.
+// Returns nil when both oci and pantryRef are absent.
+func sourceFromDTO(dto OCISourceDTO) *deliveryv1alpha1.OCISource {
+	if dto.OCI == "" && dto.PantryRef == nil {
+		return nil
+	}
+	src := &deliveryv1alpha1.OCISource{OCI: dto.OCI, Version: dto.Version}
+	if dto.PantryRef != nil {
+		src.PantryRef = &deliveryv1alpha1.PantryRef{
+			Name: dto.PantryRef.Name,
+		}
+	}
+	return src
+}
+
+// destinationFromDTO converts an OCIDestinationDTO pointer to an OCIDestination spec.
+// Returns nil when dto is nil or both oci and pantryRef are absent.
+func destinationFromDTO(dto *OCIDestinationDTO) *deliveryv1alpha1.OCIDestination {
+	if dto == nil || (dto.OCI == "" && dto.PantryRef == nil) {
+		return nil
+	}
+	dest := &deliveryv1alpha1.OCIDestination{OCI: dto.OCI}
+	if dto.PantryRef != nil {
+		dest.PantryRef = &deliveryv1alpha1.PantryRef{
+			Name: dto.PantryRef.Name,
+		}
+	}
+	return dest
 }
 
 // activePreparationFor returns the observed preparation name for the Order
@@ -420,4 +467,36 @@ func overridePolicyFromDTO(dto OverridePolicyDTO) deliveryv1alpha1.OverridePolic
 			Allowed: allowed,
 		},
 	}
+}
+
+// pantryToDTO converts a Pantry CRD object into a PantryDTO.
+func pantryToDTO(p deliveryv1alpha1.Pantry) PantryDTO {
+	dto := PantryDTO{
+		Name:        p.Name,
+		Namespace:   p.Namespace,
+		URL:         p.Spec.URL,
+		Description: p.Spec.Description,
+		State:       stateFromConditions(p.Status.Conditions),
+		Conditions:  conditionsToDTO(p.Status.Conditions),
+	}
+
+	if p.Spec.SecretRef != nil {
+		dto.SecretRef = p.Spec.SecretRef.Name
+	}
+
+	if !p.CreationTimestamp.IsZero() {
+		t := p.CreationTimestamp.UTC()
+		dto.CreatedAt = &t
+	}
+
+	return dto
+}
+
+// pantriesFromList converts a PantryList into a slice of PantryDTOs.
+func pantriesFromList(list deliveryv1alpha1.PantryList) []PantryDTO {
+	out := make([]PantryDTO, len(list.Items))
+	for i, p := range list.Items {
+		out[i] = pantryToDTO(p)
+	}
+	return out
 }

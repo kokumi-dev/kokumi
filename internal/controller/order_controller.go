@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/renderer"
 	"github.com/kokumi-dev/kokumi/internal/resolve"
 	"github.com/kokumi-dev/kokumi/internal/service"
@@ -39,8 +40,9 @@ import (
 // OrderReconciler reconciles an Order object.
 type OrderReconciler struct {
 	client.Client
-	Scheme  *runtime.Scheme
-	Service service.OrderService
+	Scheme         *runtime.Scheme
+	Service        service.OrderService
+	PantryResolver credential.PantryResolver
 }
 
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=orders,verbs=get;list;watch;create;update;patch;delete
@@ -49,6 +51,8 @@ type OrderReconciler struct {
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=preparations,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=preparations/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=menus,verbs=get;list;watch
+// +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=pantries,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -142,12 +146,25 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 		effectiveDest = order.Spec.Destination.OCI
 	}
 
+	// Resolve Pantry references into plain OCI URLs and optional authenticated clients.
+	resolvedSource, sourceClient, err := r.PantryResolver.ResolveSource(ctx, effective.Source, order.Namespace)
+	if err != nil {
+		_ = statusUpdater.Failed(ctx, order, fmt.Errorf("failed to resolve source Pantry: %w", err))
+		return ctrl.Result{}, err
+	}
+
+	resolvedDest, destClient, err := r.PantryResolver.ResolveDestination(ctx, order.Spec.Destination, effectiveDest, order.Namespace, order.Namespace, order.Name)
+	if err != nil {
+		_ = statusUpdater.Failed(ctx, order, fmt.Errorf("failed to resolve destination Pantry: %w", err))
+		return ctrl.Result{}, err
+	}
+
 	parentDigest := order.Status.LatestArtifactDigest
 
 	userMessage, messageProvided := order.Annotations[deliveryv1alpha1.AnnotationCommitMessage]
 	commitMessage := service.DefaultCommitMessage(userMessage, messageProvided, parentDigest == "")
 
-	result, err := r.Service.ProcessOrder(ctx, order, effective.Source, effective.Render, effective.Patches, effective.Edits, effectiveDest, commitMessage, parentDigest)
+	result, err := r.Service.ProcessOrder(ctx, order, resolvedSource, effective.Render, effective.Patches, effective.Edits, resolvedDest, commitMessage, parentDigest, sourceClient, destClient)
 	if err != nil {
 		logger.Error(err, "Failed to process Order")
 		_ = statusUpdater.Failed(ctx, order, err)
@@ -155,7 +172,7 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 		return ctrl.Result{}, err
 	}
 
-	preparation, err := r.createPreparation(ctx, order, result.SourceRef, result.SourceDigest, effective.Source.Version, result.DestRef, result.DestDigest, commitMessage, parentDigest)
+	preparation, err := r.createPreparation(ctx, order, result.SourceRef, result.SourceDigest, resolvedSource.Version, result.DestRef, result.DestDigest, commitMessage, parentDigest)
 	if err != nil {
 		logger.Error(err, "Failed to create Preparation")
 		_ = statusUpdater.Failed(ctx, order, fmt.Errorf("failed to create revision: %w", err))

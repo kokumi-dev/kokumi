@@ -10,6 +10,7 @@ import type { Order, OrderFormData, Patch, HelmRender, Menu, ChartInfo } from '.
 import { emptyOrderForm, orderToFormData } from '../../api/types'
 import { objectToYaml, yamlToValues } from '../../utils/yaml'
 import { getDefaultRegistry, listOCITags, getChartInfo } from '../../api/client'
+import { usePantries } from '../../hooks/usePantries'
 import styles from './OrderFormModal.module.css'
 
 interface Props {
@@ -31,14 +32,20 @@ function formToYaml(data: OrderFormData): string {
   const doc: Record<string, unknown> = {
     autoDeploy: data.autoDeploy,
   }
-  if (data.destination.oci) {
+  if (data.destination?.pantryRef?.name) {
+    doc.destination = { pantryRef: { name: data.destination.pantryRef.name } }
+  } else if (data.destination?.oci) {
     doc.destination = { oci: data.destination.oci }
   }
   if (data.menuRef) {
     doc.menuRef = { name: data.menuRef.name }
   }
   if (data.source) {
-    doc.source = { oci: data.source.oci, version: data.source.version }
+    if (data.source.pantryRef?.name) {
+      doc.source = { pantryRef: { name: data.source.pantryRef.name }, version: data.source.version }
+    } else {
+      doc.source = { oci: data.source.oci ?? '', version: data.source.version }
+    }
   }
   if (data.render?.helm) {
     const h = data.render.helm
@@ -66,8 +73,8 @@ function yamlToPartialForm(text: string): Omit<OrderFormData, 'name' | 'namespac
   const doc = load(text) as Record<string, unknown>
   if (!doc || typeof doc !== 'object') throw new Error('YAML must be a mapping')
 
-  const src = doc.source as Record<string, string> | undefined
-  const dst = doc.destination as Record<string, string> | undefined
+  const src = doc.source as Record<string, unknown> | undefined
+  const dst = doc.destination as Record<string, unknown> | undefined
   const rawMenuRef = doc.menuRef as Record<string, string> | undefined
   const rawPatches = Array.isArray(doc.patches) ? (doc.patches as unknown[]) : []
 
@@ -87,10 +94,32 @@ function yamlToPartialForm(text: string): Omit<OrderFormData, 'name' | 'namespac
     }
   }
 
+  // Resolve source — exactly one of oci or pantryRef
+  let source: OrderFormData['source']
+  if (src) {
+    const srcPantryRef = src.pantryRef as Record<string, string> | undefined
+    if (srcPantryRef?.name) {
+      source = { version: (src.version as string) ?? '', pantryRef: { name: srcPantryRef.name } }
+    } else {
+      source = { oci: (src.oci as string) ?? '', version: (src.version as string) ?? '' }
+    }
+  }
+
+  // Resolve destination — at most one of oci or pantryRef
+  let destination: OrderFormData['destination'] = {}
+  if (dst) {
+    const dstPantryRef = dst.pantryRef as Record<string, string> | undefined
+    if (dstPantryRef?.name) {
+      destination = { pantryRef: { name: dstPantryRef.name } }
+    } else {
+      destination = { oci: (dst.oci as string) ?? '' }
+    }
+  }
+
   return {
     menuRef: rawMenuRef?.name ? { name: rawMenuRef.name } : undefined,
-    source: src?.oci ? { oci: src.oci, version: src.version ?? '' } : undefined,
-    destination: { oci: dst?.oci ?? '' },
+    source,
+    destination,
     render,
     autoDeploy: doc.autoDeploy === 'Enabled' ? 'Enabled' : 'Disabled',
     edits: [],
@@ -432,6 +461,26 @@ function FormView({
   const valuesPolicy = menu?.overrides.values.policy
   const patchesPolicy = menu?.overrides.patches.policy
 
+  const pantries = usePantries()
+
+  const [isDestOpen, setIsDestOpen] = useState(
+    !!(formData.destination?.oci || formData.destination?.pantryRef?.name),
+  )
+  const [isAdvancedOpen, setIsAdvancedOpen] = useState(
+    !!(formData.render?.helm || (formData.patches?.length ?? 0) > 0),
+  )
+
+  // Source type: 'oci' = direct URL, 'pantry' = named Pantry provides the URL
+  const [sourceMode, setSourceMode] = useState<'oci' | 'pantry'>(
+    formData.source?.pantryRef?.name ? 'pantry' : 'oci',
+  )
+  // Destination type: 'default' = in-cluster, 'oci' = direct URL, 'pantry' = Pantry provides URL
+  const [destMode, setDestMode] = useState<'default' | 'oci' | 'pantry'>(
+    formData.destination?.pantryRef?.name ? 'pantry'
+      : formData.destination?.oci ? 'oci'
+      : 'default',
+  )
+
   const [versionTags, setVersionTags] = useState<string[]>([])
   const [versionTagsLoading, setVersionTagsLoading] = useState(false)
   const lastFetchedTagsRef = useRef<string>('')
@@ -442,26 +491,44 @@ function FormView({
   const lastFetchedChartRef = useRef<string>('')
   const chartSeqRef = useRef(0)
 
-  // On mount: if source is already populated (edit mode or pre-filled create),
-  // fetch chart info immediately so the reference panel appears without interaction.
+  // Build the OCI ref for the current source — resolves pantry URL when in pantry mode.
+  function resolveOciRef(): string {
+    if (formData.source?.pantryRef?.name) {
+      const p = (pantries ?? []).find(
+        (p) => p.name === formData.source!.pantryRef!.name && p.namespace === formData.namespace,
+      )
+      return p?.url ?? ''
+    }
+    return formData.source?.oci ?? ''
+  }
+
+  function fetchTags(oci: string, pantryName?: string, pantryNs?: string) {
+    const resolvedPantryName = pantryName ?? formData.source?.pantryRef?.name
+    const resolvedPantryNs = pantryNs ?? formData.namespace
+    const dedupeKey = `${oci}|${resolvedPantryName ?? ''}`
+    if (!oci || dedupeKey === lastFetchedTagsRef.current) return
+    lastFetchedTagsRef.current = dedupeKey
+    const seq = ++tagsSeqRef.current
+    setVersionTagsLoading(true)
+    listOCITags(oci, resolvedPantryName, resolvedPantryNs)
+      .then((tags) => { if (tagsSeqRef.current === seq) setVersionTags(tags) })
+      .catch(() => { /* non-blocking: keep previous tags */ })
+      .finally(() => { if (tagsSeqRef.current === seq) setVersionTagsLoading(false) })
+  }
+
+  // On mount: load tags and chart info immediately if source is already
+  // populated (edit mode or pre-filled create).
   useEffect(() => {
     const oci = formData.source?.oci ?? ''
     const version = formData.source?.version ?? ''
+    if (oci) fetchTags(oci)
     if (oci && version) fetchChartInfo(oci, version)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   function handleOciBlur() {
-    const oci = formData.source?.oci ?? ''
-    if (!oci || oci === lastFetchedTagsRef.current) return
-    lastFetchedTagsRef.current = oci
-    const seq = ++tagsSeqRef.current
-    setVersionTagsLoading(true)
-    listOCITags(oci)
-      .then((tags) => { if (tagsSeqRef.current === seq) setVersionTags(tags) })
-      .catch(() => { /* non-blocking: keep previous tags */ })
-      .finally(() => { if (tagsSeqRef.current === seq) setVersionTagsLoading(false) })
-    // If a version is already selected, also refresh chart info
+    const oci = resolveOciRef()
+    fetchTags(oci)
     const version = formData.source?.version ?? ''
     if (version) fetchChartInfo(oci, version)
   }
@@ -472,7 +539,7 @@ function FormView({
     lastFetchedChartRef.current = key
     const seq = ++chartSeqRef.current
     setChartInfoLoading(true)
-    getChartInfo(oci, version)
+    getChartInfo(oci, version, formData.source?.pantryRef?.name, formData.namespace)
       .then((info) => {
         if (chartSeqRef.current !== seq) return
         setChartInfo(info)
@@ -488,7 +555,7 @@ function FormView({
 
   function handleVersionSelect(version: string) {
     onFieldChange('source', { ...(formData.source ?? { oci: '', version: '' }), version })
-    const oci = formData.source?.oci ?? ''
+    const oci = resolveOciRef()
     if (oci) fetchChartInfo(oci, version)
   }
 
@@ -521,7 +588,7 @@ function FormView({
       {/* Menu selector (create mode, when menus are available and no preset menu) */}
       {!isEdit && !hasPresetMenu && menus && menus.length > 0 && (
         <div className={styles.fieldGroup}>
-          <label className={styles.label}>Source Type</label>
+          <label className={styles.label}>Order Mode</label>
           <select
             className={styles.input}
             value={formData.menuRef?.name ?? ''}
@@ -552,17 +619,66 @@ function FormView({
         <>
           <div className={styles.fieldGroup}>
             <p className={styles.sectionTitle}>Source</p>
+            {/* Source mode toggle */}
+            <div className={styles.tabs} style={{ marginBottom: 0 }}>
+              <button
+                type="button"
+                className={`${styles.tab} ${sourceMode === 'oci' ? styles.tabActive : ''}`}
+                onClick={() => {
+                  setSourceMode('oci')
+                  onFieldChange('source', { oci: '', version: formData.source?.version ?? '', pantryRef: undefined })
+                }}
+              >
+                Direct OCI URL
+              </button>
+              <button
+                type="button"
+                className={`${styles.tab} ${sourceMode === 'pantry' ? styles.tabActive : ''}`}
+                onClick={() => {
+                  setSourceMode('pantry')
+                  onFieldChange('source', { version: formData.source?.version ?? '', pantryRef: { name: '' } })
+                }}
+              >
+                From Pantry
+              </button>
+            </div>
           </div>
           <div className={styles.row2}>
             <div className={styles.fieldGroup}>
-              <label className={styles.label}>OCI Registry</label>
-              <input
-                className={styles.input}
-                value={formData.source?.oci ?? ''}
-                onChange={(e) => onFieldChange('source', { ...(formData.source ?? { oci: '', version: '' }), oci: e.target.value })}
-                onBlur={handleOciBlur}
-                placeholder="oci://registry/repo"
-              />
+              {sourceMode === 'oci' ? (
+                <>
+                  <label className={styles.label}>OCI URL</label>
+                  <input
+                    className={styles.input}
+                    value={formData.source?.oci ?? ''}
+                    onChange={(e) => onFieldChange('source', { ...(formData.source ?? { oci: '', version: '' }), oci: e.target.value })}
+                    onBlur={handleOciBlur}
+                    placeholder="oci://ghcr.io/my-org/charts/app"
+                  />
+                </>
+              ) : (
+                <>
+                  <label className={styles.label}>Pantry</label>
+                  <select
+                    className={styles.input}
+                    value={formData.source?.pantryRef?.name ?? ''}
+                    onChange={(e) => {
+                      const name = e.target.value
+                      const version = formData.source?.version ?? ''
+                      onFieldChange('source', { version, pantryRef: { name } })
+                      if (name) {
+                        const p = (pantries ?? []).find((p) => p.name === name && p.namespace === formData.namespace)
+                        if (p?.url) fetchTags(p.url, name, formData.namespace)
+                      }
+                    }}
+                  >
+                    <option value="">— select a pantry —</option>
+                    {(pantries ?? []).filter((p) => p.namespace === formData.namespace).map((p) => (
+                      <option key={p.name} value={p.name}>{p.name}</option>
+                    ))}
+                  </select>
+                </>
+              )}
             </div>
             <div className={styles.fieldGroup}>
               <label className={styles.label}>Version</label>
@@ -577,23 +693,91 @@ function FormView({
         </>
       )}
 
-      {/* Destination */}
-      <div className={styles.fieldGroup}>
-        <label className={styles.label}>Destination OCI <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional)</span></label>
-        <input
-          className={styles.input}
-          value={formData.destination.oci}
-          onChange={(e) => onFieldChange('destination', { oci: e.target.value })}
-          placeholder={
-            defaultRegistry
-              ? `oci://${defaultRegistry}/${formData.namespace || 'namespace'}/${formData.name || 'name'}`
-              : 'oci://registry/rendered-repo'
-          }
-        />
-        {defaultRegistry && !formData.destination.oci && (
-          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted-light)', marginTop: 2 }}>
-            Leave blank to use the in-cluster registry automatically
-          </span>
+      {/* Destination (collapsible) */}
+      <div>
+        <button type="button" className={styles.sectionHeader} onClick={() => setIsDestOpen((v) => !v)}>
+          <span className={`${styles.sectionChevron} ${isDestOpen ? styles.sectionChevronOpen : ''}`}>›</span>
+          Destination
+          {!isDestOpen && (formData.destination?.oci || formData.destination?.pantryRef?.name) && (
+            <span className={styles.sectionSummary}>
+              {formData.destination.oci || `pantry: ${formData.destination.pantryRef?.name}`}
+            </span>
+          )}
+        </button>
+        {isDestOpen && (
+          <div className={styles.formGrid} style={{ gap: 10, marginTop: 4 }}>
+            {/* Destination mode tabs */}
+            <div className={styles.tabs} style={{ marginBottom: 0 }}>
+              <button
+                type="button"
+                className={`${styles.tab} ${destMode === 'default' ? styles.tabActive : ''}`}
+                onClick={() => {
+                  setDestMode('default')
+                  onFieldChange('destination', {})
+                }}
+              >
+                In-cluster (default)
+              </button>
+              <button
+                type="button"
+                className={`${styles.tab} ${destMode === 'oci' ? styles.tabActive : ''}`}
+                onClick={() => {
+                  setDestMode('oci')
+                  onFieldChange('destination', { oci: '' })
+                }}
+              >
+                Direct OCI URL
+              </button>
+              <button
+                type="button"
+                className={`${styles.tab} ${destMode === 'pantry' ? styles.tabActive : ''}`}
+                onClick={() => {
+                  setDestMode('pantry')
+                  onFieldChange('destination', { pantryRef: { name: '' } })
+                }}
+              >
+                From Pantry
+              </button>
+            </div>
+            {destMode === 'oci' && (
+              <div className={styles.fieldGroup}>
+                <label className={styles.label}>Destination OCI URL</label>
+                <input
+                  className={styles.input}
+                  value={formData.destination?.oci ?? ''}
+                  onChange={(e) => onFieldChange('destination', { oci: e.target.value })}
+                  placeholder={
+                    defaultRegistry
+                      ? `oci://${defaultRegistry}/${formData.namespace || 'namespace'}/${formData.name || 'name'}`
+                      : 'oci://ghcr.io/my-org/rendered-output'
+                  }
+                />
+              </div>
+            )}
+            {destMode === 'pantry' && (
+              <div className={styles.fieldGroup}>
+                <label className={styles.label}>Pantry</label>
+                <select
+                  className={styles.input}
+                  value={formData.destination?.pantryRef?.name ?? ''}
+                  onChange={(e) => {
+                    const name = e.target.value
+                    onFieldChange('destination', { pantryRef: { name } })
+                  }}
+                >
+                  <option value="">— select a pantry —</option>
+                  {(pantries ?? []).filter((p) => p.namespace === formData.namespace).map((p) => (
+                    <option key={p.name} value={p.name}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {destMode === 'default' && defaultRegistry && (
+              <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted-light)' }}>
+                Kokumi will push to the in-cluster registry automatically
+              </span>
+            )}
+          </div>
         )}
       </div>
 
@@ -607,96 +791,107 @@ function FormView({
         Auto Deploy — automatically promote newly created Preparations
       </label>
 
-      {/* Renderer */}
+      {/* Advanced: Renderer + Patches (collapsible) */}
       <div>
-        <p className={styles.sectionTitle}>Renderer</p>
-        {valuesPolicy === 'None' ? (
-          <div className={styles.policyBanner}>
-            <span className={styles.policyIcon}>🔒</span>
-            Value overrides are locked by the Menu
-          </div>
-        ) : (
+        <button type="button" className={styles.sectionHeader} onClick={() => setIsAdvancedOpen((v) => !v)}>
+          <span className={`${styles.sectionChevron} ${isAdvancedOpen ? styles.sectionChevronOpen : ''}`}>›</span>
+          Advanced
+        </button>
+        {isAdvancedOpen && (
           <>
-            {!menu && (
-              <label className={styles.checkRow}>
-                <input
-                  type="checkbox"
-                  checked={!!formData.render?.helm}
-                  onChange={(e) => (e.target.checked ? onEnableHelm() : onDisableHelm())}
-                />
-                Enable Helm rendering
-              </label>
-            )}
-            {valuesPolicy === 'Restricted' && menu?.overrides.values.allowed && (
-              <div className={styles.policyBanner}>
-                <span className={styles.policyIcon}>📋</span>
-                Allowed values:{' '}
-                {menu.overrides.values.allowed.map((k) => (
-                  <span key={k} className={styles.policyChip}>{k}</span>
-                ))}
-              </div>
-            )}
-            {valuesPolicy === 'All' && menu && (
-              <div className={styles.policyBannerOpen}>
-                <span className={styles.policyIcon}>✓</span>
-                All value overrides are allowed
-              </div>
-            )}
-            {formData.render?.helm && (
-              <div className={styles.helmSection}>
-                <HelmRenderEditor
-                  helm={formData.render.helm}
-                  onUpdate={onUpdateHelm}
-                  chartInfo={chartInfo}
-                  chartInfoLoading={chartInfoLoading}
-                />
-              </div>
-            )}
-          </>
-        )}
-      </div>
-
-      {/* Patches */}
-      <div>
-        <p className={styles.sectionTitle}>Patches</p>
-        {patchesPolicy === 'None' ? (
-          <div className={styles.policyBanner}>
-            <span className={styles.policyIcon}>🔒</span>
-            Patch overrides are locked by the Menu
-          </div>
-        ) : (
-          <>
-            {patchesPolicy === 'Restricted' && menu?.overrides.patches.allowed && (
-              <div className={styles.policyBanner}>
-                <span className={styles.policyIcon}>📋</span>
-                Allowed patches:{' '}
-                {menu.overrides.patches.allowed.map((a, i) => (
-                  <span key={i} className={styles.policyChip}>
-                    {a.target.kind}/{a.target.name}: {a.paths.join(', ')}
-                  </span>
-                ))}
-              </div>
-            )}
-            {patchesPolicy === 'All' && menu && (
-              <div className={styles.policyBannerOpen}>
-                <span className={styles.policyIcon}>✓</span>
-                All patch overrides are allowed
-              </div>
-            )}
-            <div className={styles.patchList}>
-              {formData.patches.map((patch, idx) => (
-                <PatchEditor
-                  key={idx}
-                  index={idx}
-                  patch={patch}
-                  onUpdate={(p) => onUpdatePatch(idx, p)}
-                  onRemove={() => onRemovePatch(idx)}
-                />
-              ))}
+            {/* Renderer */}
+            <div style={{ marginTop: 10 }}>
+              <p className={styles.sectionTitle}>Renderer</p>
+              {valuesPolicy === 'None' ? (
+                <div className={styles.policyBanner}>
+                  <span className={styles.policyIcon}>🔒</span>
+                  Value overrides are locked by the Menu
+                </div>
+              ) : (
+                <>
+                  {!menu && (
+                    <label className={styles.checkRow}>
+                      <input
+                        type="checkbox"
+                        checked={!!formData.render?.helm}
+                        onChange={(e) => (e.target.checked ? onEnableHelm() : onDisableHelm())}
+                      />
+                      Enable Helm rendering
+                    </label>
+                  )}
+                  {valuesPolicy === 'Restricted' && menu?.overrides.values.allowed && (
+                    <div className={styles.policyBanner}>
+                      <span className={styles.policyIcon}>📋</span>
+                      Allowed values:{' '}
+                      {menu.overrides.values.allowed.map((k) => (
+                        <span key={k} className={styles.policyChip}>{k}</span>
+                      ))}
+                    </div>
+                  )}
+                  {valuesPolicy === 'All' && menu && (
+                    <div className={styles.policyBannerOpen}>
+                      <span className={styles.policyIcon}>✓</span>
+                      All value overrides are allowed
+                    </div>
+                  )}
+                  {formData.render?.helm && (
+                    <div className={styles.helmSection}>
+                      <HelmRenderEditor
+                        helm={formData.render.helm}
+                        onUpdate={onUpdateHelm}
+                        chartInfo={chartInfo}
+                        chartInfoLoading={chartInfoLoading}
+                      />
+                    </div>
+                  )}
+                </>
+              )}
             </div>
-            <button className={styles.addPatchBtn} onClick={onAddPatch}>
-              + Add Patch
-            </button>
+
+            {/* Patches */}
+            <div style={{ marginTop: 10 }}>
+              <p className={styles.sectionTitle}>Patches</p>
+              {patchesPolicy === 'None' ? (
+                <div className={styles.policyBanner}>
+                  <span className={styles.policyIcon}>🔒</span>
+                  Patch overrides are locked by the Menu
+                </div>
+              ) : (
+                <>
+                  {patchesPolicy === 'Restricted' && menu?.overrides.patches.allowed && (
+                    <div className={styles.policyBanner}>
+                      <span className={styles.policyIcon}>📋</span>
+                      Allowed patches:{' '}
+                      {menu.overrides.patches.allowed.map((a, i) => (
+                        <span key={i} className={styles.policyChip}>
+                          {a.target.kind}/{a.target.name}: {a.paths.join(', ')}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {patchesPolicy === 'All' && menu && (
+                    <div className={styles.policyBannerOpen}>
+                      <span className={styles.policyIcon}>✓</span>
+                      All patch overrides are allowed
+                    </div>
+                  )}
+                  <div className={styles.patchList}>
+                    {formData.patches.map((patch, idx) => (
+                      <PatchEditor
+                        key={idx}
+                        index={idx}
+                        patch={patch}
+                        onUpdate={(p) => onUpdatePatch(idx, p)}
+                        onRemove={() => onRemovePatch(idx)}
+                      />
+                    ))}
+                  </div>
+                  <button className={styles.addPatchBtn} onClick={onAddPatch}>
+                    + Add Patch
+                  </button>
+                </>
+              )}
+            </div>
           </>
         )}
       </div>
