@@ -38,6 +38,7 @@ import (
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/controller"
+	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/service"
 	// +kubebuilder:scaffold:imports
@@ -210,6 +211,7 @@ func main() {
 			afero.NewOsFs(),
 			"/tmp/kokumi-pull-cache",
 		),
+		PantryResolver: credential.NewKubeResolver(mgr.GetClient()),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Order")
 		os.Exit(1)
@@ -219,6 +221,13 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Menu")
+		os.Exit(1)
+	}
+	if err := (&controller.PantryReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "Pantry")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

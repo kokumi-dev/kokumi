@@ -20,7 +20,7 @@ export default function PreviewTab({ formData }: Props) {
 
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const hasSource = !!(formData.source?.oci || formData.menuRef)
+  const hasSource = !!(formData.source?.oci || formData.source?.pantryRef?.name || formData.menuRef)
 
   useEffect(() => {
     if (timerRef.current !== null) {

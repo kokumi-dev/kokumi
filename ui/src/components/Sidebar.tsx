@@ -1,7 +1,7 @@
 import styles from './Sidebar.module.css'
 import logo from '../assets/logo.png'
 
-export type Page = 'dashboard' | 'orders' | 'menus' | 'preparations' | 'servings' | 'settings'
+export type Page = 'dashboard' | 'orders' | 'menus' | 'preparations' | 'servings' | 'pantries' | 'settings'
 
 interface NavItem {
   id: Page
@@ -67,6 +67,16 @@ function IconSettings() {
   )
 }
 
+function IconPantry() {
+  return (
+    <svg className={styles.navIcon} viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="5" width="14" height="10" rx="2" />
+      <path d="M5 5V3.5A1.5 1.5 0 0 1 6.5 2h5A1.5 1.5 0 0 1 13 3.5V5" />
+      <path d="M6 9h6M6 12h4" />
+    </svg>
+  )
+}
+
 function IconMenu() {
   return (
     <svg className={styles.navIcon} viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
@@ -88,6 +98,7 @@ const sections: NavSection[] = [
     items: [
       { id: 'orders',       label: 'Orders',       icon: <IconOrder /> },
       { id: 'menus',        label: 'Menus',        icon: <IconMenu /> },
+      { id: 'pantries',     label: 'Pantries',     icon: <IconPantry /> },
       { id: 'preparations', label: 'Preparations', icon: <IconPreparation /> },
       { id: 'servings',     label: 'Servings',     icon: <IconServing /> },
     ],

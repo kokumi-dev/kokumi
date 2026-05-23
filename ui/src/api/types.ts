@@ -1,12 +1,19 @@
 // ── Mirror of Go server DTOs ──────────────────────────────────────────────────
 
+export interface PantryRef {
+  name: string
+  namespace?: string
+}
+
 export interface OCISource {
   oci: string
+  pantryRef?: PantryRef
   version: string
 }
 
 export interface OCIDestination {
-  oci: string
+  oci?: string
+  pantryRef?: PantryRef
 }
 
 export interface PatchTarget {
@@ -135,6 +142,35 @@ export interface Menu {
   createdAt?: string
 }
 
+// ── Pantry types ──────────────────────────────────────────────────────────────
+
+export interface Pantry {
+  name: string
+  namespace: string
+  registry: string
+  secretRef?: string
+  description?: string
+  state: string
+  conditions?: Condition[]
+  createdAt?: string
+}
+
+export interface Repository {
+  name: string
+}
+
+export interface ArtifactInfo {
+  isHelm: boolean
+  isManifest: boolean
+  manifest?: string
+  chartInfo?: {
+    name: string
+    version: string
+    appVersion?: string
+    description?: string
+  }
+}
+
 // ── Registry / chart types ────────────────────────────────────────────────────
 
 export interface ChartInfo {
@@ -167,7 +203,7 @@ export const emptyOrderForm = (): OrderFormData => ({
   name: '',
   namespace: 'default',
   source: { oci: '', version: '' },
-  destination: { oci: '' },
+  destination: {},
   render: undefined,
   patches: [],
   edits: [],
@@ -179,7 +215,7 @@ export const orderToFormData = (r: Order): OrderFormData => ({
   namespace: r.namespace,
   menuRef: r.menuRef,
   source: r.source ? { ...r.source } : undefined,
-  destination: r.destination ? { ...r.destination } : { oci: '' },
+  destination: r.destination ? { ...r.destination } : {},
   render: r.render?.helm
     ? {
         helm: {
@@ -253,4 +289,31 @@ export const menuToFormData = (m: Menu): MenuFormData => ({
     },
   },
   defaults: { ...m.defaults },
+})
+
+export interface PantryFormData {
+  name: string
+  namespace: string
+  registry: string
+  description?: string
+  username?: string
+  password?: string
+}
+
+export const emptyPantryForm = (): PantryFormData => ({
+  name: '',
+  namespace: 'kokumi',
+  registry: '',
+  description: '',
+  username: '',
+  password: '',
+})
+
+export const pantryToFormData = (p: Pantry): PantryFormData => ({
+  name: p.name,
+  namespace: p.namespace,
+  registry: p.registry,
+  description: p.description ?? '',
+  username: '',
+  password: '',
 })

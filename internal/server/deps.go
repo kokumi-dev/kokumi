@@ -7,6 +7,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// defaultNamespace is the Kubernetes namespace used when none is specified in a request.
+const defaultNamespace = "default"
+
 // apiDeps groups the runtime dependencies used by HTTP handlers.
 // All fields may be nil when no Kubernetes configuration was found; handlers
 // return 503 Service Unavailable in that case.

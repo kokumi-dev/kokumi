@@ -39,10 +39,27 @@ type OCISource struct {
 	// +kubebuilder:validation:Pattern=`^oci://.*`
 	OCI string `json:"oci"`
 
+	// pantryRef references a Pantry resource to use for authentication.
+	// The host of the oci URL must match the pantry's registry.
+	// +optional
+	PantryRef *PantryRef `json:"pantryRef,omitempty"`
+
 	// version is the semantic version or tag of the artifact
 	// The controller will resolve this to a digest
 	// +kubebuilder:validation:Required
 	Version string `json:"version"`
+}
+
+// PantryRef references a Pantry resource for authentication.
+type PantryRef struct {
+	// name is the name of the Pantry resource.
+	// +kubebuilder:validation:Required
+	Name string `json:"name"`
+
+	// namespace is the namespace of the Pantry resource.
+	// When omitted, defaults to the namespace of the Order.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // HelmRender defines Helm-specific rendering options for the source artifact.
@@ -86,6 +103,11 @@ type OCIDestination struct {
 	// +optional
 	// +kubebuilder:validation:Pattern=`^oci://.*`
 	OCI string `json:"oci,omitempty"`
+
+	// pantryRef references a Pantry resource to use for authentication when
+	// pushing to the destination registry. Ignored when oci is omitted.
+	// +optional
+	PantryRef *PantryRef `json:"pantryRef,omitempty"`
 }
 
 // PatchTarget identifies which resource to patch
