@@ -1,5 +1,5 @@
 ---
-title: kokumi
+title: Kokumi – OCI-First GitOps Delivery for Kubernetes
 layout: hextra-home
 ---
 

@@ -9,7 +9,8 @@ enableGitInfo = true
     path = "github.com/imfing/hextra"
 
 [params]
-  description = "Kubernetes operator for structured, immutable release management"
+  description = "Kokumi is a Kubernetes operator for OCI-native, immutable release management. Keep Git traceability, gain OCI portability, and ship anywhere without compromise."
+  images = ["/images/kokumi.png"]
   displayUpdatedDate = true
   dateFormat = "January 2, 2006"
 
