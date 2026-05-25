@@ -165,6 +165,16 @@ Three ways to activate or change a Serving:
 Once activated, Kokumi creates a matching Argo CD `Application` in the `argocd`
 namespace and Argo CD syncs the manifests into the cluster.
 
+> **Opt-in update protection.** Kokumi will only update an Argo CD
+> `Application` it did not create if the `Application` is annotated with
+> `delivery.kokumi.dev/allowed-order: "<order-name>"` matching the Order
+> that owns the Serving. When Kokumi creates the `Application` itself, this
+> annotation is added automatically. If a pre-existing `Application` is
+> missing the annotation (or has a different value), Kokumi refuses to
+> modify it and surfaces the failure on the Serving's status condition with
+> the message `Cannot update Argo CD Application, opt-in annotation must
+> exist`.
+
 ```bash
 kubectl get servings
 # NAME               ORDER              PREPARATION                     READY   REASON     AGE

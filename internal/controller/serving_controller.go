@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -40,6 +41,14 @@ import (
 const (
 	argoNamespace = "argocd"
 )
+
+// errAllowedOrderOptInRequired is returned when an existing Argo CD Application
+// is missing (or has a mismatched) opt-in annotation. It is treated as a
+// terminal state for the current Serving generation: the reconciler records
+// the failure on the status and stops requeueing, so the Serving does not
+// flap between "Deploying" and "DeploymentFailed". The user must update the
+// Application's annotation (or change the Serving) to retry.
+var errAllowedOrderOptInRequired = errors.New("opt-in annotation required")
 
 // ServingReconciler reconciles a Serving object
 type ServingReconciler struct {
@@ -158,6 +167,22 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 		return ctrl.Result{}, nil
 	}
 
+	// Validate the opt-in annotation on any pre-existing Argo CD Application
+	// BEFORE transitioning the status to "Deploying". This avoids flapping
+	// between "Deploying" and "DeploymentFailed" on every reconcile pass when
+	// the annotation is missing.
+	if err := r.checkArgoApplicationOptIn(ctx, serving); err != nil {
+		if errors.Is(err, errAllowedOrderOptInRequired) {
+			logger.Info("Cannot update Argo CD Application, opt-in annotation must exist", "error", err.Error())
+			_ = statusUpdater.Failed(ctx, serving, err)
+			// Terminal for this generation: do not requeue. A change to the
+			// Application (annotation) or Serving will trigger a fresh event.
+			return ctrl.Result{}, nil
+		}
+		_ = statusUpdater.Failed(ctx, serving, fmt.Errorf("failed to check Argo CD Application: %w", err))
+		return ctrl.Result{}, err
+	}
+
 	if err := statusUpdater.Deploying(ctx, serving); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -204,6 +229,9 @@ func (r *ServingReconciler) reconcileArgoApplication(ctx context.Context, servin
 					deliveryv1alpha1.LabelOrder:   serving.Spec.OrderName,
 					deliveryv1alpha1.LabelServing: serving.Name,
 				},
+				"annotations": map[string]any{
+					deliveryv1alpha1.AnnotationAllowedOrder: serving.Spec.OrderName,
+				},
 			},
 			"spec": map[string]any{
 				"project": "default",
@@ -245,6 +273,18 @@ func (r *ServingReconciler) reconcileArgoApplication(ctx context.Context, servin
 			return fmt.Errorf("failed to get existing Application: %w", err)
 		}
 	} else {
+		if err := assertAllowedOrderAnnotation(existing, serving.Spec.OrderName); err != nil {
+			logger.Info(
+				"Cannot update Argo CD Application, opt-in annotation must exist",
+				"name", appName,
+				"namespace", argoNamespace,
+				"requiredAnnotation", deliveryv1alpha1.AnnotationAllowedOrder,
+				"expectedValue", serving.Spec.OrderName,
+				"actualValue", existing.GetAnnotations()[deliveryv1alpha1.AnnotationAllowedOrder],
+			)
+			return err
+		}
+
 		app.SetResourceVersion(existing.GetResourceVersion())
 		logger.Info("Updating Argo CD Application", "name", appName, "namespace", argoNamespace, "revision", targetRevision)
 		if err := r.Update(ctx, app); err != nil {
@@ -254,6 +294,49 @@ func (r *ServingReconciler) reconcileArgoApplication(ctx context.Context, servin
 	}
 
 	return nil
+}
+
+// checkArgoApplicationOptIn looks up the Argo CD Application that this Serving
+// would manage and verifies the opt-in annotation. It returns nil when the
+// Application does not yet exist (the create path is always allowed) or when
+// the annotation matches the Serving's Order. When the annotation is missing
+// or refers to a different Order it returns an error wrapping
+// errAllowedOrderOptInRequired.
+func (r *ServingReconciler) checkArgoApplicationOptIn(ctx context.Context, serving *deliveryv1alpha1.Serving) error {
+	existing := &unstructured.Unstructured{}
+	existing.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "argoproj.io",
+		Version: "v1alpha1",
+		Kind:    "Application",
+	})
+
+	err := r.Get(ctx, client.ObjectKey{Namespace: argoNamespace, Name: serving.Name}, existing)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to get existing Application: %w", err)
+	}
+
+	return assertAllowedOrderAnnotation(existing, serving.Spec.OrderName)
+}
+
+// assertAllowedOrderAnnotation returns errAllowedOrderOptInRequired (wrapped
+// with a descriptive message) if the given Application is not annotated with
+// the expected delivery.kokumi.dev/allowed-order value.
+func assertAllowedOrderAnnotation(app *unstructured.Unstructured, expectedOrder string) error {
+	actual := app.GetAnnotations()[deliveryv1alpha1.AnnotationAllowedOrder]
+	if actual == expectedOrder {
+		return nil
+	}
+	return fmt.Errorf(
+		"%w: Argo CD Application %q must be annotated with %q=%q (current value: %q)",
+		errAllowedOrderOptInRequired,
+		app.GetName(),
+		deliveryv1alpha1.AnnotationAllowedOrder,
+		expectedOrder,
+		actual,
+	)
 }
 
 // reconcileDelete handles the deletion of a Serving
