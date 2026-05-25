@@ -22,6 +22,21 @@ kubectl apply -n argocd --server-side --force-conflicts \
     -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.3.0/manifests/install.yaml
 ```
 
+### Argo CD registry credentials
+
+The in-cluster registry currently serves plain HTTP. Until proper TLS support
+is added, register it with Argo CD using `insecureOCIForceHttp=true`:
+
+```bash
+kubectl -n argocd create secret generic manifests-registry-creds \
+    --from-literal=type=oci \
+    --from-literal=url=oci://kokumi-registry.kokumi.svc.cluster.local:5000 \
+    --from-literal=insecureOCIForceHttp=true \
+    --dry-run=client -o yaml | \
+kubectl label -f - argocd.argoproj.io/secret-type=repo-creds --local -o yaml | \
+kubectl apply -f -
+```
+
 ## Install Kokumi
 
 <!-- x-release-please-start-version -->

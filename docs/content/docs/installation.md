@@ -16,6 +16,9 @@ creates and updates Argo CD `Application` resources to point at the immutable
 OCI artifacts produced by Preparations. Without Argo CD, Servings will fail
 and no workloads will be deployed.
 
+See [Getting Started — Argo CD registry credentials](../getting-started/#argo-cd-registry-credentials)
+for the required repo-creds secret to let Argo CD reach the in-cluster registry.
+
 ## Install
 
 <!-- x-release-please-start-version -->
