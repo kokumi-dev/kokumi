@@ -39,6 +39,13 @@ const (
 	// AnnotationCommitMessage carries a user-supplied commit message that is
 	// attached to the OCI artifact and then removed from the Order after consumption.
 	AnnotationCommitMessage = "delivery.kokumi.dev/commit-message"
+
+	// AnnotationAllowedOrder marks an Argo CD Application as opt-in to being
+	// managed (updated) by a kokumi Order. The annotation value is the name of
+	// the Order that is allowed to update the Application. Kokumi sets this
+	// annotation when it creates an Application, and refuses to update any
+	// pre-existing Application that does not carry a matching value.
+	AnnotationAllowedOrder = "delivery.kokumi.dev/allowed-order"
 )
 
 // Finalizer names registered on kokumi-managed resources.
