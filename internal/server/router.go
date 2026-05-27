@@ -35,6 +35,15 @@ func addRoutes(
 	mux.HandleFunc("PUT /api/v1/menus/{name}", handleUpdateMenu(deps))
 	mux.HandleFunc("DELETE /api/v1/menus/{name}", handleDeleteMenu(deps))
 
+	// Pantry CRUD
+	mux.HandleFunc("GET /api/v1/pantries", handleListPantries(deps))
+	mux.HandleFunc("POST /api/v1/pantries", handleCreatePantry(deps))
+	mux.HandleFunc("GET /api/v1/pantries/{namespace}/{name}", handleGetPantry(deps))
+	mux.HandleFunc("PUT /api/v1/pantries/{namespace}/{name}", handleUpdatePantry(deps))
+	mux.HandleFunc("DELETE /api/v1/pantries/{namespace}/{name}", handleDeletePantry(deps))
+	mux.HandleFunc("GET /api/v1/pantries/{namespace}/{name}/repositories", handleListPantryRepositories(deps))
+	mux.HandleFunc("GET /api/v1/pantries/{namespace}/{name}/repositories/{repo...}", handleListPantryTags(deps))
+
 	// Preparations scoped to a Order
 	mux.HandleFunc("GET /api/v1/orders/{namespace}/{name}/preparations", handleListPreparations(deps))
 

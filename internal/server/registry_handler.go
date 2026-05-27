@@ -1,10 +1,12 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"path/filepath"
 	"strings"
 
+	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/renderer"
 	"github.com/kokumi-dev/kokumi/internal/service"
@@ -21,6 +23,9 @@ func handleGetDefaultRegistry() http.HandlerFunc {
 }
 
 // handleListRegistryTags handles GET /api/v1/registry/tags?ref=<oci-ref>.
+// Optional query parameters pantryName and pantryNamespace select a specific
+// Pantry to use for authenticated access. When omitted the shared
+// unauthenticated client is used.
 // It strips the oci:// scheme prefix if present, fetches tags from the registry
 // and returns {"tags": [...]}.
 func handleListRegistryTags(deps *apiDeps) http.HandlerFunc {
@@ -42,7 +47,9 @@ func handleListRegistryTags(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		tags, err := deps.ociClient.ListTags(r.Context(), ref)
+		ociClient := ociClientForPantryRef(r.Context(), deps, r.URL.Query().Get("pantryName"), r.URL.Query().Get("pantryNamespace"))
+
+		tags, err := ociClient.ListTags(r.Context(), ref)
 		if err != nil {
 			deps.logger.Error(err, "Failed to list tags", "ref", ref)
 			respondError(w, http.StatusBadGateway, "could not list tags: "+err.Error())
@@ -93,6 +100,8 @@ func handleGetChartInfo(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
+		ociClient := ociClientForPantryRef(r.Context(), deps, r.URL.Query().Get("pantryName"), r.URL.Query().Get("pantryNamespace"))
+
 		tmpDir, err := afero.TempDir(deps.fs, "", "kokumi-chart-info-*")
 		if err != nil {
 			deps.logger.Error(err, "Failed to create temp directory")
@@ -101,7 +110,7 @@ func handleGetChartInfo(deps *apiDeps) http.HandlerFunc {
 		}
 		defer deps.fs.RemoveAll(tmpDir) //nolint:errcheck
 
-		mediaType, _, err := deps.ociClient.Pull(r.Context(), ref, version, tmpDir)
+		mediaType, _, err := ociClient.Pull(r.Context(), ref, version, tmpDir)
 		if err != nil {
 			deps.logger.Error(err, "Failed to pull OCI artifact", "ref", ref, "version", version)
 			respondError(w, http.StatusBadGateway, "could not pull artifact: "+err.Error())
@@ -130,4 +139,17 @@ func handleGetChartInfo(deps *apiDeps) http.HandlerFunc {
 			HasSchema:     info.HasSchema,
 		})
 	}
+}
+
+// ociClientForPantryRef returns an authenticated OCI client for the explicitly
+// named Pantry. When pantryName is empty, or the Pantry cannot be resolved,
+// the shared unauthenticated client on deps is returned.
+func ociClientForPantryRef(ctx context.Context, deps *apiDeps, pantryName, pantryNamespace string) oci.Client {
+	if pantryName == "" {
+		return deps.ociClient
+	}
+	if authClient, err := credential.NewKubeResolver(deps.reader).ClientForPantry(ctx, pantryNamespace, pantryName); err == nil && authClient != nil {
+		return authClient
+	}
+	return deps.ociClient
 }

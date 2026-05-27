@@ -143,19 +143,26 @@ export default function OrderDetail({ order, editsAllowed, onClose, onEdit, onDe
               {order.source && (
                 <>
                   <span className={styles.specKey}>Source OCI</span>
-                  <span className={styles.specValue}>{order.source.oci}</span>
+                  <span className={styles.specValue}>
+                    {order.source.oci}
+                    {order.source.pantryRef && (
+                      <span className={styles.autoBadge}>auth: {order.source.pantryRef.name}</span>
+                    )}
+                  </span>
                   <span className={styles.specKey}>Version</span>
                   <span className={styles.specValue}>{order.source.version}</span>
                 </>
               )}
               <span className={styles.specKey}>Destination</span>
               <span className={styles.specValue}>
-                {order.destination?.oci || (
-                  <>
-                    {order.effectiveDestination}
-                    <span className={styles.autoBadge}>auto</span>
-                  </>
-                )}
+                {order.destination?.pantryRef
+                  ? <>{order.destination.oci || order.effectiveDestination}<span className={styles.autoBadge}>auth: {order.destination.pantryRef.name}</span></>
+                  : order.destination?.oci || (
+                    <>
+                      {order.effectiveDestination}
+                      <span className={styles.autoBadge}>auto</span>
+                    </>
+                  )}
               </span>
               <span className={styles.specKey}>Auto Deploy</span>
               <span className={styles.specValue}>{order.autoDeploy}</span>

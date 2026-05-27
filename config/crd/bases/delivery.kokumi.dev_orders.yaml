@@ -88,6 +88,22 @@ spec:
                       will be pushed
                     pattern: ^oci://.*
                     type: string
+                  pantryRef:
+                    description: |-
+                      pantryRef references a Pantry resource to use for authentication when
+                      pushing to the destination registry. Ignored when oci is omitted.
+                    properties:
+                      name:
+                        description: name is the name of the Pantry resource.
+                        type: string
+                      namespace:
+                        description: |-
+                          namespace is the namespace of the Pantry resource.
+                          When omitted, defaults to the namespace of the Order.
+                        type: string
+                    required:
+                    - name
+                    type: object
                 type: object
               edits:
                 description: |-
@@ -228,6 +244,22 @@ spec:
                     description: oci is the OCI registry URL for the source manifests
                     pattern: ^oci://.*
                     type: string
+                  pantryRef:
+                    description: |-
+                      pantryRef references a Pantry resource to use for authentication.
+                      The host of the oci URL must match the pantry's registry.
+                    properties:
+                      name:
+                        description: name is the name of the Pantry resource.
+                        type: string
+                      namespace:
+                        description: |-
+                          namespace is the namespace of the Pantry resource.
+                          When omitted, defaults to the namespace of the Order.
+                        type: string
+                    required:
+                    - name
+                    type: object
                   version:
                     description: |-
                       version is the semantic version or tag of the artifact

@@ -284,6 +284,36 @@ The UI lets you browse Menus, Orders, Preparations, and Servings, create
 Orders from a Menu with one click, promote a Preparation to active, and view
 Argo CD sync status in real time.
 
+## Using a private registry
+
+If your source OCI artifact lives in a private registry, create a **Pantry** with
+the registry credentials and reference it on the Order's source:
+
+```yaml
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Pantry
+metadata:
+  name: ghcr-private
+  namespace: kokumi
+spec:
+  registry: oci://ghcr.io
+  secretRef:
+    name: ghcr-creds  # kubernetes.io/dockerconfigjson Secret
+```
+
+```yaml
+spec:
+  source:
+    oci: oci://ghcr.io/my-org/my-app
+    version: "1.2.3"
+    pantryRef:
+      name: ghcr-private
+      namespace: kokumi
+```
+
+See [Pantry](../user-guide/pantry) for how to create the credentials Secret,
+configure an authenticated destination, and verify connectivity.
+
 ## Next steps
 
 {{< cards >}}
