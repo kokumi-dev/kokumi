@@ -280,6 +280,30 @@ kubectl port-forward -n kokumi svc/kokumi-server 8080:80
 
 Then open [http://localhost:8080](http://localhost:8080) in your browser.
 
+The UI requires authentication. The default credentials are:
+
+| Username | Password |
+| -------- | -------- |
+| `admin`  | `admin`  |
+
+Change the password before any non-development use. Generate a new bcrypt hash
+with `htpasswd` and patch the `kokumi-server-auth` Secret:
+
+```bash
+kubectl -n kokumi patch secret kokumi-server-auth \
+  --type merge \
+  -p "{\"stringData\":{\"password-hash\":\"$(htpasswd -nbB admin 'your-new-password' | cut -d: -f2)\"}}"
+```
+
+Then restart the server so it picks up the change:
+
+```bash
+kubectl -n kokumi rollout restart deployment/kokumi-server
+```
+
+> You can also change the username from the default `admin` by setting
+> `stringData.username` in the same Secret.
+
 The UI lets you browse Menus, Orders, Preparations, and Servings, create
 Orders from a Menu with one click, promote a Preparation to active, and view
 Argo CD sync status in real time.

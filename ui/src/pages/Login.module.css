@@ -1,0 +1,117 @@
+.screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  width: 100%;
+  background-color: var(--color-bg-sidebar);
+  padding: 24px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 100%;
+  max-width: 360px;
+  padding: 36px 32px;
+  background-color: var(--color-bg-main);
+  border-radius: 14px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.logo {
+  width: 56px;
+  height: 56px;
+  margin-bottom: 8px;
+}
+
+.title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--color-text-on-light);
+}
+
+.subtitle {
+  font-size: 0.85rem;
+  color: var(--color-text-muted-light);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-muted-light);
+}
+
+.input {
+  font-family: inherit;
+  font-size: 0.95rem;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(49, 54, 56, 0.18);
+  background: var(--color-bg-card);
+  color: var(--color-text-on-light);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.input:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px rgba(239, 100, 97, 0.18);
+}
+
+.error {
+  font-size: 0.85rem;
+  color: #c0312e;
+  background: rgba(239, 100, 97, 0.12);
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+
+.submit {
+  margin-top: 4px;
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  padding: 11px 14px;
+  border-radius: 8px;
+  border: none;
+  background: var(--color-accent);
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s, transform 0.1s;
+}
+
+.submit:hover:not(:disabled) {
+  background: #d9554f;
+}
+
+.submit:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.footer {
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--color-text-muted-light);
+}

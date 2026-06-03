@@ -23,10 +23,14 @@ func NewServer(
 	config *Config,
 	h *hub,
 	deps *apiDeps,
+	auth *authenticator,
 ) http.Handler {
 	mux := http.NewServeMux()
-	addRoutes(mux, h, deps)
+	addRoutes(mux, h, deps, auth)
 	var handler http.Handler = mux
+	if auth != nil {
+		handler = auth.middleware(handler)
+	}
 	return handler
 }
 
@@ -53,7 +57,19 @@ func Run(
 		_, _ = fmt.Fprintf(stderr, "Warning: failed to start Kubernetes watcher: %s\n", err)
 	}
 
-	srv := NewServer(config, h, deps)
+	var auth *authenticator
+	if deps != nil {
+		namespace := currentNamespace(getenv)
+		secretName := authSecretName(getenv)
+		if a, aerr := loadAuthenticator(ctx, deps.writer, namespace, secretName); aerr != nil {
+			logger.Info("Authentication disabled", "reason", aerr.Error())
+		} else {
+			auth = a
+			logger.Info("Authentication enabled", "namespace", namespace, "secret", secretName)
+		}
+	}
+
+	srv := NewServer(config, h, deps, auth)
 	httpServer := &http.Server{
 		Addr:    net.JoinHostPort(config.Host, config.Port),
 		Handler: srv,

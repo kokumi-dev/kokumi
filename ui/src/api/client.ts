@@ -1,4 +1,5 @@
 import type { Order, Preparation, OrderFormData, Menu, MenuFormData, Patch, ChartInfo } from './types'
+import { authHeaders, setToken } from './auth'
 
 // All API calls are relative so they work both in dev (proxied by Vite) and
 // in production (served from the same Go binary).
@@ -6,13 +7,22 @@ const BASE = '/api/v1'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+// handleUnauthorized clears the stored token when the server rejects a request
+// with 401, which flips the app back to the login screen via the auth listener.
+function handleUnauthorized(status: number): void {
+  if (status === 401) {
+    setToken(null)
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(), ...init?.headers },
     ...init,
   })
 
   if (!res.ok) {
+    handleUnauthorized(res.status)
     let message = `HTTP ${res.status}`
     try {
       const body = (await res.json()) as { error?: string }
@@ -102,10 +112,11 @@ export function listPreparations(
 export function previewOrder(data: OrderFormData): Promise<string> {
   return fetch(`${BASE}/orders/preview`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(data),
   }).then(async (res) => {
     if (!res.ok) {
+      handleUnauthorized(res.status)
       let message = `HTTP ${res.status}`
       try {
         const body = (await res.json()) as { error?: string }
@@ -123,9 +134,12 @@ export function getManifest(
   namespace: string,
   prepName: string,
 ): Promise<string> {
-  return fetch(`${BASE}/preparations/${namespace}/${prepName}/manifest`).then(
+  return fetch(`${BASE}/preparations/${namespace}/${prepName}/manifest`, {
+    headers: { ...authHeaders() },
+  }).then(
     async (res) => {
       if (!res.ok) {
+        handleUnauthorized(res.status)
         let message = `HTTP ${res.status}`
         try {
           const body = (await res.json()) as { error?: string }

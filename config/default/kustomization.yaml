@@ -8,6 +8,12 @@ namespace: kokumi
 # field above.
 namePrefix: kokumi-
 
+# Custom name-reference configuration so a Role's resourceNames that points at a
+# Secret is rewritten alongside the namePrefix/nameSuffix (keeps RBAC for the
+# server auth Secret correct for any prefix). See auth_nameref_config.yaml.
+configurations:
+- auth_nameref_config.yaml
+
 # Labels to add to all resources and selectors.
 #labels:
 #- includeSelectors: true

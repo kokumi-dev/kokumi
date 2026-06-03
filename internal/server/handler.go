@@ -10,18 +10,23 @@ import (
 
 // InfoResponse is the response body for GET /api/v1/info.
 type InfoResponse struct {
-	Name    string `json:"name"`
-	Version string `json:"version"`
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	AuthEnabled bool   `json:"authEnabled"`
 }
 
-// HandleInfo handles GET /api/v1/info.
-func handleInfo(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(InfoResponse{
-		Name:    "kokumi",
-		Version: version.Version,
-	}); err != nil {
-		http.Error(w, "failed to encode response", http.StatusInternalServerError)
+// handleInfo handles GET /api/v1/info. authEnabled tells the UI whether a login
+// is required; it is true only when an authenticator is configured.
+func handleInfo(auth *authenticator) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(InfoResponse{
+			Name:        "kokumi",
+			Version:     version.Version,
+			AuthEnabled: auth != nil,
+		}); err != nil {
+			http.Error(w, "failed to encode response", http.StatusInternalServerError)
+		}
 	}
 }
 

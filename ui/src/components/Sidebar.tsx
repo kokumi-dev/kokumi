@@ -18,6 +18,7 @@ interface Props {
   activePage: Page
   onNavigate: (page: Page) => void
   operatorVersion?: string
+  onLogout?: () => void
 }
 
 function IconDashboard() {
@@ -100,7 +101,7 @@ const sections: NavSection[] = [
   },
 ]
 
-export default function Sidebar({ activePage, onNavigate, operatorVersion }: Props) {
+export default function Sidebar({ activePage, onNavigate, operatorVersion, onLogout }: Props) {
   return (
     <aside className={styles.sidebar}>
       {/* ── Logo ── */}
@@ -133,6 +134,11 @@ export default function Sidebar({ activePage, onNavigate, operatorVersion }: Pro
 
       {/* ── Footer ── */}
       <div className={styles.footer}>
+        {onLogout && (
+          <button className={styles.logout} onClick={onLogout}>
+            Sign out
+          </button>
+        )}
         {operatorVersion && (
           <div className={styles.footerInfo}>
             Version{' '}
