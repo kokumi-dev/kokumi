@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { withAccessToken } from '../api/auth'
 
 /**
  * Subscribes to a single named event type on an SSE endpoint and returns the
@@ -17,7 +18,9 @@ export function useSSEEvent<T>(endpoint: string, eventType: string): T | null {
   const [value, setValue] = useState<T | null>(null)
 
   useEffect(() => {
-    const es = new EventSource(endpoint)
+    // EventSource cannot set an Authorization header, so the token is passed as
+    // a query parameter, which the server also accepts.
+    const es = new EventSource(withAccessToken(endpoint))
 
     es.addEventListener(eventType, (event: MessageEvent<string>) => {
       try {

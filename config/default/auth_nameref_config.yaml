@@ -1,0 +1,12 @@
+# Teaches kustomize that a Role's rules[].resourceNames may reference a Secret.
+# Without this, the namePrefix is applied to the Secret's metadata.name but not
+# to the resourceNames entry that grants access to it, breaking RBAC whenever a
+# namePrefix (or nameSuffix) is configured. With it, resourceNames automatically
+# tracks the final Secret name for any prefix/suffix.
+nameReference:
+- kind: Secret
+  version: v1
+  fieldSpecs:
+  - kind: Role
+    group: rbac.authorization.k8s.io
+    path: rules/resourceNames

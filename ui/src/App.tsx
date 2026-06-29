@@ -7,15 +7,20 @@ import Menus from './pages/Menus'
 import Preparations from './pages/Preparations'
 import Servings from './pages/Servings'
 import Settings from './pages/Settings'
+import Login from './pages/Login'
+import { getToken, logout, onAuthChange } from './api/auth'
 
 interface Info {
   name: string
   version: string
+  authEnabled: boolean
 }
 
 function App() {
   const [activePage, setActivePage] = useState<Page>('dashboard')
   const [info, setInfo] = useState<Info | null>(null)
+  const [ready, setReady] = useState(false)
+  const [authed, setAuthed] = useState(() => getToken() !== null)
 
   useEffect(() => {
     fetch('/api/v1/info')
@@ -25,7 +30,24 @@ function App() {
       })
       .then(setInfo)
       .catch(() => {/* silently ignore in dev */})
+      .finally(() => setReady(true))
   }, [])
+
+  // Keep the authed flag in sync with token changes (login, logout, 401).
+  useEffect(() => onAuthChange(() => setAuthed(getToken() !== null)), [])
+
+  // Wait until /api/v1/info resolves so we know whether auth is required.
+  if (!ready) return null
+
+  const authRequired = info?.authEnabled ?? false
+  if (authRequired && !authed) {
+    return (
+      <Login
+        operatorVersion={info?.version}
+        onSuccess={() => setAuthed(true)}
+      />
+    )
+  }
 
   function renderPage() {
     switch (activePage) {
@@ -50,6 +72,7 @@ function App() {
         activePage={activePage}
         onNavigate={setActivePage}
         operatorVersion={info?.version}
+        onLogout={authRequired ? logout : undefined}
       />
       <main className={styles.content}>
         {renderPage()}
