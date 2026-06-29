@@ -42,7 +42,7 @@ kubectl apply -f -
 <!-- x-release-please-start-version -->
 ```bash
 kubectl apply -f \
-    https://github.com/kokumi-dev/kokumi/releases/download/0.13.0/install.yaml
+    https://github.com/kokumi-dev/kokumi/releases/download/0.14.0/install.yaml
 ```
 <!-- x-release-please-end -->
 
