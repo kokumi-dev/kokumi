@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.14.0](https://github.com/kokumi-dev/kokumi/compare/0.13.0...0.14.0) (2026-06-29)
+
+
+### Features
+
+* add contribution guide to documentation ([#203](https://github.com/kokumi-dev/kokumi/issues/203)) ([65e1f7d](https://github.com/kokumi-dev/kokumi/commit/65e1f7d4b60626c92969bda9ec4954dff86bf336))
+* add the ability to opt-in for existing Argo CD Applications ([#222](https://github.com/kokumi-dev/kokumi/issues/222)) ([ec598c5](https://github.com/kokumi-dev/kokumi/commit/ec598c5a1ddfbf3f4101a5d70028db486dc09128))
+* secure the API server with basic authentication ([#227](https://github.com/kokumi-dev/kokumi/issues/227)) ([73ded49](https://github.com/kokumi-dev/kokumi/commit/73ded496a6c447abfd47879fcb9f43684ddb5a45))
+
 ## [0.13.0](https://github.com/kokumi-dev/kokumi/compare/0.12.0...0.13.0) (2026-05-09)
 
 
