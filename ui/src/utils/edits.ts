@@ -1,4 +1,4 @@
-import yaml from 'js-yaml'
+import { load } from 'js-yaml'
 import type { Patch, PatchTarget } from '../api/types'
 
 const DOC_SEPARATOR = /(?:^|\n)---[ \t]*(?:\n|$)/
@@ -86,8 +86,8 @@ export function computeEdits(
   editedManifest: string,
   existingEdits: Patch[],
 ): Patch[] {
-  const origDocs = splitDocuments(originalManifest).map((d) => yaml.load(d))
-  const editedDocs = splitDocuments(editedManifest).map((d) => yaml.load(d))
+  const origDocs = splitDocuments(originalManifest).map((d) => load(d))
+  const editedDocs = splitDocuments(editedManifest).map((d) => load(d))
 
   // Index original docs by target key
   const origMap = new Map<string, unknown>()

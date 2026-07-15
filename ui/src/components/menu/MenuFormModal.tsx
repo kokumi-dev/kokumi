@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import yaml from 'js-yaml'
+import { load, dump } from 'js-yaml'
 import Modal from '../shared/Modal'
 import Btn from '../shared/Btn'
 import YamlEditor from '../shared/YamlEditor'
@@ -39,11 +39,11 @@ function formToYaml(data: MenuFormData): string {
       set: p.set,
     }))
   }
-  return yaml.dump(doc, { lineWidth: 100 })
+  return dump(doc, { lineWidth: 100 })
 }
 
 function yamlToPartialForm(text: string): Omit<MenuFormData, 'name'> {
-  const doc = yaml.load(text) as Record<string, unknown>
+  const doc = load(text) as Record<string, unknown>
   if (!doc || typeof doc !== 'object') throw new Error('YAML must be a mapping')
 
   const src = doc.source as Record<string, string> | undefined
