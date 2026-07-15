@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // OrderSource defines the immutable base artifact for a preparation
@@ -176,5 +177,8 @@ type PreparationList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&Preparation{}, &PreparationList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(SchemeGroupVersion, &Preparation{}, &PreparationList{})
+		return nil
+	})
 }

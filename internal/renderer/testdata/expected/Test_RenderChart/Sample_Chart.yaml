@@ -11,6 +11,7 @@ metadata:
     app.kubernetes.io/version: "1.16.0"
     app.kubernetes.io/managed-by: Helm
 automountServiceAccountToken: true
+
 ---
 # Source: sample-chart/templates/service.yaml
 apiVersion: v1
@@ -33,6 +34,7 @@ spec:
   selector:
     app.kubernetes.io/name: sample-chart
     app.kubernetes.io/instance: sample
+
 ---
 # Source: sample-chart/templates/deployment.yaml
 apiVersion: apps/v1

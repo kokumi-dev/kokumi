@@ -19,6 +19,7 @@ package v1alpha1
 import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // AutoDeployPolicy controls whether newly created Preparations are automatically promoted to active.
@@ -240,5 +241,8 @@ type OrderList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&Order{}, &OrderList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(SchemeGroupVersion, &Order{}, &OrderList{})
+		return nil
+	})
 }

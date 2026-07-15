@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // PreparationPolicyType defines how updates to the Preparations are handled
@@ -115,5 +116,8 @@ type ServingList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&Serving{}, &ServingList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(SchemeGroupVersion, &Serving{}, &ServingList{})
+		return nil
+	})
 }
