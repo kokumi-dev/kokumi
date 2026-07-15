@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import yaml from 'js-yaml'
+import { load, dump } from 'js-yaml'
 import Modal from '../shared/Modal'
 import Btn from '../shared/Btn'
 import YamlEditor from '../shared/YamlEditor'
@@ -59,11 +59,11 @@ function formToYaml(data: OrderFormData): string {
       set: p.set,
     }))
   }
-  return yaml.dump(doc, { lineWidth: 100 })
+  return dump(doc, { lineWidth: 100 })
 }
 
 function yamlToPartialForm(text: string): Omit<OrderFormData, 'name' | 'namespace'> {
-  const doc = yaml.load(text) as Record<string, unknown>
+  const doc = load(text) as Record<string, unknown>
   if (!doc || typeof doc !== 'object') throw new Error('YAML must be a mapping')
 
   const src = doc.source as Record<string, string> | undefined
@@ -995,7 +995,7 @@ function ChartReferencePanel({ chartInfo, loading, onJumpToPath }: ChartReferenc
   const defaultEntries: DefaultEntry[] = (() => {
     if (!chartInfo?.isHelm || !chartInfo.defaultValues) return []
     try {
-      const parsed = yaml.load(chartInfo.defaultValues)
+      const parsed = load(chartInfo.defaultValues)
       return flattenValues(parsed)
     } catch {
       return []

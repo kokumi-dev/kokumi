@@ -1,4 +1,4 @@
-import yaml from 'js-yaml'
+import { load, dump } from 'js-yaml'
 
 /**
  * Serialises a plain JS object to a YAML string.
@@ -6,7 +6,7 @@ import yaml from 'js-yaml'
  */
 export function objectToYaml(values: Record<string, unknown>): string {
   if (!values || Object.keys(values).length === 0) return ''
-  return yaml.dump(values, { lineWidth: 100 }).trimEnd()
+  return dump(values, { lineWidth: 100 }).trimEnd()
 }
 
 /**
@@ -16,7 +16,7 @@ export function objectToYaml(values: Record<string, unknown>): string {
  */
 export function yamlToValues(text: string): Record<string, unknown> {
   if (!text.trim()) return {}
-  const parsed = yaml.load(text)
+  const parsed = load(text)
   if (parsed == null) return {}
   if (typeof parsed !== 'object' || Array.isArray(parsed))
     throw new Error('Values must be a YAML mapping')
