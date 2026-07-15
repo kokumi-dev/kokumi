@@ -5,7 +5,7 @@ go 1.26
 require (
 	github.com/go-logr/logr v1.4.3
 	github.com/golang-jwt/jwt/v5 v5.3.1
-	github.com/onsi/ginkgo/v2 v2.29.0
+	github.com/onsi/ginkgo/v2 v2.32.0
 	github.com/onsi/gomega v1.42.1
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/spf13/afero v1.15.0
