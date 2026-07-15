@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // OverridePolicyType controls whether consumers may override values or patches.
@@ -184,5 +185,8 @@ type MenuList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&Menu{}, &MenuList{})
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(SchemeGroupVersion, &Menu{}, &MenuList{})
+		return nil
+	})
 }
