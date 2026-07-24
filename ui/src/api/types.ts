@@ -1,12 +1,18 @@
 // ── Mirror of Go server DTOs ──────────────────────────────────────────────────
 
+export interface PantryRef {
+  name: string
+}
+
 export interface OCISource {
-  oci: string
+  oci?: string
+  pantryRef?: PantryRef
   version: string
 }
 
 export interface OCIDestination {
-  oci: string
+  oci?: string
+  pantryRef?: PantryRef
 }
 
 export interface PatchTarget {
@@ -135,6 +141,31 @@ export interface Menu {
   createdAt?: string
 }
 
+// ── Pantry types ──────────────────────────────────────────────────────────────
+
+export interface Pantry {
+  name: string
+  namespace: string
+  url: string
+  secretRef?: string
+  description?: string
+  state: string
+  conditions?: Condition[]
+  createdAt?: string
+}
+
+export interface ArtifactInfo {
+  isHelm: boolean
+  isManifest: boolean
+  manifest?: string
+  chartInfo?: {
+    name: string
+    version: string
+    appVersion?: string
+    description?: string
+  }
+}
+
 // ── Registry / chart types ────────────────────────────────────────────────────
 
 export interface ChartInfo {
@@ -165,9 +196,9 @@ export interface OrderFormData {
 
 export const emptyOrderForm = (): OrderFormData => ({
   name: '',
-  namespace: 'default',
+  namespace: 'kokumi',
   source: { oci: '', version: '' },
-  destination: { oci: '' },
+  destination: {},
   render: undefined,
   patches: [],
   edits: [],
@@ -179,7 +210,7 @@ export const orderToFormData = (r: Order): OrderFormData => ({
   namespace: r.namespace,
   menuRef: r.menuRef,
   source: r.source ? { ...r.source } : undefined,
-  destination: r.destination ? { ...r.destination } : { oci: '' },
+  destination: r.destination ? { ...r.destination } : {},
   render: r.render?.helm
     ? {
         helm: {
@@ -253,4 +284,37 @@ export const menuToFormData = (m: Menu): MenuFormData => ({
     },
   },
   defaults: { ...m.defaults },
+})
+
+export interface PantryFormData {
+  name: string
+  namespace: string
+  url: string
+  description?: string
+  username?: string
+  password?: string
+  secretRef?: string
+  credentialMode?: 'direct' | 'secretRef'
+}
+
+export const emptyPantryForm = (): PantryFormData => ({
+  name: '',
+  namespace: 'kokumi',
+  url: '',
+  description: '',
+  username: '',
+  password: '',
+  secretRef: '',
+  credentialMode: 'direct',
+})
+
+export const pantryToFormData = (p: Pantry): PantryFormData => ({
+  name: p.name,
+  namespace: p.namespace,
+  url: p.url,
+  description: p.description ?? '',
+  username: '',
+  password: '',
+  secretRef: p.secretRef ?? '',
+  credentialMode: p.secretRef ? 'secretRef' : 'direct',
 })

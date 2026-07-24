@@ -1,5 +1,5 @@
-import type { Order, Preparation, OrderFormData, Menu, MenuFormData, Patch, ChartInfo } from './types'
 import { authHeaders, setToken } from './auth'
+import type { Order, Preparation, OrderFormData, Menu, MenuFormData, Patch, ChartInfo, Pantry, PantryFormData } from './types'
 
 // All API calls are relative so they work both in dev (proxied by Vite) and
 // in production (served from the same Go binary).
@@ -88,16 +88,24 @@ export function getDefaultRegistry(): Promise<{ baseURL: string }> {
   return request<{ baseURL: string }>('/registry/default')
 }
 
-export function listOCITags(ref: string): Promise<string[]> {
-  return request<{ tags: string[] }>(`/registry/tags?ref=${encodeURIComponent(ref)}`).then(
+export function listOCITags(ref: string, pantryName?: string, namespace?: string): Promise<string[]> {
+  let url = `/registry/tags?ref=${encodeURIComponent(ref)}`
+  if (pantryName) {
+    url += `&pantryName=${encodeURIComponent(pantryName)}`
+    if (namespace) url += `&pantryNamespace=${encodeURIComponent(namespace)}`
+  }
+  return request<{ tags: string[] }>(url).then(
     (r) => r.tags ?? [],
   )
 }
 
-export function getChartInfo(ref: string, version: string): Promise<ChartInfo> {
-  return request<ChartInfo>(
-    `/registry/chart-info?ref=${encodeURIComponent(ref)}&version=${encodeURIComponent(version)}`,
-  )
+export function getChartInfo(ref: string, version: string, pantryName?: string, namespace?: string): Promise<ChartInfo> {
+  let url = `/registry/chart-info?ref=${encodeURIComponent(ref)}&version=${encodeURIComponent(version)}`
+  if (pantryName) {
+    url += `&pantryName=${encodeURIComponent(pantryName)}`
+    if (namespace) url += `&pantryNamespace=${encodeURIComponent(namespace)}`
+  }
+  return request<ChartInfo>(url)
 }
 
 // ── Preparations ──────────────────────────────────────────────────────────────
@@ -199,4 +207,36 @@ export function updateMenu(
 
 export function deleteMenu(name: string): Promise<void> {
   return request<void>(`/menus/${name}`, { method: 'DELETE' })
+}
+
+// ── Pantries ──────────────────────────────────────────────────────────────────
+
+export function listPantries(): Promise<Pantry[]> {
+  return request<Pantry[]>('/pantries')
+}
+
+export function getPantry(namespace: string, name: string): Promise<Pantry> {
+  return request<Pantry>(`/pantries/${namespace}/${name}`)
+}
+
+export function createPantry(data: PantryFormData): Promise<Pantry> {
+  return request<Pantry>('/pantries', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export function updatePantry(
+  namespace: string,
+  name: string,
+  data: Omit<PantryFormData, 'name' | 'namespace'>,
+): Promise<Pantry> {
+  return request<Pantry>(`/pantries/${namespace}/${name}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+export function deletePantry(namespace: string, name: string): Promise<void> {
+  return request<void>(`/pantries/${namespace}/${name}`, { method: 'DELETE' })
 }

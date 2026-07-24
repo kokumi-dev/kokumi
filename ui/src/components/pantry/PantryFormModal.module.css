@@ -1,0 +1,92 @@
+.formGrid {
+  display: grid;
+  gap: 14px;
+}
+
+.row2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.fieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-muted-light);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.input {
+  padding: 8px 11px;
+  border-radius: 7px;
+  border: 1px solid rgba(49, 54, 56, 0.15);
+  background: var(--color-bg-main);
+  font-family: inherit;
+  font-size: 0.875rem;
+  color: var(--color-text-on-light);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.input:focus {
+  border-color: var(--color-accent);
+}
+
+.input::placeholder {
+  color: var(--color-text-muted-light);
+}
+
+.hint {
+  font-size: 0.75rem;
+  color: var(--color-text-muted-light);
+  margin-top: 2px;
+}
+
+.divider {
+  border: none;
+  border-top: 1px solid rgba(49, 54, 56, 0.1);
+  margin: 2px 0;
+}
+
+.sectionLabel {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-muted-light);
+  margin-bottom: 4px;
+}
+
+.credTabs {
+  display: flex;
+  gap: 2px;
+  background: rgba(49, 54, 56, 0.07);
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.credTab {
+  flex: 1;
+  padding: 6px 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  color: var(--color-text-muted-light);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.credTabActive {
+  background: var(--color-bg-card);
+  color: var(--color-text-on-light);
+  box-shadow: 0 1px 4px rgba(49, 54, 56, 0.1);
+}
