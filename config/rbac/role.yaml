@@ -5,6 +5,14 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - argoproj.io
   resources:
   - applications
@@ -21,6 +29,7 @@ rules:
   resources:
   - menus
   - orders
+  - pantries
   - preparations
   - recipes
   - servings
@@ -37,6 +46,7 @@ rules:
   resources:
   - menus/finalizers
   - orders/finalizers
+  - pantries/finalizers
   - preparations/finalizers
   - recipes/finalizers
   - servings/finalizers
@@ -47,6 +57,7 @@ rules:
   resources:
   - menus/status
   - orders/status
+  - pantries/status
   - preparations/status
   - recipes/status
   - servings/status

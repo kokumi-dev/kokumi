@@ -262,18 +262,37 @@ spec:
                   Consumers cannot change the source or version.
                 properties:
                   oci:
-                    description: oci is the OCI registry URL for the source manifests
-                    pattern: ^oci://.*
+                    description: |-
+                      oci is the full OCI URL for the source manifests.
+                      Mutually exclusive with pantryRef.
                     type: string
+                    x-kubernetes-validations:
+                    - message: must be a valid OCI URL
+                      rule: self == '' || (isURL(self) && url(self).getScheme() ==
+                        'oci')
+                  pantryRef:
+                    description: |-
+                      pantryRef references a Pantry resource whose URL is used as the source.
+                      Mutually exclusive with oci.
+                    properties:
+                      name:
+                        description: name is the name of the Pantry resource.
+                        type: string
+                    required:
+                    - name
+                    type: object
                   version:
                     description: |-
                       version is the semantic version or tag of the artifact
                       The controller will resolve this to a digest
                     type: string
                 required:
-                - oci
                 - version
                 type: object
+                x-kubernetes-validations:
+                - message: exactly one of oci or pantryRef must be set
+                  rule: (has(self.oci) && !has(self.pantryRef)) || (!has(self.oci)
+                    && has(self.pantryRef))
             required:
             - overrides
             - source

@@ -4,6 +4,7 @@ import Sidebar, { type Page } from './components/Sidebar'
 import Dashboard from './pages/Dashboard'
 import Orders from './pages/Orders'
 import Menus from './pages/Menus'
+import Pantries from './pages/Pantries'
 import Preparations from './pages/Preparations'
 import Servings from './pages/Servings'
 import Settings from './pages/Settings'
@@ -57,6 +58,8 @@ function App() {
         return <Orders />
       case 'menus':
         return <Menus />
+      case 'pantries':
+        return <Pantries />
       case 'preparations':
         return <Preparations />
       case 'servings':

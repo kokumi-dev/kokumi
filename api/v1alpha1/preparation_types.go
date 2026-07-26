@@ -26,7 +26,7 @@ type OrderSource struct {
 	// oci is the OCI registry URL for the source manifests
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MaxLength=2048
-	// +kubebuilder:validation:Pattern=`^oci://.*`
+	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() == 'oci'",message="must be a valid OCI URL"
 	OCI string `json:"oci"`
 
 	// baseDigest is the SHA256 digest of the base source artifact

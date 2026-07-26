@@ -149,8 +149,10 @@ spec:
                   oci:
                     description: oci is the OCI registry URL for the source manifests
                     maxLength: 2048
-                    pattern: ^oci://.*
                     type: string
+                    x-kubernetes-validations:
+                    - message: must be a valid OCI URL
+                      rule: isURL(self) && url(self).getScheme() == 'oci'
                 required:
                 - baseDigest
                 - oci

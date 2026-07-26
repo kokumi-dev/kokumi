@@ -7,13 +7,21 @@ import (
 
 // OCISourceDTO is the data-transfer representation of an OCISource.
 type OCISourceDTO struct {
-	OCI     string `json:"oci"`
-	Version string `json:"version"`
+	OCI       string        `json:"oci,omitempty"`
+	PantryRef *PantryRefDTO `json:"pantryRef,omitempty"`
+	Version   string        `json:"version"`
 }
 
 // OCIDestinationDTO is the data-transfer representation of an OCIDestination.
 type OCIDestinationDTO struct {
-	OCI string `json:"oci"`
+	OCI       string        `json:"oci,omitempty"`
+	PantryRef *PantryRefDTO `json:"pantryRef,omitempty"`
+}
+
+// PantryRefDTO is the data-transfer representation of a PantryRef
+// embedded in an Order source or destination.
+type PantryRefDTO struct {
+	Name string `json:"name"`
 }
 
 // PatchTargetDTO is the data-transfer representation of a PatchTarget.
@@ -207,4 +215,54 @@ type UpdateMenuRequest struct {
 	Patches   []PatchDTO        `json:"patches,omitempty"`
 	Overrides OverridePolicyDTO `json:"overrides"`
 	Defaults  MenuDefaultsDTO   `json:"defaults"`
+}
+
+// --- Pantry DTOs ---
+
+// PantryDTO is the view of a Pantry served to the UI.
+type PantryDTO struct {
+	Name        string         `json:"name"`
+	Namespace   string         `json:"namespace"`
+	URL         string         `json:"url"`
+	SecretRef   string         `json:"secretRef,omitempty"`
+	Description string         `json:"description,omitempty"`
+	State       string         `json:"state"`
+	Conditions  []ConditionDTO `json:"conditions,omitempty"`
+	CreatedAt   *time.Time     `json:"createdAt,omitempty"`
+}
+
+// CreatePantryRequest is the body for POST /api/v1/pantries.
+type CreatePantryRequest struct {
+	Namespace   string `json:"namespace,omitempty"`
+	Name        string `json:"name"`
+	URL         string `json:"url"`
+	Description string `json:"description,omitempty"`
+	Username    string `json:"username,omitempty"`
+	Password    string `json:"password,omitempty"`
+	SecretRef   string `json:"secretRef,omitempty"`
+}
+
+// UpdatePantryRequest is the body for PUT /api/v1/pantries/{name}.
+type UpdatePantryRequest struct {
+	URL         string `json:"url"`
+	Description string `json:"description,omitempty"`
+	Username    string `json:"username,omitempty"`
+	Password    string `json:"password,omitempty"`
+	SecretRef   string `json:"secretRef,omitempty"`
+}
+
+// ArtifactInfoDTO contains metadata about an OCI artifact at a specific tag.
+type ArtifactInfoDTO struct {
+	IsHelm     bool          `json:"isHelm"`
+	IsManifest bool          `json:"isManifest"`
+	Manifest   string        `json:"manifest,omitempty"`
+	ChartInfo  *ChartInfoDTO `json:"chartInfo,omitempty"`
+}
+
+// ChartInfoDTO contains Helm chart metadata extracted from a chart artifact.
+type ChartInfoDTO struct {
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	AppVersion  string `json:"appVersion,omitempty"`
+	Description string `json:"description,omitempty"`
 }

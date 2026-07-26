@@ -83,7 +83,7 @@ function MenuCard({ menu: m, selected, onClick, onOrder }: CardProps) {
       <div className={styles.cardMeta}>
         <div className={styles.metaRow}>
           <span className={styles.metaLabel}>Source</span>
-          <span className={styles.metaValue} title={m.source.oci}>{m.source.oci}</span>
+          <span className={styles.metaValue} title={m.source.oci}>{m.source.pantryRef?.name ? `pantry: ${m.source.pantryRef.name}` : m.source.oci}</span>
         </div>
         <div className={styles.metaRow}>
           <span className={styles.metaLabel}>Version</span>

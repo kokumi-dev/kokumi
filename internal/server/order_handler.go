@@ -91,7 +91,7 @@ func handleCreateOrder(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 		if req.Namespace == "" {
-			req.Namespace = "default"
+			req.Namespace = defaultNamespace
 		}
 
 		order := &deliveryv1alpha1.Order{
@@ -107,14 +107,12 @@ func handleCreateOrder(deps *apiDeps) http.HandlerFunc {
 			},
 		}
 
-		if req.Destination != nil && req.Destination.OCI != "" {
-			order.Spec.Destination = &deliveryv1alpha1.OCIDestination{OCI: req.Destination.OCI}
-		}
+		order.Spec.Destination = destinationFromDTO(req.Destination)
 
 		if req.MenuRef != nil {
 			order.Spec.MenuRef = &deliveryv1alpha1.MenuRef{Name: req.MenuRef.Name}
 		} else {
-			order.Spec.Source = &deliveryv1alpha1.OCISource{OCI: req.Source.OCI, Version: req.Source.Version}
+			order.Spec.Source = sourceFromDTO(req.Source)
 		}
 
 		if req.CommitMessage != nil {
@@ -167,17 +165,13 @@ func handleUpdateOrder(deps *apiDeps) http.HandlerFunc {
 		order.Spec.Edits = patchesFromDTO(req.Edits)
 		order.Spec.AutoDeploy = deliveryv1alpha1.AutoDeployPolicy(req.AutoDeploy)
 
-		if req.Destination != nil && req.Destination.OCI != "" {
-			order.Spec.Destination = &deliveryv1alpha1.OCIDestination{OCI: req.Destination.OCI}
-		} else {
-			order.Spec.Destination = nil
-		}
+		order.Spec.Destination = destinationFromDTO(req.Destination)
 
 		if req.MenuRef != nil {
 			order.Spec.MenuRef = &deliveryv1alpha1.MenuRef{Name: req.MenuRef.Name}
 			order.Spec.Source = nil
 		} else {
-			order.Spec.Source = &deliveryv1alpha1.OCISource{OCI: req.Source.OCI, Version: req.Source.Version}
+			order.Spec.Source = sourceFromDTO(req.Source)
 			order.Spec.MenuRef = nil
 		}
 
