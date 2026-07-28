@@ -18,6 +18,8 @@ spec:
           color: "#EF6461"
           message: "Hello from Kokumi"
           logo: "https://kokumi.dev/images/logo.png"
+        service:
+          type: NodePort
 
   patches:
     - target:

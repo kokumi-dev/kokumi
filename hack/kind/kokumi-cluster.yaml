@@ -17,3 +17,7 @@ nodes:
       - containerPort: 30052
         hostPort: 8443
         protocol: TCP
+      # Port for Podinfo UI
+      - containerPort: 31198
+        hostPort: 9898
+        protocol: TCP
