@@ -24,10 +24,9 @@ func handleGetDefaultRegistry() http.HandlerFunc {
 
 // handleListRegistryTags handles GET /api/v1/registry/tags?ref=<oci-ref>.
 // Optional query parameters pantryName and pantryNamespace select a specific
-// Pantry to use for authenticated access.
-// When omitted the shared unauthenticated client is used.
-// It strips the oci:// scheme prefix if present, fetches tags from the registry
-// and returns {"tags": [...]}.
+// Pantry to use for authenticated access. When omitted the shared
+// unauthenticated client is used. It strips the oci:// scheme prefix if present,
+// fetches all tags from the registry and returns {"tags": [...]}.
 func handleListRegistryTags(deps *apiDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if deps == nil {
@@ -137,6 +136,95 @@ func handleGetChartInfo(deps *apiDeps) http.HandlerFunc {
 			DefaultValues: info.DefaultValues,
 			Readme:        info.Readme,
 			HasSchema:     info.HasSchema,
+		})
+	}
+}
+
+// handleGetRegistryArtifact handles GET /api/v1/registry/artifact?ref=<oci-ref>&version=<tag>.
+// It pulls the OCI artifact at the given tag, resolves its manifest digest, and
+// classifies it as a Helm chart or a pre-rendered manifest bundle. For Helm
+// charts it returns chart metadata, the default values, the README, and the
+// manifest rendered with the default values. For manifest bundles it returns the
+// concatenated manifest YAML. Optional pantryName/pantryNamespace select a
+// Pantry for authenticated access.
+func handleGetRegistryArtifact(deps *apiDeps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps == nil {
+			unavailable(w)
+			return
+		}
+
+		ref := r.URL.Query().Get("ref")
+		if ref == "" {
+			respondError(w, http.StatusBadRequest, "ref query parameter is required")
+			return
+		}
+		version := r.URL.Query().Get("version")
+		if version == "" {
+			respondError(w, http.StatusBadRequest, "version query parameter is required")
+			return
+		}
+
+		ref = strings.TrimPrefix(ref, "oci://")
+		if ref == "" {
+			respondError(w, http.StatusBadRequest, "ref is empty after stripping scheme")
+			return
+		}
+
+		ociClient := ociClientForPantryRef(r.Context(), deps, r.URL.Query().Get("pantryName"), r.URL.Query().Get("pantryNamespace"))
+
+		tmpDir, err := afero.TempDir(deps.fs, "", "kokumi-artifact-*")
+		if err != nil {
+			deps.logger.Error(err, "Failed to create temp directory")
+			respondError(w, http.StatusInternalServerError, "could not create temp directory")
+			return
+		}
+		defer deps.fs.RemoveAll(tmpDir) //nolint:errcheck
+
+		mediaType, digest, err := ociClient.Pull(r.Context(), ref, version, tmpDir)
+		if err != nil {
+			deps.logger.Error(err, "Failed to pull OCI artifact", "ref", ref, "version", version)
+			respondError(w, http.StatusBadGateway, "could not pull artifact: "+err.Error())
+			return
+		}
+
+		if mediaType == oci.HelmChartLayerMediaType {
+			info, err := renderer.InspectChart(filepath.Join(tmpDir, "chart.tgz"))
+			if err != nil {
+				deps.logger.Error(err, "Failed to inspect Helm chart", "ref", ref, "version", version)
+				respondError(w, http.StatusBadGateway, "could not inspect chart: "+err.Error())
+				return
+			}
+
+			respondJSON(w, http.StatusOK, ArtifactInfoDTO{
+				IsHelm:     true,
+				IsManifest: false,
+				Digest:     digest,
+				ChartInfo: &ChartInfoDTO{
+					Name:          info.Name,
+					Version:       info.ChartVersion,
+					AppVersion:    info.AppVersion,
+					Description:   info.Description,
+					DefaultValues: info.RawValues,
+					Readme:        info.Readme,
+					HasSchema:     info.HasSchema,
+				},
+			})
+			return
+		}
+
+		manifest, err := readYAMLFiles(deps.fs, tmpDir)
+		if err != nil {
+			deps.logger.Error(err, "Failed to read manifest files", "ref", ref, "version", version)
+			respondError(w, http.StatusBadGateway, "could not read manifest: "+err.Error())
+			return
+		}
+
+		respondJSON(w, http.StatusOK, ArtifactInfoDTO{
+			IsHelm:     false,
+			IsManifest: true,
+			Digest:     digest,
+			Manifest:   manifest,
 		})
 	}
 }

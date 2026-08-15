@@ -255,6 +255,7 @@ type UpdatePantryRequest struct {
 type ArtifactInfoDTO struct {
 	IsHelm     bool          `json:"isHelm"`
 	IsManifest bool          `json:"isManifest"`
+	Digest     string        `json:"digest,omitempty"`
 	Manifest   string        `json:"manifest,omitempty"`
 	ChartInfo  *ChartInfoDTO `json:"chartInfo,omitempty"`
 }
@@ -265,4 +266,11 @@ type ChartInfoDTO struct {
 	Version     string `json:"version"`
 	AppVersion  string `json:"appVersion,omitempty"`
 	Description string `json:"description,omitempty"`
+	// DefaultValues is the verbatim contents of the chart's values.yaml,
+	// preserving the original key order and comments as authored.
+	DefaultValues string `json:"defaultValues,omitempty"`
+	// Readme is the contents of README.md, empty when the chart has none.
+	Readme string `json:"readme,omitempty"`
+	// HasSchema reports whether the chart ships a values JSON schema.
+	HasSchema bool `json:"hasSchema,omitempty"`
 }

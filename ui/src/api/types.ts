@@ -157,12 +157,16 @@ export interface Pantry {
 export interface ArtifactInfo {
   isHelm: boolean
   isManifest: boolean
+  digest?: string
   manifest?: string
   chartInfo?: {
     name: string
     version: string
     appVersion?: string
     description?: string
+    defaultValues?: string
+    readme?: string
+    hasSchema?: boolean
   }
 }
 

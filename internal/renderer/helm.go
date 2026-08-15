@@ -23,8 +23,13 @@ type ChartInfo struct {
 	Description string
 	// ChartVersion is the chart version from Chart.yaml.
 	ChartVersion string
+	// AppVersion is the application version from Chart.yaml, if set.
+	AppVersion string
 	// DefaultValues is the serialised YAML of the chart's default values.
 	DefaultValues string
+	// RawValues is the verbatim contents of the chart's values.yaml, preserving
+	// the original key order and comments as authored.
+	RawValues string
 	// Readme is the contents of README.md, empty when the chart has none.
 	Readme string
 	// HasSchema reports whether the chart ships a values JSON schema.
@@ -52,11 +57,23 @@ func InspectChart(chartPath string) (*ChartInfo, error) {
 		}
 	}
 
+	// RawValues preserves the original values.yaml key order and comments, which
+	// yaml.Marshal(chrt.Values) would otherwise alphabetise and strip.
+	var rawValues string
+	for _, f := range chrt.Raw {
+		if f.Name == "values.yaml" {
+			rawValues = string(f.Data)
+			break
+		}
+	}
+
 	return &ChartInfo{
 		Name:          chrt.Metadata.Name,
 		Description:   chrt.Metadata.Description,
 		ChartVersion:  chrt.Metadata.Version,
+		AppVersion:    chrt.Metadata.AppVersion,
 		DefaultValues: string(defaultValuesBytes),
+		RawValues:     rawValues,
 		Readme:        readme,
 		HasSchema:     len(chrt.Schema) > 0,
 	}, nil
