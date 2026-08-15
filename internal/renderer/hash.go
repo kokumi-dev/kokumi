@@ -11,15 +11,16 @@ import (
 
 // CalculateSpecHash computes a stable SHA-256 hash over the complete set of inputs
 // that determine the content of a rendered artifact.
-func CalculateSpecHash(spec deliveryv1alpha1.OrderSpec) (string, error) {
+// sourceOCI and destOCI are the resolved registry URLs (after pantryRef lookup).
+// pantryRef names and credentials are not hashed: only the live URLs are identity.
+func CalculateSpecHash(spec deliveryv1alpha1.OrderSpec, sourceOCI, destOCI string) (string, error) {
 	var builder strings.Builder
 
 	encoder := yaml.NewEncoder(&builder)
 	encoder.SetIndent(2)
 
-	var oci, version string
+	var version string
 	if spec.Source != nil {
-		oci = spec.Source.OCI
 		version = spec.Source.Version
 	}
 
@@ -32,13 +33,15 @@ func CalculateSpecHash(spec deliveryv1alpha1.OrderSpec) (string, error) {
 		OCI     string                   `yaml:"oci,omitempty"`
 		Version string                   `yaml:"version,omitempty"`
 		MenuRef string                   `yaml:"menuRef,omitempty"`
+		DestOCI string                   `yaml:"destOCI,omitempty"`
 		Render  *deliveryv1alpha1.Render `yaml:"render,omitempty"`
 		Patches []deliveryv1alpha1.Patch `yaml:"patches,omitempty"`
 		Edits   []deliveryv1alpha1.Patch `yaml:"edits,omitempty"`
 	}{
-		OCI:     oci,
+		OCI:     sourceOCI,
 		Version: version,
 		MenuRef: menuRef,
+		DestOCI: destOCI,
 		Render:  spec.Render,
 		Patches: spec.Patches,
 		Edits:   spec.Edits,

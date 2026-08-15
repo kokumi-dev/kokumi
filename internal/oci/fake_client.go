@@ -2,6 +2,8 @@ package oci
 
 import (
 	"context"
+	"crypto/rand"
+	"fmt"
 	"path/filepath"
 
 	"github.com/spf13/afero"
@@ -32,9 +34,15 @@ func (c *FakeClient) Pull(ctx context.Context, ref, tag, targetDir string) (stri
 	return "", "sha256:fdf90e00e76bf3f0d2e5042c4c4e6c42a6d38c1e2b4f5a7d8e9f0a1b2c3d4e5f", nil
 }
 
-// Push returns a deterministic fake digest.
+// Push returns a unique dest digest per call. Real ORAS PackManifest adds
+// org.opencontainers.image.created, so same payloads still get different digests.
 func (c *FakeClient) Push(_ context.Context, _, _, _ string, _ map[string]string) (string, error) {
-	return "sha256:fdf90e00e76bf3f0d2e5042c4c4e6c42a6d38c1e2b4f5a7d8e9f0a1b2c3d4e5f", nil
+	var b [32]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("sha256:%x", b), nil
 }
 
 // ListTags returns an empty tag list. To return specific tags in a test,

@@ -25,7 +25,6 @@ func TestOrderService_ProcessOrder(t *testing.T) {
 		wantSourceRef string
 		wantDestRef   string
 		wantSourceDig string
-		wantDestDig   string
 		wantErr       bool
 		wantErrMsg    string
 	}{
@@ -45,7 +44,6 @@ func TestOrderService_ProcessOrder(t *testing.T) {
 			wantSourceRef: "kokumi-registry.kokumi.svc.cluster.local:5000/order/external-secrets",
 			wantDestRef:   "kokumi-registry.kokumi.svc.cluster.local:5000/preparation/external-secrets",
 			wantSourceDig: fakeDigest,
-			wantDestDig:   fakeDigest,
 		},
 		{
 			name: "helm render rejected when source is not a helm chart",
@@ -88,7 +86,6 @@ func TestOrderService_ProcessOrder(t *testing.T) {
 			wantSourceRef: "registry.svc.cluster.local:5000/order/multi-file-app",
 			wantDestRef:   "registry.svc.cluster.local:5000/preparation/multi-file-app",
 			wantSourceDig: fakeDigest,
-			wantDestDig:   fakeDigest,
 		},
 	}
 
@@ -122,7 +119,7 @@ func TestOrderService_ProcessOrder(t *testing.T) {
 			assert.Equal(t, tc.wantSourceRef, result.SourceRef)
 			assert.Equal(t, tc.wantDestRef, result.DestRef)
 			assert.Equal(t, tc.wantSourceDig, result.SourceDigest)
-			assert.Equal(t, tc.wantDestDig, result.DestDigest)
+			assert.Regexp(t, `^sha256:[a-f0-9]{64}$`, result.DestDigest)
 		})
 	}
 }

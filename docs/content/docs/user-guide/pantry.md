@@ -13,6 +13,10 @@ Pantry's `spec.url` as the OCI location and uses its credentials for
 authentication. This means `oci` and `pantryRef` are **mutually exclusive** on
 any source or destination — you use one or the other, never both.
 
+`pantryRef` is a live reference. If `spec.url` on the referenced Pantry
+changes, Kokumi re-resolves the Order and creates a new Preparation. Changing
+only the Pantry's credentials (`secretRef` or Secret data) does not rebuild.
+
 ## How the Pantry controller works
 
 Whenever a Pantry is created or updated (or its referenced Secret changes),
