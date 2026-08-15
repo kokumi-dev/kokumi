@@ -733,8 +733,8 @@ spec:
                 type: string
               latestConfigHash:
                 description: |-
-                  latestConfigHash is a SHA-256 hash of the spec inputs (source OCI reference,
-                  version, and patches) that produced the current latestRevision.
+                  latestConfigHash is a SHA-256 hash of the resolved source and destination
+                  OCI URLs plus version, menuRef, render, patches, and edits.
                 type: string
               latestPreparationName:
                 description: |-

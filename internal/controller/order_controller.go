@@ -24,10 +24,13 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/credential"
@@ -35,6 +38,11 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/resolve"
 	"github.com/kokumi-dev/kokumi/internal/service"
 	"github.com/kokumi-dev/kokumi/internal/status"
+)
+
+const (
+	orderSourcePantryRefIndex = "spec.source.pantryRef.name"
+	orderDestPantryRefIndex   = "spec.destination.pantryRef.name"
 )
 
 // OrderReconciler reconciles an Order object.
@@ -127,7 +135,26 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 	logger := log.FromContext(ctx)
 	statusUpdater := status.NewOrderUpdater(r.Client)
 
-	specHash, err := renderer.CalculateSpecHash(order.Spec)
+	effectiveDest := service.DefaultDestination(order.Namespace, order.Name)
+	if order.Spec.Destination != nil && order.Spec.Destination.OCI != "" {
+		effectiveDest = order.Spec.Destination.OCI
+	}
+
+	// Resolve Pantry references into plain OCI URLs before hashing so a live
+	// Pantry URL change is part of artifact identity.
+	resolvedSource, sourceClient, err := r.PantryResolver.ResolveSource(ctx, effective.Source, order.Namespace)
+	if err != nil {
+		_ = statusUpdater.Failed(ctx, order, fmt.Errorf("failed to resolve source Pantry: %w", err))
+		return ctrl.Result{}, err
+	}
+
+	resolvedDest, destClient, err := r.PantryResolver.ResolveDestination(ctx, order.Spec.Destination, effectiveDest, order.Namespace, order.Namespace, order.Name)
+	if err != nil {
+		_ = statusUpdater.Failed(ctx, order, fmt.Errorf("failed to resolve destination Pantry: %w", err))
+		return ctrl.Result{}, err
+	}
+
+	specHash, err := renderer.CalculateSpecHash(order.Spec, resolvedSource.OCI, resolvedDest)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to calculate spec hash: %w", err)
 	}
@@ -138,24 +165,6 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 	}
 
 	if err := statusUpdater.Processing(ctx, order, specHash); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	effectiveDest := service.DefaultDestination(order.Namespace, order.Name)
-	if order.Spec.Destination != nil && order.Spec.Destination.OCI != "" {
-		effectiveDest = order.Spec.Destination.OCI
-	}
-
-	// Resolve Pantry references into plain OCI URLs and optional authenticated clients.
-	resolvedSource, sourceClient, err := r.PantryResolver.ResolveSource(ctx, effective.Source, order.Namespace)
-	if err != nil {
-		_ = statusUpdater.Failed(ctx, order, fmt.Errorf("failed to resolve source Pantry: %w", err))
-		return ctrl.Result{}, err
-	}
-
-	resolvedDest, destClient, err := r.PantryResolver.ResolveDestination(ctx, order.Spec.Destination, effectiveDest, order.Namespace, order.Namespace, order.Name)
-	if err != nil {
-		_ = statusUpdater.Failed(ctx, order, fmt.Errorf("failed to resolve destination Pantry: %w", err))
 		return ctrl.Result{}, err
 	}
 
@@ -172,7 +181,7 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 		return ctrl.Result{}, err
 	}
 
-	preparation, err := r.createPreparation(ctx, order, result.SourceRef, result.SourceDigest, resolvedSource.Version, result.DestRef, result.DestDigest, commitMessage, parentDigest)
+	preparation, err := r.createPreparation(ctx, order, result.SourceRef, result.SourceDigest, resolvedSource.Version, result.DestRef, result.DestDigest, commitMessage, parentDigest, specHash)
 	if err != nil {
 		logger.Error(err, "Failed to create Preparation")
 		_ = statusUpdater.Failed(ctx, order, fmt.Errorf("failed to create revision: %w", err))
@@ -227,6 +236,7 @@ func (r *OrderReconciler) createPreparation(
 	sourceRef, sourceDigest, sourceVersion, destRef, destDigest string,
 	commitMessage string,
 	parentDigest string,
+	configHash string,
 ) (*deliveryv1alpha1.Preparation, error) {
 	logger := log.FromContext(ctx)
 
@@ -243,11 +253,6 @@ func (r *OrderReconciler) createPreparation(
 
 	if !apierrors.IsNotFound(err) {
 		return nil, fmt.Errorf("failed to check for existing revision: %w", err)
-	}
-
-	configHash, err := renderer.CalculateSpecHash(order.Spec)
-	if err != nil {
-		return nil, fmt.Errorf("failed to calculate config hash: %w", err)
 	}
 
 	renderType := deliveryv1alpha1.RenderTypeManifest
@@ -306,9 +311,67 @@ func (r *OrderReconciler) createPreparation(
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *OrderReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	ctx := context.Background()
+	indexer := mgr.GetFieldIndexer()
+
+	if err := indexer.IndexField(ctx, &deliveryv1alpha1.Order{}, orderSourcePantryRefIndex, indexOrderSourcePantryRef); err != nil {
+		return err
+	}
+
+	if err := indexer.IndexField(ctx, &deliveryv1alpha1.Order{}, orderDestPantryRefIndex, indexOrderDestPantryRef); err != nil {
+		return err
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&deliveryv1alpha1.Order{}).
 		Owns(&deliveryv1alpha1.Preparation{}).
+		Watches(&deliveryv1alpha1.Pantry{}, r.enqueueOrdersForPantry()).
 		Named("order").
 		Complete(r)
+}
+
+func indexOrderSourcePantryRef(obj client.Object) []string {
+	order, ok := obj.(*deliveryv1alpha1.Order)
+	if !ok || order.Spec.Source == nil || order.Spec.Source.PantryRef == nil {
+		return nil
+	}
+
+	return []string{order.Spec.Source.PantryRef.Name}
+}
+
+func indexOrderDestPantryRef(obj client.Object) []string {
+	order, ok := obj.(*deliveryv1alpha1.Order)
+	if !ok || order.Spec.Destination == nil || order.Spec.Destination.PantryRef == nil {
+		return nil
+	}
+
+	return []string{order.Spec.Destination.PantryRef.Name}
+}
+
+func (r *OrderReconciler) enqueueOrdersForPantry() handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+		pantry, ok := obj.(*deliveryv1alpha1.Pantry)
+		if !ok {
+			return nil
+		}
+
+		var reqs []reconcile.Request
+		for _, field := range []string{orderSourcePantryRefIndex, orderDestPantryRefIndex} {
+			var list deliveryv1alpha1.OrderList
+			if err := r.List(ctx, &list, client.InNamespace(pantry.Namespace), client.MatchingFields{field: pantry.Name}); err != nil {
+				return nil
+			}
+
+			for _, order := range list.Items {
+				reqs = append(reqs, reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Namespace: order.Namespace,
+						Name:      order.Name,
+					},
+				})
+			}
+		}
+
+		return reqs
+	})
 }

@@ -211,8 +211,8 @@ type OrderStatus struct {
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	LatestArtifactDigest string `json:"latestArtifactDigest,omitempty"`
 
-	// latestConfigHash is a SHA-256 hash of the spec inputs (source OCI reference,
-	// version, and patches) that produced the current latestRevision.
+	// latestConfigHash is a SHA-256 hash of the resolved source and destination
+	// OCI URLs plus version, menuRef, render, patches, and edits.
 	// +optional
 	LatestConfigHash string `json:"latestConfigHash,omitempty"`
 
