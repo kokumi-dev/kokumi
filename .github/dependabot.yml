@@ -33,6 +33,9 @@ updates:
         patterns:
           - "react"
           - "react-dom"
+      codemirror:
+        patterns:
+          - "@codemirror/*"
   - package-ecosystem: "devcontainers"
     directory: "/"
     schedule:
