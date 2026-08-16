@@ -109,7 +109,7 @@ func handleGetChartInfo(deps *apiDeps) http.HandlerFunc {
 		}
 		defer deps.fs.RemoveAll(tmpDir) //nolint:errcheck
 
-		mediaType, _, err := ociClient.Pull(r.Context(), ref, version, tmpDir)
+		mediaType, _, _, err := ociClient.Pull(r.Context(), ref, version, tmpDir)
 		if err != nil {
 			deps.logger.Error(err, "Failed to pull OCI artifact", "ref", ref, "version", version)
 			respondError(w, http.StatusBadGateway, "could not pull artifact: "+err.Error())
@@ -181,7 +181,7 @@ func handleGetRegistryArtifact(deps *apiDeps) http.HandlerFunc {
 		}
 		defer deps.fs.RemoveAll(tmpDir) //nolint:errcheck
 
-		mediaType, digest, err := ociClient.Pull(r.Context(), ref, version, tmpDir)
+		mediaType, digest, _, err := ociClient.Pull(r.Context(), ref, version, tmpDir)
 		if err != nil {
 			deps.logger.Error(err, "Failed to pull OCI artifact", "ref", ref, "version", version)
 			respondError(w, http.StatusBadGateway, "could not pull artifact: "+err.Error())

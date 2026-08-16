@@ -95,61 +95,63 @@ func isPlainHTTP(ref string) bool {
 //   - anything else:           uses oras.Copy, which writes manifest.yaml
 //
 // The first return value is the layer media type (empty string for non-Helm artifacts).
-func (c *ORASClient) Pull(ctx context.Context, ref, tag, targetDir string) (string, string, error) {
+// The third return value is the manifest annotations map (may be nil/empty).
+func (c *ORASClient) Pull(ctx context.Context, ref, tag, targetDir string) (string, string, map[string]string, error) {
 	log := ctrl.LoggerFrom(ctx)
 
 	repo, err := c.newRepository(ref)
 	if err != nil {
-		return "", "", fmt.Errorf("create repository for %q: %w", ref, err)
+		return "", "", nil, fmt.Errorf("create repository for %q: %w", ref, err)
 	}
 	log.Info("Resolving OCI manifest", "ref", fmt.Sprintf("%s:%s", ref, tag))
 
 	manifestDesc, err := repo.Resolve(ctx, tag)
 	if err != nil {
-		return "", "", fmt.Errorf("resolve %s:%s: %w", ref, tag, err)
+		return "", "", nil, fmt.Errorf("resolve %s:%s: %w", ref, tag, err)
 	}
 
 	rc, err := repo.Fetch(ctx, manifestDesc)
 	if err != nil {
-		return "", "", fmt.Errorf("fetch manifest %s: %w", manifestDesc.Digest, err)
+		return "", "", nil, fmt.Errorf("fetch manifest %s: %w", manifestDesc.Digest, err)
 	}
 	defer rc.Close() //nolint:errcheck
 
 	manifestBytes, err := io.ReadAll(rc)
 	if err != nil {
-		return "", "", fmt.Errorf("read manifest %s: %w", manifestDesc.Digest, err)
+		return "", "", nil, fmt.Errorf("read manifest %s: %w", manifestDesc.Digest, err)
 	}
 
 	var manifest ocispec.Manifest
 	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
-		return "", "", fmt.Errorf("parse manifest: %w", err)
+		return "", "", nil, fmt.Errorf("parse manifest: %w", err)
 	}
 
 	digest := manifestDesc.Digest.String()
+	annotations := manifest.Annotations
 
 	if len(manifest.Layers) > 0 && manifest.Layers[0].MediaType == HelmChartLayerMediaType {
 		log.Info("Pulling Helm chart blob", "ref", fmt.Sprintf("%s:%s", ref, tag))
 
 		if err := c.fetchBlob(ctx, repo, manifest.Layers[0], filepath.Join(targetDir, "chart.tgz")); err != nil {
-			return "", "", fmt.Errorf("fetch helm chart blob: %w", err)
+			return "", "", nil, fmt.Errorf("fetch helm chart blob: %w", err)
 		}
 
-		return HelmChartLayerMediaType, digest, nil
+		return HelmChartLayerMediaType, digest, annotations, nil
 	}
 
 	log.Info("Pulling OCI artifact", "ref", fmt.Sprintf("%s:%s", ref, tag))
 
 	fs, err := file.New(targetDir)
 	if err != nil {
-		return "", "", fmt.Errorf("create file store at %q: %w", targetDir, err)
+		return "", "", nil, fmt.Errorf("create file store at %q: %w", targetDir, err)
 	}
 	defer fs.Close() //nolint:errcheck
 
 	if _, err := oras.Copy(ctx, repo, tag, fs, "", oras.DefaultCopyOptions); err != nil {
-		return "", "", fmt.Errorf("pull artifact %s:%s: %w", ref, tag, err)
+		return "", "", nil, fmt.Errorf("pull artifact %s:%s: %w", ref, tag, err)
 	}
 
-	return "", digest, nil
+	return "", digest, annotations, nil
 }
 
 // fetchBlob streams a single OCI layer blob to the given file path.

@@ -110,6 +110,20 @@ function PreparationRow({
               {prep.artifact.digest.replace('sha256:', '').slice(0, 12)}…
             </span>
           </span>
+          {prep.gitSource?.sourceLink && (
+            <span className={styles.metaItem}>
+              source{' '}
+              <a
+                className={styles.metaItemLink}
+                href={prep.gitSource.sourceLink.url}
+                target="_blank"
+                rel="noreferrer noopener"
+                title={prep.gitSource.tag || prep.gitSource.commitHash}
+              >
+                {prep.gitSource.sourceLink.label} ↗
+              </a>
+            </span>
+          )}
         </div>
       </div>
 

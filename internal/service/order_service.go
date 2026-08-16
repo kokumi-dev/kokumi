@@ -13,6 +13,7 @@ import (
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/renderer"
+	"github.com/kokumi-dev/kokumi/internal/scmlink"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/spf13/afero"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -21,10 +22,13 @@ import (
 
 // OrderResult holds the outcome of processing an Order artifact.
 type OrderResult struct {
-	SourceRef    string
-	SourceDigest string
-	DestRef      string
-	DestDigest   string
+	SourceRef     string
+	SourceDigest  string
+	DestRef       string
+	DestDigest    string
+	GitRepo       string
+	GitTag        string
+	GitCommitHash string
 }
 
 // OrderService handles the FS and OCI operations for an Order.
@@ -93,7 +97,7 @@ func (rs *OrderService) ProcessOrder(
 
 	logger.Info("Fetching artifact from source")
 
-	mediaType, sourceDigest, err := rs.pullWithCache(ctx, srcClient, sourceRef, source.Version, tempDir)
+	mediaType, sourceDigest, sourceAnnotations, err := rs.pullWithCache(ctx, srcClient, sourceRef, source.Version, tempDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pull artifact: %w", err)
 	}
@@ -101,6 +105,8 @@ func (rs *OrderService) ProcessOrder(
 	manifestPath := filepath.Join(tempDir, "manifest.yaml")
 
 	logger.Info("Pulled source artifact", "digest", sourceDigest, "mediaType", mediaType)
+
+	repo, tag, commitHash := scmlink.Resolve(sourceAnnotations)
 
 	if render != nil && render.Helm != nil {
 		if mediaType != oci.HelmChartLayerMediaType {
@@ -165,6 +171,18 @@ func (rs *OrderService) ProcessOrder(
 		ociAnnotations[oci.AnnotationParentDigest] = parentDigest
 	}
 
+	if repo != "" {
+		ociAnnotations[ocispec.AnnotationSource] = repo
+	}
+	if tag != "" {
+		ociAnnotations[ocispec.AnnotationVersion] = tag
+	}
+	if commitHash != "" {
+		ociAnnotations[ocispec.AnnotationRevision] = commitHash
+	}
+	ociAnnotations[ocispec.AnnotationBaseImageName] = sourceRef
+	ociAnnotations[ocispec.AnnotationBaseImageDigest] = sourceDigest
+
 	destDigest, err := dstClient.Push(ctx, destRef, source.Version, tempDir, ociAnnotations)
 	if err != nil {
 		return nil, fmt.Errorf("failed to push artifact: %w", err)
@@ -173,10 +191,13 @@ func (rs *OrderService) ProcessOrder(
 	logger.Info("Successfully processed artifact", "digest", destDigest)
 
 	return &OrderResult{
-		SourceRef:    sourceRef,
-		SourceDigest: sourceDigest,
-		DestRef:      destRef,
-		DestDigest:   destDigest,
+		SourceRef:     sourceRef,
+		SourceDigest:  sourceDigest,
+		DestRef:       destRef,
+		DestDigest:    destDigest,
+		GitRepo:       repo,
+		GitTag:        tag,
+		GitCommitHash: commitHash,
 	}, nil
 }
 
@@ -209,7 +230,7 @@ func (rs *OrderService) PreviewOrder(
 	}
 	defer rs.fs.RemoveAll(tempDir) //nolint:errcheck
 
-	mediaType, _, err := rs.pullWithCache(ctx, srcClient, sourceRef, source.Version, tempDir)
+	mediaType, _, _, err := rs.pullWithCache(ctx, srcClient, sourceRef, source.Version, tempDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pull artifact: %w", err)
 	}
@@ -300,8 +321,9 @@ func (rs *OrderService) processManifest(ctx context.Context, content []byte, pat
 
 // cacheEntry is the metadata written alongside a cached artifact blob.
 type cacheEntry struct {
-	MediaType string `json:"mediaType"`
-	Digest    string `json:"digest"`
+	MediaType   string            `json:"mediaType"`
+	Digest      string            `json:"digest"`
+	Annotations map[string]string `json:"annotations,omitempty"`
 }
 
 // pullCacheKey returns a filesystem-safe directory name for the given OCI ref + version.
@@ -323,22 +345,23 @@ func artifactFilename(mediaType string) string {
 // pulls from the OCI registry and caches the result for future reconciles.
 // Version tags are treated as immutable — if a tag is re-pushed with different
 // content, remove the cache directory to force a fresh pull.
-func (rs *OrderService) pullWithCache(ctx context.Context, client oci.Client, ref, version, workDir string) (string, string, error) {
+// It returns the media type, manifest digest, manifest annotations, and any error.
+func (rs *OrderService) pullWithCache(ctx context.Context, client oci.Client, ref, version, workDir string) (string, string, map[string]string, error) {
 	logger := log.FromContext(ctx)
 
 	if rs.cacheDir == "" {
-		mediaType, digest, err := client.Pull(ctx, ref, version, workDir)
+		mediaType, digest, annotations, err := client.Pull(ctx, ref, version, workDir)
 		if err != nil {
-			return "", "", err
+			return "", "", nil, err
 		}
 
 		if mediaType != oci.HelmChartLayerMediaType {
 			if err := mergeYAMLFiles(rs.fs, workDir); err != nil {
-				return "", "", fmt.Errorf("failed to merge manifest files: %w", err)
+				return "", "", nil, fmt.Errorf("failed to merge manifest files: %w", err)
 			}
 		}
 
-		return mediaType, digest, nil
+		return mediaType, digest, annotations, nil
 	}
 
 	key := pullCacheKey(ref, version)
@@ -354,7 +377,7 @@ func (rs *OrderService) pullWithCache(ctx context.Context, client oci.Client, re
 			if data, err := afero.ReadFile(rs.fs, src); err == nil {
 				if err := afero.WriteFile(rs.fs, dst, data, 0600); err == nil {
 					logger.Info("Pulled source artifact from cache", "ref", ref, "version", version, "digest", entry.Digest)
-					return entry.MediaType, entry.Digest, nil
+					return entry.MediaType, entry.Digest, entry.Annotations, nil
 				}
 			}
 		}
@@ -362,25 +385,25 @@ func (rs *OrderService) pullWithCache(ctx context.Context, client oci.Client, re
 		logger.Info("Cache entry invalid, re-pulling source artifact", "ref", ref, "version", version)
 	}
 
-	mediaType, digest, err := client.Pull(ctx, ref, version, workDir)
+	mediaType, digest, annotations, err := client.Pull(ctx, ref, version, workDir)
 	if err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
 
 	if mediaType != oci.HelmChartLayerMediaType {
 		if err := mergeYAMLFiles(rs.fs, workDir); err != nil {
-			return "", "", fmt.Errorf("failed to merge manifest files: %w", err)
+			return "", "", nil, fmt.Errorf("failed to merge manifest files: %w", err)
 		}
 	}
 
-	rs.populateCache(ctx, entryDir, metaPath, mediaType, digest, workDir)
+	rs.populateCache(ctx, entryDir, metaPath, mediaType, digest, annotations, workDir)
 
-	return mediaType, digest, nil
+	return mediaType, digest, annotations, nil
 }
 
 // populateCache writes the pulled artifact and its metadata to the cache entry
 // directory. Errors are non-fatal and only logged as informational messages.
-func (rs *OrderService) populateCache(ctx context.Context, entryDir, metaPath, mediaType, digest, workDir string) {
+func (rs *OrderService) populateCache(ctx context.Context, entryDir, metaPath, mediaType, digest string, annotations map[string]string, workDir string) {
 	logger := log.FromContext(ctx)
 
 	if err := rs.fs.MkdirAll(entryDir, 0700); err != nil {
@@ -402,7 +425,7 @@ func (rs *OrderService) populateCache(ctx context.Context, entryDir, metaPath, m
 		return
 	}
 
-	metaBytes, err := json.Marshal(cacheEntry{MediaType: mediaType, Digest: digest})
+	metaBytes, err := json.Marshal(cacheEntry{MediaType: mediaType, Digest: digest, Annotations: annotations})
 	if err != nil {
 		return
 	}

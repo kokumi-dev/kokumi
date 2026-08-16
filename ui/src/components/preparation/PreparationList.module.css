@@ -75,6 +75,17 @@
   font-size: 0.72rem;
 }
 
+.metaItemLink {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.72rem;
+  color: var(--color-accent, #2563eb);
+  text-decoration: none;
+}
+
+.metaItemLink:hover {
+  text-decoration: underline;
+}
+
 .actions {
   display: flex;
   align-items: center;

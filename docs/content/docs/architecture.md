@@ -168,6 +168,28 @@ It contains:
 Preparations are **never garbage-collected automatically**. You retain full
 history and can promote any old Preparation to active at any time.
 
+#### Linking a Preparation back to its source
+
+Every Preparation records where its base OCI artifact came from, so you can
+trace any deployed version back to the exact commit or tag that produced it.
+Kokumi reads provenance from the base artifact's OCI annotations and copies
+them onto the rendered Preparation artifact and its CR. The primary keys are
+`org.opencontainers.image.source`, `org.opencontainers.image.version`, and
+`org.opencontainers.image.revision`, with
+fallbacks so artifacts that omit one still link correctly:
+
+| Annotation (base artifact) | Fallback | Preparation field | Meaning |
+|---|---|---|---|
+| `org.opencontainers.image.source` | `org.opencontainers.image.url` | `spec.gitSource.repo` | SCM repository URL of the base artifact's source |
+| `org.opencontainers.image.version` | — | `spec.gitSource.tag` | SCM tag of the base artifact's source |
+| `org.opencontainers.image.revision` | — | `spec.gitSource.commitHash` | SCM commit SHA of the base artifact's source |
+
+Kokumi also stamps the base artifact's identity onto the rendered artifact so
+the chain is verifiable from the artifact alone:
+
+- `org.opencontainers.image.base.name` — the base artifact's OCI reference
+- `org.opencontainers.image.base.digest` — the base artifact's digest
+
 ### Serving
 
 A Serving tracks which Preparation is actively deployed. There is exactly one

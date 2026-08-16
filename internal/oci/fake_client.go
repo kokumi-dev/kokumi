@@ -11,7 +11,8 @@ import (
 
 // FakeClient implements Client intended for testing.
 type FakeClient struct {
-	fs afero.Fs
+	fs          afero.Fs
+	Annotations map[string]string
 }
 
 var _ Client = (*FakeClient)(nil)
@@ -24,14 +25,15 @@ func NewFakeClient(fs afero.Fs) *FakeClient {
 }
 
 // Pull writes a minimal stub manifest.yaml into targetDir so that callers that
-// expect a manifest after pulling an artifact do not fail.
-func (c *FakeClient) Pull(ctx context.Context, ref, tag, targetDir string) (string, string, error) {
+// expect a manifest after pulling an artifact do not fail. It returns the
+// Annotations configured on the client (may be nil).
+func (c *FakeClient) Pull(ctx context.Context, ref, tag, targetDir string) (string, string, map[string]string, error) {
 	manifestPath := filepath.Join(targetDir, "manifest.yaml")
 	if err := afero.WriteFile(c.fs, manifestPath, []byte("---\n"), 0600); err != nil {
-		return "", "", err
+		return "", "", nil, err
 	}
 
-	return "", "sha256:fdf90e00e76bf3f0d2e5042c4c4e6c42a6d38c1e2b4f5a7d8e9f0a1b2c3d4e5f", nil
+	return "", "sha256:fdf90e00e76bf3f0d2e5042c4c4e6c42a6d38c1e2b4f5a7d8e9f0a1b2c3d4e5f", c.Annotations, nil
 }
 
 // Push returns a unique dest digest per call. Real ORAS PackManifest adds

@@ -8,6 +8,7 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/scmlink"
 	"github.com/kokumi-dev/kokumi/internal/service"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -219,13 +220,27 @@ func preparationToDTO(p deliveryv1alpha1.Preparation, isActive bool) Preparation
 		IsActive:      isActive,
 		CommitMessage: p.Spec.CommitMessage,
 		ParentDigest:  p.Spec.ParentDigest,
-		Conditions:    conditionsToDTO(p.Status.Conditions),
+		GitSource: GitSourceDTO{
+			Repo:       p.Spec.GitSource.Repo,
+			Tag:        p.Spec.GitSource.Tag,
+			CommitHash: p.Spec.GitSource.CommitHash,
+			SourceLink: toSourceLinkDTO(scmlink.Build(p.Spec.GitSource.Repo, p.Spec.GitSource.Tag, p.Spec.GitSource.CommitHash)),
+		},
+		Conditions: conditionsToDTO(p.Status.Conditions),
 	}
 	if p.Status.CreationTime != nil && !p.Status.CreationTime.IsZero() {
 		t := p.Status.CreationTime.UTC()
 		dto.CreatedAt = &t
 	}
 	return dto
+}
+
+// toSourceLinkDTO maps the scmlink package result to the API DTO.
+func toSourceLinkDTO(l *scmlink.SourceLink) *SourceLinkDTO {
+	if l == nil {
+		return nil
+	}
+	return &SourceLinkDTO{URL: l.URL, Label: l.Label}
 }
 
 // patchesFromDTO converts a slice of PatchDTO (from a request body) to the
