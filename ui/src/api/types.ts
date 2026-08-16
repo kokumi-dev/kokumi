@@ -85,6 +85,15 @@ export interface Preparation {
   isActive: boolean
   commitMessage?: string
   parentDigest?: string
+  gitSource?: {
+    repo?: string
+    tag?: string
+    commitHash?: string
+    sourceLink?: {
+      url: string
+      label: string
+    }
+  }
   conditions?: Condition[]
 }
 

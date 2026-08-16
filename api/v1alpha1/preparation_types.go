@@ -85,6 +85,34 @@ type Artifact struct {
 	Signed bool `json:"signed,omitempty"`
 }
 
+// GitSource records the SCM provenance of the base artifact that produced this
+// Preparation. It is derived from the org.opencontainers.image.source,
+// org.opencontainers.image.version, and org.opencontainers.image.revision
+// annotations on the base artifact. Empty when the base artifact carries no git
+// provenance.
+type GitSource struct {
+	// repo is the SCM repository URL of the base artifact's source
+	// (org.opencontainers.image.source). Empty when the base artifact carries
+	// no git provenance.
+	// +optional
+	// +kubebuilder:validation:MaxLength=2048
+	Repo string `json:"repo,omitempty"`
+
+	// tag is the SCM tag of the base artifact's source files
+	// (org.opencontainers.image.version). Empty when the base artifact carries
+	// no git tag.
+	// +optional
+	// +kubebuilder:validation:MaxLength=256
+	Tag string `json:"tag,omitempty"`
+
+	// commitHash is the SCM commit SHA of the base artifact's source files
+	// (org.opencontainers.image.revision). Empty when the base artifact carries
+	// no git revision.
+	// +optional
+	// +kubebuilder:validation:MaxLength=64
+	CommitHash string `json:"commitHash,omitempty"`
+}
+
 // PreparationSpec defines the desired state of Preparation
 // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Preparation spec is immutable"
 type PreparationSpec struct {
@@ -124,6 +152,11 @@ type PreparationSpec struct {
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	ParentDigest string `json:"parentDigest,omitempty"`
+
+	// gitSource records the SCM provenance of the base artifact that produced
+	// this Preparation. Empty when the base artifact carries no git provenance.
+	// +optional
+	GitSource GitSource `json:"gitSource,omitempty"` //nolint:lll
 }
 
 // PreparationStatus defines the observed state of Preparation.

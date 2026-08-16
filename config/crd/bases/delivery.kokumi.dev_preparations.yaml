@@ -98,6 +98,33 @@ spec:
                 maxLength: 71
                 pattern: ^sha256:[a-f0-9]+$
                 type: string
+              gitSource:
+                description: |-
+                  gitSource records the SCM provenance of the base artifact that produced
+                  this Preparation. Empty when the base artifact carries no git provenance.
+                properties:
+                  commitHash:
+                    description: |-
+                      commitHash is the SCM commit SHA of the base artifact's source files
+                      (org.opencontainers.image.revision). Empty when the base artifact carries
+                      no git revision.
+                    maxLength: 64
+                    type: string
+                  repo:
+                    description: |-
+                      repo is the SCM repository URL of the base artifact's source
+                      (org.opencontainers.image.source). Empty when the base artifact carries
+                      no git provenance.
+                    maxLength: 2048
+                    type: string
+                  tag:
+                    description: |-
+                      tag is the SCM tag of the base artifact's source files
+                      (org.opencontainers.image.version). Empty when the base artifact carries
+                      no git tag.
+                    maxLength: 256
+                    type: string
+                type: object
               orderName:
                 description: orderName is the name of the Order this preparation belongs
                   to

@@ -11,6 +11,7 @@ import (
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 const (
@@ -124,6 +125,93 @@ func TestOrderService_ProcessOrder(t *testing.T) {
 	}
 }
 
+func TestOrderService_Provenance(t *testing.T) {
+	// Base artifact carries standard OCI git provenance annotations.
+	baseAnnotations := map[string]string{
+		ocispec.AnnotationSource:   "https://github.com/kokumi-dev/example",
+		ocispec.AnnotationVersion:  "1.2.3",
+		ocispec.AnnotationRevision: "abcdef1234567890abcdef1234567890abcdef12",
+	}
+
+	order := &deliveryv1alpha1.Order{
+		Spec: deliveryv1alpha1.OrderSpec{
+			Source: &deliveryv1alpha1.OCISource{
+				OCI:     "oci://registry.svc.cluster.local:5000/order/app",
+				Version: "1.0.0",
+			},
+			Destination: &deliveryv1alpha1.OCIDestination{
+				OCI: "oci://registry.svc.cluster.local:5000/preparation/app",
+			},
+		},
+	}
+
+	t.Run("extracts and copies provenance forward", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		client := &capturingFakeClient{fs: fs, annotations: baseAnnotations}
+
+		svc := NewOrderService(client, fs, "")
+		result, err := svc.ProcessOrder(context.Background(), order, *order.Spec.Source, order.Spec.Render, order.Spec.Patches, order.Spec.Edits, order.Spec.Destination.OCI, "", "", nil, nil)
+		require.NoError(t, err)
+
+		// Returned on the result.
+		assert.Equal(t, "https://github.com/kokumi-dev/example", result.GitRepo)
+		assert.Equal(t, "1.2.3", result.GitTag)
+		assert.Equal(t, "abcdef1234567890abcdef1234567890abcdef12", result.GitCommitHash)
+
+		// Copied forward onto the rendered artifact's annotations.
+		require.NotNil(t, client.lastPushAnnotations)
+		assert.Equal(t, "https://github.com/kokumi-dev/example", client.lastPushAnnotations[ocispec.AnnotationSource])
+		assert.Equal(t, "1.2.3", client.lastPushAnnotations[ocispec.AnnotationVersion])
+		assert.Equal(t, "abcdef1234567890abcdef1234567890abcdef12", client.lastPushAnnotations[ocispec.AnnotationRevision])
+		// Base identity stamped for chain verification.
+		assert.Equal(t, "registry.svc.cluster.local:5000/order/app", client.lastPushAnnotations[ocispec.AnnotationBaseImageName])
+		assert.Equal(t, fakeDigest, client.lastPushAnnotations[ocispec.AnnotationBaseImageDigest])
+	})
+
+	t.Run("omits provenance when base has none", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		client := &capturingFakeClient{fs: fs, annotations: nil}
+
+		svc := NewOrderService(client, fs, "")
+		result, err := svc.ProcessOrder(context.Background(), order, *order.Spec.Source, order.Spec.Render, order.Spec.Patches, order.Spec.Edits, order.Spec.Destination.OCI, "", "", nil, nil)
+		require.NoError(t, err)
+
+		assert.Empty(t, result.GitRepo)
+		assert.Empty(t, result.GitTag)
+		assert.Empty(t, result.GitCommitHash)
+		require.NotNil(t, client.lastPushAnnotations)
+		_, hasSource := client.lastPushAnnotations[ocispec.AnnotationSource]
+		assert.False(t, hasSource, "source annotation should not be set when base has none")
+	})
+}
+
+// capturingFakeClient records the annotations passed to Push so tests can assert
+// that provenance is copied forward onto the rendered artifact.
+type capturingFakeClient struct {
+	fs                  afero.Fs
+	annotations         map[string]string
+	lastPushAnnotations map[string]string
+}
+
+var _ oci.Client = (*capturingFakeClient)(nil)
+
+func (c *capturingFakeClient) Pull(_ context.Context, ref, tag, targetDir string) (string, string, map[string]string, error) {
+	_, _, _, err := oci.NewFakeClient(c.fs).Pull(context.Background(), ref, tag, targetDir)
+	if err != nil {
+		return "", "", nil, err
+	}
+	return "", fakeDigest, c.annotations, nil
+}
+
+func (c *capturingFakeClient) Push(_ context.Context, ref, tag, sourceDir string, annotations map[string]string) (string, error) {
+	c.lastPushAnnotations = annotations
+	return oci.NewFakeClient(c.fs).Push(context.Background(), ref, tag, sourceDir, annotations)
+}
+
+func (c *capturingFakeClient) ListTags(_ context.Context, _ string) ([]string, error) {
+	return nil, nil
+}
+
 func TestOrderService_PullCache(t *testing.T) {
 	const cacheDir = "/cache"
 
@@ -187,17 +275,17 @@ type multiFileFakeClient struct {
 
 var _ oci.Client = (*multiFileFakeClient)(nil)
 
-func (c *multiFileFakeClient) Pull(_ context.Context, _, _, targetDir string) (string, string, error) {
+func (c *multiFileFakeClient) Pull(_ context.Context, _, _, targetDir string) (string, string, map[string]string, error) {
 	files := map[string]string{
 		"deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: my-app\nspec:\n  replicas: 1\n",
 		"service.yaml":    "apiVersion: v1\nkind: Service\nmetadata:\n  name: my-app\nspec:\n  port: 80\n",
 	}
 	for name, content := range files {
 		if err := afero.WriteFile(c.fs, filepath.Join(targetDir, name), []byte(content), 0600); err != nil {
-			return "", "", err
+			return "", "", nil, err
 		}
 	}
-	return "", fakeDigest, nil
+	return "", fakeDigest, nil, nil
 }
 
 func (c *multiFileFakeClient) Push(_ context.Context, _, _, _ string, _ map[string]string) (string, error) {
@@ -216,7 +304,7 @@ type countingFakeClient struct {
 
 var _ oci.Client = (*countingFakeClient)(nil)
 
-func (c *countingFakeClient) Pull(ctx context.Context, ref, tag, targetDir string) (string, string, error) {
+func (c *countingFakeClient) Pull(ctx context.Context, ref, tag, targetDir string) (string, string, map[string]string, error) {
 	c.onPull()
 	return oci.NewFakeClient(c.fs).Pull(ctx, ref, tag, targetDir)
 }

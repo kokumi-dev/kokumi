@@ -24,6 +24,22 @@ type PantryRefDTO struct {
 	Name string `json:"name"`
 }
 
+// SourceLinkDTO is a clickable link back to the base artifact's source SCM
+// (commit or tag), derived from the git provenance annotations.
+type SourceLinkDTO struct {
+	URL   string `json:"url"`
+	Label string `json:"label"`
+}
+
+// GitSourceDTO is the data-transfer representation of the SCM provenance of the
+// base artifact that produced a Preparation.
+type GitSourceDTO struct {
+	Repo       string         `json:"repo,omitempty"`
+	Tag        string         `json:"tag,omitempty"`
+	CommitHash string         `json:"commitHash,omitempty"`
+	SourceLink *SourceLinkDTO `json:"sourceLink,omitempty"`
+}
+
 // PatchTargetDTO is the data-transfer representation of a PatchTarget.
 type PatchTargetDTO struct {
 	Kind      string `json:"kind"`
@@ -106,6 +122,7 @@ type PreparationDTO struct {
 	IsActive      bool           `json:"isActive"`
 	CommitMessage string         `json:"commitMessage,omitempty"`
 	ParentDigest  string         `json:"parentDigest,omitempty"`
+	GitSource     GitSourceDTO   `json:"gitSource,omitempty"`
 	Conditions    []ConditionDTO `json:"conditions,omitempty"`
 }
 

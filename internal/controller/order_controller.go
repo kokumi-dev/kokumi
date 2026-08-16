@@ -181,7 +181,7 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 		return ctrl.Result{}, err
 	}
 
-	preparation, err := r.createPreparation(ctx, order, result.SourceRef, result.SourceDigest, resolvedSource.Version, result.DestRef, result.DestDigest, commitMessage, parentDigest, specHash)
+	preparation, err := r.createPreparation(ctx, order, result.SourceRef, result.SourceDigest, resolvedSource.Version, result.DestRef, result.DestDigest, commitMessage, parentDigest, specHash, deliveryv1alpha1.GitSource{Repo: result.GitRepo, Tag: result.GitTag, CommitHash: result.GitCommitHash})
 	if err != nil {
 		logger.Error(err, "Failed to create Preparation")
 		_ = statusUpdater.Failed(ctx, order, fmt.Errorf("failed to create revision: %w", err))
@@ -237,6 +237,7 @@ func (r *OrderReconciler) createPreparation(
 	commitMessage string,
 	parentDigest string,
 	configHash string,
+	gitSource deliveryv1alpha1.GitSource,
 ) (*deliveryv1alpha1.Preparation, error) {
 	logger := log.FromContext(ctx)
 
@@ -289,6 +290,7 @@ func (r *OrderReconciler) createPreparation(
 			},
 			CommitMessage: commitMessage,
 			ParentDigest:  parentDigest,
+			GitSource:     gitSource,
 		},
 	}
 
