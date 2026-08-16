@@ -1,6 +1,7 @@
 import type { Pantry } from '../../api/types'
 import Badge from '../shared/Badge'
 import Btn from '../shared/Btn'
+import PantryContents from './PantryContents'
 import styles from './PantryDetail.module.css'
 
 interface Props {
@@ -80,6 +81,12 @@ export default function PantryDetail({ pantry, onClose, onEdit, onDelete }: Prop
               </div>
             </div>
           )}
+
+          {/* Contents */}
+          <div className={styles.section}>
+            <span className={styles.sectionTitle}>Contents</span>
+            <PantryContents key={`${pantry.namespace}/${pantry.name}`} pantry={pantry} />
+          </div>
         </div>
       </div>
     </>

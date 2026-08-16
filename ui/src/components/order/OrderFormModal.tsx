@@ -10,6 +10,7 @@ import type { Order, OrderFormData, Patch, HelmRender, Menu, ChartInfo } from '.
 import { emptyOrderForm, orderToFormData } from '../../api/types'
 import { objectToYaml, yamlToValues } from '../../utils/yaml'
 import { getDefaultRegistry, listOCITags, getChartInfo } from '../../api/client'
+import { cleanTags } from '../../api/ociTags'
 import { usePantries } from '../../hooks/usePantries'
 import styles from './OrderFormModal.module.css'
 
@@ -511,7 +512,12 @@ function FormView({
     const seq = ++tagsSeqRef.current
     setVersionTagsLoading(true)
     listOCITags(oci, resolvedPantryName, resolvedPantryNs)
-      .then((tags) => { if (tagsSeqRef.current === seq) setVersionTags(tags) })
+      .then((tags) => {
+        if (tagsSeqRef.current !== seq) return
+        // Drop cosign signature/attestation tags and sort semver-desc so the
+        // newest release appears first, matching the Pantry tag browser.
+        setVersionTags(cleanTags(tags))
+      })
       .catch(() => { /* non-blocking: keep previous tags */ })
       .finally(() => { if (tagsSeqRef.current === seq) setVersionTagsLoading(false) })
   }

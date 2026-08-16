@@ -1,5 +1,5 @@
 import { authHeaders, setToken } from './auth'
-import type { Order, Preparation, OrderFormData, Menu, MenuFormData, Patch, ChartInfo, Pantry, PantryFormData } from './types'
+import type { Order, Preparation, OrderFormData, Menu, MenuFormData, Patch, ChartInfo, Pantry, PantryFormData, ArtifactInfo } from './types'
 
 // All API calls are relative so they work both in dev (proxied by Vite) and
 // in production (served from the same Go binary).
@@ -88,15 +88,31 @@ export function getDefaultRegistry(): Promise<{ baseURL: string }> {
   return request<{ baseURL: string }>('/registry/default')
 }
 
-export function listOCITags(ref: string, pantryName?: string, namespace?: string): Promise<string[]> {
+export function listOCITags(
+  ref: string,
+  pantryName?: string,
+  namespace?: string,
+): Promise<string[]> {
   let url = `/registry/tags?ref=${encodeURIComponent(ref)}`
   if (pantryName) {
     url += `&pantryName=${encodeURIComponent(pantryName)}`
     if (namespace) url += `&pantryNamespace=${encodeURIComponent(namespace)}`
   }
-  return request<{ tags: string[] }>(url).then(
-    (r) => r.tags ?? [],
-  )
+  return request<{ tags: string[] }>(url).then((r) => r.tags)
+}
+
+export function getArtifactInfo(
+  ref: string,
+  version: string,
+  pantryName?: string,
+  namespace?: string,
+): Promise<ArtifactInfo> {
+  let url = `/registry/artifact?ref=${encodeURIComponent(ref)}&version=${encodeURIComponent(version)}`
+  if (pantryName) {
+    url += `&pantryName=${encodeURIComponent(pantryName)}`
+    if (namespace) url += `&pantryNamespace=${encodeURIComponent(namespace)}`
+  }
+  return request<ArtifactInfo>(url)
 }
 
 export function getChartInfo(ref: string, version: string, pantryName?: string, namespace?: string): Promise<ChartInfo> {
