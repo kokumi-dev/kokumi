@@ -6,6 +6,7 @@ import Badge from '../shared/Badge'
 import Btn from '../shared/Btn'
 import Modal from '../shared/Modal'
 import YamlEditor from '../shared/YamlEditor'
+import FileInspector from '../shared/FileInspector'
 import styles from './PantryContents.module.css'
 
 const PAGE_SIZE = 20
@@ -212,10 +213,16 @@ function ArtifactDetail({ info, onViewManifest }: { info: ArtifactInfo; onViewMa
         {tab === 'values' && <pre className={styles.pre}>{info.chartInfo?.defaultValues || 'No default values.'}</pre>}
         {tab === 'manifest' && (
           <div className={styles.manifestInline}>
-            <pre className={styles.pre}>{info.manifest}</pre>
-            <Btn variant="secondary" size="sm" onClick={() => onViewManifest(info.manifest ?? '')}>
-              Open in viewer
-            </Btn>
+            {info.files && info.files.length > 1 ? (
+              <FileInspector files={info.files} />
+            ) : (
+              <>
+                <pre className={styles.pre}>{info.manifest}</pre>
+                <Btn variant="secondary" size="sm" onClick={() => onViewManifest(info.manifest ?? '')}>
+                  Open in viewer
+                </Btn>
+              </>
+            )}
           </div>
         )}
       </div>

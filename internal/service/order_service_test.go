@@ -69,7 +69,7 @@ func TestOrderService_ProcessOrder(t *testing.T) {
 			wantErrMsg: "source is not a Helm chart",
 		},
 		{
-			name: "multiple yaml files consolidated into single manifest",
+			name: "multiple yaml files merged into single manifest",
 			makeClient: func(fs afero.Fs) oci.Client {
 				return &multiFileFakeClient{fs: fs}
 			},
@@ -242,6 +242,7 @@ func TestOrderService_PullCache(t *testing.T) {
 		key := pullCacheKey(
 			"registry.svc.cluster.local:5000/order/app",
 			"1.0.0",
+			deliveryv1alpha1.FileLayoutSingle,
 		)
 		exists, err := afero.Exists(fs, filepath.Join(cacheDir, key, "meta.json"))
 		require.NoError(t, err)
@@ -377,4 +378,205 @@ func TestMergeYAMLFiles(t *testing.T) {
 			}
 		})
 	}
+}
+
+// kustomizeFakeClient simulates an OCI artifact containing a kustomization.yaml.
+type kustomizeFakeClient struct {
+	fs afero.Fs
+}
+
+var _ oci.Client = (*kustomizeFakeClient)(nil)
+
+func (c *kustomizeFakeClient) Pull(_ context.Context, _, _, targetDir string) (string, string, map[string]string, error) {
+	files := map[string]string{
+		"kustomization.yaml": "resources:\n- deployment.yaml\n",
+		"deployment.yaml":    "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: my-app\n",
+	}
+	for name, content := range files {
+		if err := afero.WriteFile(c.fs, filepath.Join(targetDir, name), []byte(content), 0600); err != nil {
+			return "", "", nil, err
+		}
+	}
+	return "", fakeDigest, nil, nil
+}
+
+func (c *kustomizeFakeClient) Push(_ context.Context, _, _, _ string, _ map[string]string) (string, error) {
+	return fakeDigest, nil
+}
+
+func (c *kustomizeFakeClient) ListTags(_ context.Context, _ string) ([]string, error) {
+	return nil, nil
+}
+
+// fluxFakeClient simulates a Flux OCI artifact (cncf.flux.content layer): a
+// kustomization plus individual manifest files, no io.deis.oras.content.unpack
+// annotation. The real ORASClient extracts this via extractLayer; the fake
+// writes the same files directly.
+type fluxFakeClient struct {
+	fs afero.Fs
+}
+
+var _ oci.Client = (*fluxFakeClient)(nil)
+
+func (c *fluxFakeClient) Pull(_ context.Context, _, _, targetDir string) (string, string, map[string]string, error) {
+	files := map[string]string{
+		"kustomization.yaml": "resources:\n- deployment.yaml\n- service.yaml\n",
+		"deployment.yaml":    "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: podinfo\n",
+		"service.yaml":       "apiVersion: v1\nkind: Service\nmetadata:\n  name: podinfo\n",
+	}
+	for name, content := range files {
+		if err := afero.WriteFile(c.fs, filepath.Join(targetDir, name), []byte(content), 0600); err != nil {
+			return "", "", nil, err
+		}
+	}
+	return "", fakeDigest, nil, nil
+}
+
+func (c *fluxFakeClient) Push(_ context.Context, _, _, _ string, _ map[string]string) (string, error) {
+	return fakeDigest, nil
+}
+
+func (c *fluxFakeClient) ListTags(_ context.Context, _ string) ([]string, error) {
+	return nil, nil
+}
+
+func multiFileOrder(render *deliveryv1alpha1.Render) *deliveryv1alpha1.Order {
+	return &deliveryv1alpha1.Order{
+		Spec: deliveryv1alpha1.OrderSpec{
+			Source: &deliveryv1alpha1.OCISource{
+				OCI:     "oci://registry.svc.cluster.local:5000/order/multi-file-app",
+				Version: "1.0.0",
+			},
+			Destination: &deliveryv1alpha1.OCIDestination{
+				OCI: "oci://registry.svc.cluster.local:5000/preparation/multi-file-app",
+			},
+			Render: render,
+		},
+	}
+}
+
+func TestOrderService_FileLayoutMulti(t *testing.T) {
+	t.Run("files kept separate and patched individually", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		client := &multiFileFakeClient{fs: fs}
+		svc := NewOrderService(client, fs, "")
+
+		order := multiFileOrder(&deliveryv1alpha1.Render{
+			Manifest: &deliveryv1alpha1.ManifestRender{
+				Layout: deliveryv1alpha1.FileLayoutMulti,
+			},
+		})
+		order.Spec.Patches = []deliveryv1alpha1.Patch{
+			{
+				Target: deliveryv1alpha1.PatchTarget{Kind: "Deployment", Name: "my-app"},
+				Set:    map[string]string{".spec.replicas": "3"},
+			},
+		}
+
+		_, err := svc.ProcessOrder(context.Background(), order, *order.Spec.Source, order.Spec.Render, order.Spec.Patches, order.Spec.Edits, order.Spec.Destination.OCI, "", "", nil, nil)
+		require.NoError(t, err)
+
+		// The pushed artifact directory was removed after processing; verify via
+		// PreviewOrder instead, which returns the concatenated content.
+		preview, err := svc.PreviewOrder(context.Background(), *order.Spec.Source, order.Spec.Render, order.Spec.Patches, order.Spec.Edits, "multi-file-app", "default", nil)
+		require.NoError(t, err)
+		assert.Contains(t, string(preview), "# Source: deployment.yaml")
+		assert.Contains(t, string(preview), "# Source: service.yaml")
+		assert.Contains(t, string(preview), "replicas: 3")
+	})
+
+	t.Run("kustomization.yaml prevents merge even with Single layout", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		client := &kustomizeFakeClient{fs: fs}
+		svc := NewOrderService(client, fs, "")
+
+		order := multiFileOrder(nil)
+
+		preview, err := svc.PreviewOrder(context.Background(), *order.Spec.Source, order.Spec.Render, nil, nil, "multi-file-app", "default", nil)
+		require.NoError(t, err)
+		assert.Contains(t, string(preview), "# Source: deployment.yaml")
+		assert.Contains(t, string(preview), "# Source: kustomization.yaml")
+	})
+
+	t.Run("default still merges into manifest.yaml", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		client := &multiFileFakeClient{fs: fs}
+		svc := NewOrderService(client, fs, "")
+
+		order := multiFileOrder(nil)
+
+		preview, err := svc.PreviewOrder(context.Background(), *order.Spec.Source, order.Spec.Render, nil, nil, "multi-file-app", "default", nil)
+		require.NoError(t, err)
+		assert.Contains(t, string(preview), "# Source: deployment.yaml")
+		assert.Contains(t, string(preview), "# Source: service.yaml")
+	})
+}
+
+func TestOrderService_FluxKustomizeArtifact(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	client := &fluxFakeClient{fs: fs}
+	svc := NewOrderService(client, fs, "")
+
+	order := multiFileOrder(nil)
+	order.Spec.Patches = []deliveryv1alpha1.Patch{
+		{
+			Target: deliveryv1alpha1.PatchTarget{Kind: "Deployment", Name: "podinfo"},
+			Set:    map[string]string{".spec.replicas": "2"},
+		},
+	}
+
+	preview, err := svc.PreviewOrder(context.Background(), *order.Spec.Source, order.Spec.Render, order.Spec.Patches, order.Spec.Edits, "podinfo-kustomize", "default", nil)
+	require.NoError(t, err)
+
+	// Files are kept separate (kustomization present) and each is patched.
+	assert.Contains(t, string(preview), "# Source: deployment.yaml")
+	assert.Contains(t, string(preview), "# Source: service.yaml")
+	assert.Contains(t, string(preview), "# Source: kustomization.yaml")
+	assert.Contains(t, string(preview), "replicas: 2")
+}
+
+func TestOrderService_CacheSplitByLayout(t *testing.T) {
+	const cacheDir = "/cache"
+
+	fs := afero.NewMemMapFs()
+	pullCount := 0
+	client := &countingFakeClient{fs: fs, onPull: func() { pullCount++ }}
+	svc := NewOrderService(client, fs, cacheDir)
+
+	single := multiFileOrder(nil)
+	separate := multiFileOrder(&deliveryv1alpha1.Render{
+		Manifest: &deliveryv1alpha1.ManifestRender{
+			Layout: deliveryv1alpha1.FileLayoutMulti,
+		},
+	})
+
+	_, err := svc.ProcessOrder(context.Background(), single, *single.Spec.Source, single.Spec.Render, nil, nil, single.Spec.Destination.OCI, "", "", nil, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 1, pullCount)
+
+	// Different file layout must not reuse the cached merged layout.
+	_, err = svc.ProcessOrder(context.Background(), separate, *separate.Spec.Source, separate.Spec.Render, nil, nil, separate.Spec.Destination.OCI, "", "", nil, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 2, pullCount, "separate file layout must not share cache entry")
+
+	// Same policy again hits the cache.
+	_, err = svc.ProcessOrder(context.Background(), single, *single.Spec.Source, single.Spec.Render, nil, nil, single.Spec.Destination.OCI, "", "", nil, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 2, pullCount)
+}
+
+func TestMergeYAMLFiles_KustomizationSkipped(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	_ = afero.WriteFile(fs, "/dir/kustomization.yaml", []byte("resources:\n- deployment.yaml\n"), 0600)
+	_ = afero.WriteFile(fs, "/dir/deployment.yaml", []byte("kind: Deployment\n"), 0600)
+
+	require.NoError(t, mergeYAMLFiles(fs, "/dir"))
+
+	data, err := afero.ReadFile(fs, "/dir/manifest.yaml")
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "resources:")
+	assert.Contains(t, string(data), "kind: Deployment")
+
+	exists, _ := afero.Exists(fs, "/dir/kustomization.yaml")
+	assert.True(t, exists, "kustomization.yaml must survive the merge")
 }

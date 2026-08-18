@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { previewOrder } from '../../api/client'
-import type { OrderFormData } from '../../api/types'
+import { previewOrder, previewOrderFiles } from '../../api/client'
+import type { ArtifactFile, OrderFormData } from '../../api/types'
 import { filterCRDDocuments, hasCRDDocuments } from '../../utils/manifest'
 import Btn from '../shared/Btn'
 import YamlEditor from '../shared/YamlEditor'
+import FileInspector from '../shared/FileInspector'
 import styles from './PreviewTab.module.css'
 
 interface Props {
@@ -15,6 +16,7 @@ const DEBOUNCE_MS = 600
 export default function PreviewTab({ formData }: Props) {
   const [loading, setLoading] = useState(false)
   const [content, setContent] = useState<string | null>(null)
+  const [files, setFiles] = useState<ArtifactFile[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [hideCRDs, setHideCRDs] = useState(true)
 
@@ -43,6 +45,9 @@ export default function PreviewTab({ formData }: Props) {
           setError(e.message)
           setLoading(false)
         })
+      previewOrderFiles(formData)
+        .then(setFiles)
+        .catch(() => setFiles(null))
     }, DEBOUNCE_MS)
 
     return () => {
@@ -51,6 +56,8 @@ export default function PreviewTab({ formData }: Props) {
       }
     }
   }, [formData]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const multiFile = files !== null && files.length > 1
 
   if (!hasSource) {
     return (
@@ -81,14 +88,18 @@ export default function PreviewTab({ formData }: Props) {
 
   return (
     <div>
-      {hasCRDs && (
+      {hasCRDs && !multiFile && (
         <div className={styles.toolbar}>
           <Btn variant="secondary" size="sm" onClick={() => setHideCRDs((v) => !v)}>
             {hideCRDs ? 'Show CRDs' : 'Hide CRDs'}
           </Btn>
         </div>
       )}
-      <YamlEditor value={displayed} readOnly tall />
+      {multiFile && files ? (
+        <FileInspector files={files} />
+      ) : (
+        <YamlEditor value={displayed} readOnly tall />
+      )}
     </div>
   )
 }

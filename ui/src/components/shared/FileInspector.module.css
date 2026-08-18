@@ -1,0 +1,114 @@
+.inspector {
+  display: flex;
+  gap: 0;
+  border: 1px solid rgba(49, 54, 56, 0.15);
+  border-radius: 8px;
+  overflow: hidden;
+  height: min(560px, 60vh);
+}
+
+.fileList {
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  max-width: 260px;
+  overflow-y: auto;
+  max-height: 600px;
+  border-right: 1px solid rgba(49, 54, 56, 0.15);
+  background: var(--color-bg-card);
+  padding: 6px 0;
+}
+
+.fileRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-on-light);
+  font-family: 'SF Mono', 'Fira Code', 'Fira Mono', 'Roboto Mono', monospace;
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.fileRow:hover {
+  background: rgba(49, 54, 56, 0.06);
+}
+
+.fileRowActive {
+  background: rgba(49, 54, 56, 0.1);
+  font-weight: 600;
+}
+
+.fileIcon {
+  opacity: 0.5;
+  font-size: 0.7rem;
+}
+
+.dirtyDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-accent, #e5c07b);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.fileContent {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.fileContent > :last-child {
+  flex: 1;
+  min-height: 0;
+}
+
+.fileContent > :last-child :global(.cm-editor),
+.fileContent > :last-child :global(.cm-scroller) {
+  height: 100%;
+  max-height: none;
+}
+
+.fileHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid rgba(49, 54, 56, 0.15);
+  background: var(--color-bg-card);
+}
+
+.fileName {
+  font-family: 'SF Mono', 'Fira Code', 'Fira Mono', 'Roboto Mono', monospace;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-on-light);
+  margin-right: auto;
+}
+
+.headerBtn {
+  border: 1px solid rgba(49, 54, 56, 0.2);
+  background: transparent;
+  color: var(--color-text-on-light);
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.headerBtn:hover:not(:disabled) {
+  background: rgba(49, 54, 56, 0.08);
+}
+
+.headerBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

@@ -1,6 +1,8 @@
 package oci
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -92,7 +94,12 @@ func isPlainHTTP(ref string) bool {
 // Pull fetches an OCI artifact from ref:tag into targetDir.
 // It inspects the manifest's first layer media type and branches accordingly:
 //   - HelmChartLayerMediaType: fetches the blob directly to targetDir/chart.tgz
-//   - anything else:           uses oras.Copy, which writes manifest.yaml
+//   - FluxContentMediaType:    extracts the layer's tar archive into targetDir
+//     (Flux layers carry no io.deis.oras.content.unpack annotation, so ORAS
+//     would otherwise store them as a raw blob)
+//   - anything else:           uses oras.Copy with a file store, which unpacks
+//     layers annotated with io.deis.oras.content.unpack (e.g. ORAS "file"
+//     artifacts) and otherwise stores raw blobs
 //
 // The first return value is the layer media type (empty string for non-Helm artifacts).
 // The third return value is the manifest annotations map (may be nil/empty).
@@ -129,7 +136,11 @@ func (c *ORASClient) Pull(ctx context.Context, ref, tag, targetDir string) (stri
 	digest := manifestDesc.Digest.String()
 	annotations := manifest.Annotations
 
-	if len(manifest.Layers) > 0 && manifest.Layers[0].MediaType == HelmChartLayerMediaType {
+	if len(manifest.Layers) == 0 {
+		return "", "", nil, fmt.Errorf("artifact %s:%s has no layers", ref, tag)
+	}
+
+	if manifest.Layers[0].MediaType == HelmChartLayerMediaType {
 		log.Info("Pulling Helm chart blob", "ref", fmt.Sprintf("%s:%s", ref, tag))
 
 		if err := c.fetchBlob(ctx, repo, manifest.Layers[0], filepath.Join(targetDir, "chart.tgz")); err != nil {
@@ -137,6 +148,18 @@ func (c *ORASClient) Pull(ctx context.Context, ref, tag, targetDir string) (stri
 		}
 
 		return HelmChartLayerMediaType, digest, annotations, nil
+	}
+
+	if manifest.Layers[0].MediaType == FluxContentMediaType {
+		log.Info("Pulling Flux content layer", "ref", fmt.Sprintf("%s:%s", ref, tag))
+
+		for _, layer := range manifest.Layers {
+			if err := c.extractLayer(ctx, repo, layer, targetDir); err != nil {
+				return "", "", nil, fmt.Errorf("extract layer %s: %w", layer.Digest, err)
+			}
+		}
+
+		return "", digest, annotations, nil
 	}
 
 	log.Info("Pulling OCI artifact", "ref", fmt.Sprintf("%s:%s", ref, tag))
@@ -152,6 +175,78 @@ func (c *ORASClient) Pull(ctx context.Context, ref, tag, targetDir string) (stri
 	}
 
 	return "", digest, annotations, nil
+}
+
+// extractLayer fetches a Flux content layer blob (gzip-compressed tar) and
+// extracts its archive into targetDir, preserving file names. It is only ever
+// called for layers with media type FluxContentMediaType.
+func (c *ORASClient) extractLayer(ctx context.Context, repo *remote.Repository, desc ocispec.Descriptor, targetDir string) error {
+	rc, err := repo.Blobs().Fetch(ctx, desc)
+	if err != nil {
+		return fmt.Errorf("fetch blob %s: %w", desc.Digest, err)
+	}
+	defer rc.Close() //nolint:errcheck
+
+	return extractGzipTar(rc, desc.MediaType, targetDir)
+}
+
+// extractGzipTar decompresses a gzip-compressed tar stream (or a plain tar
+// stream when the media type is not gzip) and extracts it into targetDir.
+func extractGzipTar(r io.Reader, mediaType string, targetDir string) error {
+	if strings.HasSuffix(mediaType, "+gzip") || mediaType == ocispec.MediaTypeImageLayerGzip {
+		gz, err := gzip.NewReader(r)
+		if err != nil {
+			return fmt.Errorf("decompress blob: %w", err)
+		}
+		defer gz.Close() //nolint:errcheck
+		r = gz
+	}
+
+	return extractTar(r, targetDir)
+}
+
+// extractTar extracts a tar archive into targetDir, rejecting entries that
+// would escape the target directory.
+func extractTar(r io.Reader, targetDir string) error {
+	tr := tar.NewReader(r)
+
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("read tar: %w", err)
+		}
+
+		if header.Typeflag != tar.TypeReg {
+			continue
+		}
+
+		name := filepath.Clean(filepath.FromSlash(header.Name))
+		if strings.HasPrefix(name, "..") || filepath.IsAbs(name) {
+			return fmt.Errorf("tar entry %q escapes target directory", header.Name)
+		}
+
+		destPath := filepath.Join(targetDir, name)
+		if err := os.MkdirAll(filepath.Dir(destPath), 0700); err != nil {
+			return fmt.Errorf("create directory for %q: %w", name, err)
+		}
+
+		f, err := os.OpenFile(destPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600) //nolint:gosec
+		if err != nil {
+			return fmt.Errorf("create %q: %w", name, err)
+		}
+
+		if _, err := io.Copy(f, tr); err != nil {
+			f.Close() //nolint:errcheck
+			return fmt.Errorf("write %q: %w", name, err)
+		}
+
+		if err := f.Close(); err != nil {
+			return fmt.Errorf("close %q: %w", name, err)
+		}
+	}
 }
 
 // fetchBlob streams a single OCI layer blob to the given file path.

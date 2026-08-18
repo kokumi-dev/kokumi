@@ -97,7 +97,8 @@ func (rs *OrderService) ProcessOrder(
 
 	logger.Info("Fetching artifact from source")
 
-	mediaType, sourceDigest, sourceAnnotations, err := rs.pullWithCache(ctx, srcClient, sourceRef, source.Version, tempDir)
+	layout := layoutPolicy(render)
+	mediaType, sourceDigest, sourceAnnotations, err := rs.pullWithCache(ctx, srcClient, sourceRef, source.Version, tempDir, layout)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pull artifact: %w", err)
 	}
@@ -148,18 +149,8 @@ func (rs *OrderService) ProcessOrder(
 		}
 	}
 
-	content, err := afero.ReadFile(rs.fs, manifestPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read manifest: %w", err)
-	}
-
-	processedContent, err := rs.processManifest(ctx, content, patches, edits)
-	if err != nil {
+	if err := rs.processManifestFiles(ctx, tempDir, manifestPath, patches, edits); err != nil {
 		return nil, err
-	}
-
-	if err := afero.WriteFile(rs.fs, manifestPath, processedContent, 0600); err != nil {
-		return nil, fmt.Errorf("failed to write manifest: %w", err)
 	}
 
 	logger.Info("Pushing artifact to destination")
@@ -230,7 +221,8 @@ func (rs *OrderService) PreviewOrder(
 	}
 	defer rs.fs.RemoveAll(tempDir) //nolint:errcheck
 
-	mediaType, _, _, err := rs.pullWithCache(ctx, srcClient, sourceRef, source.Version, tempDir)
+	layout := layoutPolicy(render)
+	mediaType, _, _, err := rs.pullWithCache(ctx, srcClient, sourceRef, source.Version, tempDir, layout)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pull artifact: %w", err)
 	}
@@ -268,12 +260,193 @@ func (rs *OrderService) PreviewOrder(
 		}
 	}
 
-	content, err := afero.ReadFile(rs.fs, manifestPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read manifest: %w", err)
+	if err := rs.renderToDir(ctx, tempDir, render, mediaType, patches, edits, name, namespace); err != nil {
+		return nil, err
 	}
 
-	return rs.processManifest(ctx, content, patches, edits)
+	return concatYAMLFiles(rs.fs, tempDir)
+}
+
+// PreviewFile is a single rendered YAML file of a previewed artifact.
+type PreviewFile struct {
+	Path    string
+	Content string
+}
+
+// PreviewFiles runs the same pull/render/patch pipeline as PreviewOrder but
+// returns the rendered files individually, preserving the artifact's file
+// layout. Multi-document files are returned as-is.
+func (rs *OrderService) PreviewFiles(
+	ctx context.Context,
+	source deliveryv1alpha1.OCISource,
+	render *deliveryv1alpha1.Render,
+	patches []deliveryv1alpha1.Patch,
+	edits []deliveryv1alpha1.Patch,
+	name string,
+	namespace string,
+	sourceClient oci.Client,
+) ([]PreviewFile, error) {
+	srcClient := cmp.Or(sourceClient, rs.client)
+	sourceRef := strings.TrimPrefix(source.OCI, "oci://")
+
+	tempDir, err := afero.TempDir(rs.fs, "", "order-preview-*")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp directory: %w", err)
+	}
+	defer rs.fs.RemoveAll(tempDir) //nolint:errcheck
+
+	layout := layoutPolicy(render)
+	mediaType, _, _, err := rs.pullWithCache(ctx, srcClient, sourceRef, source.Version, tempDir, layout)
+	if err != nil {
+		return nil, fmt.Errorf("failed to pull artifact: %w", err)
+	}
+
+	if err := rs.renderToDir(ctx, tempDir, render, mediaType, patches, edits, name, namespace); err != nil {
+		return nil, err
+	}
+
+	files, err := yamlFiles(rs.fs, tempDir)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]PreviewFile, 0, len(files))
+	for _, file := range files {
+		content, err := afero.ReadFile(rs.fs, file)
+		if err != nil {
+			return nil, fmt.Errorf("read %q: %w", file, err)
+		}
+		out = append(out, PreviewFile{Path: filepath.Base(file), Content: string(content)})
+	}
+
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no YAML files found in %q", tempDir)
+	}
+
+	return out, nil
+}
+
+// renderToDir renders the pulled artifact in dir: it renders Helm charts into
+// manifest.yaml and applies patches and edits to the manifest file(s).
+func (rs *OrderService) renderToDir(ctx context.Context, dir string, render *deliveryv1alpha1.Render, mediaType string, patches, edits []deliveryv1alpha1.Patch, name, namespace string) error {
+	manifestPath := filepath.Join(dir, "manifest.yaml")
+
+	if render != nil && render.Helm != nil {
+		if mediaType != oci.HelmChartLayerMediaType {
+			return fmt.Errorf("source is not a Helm chart (got media type %q)", mediaType)
+		}
+
+		vals, err := jsonToMap(render.Helm.Values)
+		if err != nil {
+			return fmt.Errorf("failed convert values: %w", err)
+		}
+
+		releaseName := render.Helm.ReleaseName
+		if releaseName == "" {
+			releaseName = name
+		}
+		helmNamespace := render.Helm.Namespace
+		if helmNamespace == "" {
+			helmNamespace = namespace
+		}
+
+		chartPath := filepath.Join(dir, "chart.tgz")
+
+		manifest, err := renderer.RenderChart(ctx, chartPath, releaseName, helmNamespace, render.Helm.IncludeCRDs, vals)
+		if err != nil {
+			return fmt.Errorf("failed to render Helm chart: %w", err)
+		}
+
+		if err := afero.WriteFile(rs.fs, manifestPath, []byte(manifest), 0600); err != nil {
+			return fmt.Errorf("failed to write manifest: %w", err)
+		}
+	}
+
+	return rs.processManifestFiles(ctx, dir, manifestPath, patches, edits)
+}
+
+// processManifestFiles applies patches and edits to the manifest content in dir.
+// When manifestPath exists, only that file is processed. Otherwise every
+// top-level YAML file is processed individually, preserving the artifact's
+// original file layout.
+func (rs *OrderService) processManifestFiles(ctx context.Context, dir, manifestPath string, patches, edits []deliveryv1alpha1.Patch) error {
+	if _, err := rs.fs.Stat(manifestPath); err == nil {
+		return rs.processManifestFile(ctx, manifestPath, patches, edits)
+	}
+
+	files, err := yamlFiles(rs.fs, dir)
+	if err != nil {
+		return err
+	}
+
+	for _, file := range files {
+		if err := rs.processManifestFile(ctx, file, patches, edits); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// processManifestFile applies patches and edits to a single YAML file in place.
+func (rs *OrderService) processManifestFile(ctx context.Context, path string, patches, edits []deliveryv1alpha1.Patch) error {
+	content, err := afero.ReadFile(rs.fs, path)
+	if err != nil {
+		return fmt.Errorf("failed to read manifest: %w", err)
+	}
+
+	processed, err := rs.processManifest(ctx, content, patches, edits)
+	if err != nil {
+		return err
+	}
+
+	if err := afero.WriteFile(rs.fs, path, processed, 0600); err != nil {
+		return fmt.Errorf("failed to write manifest: %w", err)
+	}
+
+	return nil
+}
+
+// yamlFiles returns the sorted top-level YAML file paths in dir.
+// ponytail: top-level only, recurse if real artifacts ship nested dirs.
+func yamlFiles(fs afero.Fs, dir string) ([]string, error) {
+	var files []string
+	for _, pattern := range []string{"*.yaml", "*.yml"} {
+		matches, err := afero.Glob(fs, filepath.Join(dir, pattern))
+		if err != nil {
+			return nil, fmt.Errorf("read directory %q: %w", dir, err)
+		}
+		files = append(files, matches...)
+	}
+
+	sort.Strings(files)
+
+	return files, nil
+}
+
+// concatYAMLFiles reads all top-level YAML files in dir and returns them
+// concatenated with "---" separators, each preceded by a Source comment.
+func concatYAMLFiles(fs afero.Fs, dir string) ([]byte, error) {
+	files, err := yamlFiles(fs, dir)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(files) == 0 {
+		return nil, fmt.Errorf("no YAML files found in %q", dir)
+	}
+
+	var out strings.Builder
+	for _, file := range files {
+		content, err := afero.ReadFile(fs, file)
+		if err != nil {
+			return nil, fmt.Errorf("read %q: %w", file, err)
+		}
+
+		fmt.Fprintf(&out, "---\n# Source: %s\n%s\n", filepath.Base(file), strings.TrimSpace(string(content)))
+	}
+
+	return []byte(out.String()), nil
 }
 
 // processManifest applies patches and edits when present, otherwise normalizes YAML formatting.
@@ -327,26 +500,42 @@ type cacheEntry struct {
 }
 
 // pullCacheKey returns a filesystem-safe directory name for the given OCI ref + version.
-func pullCacheKey(ref, version string) string {
-	sum := sha256.Sum256([]byte(ref + "@" + version))
+// The file layout is mixed in because merged and separate file layouts
+// must not share a cache entry.
+func pullCacheKey(ref, version string, layout deliveryv1alpha1.FileLayout) string {
+	sum := sha256.Sum256(fmt.Appendf(nil, "%s@%s#%s", ref, version, layout))
 	return fmt.Sprintf("%x", sum)
 }
 
-// artifactFilename returns the filename used for a cached artifact based on its media type.
-func artifactFilename(mediaType string) string {
-	if mediaType == oci.HelmChartLayerMediaType {
-		return "chart.tgz"
+// layoutPolicy returns the effective file layout for a raw manifest
+// source, defaulting to Single when unset.
+func layoutPolicy(render *deliveryv1alpha1.Render) deliveryv1alpha1.FileLayout {
+	if render != nil && render.Manifest != nil && render.Manifest.Layout != "" {
+		return render.Manifest.Layout
 	}
 
-	return "manifest.yaml"
+	return deliveryv1alpha1.FileLayoutSingle
+}
+
+// hasKustomization reports whether dir contains a top-level kustomization file.
+func hasKustomization(fs afero.Fs, dir string) bool {
+	for _, name := range []string{"kustomization.yaml", "kustomization.yml", "Kustomization"} {
+		if _, err := fs.Stat(filepath.Join(dir, name)); err == nil {
+			return true
+		}
+	}
+
+	return false
 }
 
 // pullWithCache returns a previously cached artifact when available, otherwise
 // pulls from the OCI registry and caches the result for future reconciles.
 // Version tags are treated as immutable — if a tag is re-pushed with different
 // content, remove the cache directory to force a fresh pull.
+// Non-Helm artifacts are merged into a single manifest.yaml unless the file
+// layout is Multi or the artifact contains a kustomization file.
 // It returns the media type, manifest digest, manifest annotations, and any error.
-func (rs *OrderService) pullWithCache(ctx context.Context, client oci.Client, ref, version, workDir string) (string, string, map[string]string, error) {
+func (rs *OrderService) pullWithCache(ctx context.Context, client oci.Client, ref, version, workDir string, layout deliveryv1alpha1.FileLayout) (string, string, map[string]string, error) {
 	logger := log.FromContext(ctx)
 
 	if rs.cacheDir == "" {
@@ -355,30 +544,23 @@ func (rs *OrderService) pullWithCache(ctx context.Context, client oci.Client, re
 			return "", "", nil, err
 		}
 
-		if mediaType != oci.HelmChartLayerMediaType {
-			if err := mergeYAMLFiles(rs.fs, workDir); err != nil {
-				return "", "", nil, fmt.Errorf("failed to merge manifest files: %w", err)
-			}
+		if err := rs.consolidatePulled(workDir, mediaType, layout); err != nil {
+			return "", "", nil, err
 		}
 
 		return mediaType, digest, annotations, nil
 	}
 
-	key := pullCacheKey(ref, version)
+	key := pullCacheKey(ref, version, layout)
 	entryDir := filepath.Join(rs.cacheDir, key)
 	metaPath := filepath.Join(entryDir, "meta.json")
 
 	if metaBytes, err := afero.ReadFile(rs.fs, metaPath); err == nil {
 		var entry cacheEntry
 		if err := json.Unmarshal(metaBytes, &entry); err == nil {
-			src := filepath.Join(entryDir, artifactFilename(entry.MediaType))
-			dst := filepath.Join(workDir, artifactFilename(entry.MediaType))
-
-			if data, err := afero.ReadFile(rs.fs, src); err == nil {
-				if err := afero.WriteFile(rs.fs, dst, data, 0600); err == nil {
-					logger.Info("Pulled source artifact from cache", "ref", ref, "version", version, "digest", entry.Digest)
-					return entry.MediaType, entry.Digest, entry.Annotations, nil
-				}
+			if err := rs.restoreCacheEntry(entryDir, workDir); err == nil {
+				logger.Info("Pulled source artifact from cache", "ref", ref, "version", version, "digest", entry.Digest)
+				return entry.MediaType, entry.Digest, entry.Annotations, nil
 			}
 		}
 
@@ -390,15 +572,57 @@ func (rs *OrderService) pullWithCache(ctx context.Context, client oci.Client, re
 		return "", "", nil, err
 	}
 
-	if mediaType != oci.HelmChartLayerMediaType {
-		if err := mergeYAMLFiles(rs.fs, workDir); err != nil {
-			return "", "", nil, fmt.Errorf("failed to merge manifest files: %w", err)
-		}
+	if err := rs.consolidatePulled(workDir, mediaType, layout); err != nil {
+		return "", "", nil, err
 	}
 
 	rs.populateCache(ctx, entryDir, metaPath, mediaType, digest, annotations, workDir)
 
 	return mediaType, digest, annotations, nil
+}
+
+// consolidatePulled merges a pulled raw manifest artifact into a single
+// manifest.yaml when the file layout requires it. Artifacts containing
+// a kustomization file are always left as separate files.
+func (rs *OrderService) consolidatePulled(workDir, mediaType string, layout deliveryv1alpha1.FileLayout) error {
+	if mediaType == oci.HelmChartLayerMediaType {
+		return nil
+	}
+
+	if layout == deliveryv1alpha1.FileLayoutMulti || hasKustomization(rs.fs, workDir) {
+		return nil
+	}
+
+	if err := mergeYAMLFiles(rs.fs, workDir); err != nil {
+		return fmt.Errorf("failed to merge manifest files: %w", err)
+	}
+
+	return nil
+}
+
+// restoreCacheEntry copies all files of a cache entry into workDir.
+func (rs *OrderService) restoreCacheEntry(entryDir, workDir string) error {
+	infos, err := afero.ReadDir(rs.fs, entryDir)
+	if err != nil {
+		return err
+	}
+
+	for _, info := range infos {
+		if info.IsDir() || info.Name() == "meta.json" {
+			continue
+		}
+
+		data, err := afero.ReadFile(rs.fs, filepath.Join(entryDir, info.Name()))
+		if err != nil {
+			return err
+		}
+
+		if err := afero.WriteFile(rs.fs, filepath.Join(workDir, info.Name()), data, 0600); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // populateCache writes the pulled artifact and its metadata to the cache entry
@@ -411,18 +635,27 @@ func (rs *OrderService) populateCache(ctx context.Context, entryDir, metaPath, m
 		return
 	}
 
-	src := filepath.Join(workDir, artifactFilename(mediaType))
-	dst := filepath.Join(entryDir, artifactFilename(mediaType))
-
-	data, err := afero.ReadFile(rs.fs, src)
+	infos, err := afero.ReadDir(rs.fs, workDir)
 	if err != nil {
-		logger.Info("Could not read artifact for caching, skipping cache", "error", err)
+		logger.Info("Could not read artifact directory for caching, skipping cache", "error", err)
 		return
 	}
 
-	if err := afero.WriteFile(rs.fs, dst, data, 0600); err != nil {
-		logger.Info("Could not write artifact to cache, skipping cache", "error", err)
-		return
+	for _, info := range infos {
+		if info.IsDir() {
+			continue
+		}
+
+		data, err := afero.ReadFile(rs.fs, filepath.Join(workDir, info.Name()))
+		if err != nil {
+			logger.Info("Could not read artifact for caching, skipping cache", "error", err)
+			return
+		}
+
+		if err := afero.WriteFile(rs.fs, filepath.Join(entryDir, info.Name()), data, 0600); err != nil {
+			logger.Info("Could not write artifact to cache, skipping cache", "error", err)
+			return
+		}
 	}
 
 	metaBytes, err := json.Marshal(cacheEntry{MediaType: mediaType, Digest: digest, Annotations: annotations})
@@ -435,12 +668,21 @@ func (rs *OrderService) populateCache(ctx context.Context, entryDir, metaPath, m
 	}
 }
 
-// mergeYAMLFiles merges all *.yaml files in dir into a single manifest.yaml
+// mergeYAMLFiles merges all top-level YAML files in dir into a single
+// manifest.yaml. Kustomization files are excluded from the merge.
 func mergeYAMLFiles(fs afero.Fs, dir string) error {
-	pattern := filepath.Join(dir, "*.yaml")
-	files, err := afero.Glob(fs, pattern)
+	all, err := yamlFiles(fs, dir)
 	if err != nil {
-		return fmt.Errorf("read directory %q: %w", dir, err)
+		return err
+	}
+
+	var files []string
+	for _, file := range all {
+		switch filepath.Base(file) {
+		case "kustomization.yaml", "kustomization.yml", "Kustomization":
+			continue
+		}
+		files = append(files, file)
 	}
 
 	if len(files) == 0 {
@@ -450,8 +692,6 @@ func mergeYAMLFiles(fs afero.Fs, dir string) error {
 	if len(files) == 1 && filepath.Base(files[0]) == "manifest.yaml" {
 		return nil
 	}
-
-	sort.Strings(files)
 
 	var renderedManifest strings.Builder
 	for _, file := range files {

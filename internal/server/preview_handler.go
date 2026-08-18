@@ -115,3 +115,95 @@ func handlePreviewOrder(deps *apiDeps) http.HandlerFunc {
 		_, _ = w.Write(manifest)
 	}
 }
+
+// handlePreviewOrderFiles handles POST /api/v1/orders/preview/files.
+// It runs the same pipeline as the preview endpoint but returns the rendered
+// files individually, preserving the source artifact's file layout.
+func handlePreviewOrderFiles(deps *apiDeps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps == nil {
+			unavailable(w)
+			return
+		}
+
+		var req PreviewOrderRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			respondError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %s", err))
+			return
+		}
+
+		name := req.Name
+		namespace := req.Namespace
+		if namespace == "" {
+			namespace = defaultNamespace
+		}
+
+		order := &deliveryv1alpha1.Order{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: namespace,
+			},
+			Spec: deliveryv1alpha1.OrderSpec{
+				Render:  renderFromDTO(req.Render),
+				Patches: patchesFromDTO(req.Patches),
+				Edits:   patchesFromDTO(req.Edits),
+			},
+		}
+
+		order.Spec.Source = sourceFromDTO(req.Source)
+
+		if req.MenuRef != nil {
+			order.Spec.MenuRef = &deliveryv1alpha1.MenuRef{Name: req.MenuRef.Name}
+		}
+
+		var spec *resolve.EffectiveSpec
+		var specErr error
+
+		if req.MenuRef != nil {
+			menu := &deliveryv1alpha1.Menu{}
+			if err := deps.reader.Get(r.Context(), types.NamespacedName{Name: req.MenuRef.Name}, menu); err != nil {
+				respondError(w, http.StatusNotFound, fmt.Sprintf("menu %q not found", req.MenuRef.Name))
+				return
+			}
+			spec, specErr = resolve.ForMenu(menu, order)
+		} else {
+			spec, specErr = resolve.FromOrder(order)
+		}
+
+		if specErr != nil {
+			respondError(w, http.StatusUnprocessableEntity, specErr.Error())
+			return
+		}
+
+		resolvedSource, sourceClient, err := credential.NewKubeResolver(deps.reader).ResolveSource(r.Context(), spec.Source, namespace)
+		if err != nil {
+			respondError(w, http.StatusUnprocessableEntity, fmt.Sprintf("failed to resolve source: %s", err))
+			return
+		}
+
+		svc := service.NewOrderService(deps.ociClient, deps.fs, "")
+
+		files, err := svc.PreviewFiles(
+			r.Context(),
+			resolvedSource,
+			spec.Render,
+			spec.Patches,
+			spec.Edits,
+			name,
+			namespace,
+			sourceClient,
+		)
+		if err != nil {
+			deps.logger.Error(err, "Failed to preview Order files")
+			respondError(w, http.StatusBadGateway, fmt.Sprintf("failed to render preview: %s", err))
+			return
+		}
+
+		out := make([]ArtifactFileDTO, 0, len(files))
+		for _, f := range files {
+			out = append(out, ArtifactFileDTO{Path: f.Path, Content: f.Content})
+		}
+
+		respondJSON(w, http.StatusOK, out)
+	}
+}

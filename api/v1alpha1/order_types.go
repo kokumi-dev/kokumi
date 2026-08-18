@@ -85,13 +85,40 @@ type HelmRender struct {
 	Values *apiextensionsv1.JSON `json:"values,omitempty"`
 }
 
+// FileLayout controls how a multi-file raw manifest artifact is stored
+// in the rendered Preparation artifact.
+// +kubebuilder:validation:Enum=Single;Multi
+type FileLayout string
+
+const (
+	// FileLayoutSingle merges all YAML files into a single manifest.yaml.
+	FileLayoutSingle FileLayout = "Single"
+	// FileLayoutMulti keeps the artifact's individual files as they are.
+	FileLayoutMulti FileLayout = "Multi"
+)
+
+// ManifestRender defines rendering options for raw manifest bundle sources.
+type ManifestRender struct {
+	// layout controls whether the artifact's YAML files are merged into a
+	// single manifest.yaml (Single) or kept as separate files (Multi).
+	// Artifacts containing a kustomization.yaml are never merged.
+	// +optional
+	// +kubebuilder:default=Single
+	Layout FileLayout `json:"layout,omitempty"`
+}
+
 // Render defines optional rendering to apply to the source artifact.
 // When absent, the source is treated as a pre-rendered manifest bundle.
+// +kubebuilder:validation:XValidation:rule="!(has(self.helm) && has(self.manifest))",message="helm and manifest are mutually exclusive"
 type Render struct {
 	// helm renders the source OCI artifact as a Helm chart.
 	// When set, the source must be a Helm chart in OCI format.
 	// +optional
 	Helm *HelmRender `json:"helm,omitempty"`
+
+	// manifest configures rendering of a raw manifest bundle source.
+	// +optional
+	Manifest *ManifestRender `json:"manifest,omitempty"`
 }
 
 // OCIDestination defines where the rendered, configured artifact

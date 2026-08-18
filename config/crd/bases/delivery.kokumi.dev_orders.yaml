@@ -235,7 +235,25 @@ spec:
                           Equivalent to a final -f values.yaml pass.
                         x-kubernetes-preserve-unknown-fields: true
                     type: object
+                  manifest:
+                    description: manifest configures rendering of a raw manifest bundle
+                      source.
+                    properties:
+                      layout:
+                        default: Single
+                        description: |-
+                          layout controls whether the artifact's YAML files are merged into a
+                          single manifest.yaml (Single) or kept as separate files (Multi).
+                          Artifacts containing a kustomization.yaml are never merged.
+                        enum:
+                        - Single
+                        - Multi
+                        type: string
+                    type: object
                 type: object
+                x-kubernetes-validations:
+                - message: helm and manifest are mutually exclusive
+                  rule: '!(has(self.helm) && has(self.manifest))'
               source:
                 description: |-
                   source defines the immutable base artifact to render from.

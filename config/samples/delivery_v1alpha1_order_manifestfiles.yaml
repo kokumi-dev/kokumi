@@ -10,6 +10,10 @@ spec:
     oci: oci://ghcr.io/kokumi-dev/testdata/external-dns
     version: "0.1.0"
 
+  render:
+    manifest:
+      layout: Multi
+
   patches:
     - target:
         kind: Deployment

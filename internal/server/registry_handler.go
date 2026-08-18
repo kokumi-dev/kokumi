@@ -213,18 +213,24 @@ func handleGetRegistryArtifact(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		manifest, err := readYAMLFiles(deps.fs, tmpDir)
+		files, err := listArtifactFiles(deps.fs, tmpDir)
 		if err != nil {
 			deps.logger.Error(err, "Failed to read manifest files", "ref", ref, "version", version)
 			respondError(w, http.StatusBadGateway, "could not read manifest: "+err.Error())
 			return
 		}
 
+		parts := make([]string, 0, len(files))
+		for _, f := range files {
+			parts = append(parts, f.Content)
+		}
+
 		respondJSON(w, http.StatusOK, ArtifactInfoDTO{
 			IsHelm:     false,
 			IsManifest: true,
 			Digest:     digest,
-			Manifest:   manifest,
+			Manifest:   strings.Join(parts, "\n---\n"),
+			Files:      files,
 		})
 	}
 }
