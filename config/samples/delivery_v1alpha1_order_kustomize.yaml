@@ -4,20 +4,20 @@ metadata:
   labels:
     app.kubernetes.io/name: kokumi
     app.kubernetes.io/managed-by: kustomize
-  name: external-secrets
+  name: podinfo-kustomize
 spec:
   source:
-    oci: oci://ghcr.io/kokumi-dev/testdata/external-secrets
-    version: "0.1.0"
+    oci: oci://ghcr.io/stefanprodan/manifests/podinfo
+    version: "6.14.1"
 
   patches:
     - target:
         kind: Deployment
-        name: external-secrets-webhook
+        name: podinfo
       set:
-        .spec.replicas: "3"
+        .spec.replicas: "2"
 
   destination:
-    oci: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/external-secrets
+    oci: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/podinfo-kustomize
 
   autoDeploy: Disabled

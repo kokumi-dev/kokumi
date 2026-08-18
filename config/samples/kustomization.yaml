@@ -1,9 +1,11 @@
 ## Append samples of your project ##
+## Only user-creatable resources are listed here. Recipe, Preparation and
+## Serving are controller-managed and must never be created by users.
 resources:
-- delivery_v1alpha1_recipe.yaml
-- delivery_v1alpha1_preparation.yaml
-- delivery_v1alpha1_serving.yaml
-- delivery_v1alpha1_order.yaml
+- delivery_v1alpha1_order_helm.yaml
+- delivery_v1alpha1_order_kustomize.yaml
+- delivery_v1alpha1_order_manifest.yaml
+- delivery_v1alpha1_order_manifestfiles.yaml
 - delivery_v1alpha1_menu.yaml
 - delivery_v1alpha1_pantry.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

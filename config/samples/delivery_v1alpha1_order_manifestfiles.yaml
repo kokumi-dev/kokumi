@@ -4,20 +4,20 @@ metadata:
   labels:
     app.kubernetes.io/name: kokumi
     app.kubernetes.io/managed-by: kustomize
-  name: external-secrets
+  name: external-dns
 spec:
   source:
-    oci: oci://ghcr.io/kokumi-dev/testdata/external-secrets
+    oci: oci://ghcr.io/kokumi-dev/testdata/external-dns
     version: "0.1.0"
 
   patches:
     - target:
         kind: Deployment
-        name: external-secrets-webhook
+        name: external-dns
       set:
-        .spec.replicas: "3"
+        .spec.replicas: "2"
 
   destination:
-    oci: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/external-secrets
+    oci: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/external-dns
 
   autoDeploy: Disabled

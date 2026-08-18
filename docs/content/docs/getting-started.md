@@ -82,7 +82,7 @@ metadata:
   name: external-secrets
 spec:
   source:
-    oci: oci://ghcr.io/kokumi-dev/external-secrets
+    oci: oci://ghcr.io/kokumi-dev/testdata/external-secrets
     version: "0.1.0"
 
   patches:
