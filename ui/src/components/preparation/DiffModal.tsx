@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { getManifest } from '../../api/client'
-import type { Preparation } from '../../api/types'
+import { getManifest, getManifestFiles } from '../../api/client'
+import type { ArtifactFile, Preparation } from '../../api/types'
 import { computeDiff, filterContext } from '../../utils/diff'
 import { filterCRDDocuments, hasCRDDocuments } from '../../utils/manifest'
 import Modal from '../shared/Modal'
@@ -27,7 +27,7 @@ export default function DiffModal({ preparation, activePreparation, onClose }: P
   const [state, setState] = useState<
     | { status: 'loading' }
     | { status: 'error'; message: string }
-    | { status: 'ready'; before: string; after: string }
+    | { status: 'ready'; before: string; after: string; beforeFiles: ArtifactFile[] | null; afterFiles: ArtifactFile[] | null }
   >({ status: 'loading' })
 
   const [showFull, setShowFull] = useState(false)
@@ -37,9 +37,11 @@ export default function DiffModal({ preparation, activePreparation, onClose }: P
     Promise.all([
       getManifest(activePreparation.namespace, activePreparation.name),
       getManifest(preparation.namespace, preparation.name),
+      getManifestFiles(activePreparation.namespace, activePreparation.name).catch(() => null),
+      getManifestFiles(preparation.namespace, preparation.name).catch(() => null),
     ])
-      .then(([before, after]) => {
-        setState({ status: 'ready', before, after })
+      .then(([before, after, beforeFiles, afterFiles]) => {
+        setState({ status: 'ready', before, after, beforeFiles, afterFiles })
       })
       .catch((e: Error) => setState({ status: 'error', message: e.message }))
   }, [preparation.namespace, preparation.name, activePreparation.namespace, activePreparation.name])
@@ -47,6 +49,20 @@ export default function DiffModal({ preparation, activePreparation, onClose }: P
   const hasCRDs =
     state.status === 'ready' &&
     (hasCRDDocuments(state.before) || hasCRDDocuments(state.after))
+
+  const fileDiffs = useMemo(() => {
+    if (state.status !== 'ready' || !state.beforeFiles || !state.afterFiles) return null
+    if (state.beforeFiles.length <= 1 && state.afterFiles.length <= 1) return null
+
+    const beforeMap = new Map(state.beforeFiles.map((f) => [f.path, f.content]))
+    const paths = [...new Set([...state.beforeFiles.map((f) => f.path), ...state.afterFiles.map((f) => f.path)])].sort()
+
+    return paths.map((path) => {
+      const before = beforeMap.get(path) ?? ''
+      const after = state.afterFiles!.find((f) => f.path === path)?.content ?? ''
+      return { path, lines: computeDiff(before, after) }
+    })
+  }, [state])
 
   const allLines = useMemo(() => {
     if (state.status !== 'ready') return []
@@ -108,7 +124,18 @@ export default function DiffModal({ preparation, activePreparation, onClose }: P
             </div>
           </div>
 
-          <DiffView lines={displayLines} />
+          {fileDiffs ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {fileDiffs.map(({ path, lines }) => (
+                <div key={path}>
+                  <div className={styles.fileHeader}>{path}</div>
+                  <DiffView lines={filterContext(lines, showFull ? Infinity : CONTEXT_SIZE)} />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <DiffView lines={displayLines} />
+          )}
         </>
       )}
     </Modal>

@@ -33,8 +33,15 @@ export interface HelmRender {
   values: Record<string, unknown>
 }
 
+export type FileLayout = 'Single' | 'Multi'
+
+export interface ManifestRender {
+  layout: FileLayout
+}
+
 export interface Render {
   helm?: HelmRender
+  manifest?: ManifestRender
 }
 
 export interface Condition {
@@ -163,11 +170,17 @@ export interface Pantry {
   createdAt?: string
 }
 
+export interface ArtifactFile {
+  path: string
+  content: string
+}
+
 export interface ArtifactInfo {
   isHelm: boolean
   isManifest: boolean
   digest?: string
   manifest?: string
+  files?: ArtifactFile[]
   chartInfo?: {
     name: string
     version: string
@@ -224,14 +237,21 @@ export const orderToFormData = (r: Order): OrderFormData => ({
   menuRef: r.menuRef,
   source: r.source ? { ...r.source } : undefined,
   destination: r.destination ? { ...r.destination } : {},
-  render: r.render?.helm
+  render: r.render
     ? {
-        helm: {
-          releaseName: r.render.helm.releaseName ?? '',
-          namespace: r.render.helm.namespace ?? '',
-          includeCRDs: r.render.helm.includeCRDs ?? false,
-          values: r.render.helm.values ?? {},
-        },
+        ...(r.render.helm
+          ? {
+              helm: {
+                releaseName: r.render.helm.releaseName ?? '',
+                namespace: r.render.helm.namespace ?? '',
+                includeCRDs: r.render.helm.includeCRDs ?? false,
+                values: r.render.helm.values ?? {},
+              },
+            }
+          : {}),
+        ...(r.render.manifest
+          ? { manifest: { layout: r.render.manifest.layout ?? 'Single' } }
+          : {}),
       }
     : undefined,
   patches: (r.patches ?? []).map((p) => ({

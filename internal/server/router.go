@@ -29,6 +29,7 @@ func addRoutes(
 	mux.HandleFunc("GET /api/v1/orders", handleListOrders(deps))
 	mux.HandleFunc("POST /api/v1/orders", handleCreateOrder(deps))
 	mux.HandleFunc("POST /api/v1/orders/preview", handlePreviewOrder(deps))
+	mux.HandleFunc("POST /api/v1/orders/preview/files", handlePreviewOrderFiles(deps))
 	mux.HandleFunc("GET /api/v1/orders/{namespace}/{name}", handleGetOrder(deps))
 	mux.HandleFunc("PUT /api/v1/orders/{namespace}/{name}", handleUpdateOrder(deps))
 	mux.HandleFunc("PUT /api/v1/orders/{namespace}/{name}/edits", handleUpdateOrderEdits(deps))
@@ -56,6 +57,7 @@ func addRoutes(
 
 	// Preparation manifest (rendered YAML from OCI)
 	mux.HandleFunc("GET /api/v1/preparations/{namespace}/{name}/manifest", handleGetPreparationManifest(deps))
+	mux.HandleFunc("GET /api/v1/preparations/{namespace}/{name}/manifest/files", handleGetPreparationManifestFiles(deps))
 
 	distFS, err := fs.Sub(staticFiles, "web/dist")
 	if err != nil {

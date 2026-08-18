@@ -6,7 +6,7 @@ import YamlEditor from '../shared/YamlEditor'
 import CommitMessageModal from '../shared/CommitMessageModal'
 import PreviewTab from './PreviewTab'
 import DiffTab from './DiffTab'
-import type { Order, OrderFormData, Patch, HelmRender, Menu, ChartInfo } from '../../api/types'
+import type { Order, OrderFormData, Patch, HelmRender, Menu, ChartInfo, FileLayout } from '../../api/types'
 import { emptyOrderForm, orderToFormData } from '../../api/types'
 import { objectToYaml, yamlToValues } from '../../utils/yaml'
 import { getDefaultRegistry, listOCITags, getChartInfo } from '../../api/client'
@@ -56,6 +56,8 @@ function formToYaml(data: OrderFormData): string {
     if (h.includeCRDs) helmDoc.includeCRDs = true
     if (Object.keys(h.values).length > 0) helmDoc.values = h.values
     doc.render = { helm: helmDoc }
+  } else if (data.render?.manifest) {
+    doc.render = { manifest: { layout: data.render.manifest.layout } }
   }
   if (data.patches.length > 0) {
     doc.patches = data.patches.map((p) => ({
@@ -91,6 +93,13 @@ function yamlToPartialForm(text: string): Omit<OrderFormData, 'name' | 'namespac
         values: h.values && typeof h.values === 'object' && !Array.isArray(h.values)
           ? (h.values as Record<string, unknown>)
           : {},
+      },
+    }
+  } else if (rawRender?.manifest) {
+    const m = rawRender.manifest as Record<string, unknown>
+    render = {
+      manifest: {
+        layout: m.layout === 'Multi' ? 'Multi' : 'Single',
       },
     }
   }
@@ -267,6 +276,22 @@ export default function OrderFormModal({ order, menuRef, menu, menus, onClose, o
     setFormData((prev) => ({ ...prev, render: { helm: h } }))
   }
 
+  function setLayout(policy: FileLayout) {
+    setFormData((prev) => {
+      if (policy === 'Single') {
+        // Single is the default — omit the manifest block entirely.
+        if (!prev.render?.manifest) return prev
+        const rest = { ...prev.render }
+        delete rest.manifest
+        return { ...prev, render: Object.keys(rest).length > 0 ? rest : undefined }
+      }
+      return {
+        ...prev,
+        render: { ...(prev.render ?? {}), manifest: { layout: policy } },
+      }
+    })
+  }
+
   function addPatch() {
     setFormData((prev) => ({
       ...prev,
@@ -401,6 +426,7 @@ export default function OrderFormModal({ order, menuRef, menu, menus, onClose, o
             onEnableHelm={enableHelm}
             onDisableHelm={disableHelm}
             onUpdateHelm={updateHelm}
+            onSetLayout={setLayout}
             onAddPatch={addPatch}
             onRemovePatch={removePatch}
             onUpdatePatch={updatePatch}
@@ -438,6 +464,7 @@ interface FormViewProps {
   onEnableHelm: () => void
   onDisableHelm: () => void
   onUpdateHelm: (h: HelmRender) => void
+  onSetLayout: (policy: FileLayout) => void
   onAddPatch: () => void
   onRemovePatch: (idx: number) => void
   onUpdatePatch: (idx: number, p: Patch) => void
@@ -455,6 +482,7 @@ function FormView({
   onEnableHelm,
   onDisableHelm,
   onUpdateHelm,
+  onSetLayout,
   onAddPatch,
   onRemovePatch,
   onUpdatePatch,
@@ -848,6 +876,19 @@ function FormView({
                         chartInfo={chartInfo}
                         chartInfoLoading={chartInfoLoading}
                       />
+                    </div>
+                  )}
+                  {!formData.render?.helm && !menu && (
+                    <div className={styles.fieldGroup} style={{ marginTop: 10 }}>
+                      <label className={styles.label}>Manifest files</label>
+                      <select
+                        className={styles.input}
+                        value={formData.render?.manifest?.layout ?? 'Single'}
+                        onChange={(e) => onSetLayout(e.target.value as FileLayout)}
+                      >
+                        <option value="Single">Single manifest file</option>
+                        <option value="Multi">Keep separate files</option>
+                      </select>
                     </div>
                   )}
                 </>

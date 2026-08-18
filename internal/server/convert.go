@@ -163,43 +163,71 @@ func orderToDTO(r deliveryv1alpha1.Order, activePreparation string) OrderDTO {
 
 // renderToDTO converts a Render CRD spec into a RenderDTO, returning nil when r is nil.
 func renderToDTO(r *deliveryv1alpha1.Render) *RenderDTO {
-	if r == nil || r.Helm == nil {
+	if r == nil {
 		return nil
 	}
-	h := r.Helm
-	var vals json.RawMessage
-	if h.Values != nil {
-		vals = h.Values.Raw
-	}
-	return &RenderDTO{
-		Helm: &HelmRenderDTO{
+
+	var dto RenderDTO
+
+	if h := r.Helm; h != nil {
+		var vals json.RawMessage
+		if h.Values != nil {
+			vals = h.Values.Raw
+		}
+		dto.Helm = &HelmRenderDTO{
 			ReleaseName: h.ReleaseName,
 			Namespace:   h.Namespace,
 			IncludeCRDs: h.IncludeCRDs,
 			Values:      vals,
-		},
+		}
 	}
+
+	if m := r.Manifest; m != nil {
+		dto.Manifest = &ManifestRenderDTO{
+			Layout: string(m.Layout),
+		}
+	}
+
+	if dto.Helm == nil && dto.Manifest == nil {
+		return nil
+	}
+
+	return &dto
 }
 
 // renderFromDTO converts a RenderDTO (from a request body) into a Render CRD spec.
-// Returns nil when dto is nil or contains no helm block.
+// Returns nil when dto is nil or contains no helm or manifest block.
 func renderFromDTO(dto *RenderDTO) *deliveryv1alpha1.Render {
-	if dto == nil || dto.Helm == nil {
+	if dto == nil {
 		return nil
 	}
-	h := dto.Helm
-	var vals *apiextensionsv1.JSON
-	if len(h.Values) > 0 {
-		vals = &apiextensionsv1.JSON{Raw: h.Values}
-	}
-	return &deliveryv1alpha1.Render{
-		Helm: &deliveryv1alpha1.HelmRender{
+
+	var r deliveryv1alpha1.Render
+
+	if h := dto.Helm; h != nil {
+		var vals *apiextensionsv1.JSON
+		if len(h.Values) > 0 {
+			vals = &apiextensionsv1.JSON{Raw: h.Values}
+		}
+		r.Helm = &deliveryv1alpha1.HelmRender{
 			ReleaseName: h.ReleaseName,
 			Namespace:   h.Namespace,
 			IncludeCRDs: h.IncludeCRDs,
 			Values:      vals,
-		},
+		}
 	}
+
+	if m := dto.Manifest; m != nil {
+		r.Manifest = &deliveryv1alpha1.ManifestRender{
+			Layout: deliveryv1alpha1.FileLayout(m.Layout),
+		}
+	}
+
+	if r.Helm == nil && r.Manifest == nil {
+		return nil
+	}
+
+	return &r
 }
 
 // preparationToDTO converts a Preparation CRD object into a PreparationDTO.

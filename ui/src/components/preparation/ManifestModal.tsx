@@ -1,11 +1,12 @@
 import { useEffect, useState, useCallback } from 'react'
-import { getManifest, saveOrderEdits } from '../../api/client'
-import type { Order, Preparation } from '../../api/types'
+import { getManifest, getManifestFiles, saveOrderEdits } from '../../api/client'
+import type { ArtifactFile, Order, Preparation } from '../../api/types'
 import { computeEdits } from '../../utils/edits'
 import { filterCRDDocuments, hasCRDDocuments } from '../../utils/manifest'
 import Modal from '../shared/Modal'
 import Btn from '../shared/Btn'
 import YamlEditor from '../shared/YamlEditor'
+import FileInspector from '../shared/FileInspector'
 import CommitMessageModal from '../shared/CommitMessageModal'
 
 interface Props {
@@ -23,6 +24,7 @@ interface Props {
  */
 export default function ManifestModal({ preparation: prep, order, onClose }: Props) {
   const [content, setContent] = useState<string | null>(null)
+  const [files, setFiles] = useState<ArtifactFile[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [hideCRDs, setHideCRDs] = useState(true)
   const [editing, setEditing] = useState(false)
@@ -36,7 +38,12 @@ export default function ManifestModal({ preparation: prep, order, onClose }: Pro
     getManifest(prep.namespace, prep.name)
       .then(setContent)
       .catch((e: Error) => setError(e.message))
+    getManifestFiles(prep.namespace, prep.name)
+      .then(setFiles)
+      .catch(() => setFiles(null))
   }, [prep.namespace, prep.name])
+
+  const multiFile = files !== null && files.length > 1
 
   const hasCRDs = content !== null && hasCRDDocuments(content)
   const displayContent = content !== null ? filterCRDDocuments(content, hideCRDs) : null
@@ -64,6 +71,17 @@ export default function ManifestModal({ preparation: prep, order, onClose }: Pro
     setShowCommitModal(true)
   }, [content, displayContent, editedContent, order])
 
+  const handleFileSave = useCallback(
+    (editedFiles: ArtifactFile[]) => {
+      if (!content || !order) return
+      const joined = editedFiles.map((f) => f.content).join('\n---\n')
+      const edits = computeEdits(content, joined, order.edits ?? [])
+      setPendingEdits(edits)
+      setShowCommitModal(true)
+    },
+    [content, order],
+  )
+
   const handleCommit = useCallback(async (commitMessage: string) => {
     if (!order || pendingEdits === null) return
     setSaving(true)
@@ -73,12 +91,13 @@ export default function ManifestModal({ preparation: prep, order, onClose }: Pro
       setEditedContent('')
       setShowCommitModal(false)
       setPendingEdits(null)
+      if (multiFile) onClose()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save edits')
     } finally {
       setSaving(false)
     }
-  }, [order, pendingEdits])
+  }, [order, pendingEdits, multiFile, onClose])
 
   function copyToClipboard() {
     const text = editing ? editedContent : displayContent
@@ -90,7 +109,7 @@ export default function ManifestModal({ preparation: prep, order, onClose }: Pro
 
   const footer = (
     <>
-      {displayContent && !editing && canEdit && (
+      {displayContent && !editing && canEdit && !multiFile && (
         <Btn variant="primary" size="sm" onClick={handleStartEdit}>
           Edit
         </Btn>
@@ -148,13 +167,20 @@ export default function ManifestModal({ preparation: prep, order, onClose }: Pro
                   </span>
                 )}
               </div>
-              {hasCRDs && !editing && (
+              {hasCRDs && !editing && !multiFile && (
                 <Btn variant="secondary" size="sm" onClick={() => setHideCRDs((v) => !v)}>
                   {hideCRDs ? 'Show CRDs' : 'Hide CRDs'}
                 </Btn>
               )}
             </div>
-            {editing ? (
+            {multiFile && files ? (
+              <FileInspector
+                files={files}
+                editable={canEdit}
+                onSave={handleFileSave}
+                saving={saving}
+              />
+            ) : editing ? (
               <YamlEditor value={editedContent} onChange={setEditedContent} tall />
             ) : (
               <YamlEditor value={displayContent} readOnly tall />

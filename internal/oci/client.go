@@ -5,6 +5,11 @@ import "context"
 // HelmChartLayerMediaType is the CNCF Helm OCI media type for chart content.
 const HelmChartLayerMediaType = "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
 
+// FluxContentMediaType is the Flux OCI media type for a kustomize/manifest
+// content layer. Unlike ORAS "file" artifacts, Flux layers carry no
+// io.deis.oras.content.unpack annotation, so they must be extracted explicitly.
+const FluxContentMediaType = "application/vnd.cncf.flux.content.v1.tar+gzip"
+
 // AnnotationParentDigest is the OCI manifest annotation key that records the digest
 // of the artifact produced by the immediately preceding Preparation for the same Order.
 // Its presence on a manifest makes the revision chain explicit and tamper-evident.
@@ -16,7 +21,8 @@ type Client interface {
 	// It returns the media type of the primary layer, the manifest digest, the
 	// manifest annotations, and any error.
 	// For Helm charts the media type is HelmChartLayerMediaType and the blob is
-	// written to targetDir/chart.tgz. For all other artifacts manifest.yaml is written.
+	// written to targetDir/chart.tgz. For all other artifacts the layer's files
+	// are extracted into targetDir.
 	Pull(ctx context.Context, ref, tag, targetDir string) (mediaType, digest string, annotations map[string]string, err error)
 
 	// Push pushes an OCI artifact from sourceDir to a registry and returns its digest.

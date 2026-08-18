@@ -1,5 +1,5 @@
 import { authHeaders, setToken } from './auth'
-import type { Order, Preparation, OrderFormData, Menu, MenuFormData, Patch, ChartInfo, Pantry, PantryFormData, ArtifactInfo } from './types'
+import type { Order, Preparation, OrderFormData, Menu, MenuFormData, Patch, ChartInfo, Pantry, PantryFormData, ArtifactInfo, ArtifactFile } from './types'
 
 // All API calls are relative so they work both in dev (proxied by Vite) and
 // in production (served from the same Go binary).
@@ -154,6 +154,13 @@ export function previewOrder(data: OrderFormData): Promise<string> {
   })
 }
 
+export function previewOrderFiles(data: OrderFormData): Promise<ArtifactFile[]> {
+  return request<ArtifactFile[]>('/orders/preview/files', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
 export function getManifest(
   namespace: string,
   prepName: string,
@@ -175,6 +182,15 @@ export function getManifest(
       }
       return res.text()
     },
+  )
+}
+
+export function getManifestFiles(
+  namespace: string,
+  prepName: string,
+): Promise<ArtifactFile[]> {
+  return request<ArtifactFile[]>(
+    `/preparations/${namespace}/${prepName}/manifest/files`,
   )
 }
 

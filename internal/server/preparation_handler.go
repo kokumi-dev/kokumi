@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
@@ -123,7 +124,23 @@ func fetchManifest(ctx context.Context, ociClient oci.Client, fs afero.Fs, ociRe
 // readYAMLFiles walks dir on the given filesystem and concatenates all
 // .yaml/.yml/.json files with "---" separators.
 func readYAMLFiles(fs afero.Fs, dir string) (string, error) {
-	var parts []string
+	files, err := listArtifactFiles(fs, dir)
+	if err != nil {
+		return "", err
+	}
+
+	parts := make([]string, 0, len(files))
+	for _, f := range files {
+		parts = append(parts, f.Content)
+	}
+
+	return strings.Join(parts, "\n---\n"), nil
+}
+
+// listArtifactFiles walks dir on the given filesystem and returns all
+// .yaml/.yml/.json files with their paths relative to dir, sorted by path.
+func listArtifactFiles(fs afero.Fs, dir string) ([]ArtifactFileDTO, error) {
+	var files []ArtifactFileDTO
 
 	err := afero.Walk(fs, dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -142,16 +159,82 @@ func readYAMLFiles(fs afero.Fs, dir string) (string, error) {
 		if err != nil {
 			return fmt.Errorf("reading %s: %w", path, err)
 		}
-		parts = append(parts, string(data))
+
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			rel = filepath.Base(path)
+		}
+
+		files = append(files, ArtifactFileDTO{
+			Path:    filepath.ToSlash(rel),
+			Content: string(data),
+		})
 		return nil
 	})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	if len(parts) == 0 {
-		return "", fmt.Errorf("no YAML/JSON files found in artifact")
+	if len(files) == 0 {
+		return nil, fmt.Errorf("no YAML/JSON files found in artifact")
 	}
 
-	return strings.Join(parts, "\n---\n"), nil
+	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+
+	return files, nil
+}
+
+// handleGetPreparationManifestFiles handles GET /api/v1/preparations/{namespace}/{name}/manifest/files.
+// It returns the individual YAML files of the Preparation's OCI artifact,
+// preserving the artifact's file layout.
+func handleGetPreparationManifestFiles(deps *apiDeps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps == nil {
+			unavailable(w)
+			return
+		}
+
+		namespace := r.PathValue("namespace")
+		name := r.PathValue("name")
+
+		prep := &deliveryv1alpha1.Preparation{}
+		if err := deps.reader.Get(r.Context(), types.NamespacedName{Namespace: namespace, Name: name}, prep); err != nil {
+			if client.IgnoreNotFound(err) == nil {
+				respondError(w, http.StatusNotFound, fmt.Sprintf("preparation %s/%s not found", namespace, name))
+				return
+			}
+			deps.logger.Error(err, "Failed to get Preparation", "namespace", namespace, "name", name)
+			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get preparation: %s", err))
+			return
+		}
+
+		rawRef := strings.TrimPrefix(prep.Spec.Artifact.OCIRef, "oci://")
+		parts := strings.SplitN(rawRef, "@", 2)
+		if len(parts) != 2 {
+			respondError(w, http.StatusBadRequest, fmt.Sprintf("invalid OCI reference format: %q", prep.Spec.Artifact.OCIRef))
+			return
+		}
+
+		tmpDir, err := afero.TempDir(deps.fs, "", "kokumi-manifest-*")
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "could not create temp directory")
+			return
+		}
+		defer deps.fs.RemoveAll(tmpDir) //nolint:errcheck
+
+		if _, _, _, err := deps.ociClient.Pull(r.Context(), parts[0], parts[1], tmpDir); err != nil {
+			deps.logger.Error(err, "Failed to pull artifact", "ociRef", prep.Spec.Artifact.OCIRef)
+			respondError(w, http.StatusBadGateway, "could not pull artifact: "+err.Error())
+			return
+		}
+
+		files, err := listArtifactFiles(deps.fs, tmpDir)
+		if err != nil {
+			deps.logger.Error(err, "Failed to read manifest files", "ociRef", prep.Spec.Artifact.OCIRef)
+			respondError(w, http.StatusBadGateway, "could not read manifest files: "+err.Error())
+			return
+		}
+
+		respondJSON(w, http.StatusOK, files)
+	}
 }

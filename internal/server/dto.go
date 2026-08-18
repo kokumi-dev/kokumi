@@ -70,9 +70,15 @@ type HelmRenderDTO struct {
 	Values      json.RawMessage `json:"values,omitempty"`
 }
 
+// ManifestRenderDTO is the data-transfer representation of a ManifestRender.
+type ManifestRenderDTO struct {
+	Layout string `json:"layout,omitempty"`
+}
+
 // RenderDTO is the data-transfer representation of a Render.
 type RenderDTO struct {
-	Helm *HelmRenderDTO `json:"helm,omitempty"`
+	Helm     *HelmRenderDTO     `json:"helm,omitempty"`
+	Manifest *ManifestRenderDTO `json:"manifest,omitempty"`
 }
 
 // MenuRefDTO is the data-transfer representation of a MenuRef.
@@ -268,13 +274,20 @@ type UpdatePantryRequest struct {
 	SecretRef   string `json:"secretRef,omitempty"`
 }
 
+// ArtifactFileDTO is a single file of a raw manifest bundle artifact.
+type ArtifactFileDTO struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+}
+
 // ArtifactInfoDTO contains metadata about an OCI artifact at a specific tag.
 type ArtifactInfoDTO struct {
-	IsHelm     bool          `json:"isHelm"`
-	IsManifest bool          `json:"isManifest"`
-	Digest     string        `json:"digest,omitempty"`
-	Manifest   string        `json:"manifest,omitempty"`
-	ChartInfo  *ChartInfoDTO `json:"chartInfo,omitempty"`
+	IsHelm     bool              `json:"isHelm"`
+	IsManifest bool              `json:"isManifest"`
+	Digest     string            `json:"digest,omitempty"`
+	Manifest   string            `json:"manifest,omitempty"`
+	Files      []ArtifactFileDTO `json:"files,omitempty"`
+	ChartInfo  *ChartInfoDTO     `json:"chartInfo,omitempty"`
 }
 
 // ChartInfoDTO contains Helm chart metadata extracted from a chart artifact.
