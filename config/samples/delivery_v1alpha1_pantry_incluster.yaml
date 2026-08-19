@@ -1,0 +1,10 @@
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Pantry
+metadata:
+  labels:
+    app.kubernetes.io/name: kokumi
+    app.kubernetes.io/managed-by: kustomize
+  name: in-cluster-external-dns
+spec:
+  url: oci://kokumi-registry.kokumi.svc.cluster.local:5000/kokumi-dev/testdata/external-dns
+  description: "In-cluster external-dns testdata"
