@@ -9,7 +9,7 @@ import Preparations from './pages/Preparations'
 import Servings from './pages/Servings'
 import Settings from './pages/Settings'
 import Login from './pages/Login'
-import { getToken, logout, onAuthChange } from './api/auth'
+import { logout, onAuthChange, refresh, getTokenTTL, isAuthed } from './api/auth'
 
 interface Info {
   name: string
@@ -21,7 +21,7 @@ function App() {
   const [activePage, setActivePage] = useState<Page>('dashboard')
   const [info, setInfo] = useState<Info | null>(null)
   const [ready, setReady] = useState(false)
-  const [authed, setAuthed] = useState(() => getToken() !== null)
+  const [authed, setAuthed] = useState(() => isAuthed())
 
   useEffect(() => {
     fetch('/api/v1/info')
@@ -29,13 +29,42 @@ function App() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         return res.json() as Promise<Info>
       })
-      .then(setInfo)
+      .then((data) => {
+        setInfo(data)
+      })
       .catch(() => {/* silently ignore in dev */})
       .finally(() => setReady(true))
   }, [])
 
   // Keep the authed flag in sync with token changes (login, logout, 401).
-  useEffect(() => onAuthChange(() => setAuthed(getToken() !== null)), [])
+  useEffect(() => onAuthChange(() => setAuthed(isAuthed())), [])
+
+  // Proactively refresh the access token shortly before it expires, so the SSE
+  // dashboard stream and API calls never hit a 401.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const schedule = () => {
+      const ttl = getTokenTTL()
+      if (ttl <= 0) return
+      // Refresh at 80% of the remaining lifetime, leaving a comfortable margin
+      // for latency. getTokenTTL derives this from the token's exp claim.
+      const delayMs = Math.max(1000, Math.floor(ttl * 800))
+      timer = setTimeout(() => {
+        void refresh().then((ok) => {
+          if (ok) schedule()
+        })
+      }, delayMs)
+    }
+    schedule()
+    const unsub = onAuthChange(() => {
+      if (timer) clearTimeout(timer)
+      schedule()
+    })
+    return () => {
+      if (timer) clearTimeout(timer)
+      unsub()
+    }
+  }, [])
 
   // Wait until /api/v1/info resolves so we know whether auth is required.
   if (!ready) return null
@@ -75,7 +104,7 @@ function App() {
         activePage={activePage}
         onNavigate={setActivePage}
         operatorVersion={info?.version}
-        onLogout={authRequired ? logout : undefined}
+        onLogout={authRequired ? () => void logout() : undefined}
       />
       <main className={styles.content}>
         {renderPage()}

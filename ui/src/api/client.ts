@@ -1,4 +1,4 @@
-import { authHeaders, setToken } from './auth'
+import { authHeaders, refresh } from './auth'
 import type { Order, Preparation, OrderFormData, Menu, MenuFormData, Patch, ChartInfo, Pantry, PantryFormData, ArtifactInfo, ArtifactFile } from './types'
 
 // All API calls are relative so they work both in dev (proxied by Vite) and
@@ -7,12 +7,24 @@ const BASE = '/api/v1'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-// handleUnauthorized clears the stored token when the server rejects a request
-// with 401, which flips the app back to the login screen via the auth listener.
-function handleUnauthorized(status: number): void {
-  if (status === 401) {
-    setToken(null)
+// refreshInFlight collapses concurrent 401s into a single refresh call so we
+// don't fire a refresh storm when many requests fail at once after expiry.
+let refreshInFlight: Promise<boolean> | null = null
+function refreshOnce(): Promise<boolean> {
+  if (!refreshInFlight) {
+    refreshInFlight = refresh().finally(() => {
+      refreshInFlight = null
+    })
   }
+  return refreshInFlight
+}
+
+// handleUnauthorized triggers a silent refresh on 401. If the refresh succeeds
+// the caller should retry the original request; if it fails the token is
+// cleared (via refresh()) and the app returns to the login screen.
+async function handleUnauthorized(status: number): Promise<boolean> {
+  if (status !== 401) return false
+  return refreshOnce()
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -22,7 +34,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   })
 
   if (!res.ok) {
-    handleUnauthorized(res.status)
+    const recovered = await handleUnauthorized(res.status)
+    if (recovered) {
+      // Retry once with the freshly issued access token.
+      const retry = await fetch(`${BASE}${path}`, {
+        headers: { 'Content-Type': 'application/json', ...authHeaders(), ...init?.headers },
+        ...init,
+      })
+      if (retry.ok) {
+        if (retry.status === 204) return undefined as T
+        return retry.json() as Promise<T>
+      }
+    }
     let message = `HTTP ${res.status}`
     try {
       const body = (await res.json()) as { error?: string }

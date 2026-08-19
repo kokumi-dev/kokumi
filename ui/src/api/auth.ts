@@ -1,6 +1,8 @@
-// Lightweight auth state for the UI. The token is kept in sessionStorage so it
-// survives reloads within a tab but is cleared when the tab closes. Subscribers
-// are notified whenever the token changes (login / logout / 401).
+// Lightweight auth state for the UI. The access token is kept in sessionStorage
+// so it survives reloads within a tab but is cleared when the tab closes. The
+// refresh token is held by the server in an HttpOnly cookie and is never
+// exposed to JS. Subscribers are notified whenever the token changes
+// (login / logout / 401 / silent refresh).
 
 const TOKEN_KEY = 'kokumi.token'
 
@@ -27,6 +29,52 @@ export function onAuthChange(listener: () => void): () => void {
   return () => {
     listeners.delete(listener)
   }
+}
+
+// decodeTokenPayload returns the parsed JWT payload, or null if the token is
+// missing or unreadable. Used to derive expiry without a server-provided TTL.
+function decodeTokenPayload(tokenToCheck: string | null = token): { exp?: number } | null {
+  if (!tokenToCheck) return null
+  const parts = tokenToCheck.split('.')
+  if (parts.length < 2) return null
+  try {
+    return JSON.parse(atob(parts[1])) as { exp?: number }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Returns the remaining access-token lifetime in seconds, derived from the
+ * token's own `exp` claim. The proactive refresh timer uses this so the UI
+ * renews before expiry without the server advertising the TTL. Returns 0 when
+ * there is no token or it is unreadable/expired.
+ */
+export function getTokenTTL(): number {
+  const payload = decodeTokenPayload()
+  if (typeof payload?.exp !== 'number') return 0
+  return Math.max(0, payload.exp - Math.floor(Date.now() / 1000))
+}
+
+/**
+ * Reports whether the given access token is expired (or unreadable). The
+ * payload's `exp` claim is a JWT numeric date in seconds. A null or malformed
+ * token is treated as expired so the UI falls back to the login screen rather
+ * than showing a broken state.
+ */
+export function isExpired(tokenToCheck: string | null = token): boolean {
+  const payload = decodeTokenPayload(tokenToCheck)
+  if (typeof payload?.exp !== 'number') return true
+  return payload.exp <= Math.floor(Date.now() / 1000)
+}
+
+/**
+ * Reports whether the user is currently authenticated: there is a token and it
+ * is not expired. Used to decide between rendering the app and the login
+ * screen.
+ */
+export function isAuthed(): boolean {
+  return token !== null && !isExpired(token)
 }
 
 /** Authorization header for fetch requests, or an empty object when logged out. */
@@ -71,7 +119,42 @@ export async function login(username: string, password: string): Promise<void> {
   setToken(data.token)
 }
 
-/** Clears the stored token. */
-export function logout(): void {
+/**
+ * Silently exchanges the HttpOnly refresh cookie for a new access token. Used
+ * both proactively (before expiry) and reactively (after a 401). On success
+ * the new access token is stored; on failure the token is cleared so the app
+ * returns to the login screen.
+ */
+export async function refresh(): Promise<boolean> {
+  if (!token) return false
+  try {
+    const res = await fetch('/api/v1/auth/refresh', {
+      method: 'POST',
+      // Send cookies (the refresh token) with the request.
+      credentials: 'same-origin',
+    })
+    if (!res.ok) {
+      setToken(null)
+      return false
+    }
+    const data = (await res.json()) as { token: string }
+    setToken(data.token)
+    return true
+  } catch {
+    setToken(null)
+    return false
+  }
+}
+
+/** Clears the stored token and notifies the server to expire its refresh cookie. */
+export async function logout(): Promise<void> {
+  try {
+    await fetch('/api/v1/auth/logout', {
+      method: 'POST',
+      credentials: 'same-origin',
+    })
+  } catch {
+    // best-effort; the cookie is cleared server-side regardless
+  }
   setToken(null)
 }

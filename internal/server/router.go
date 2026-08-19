@@ -18,6 +18,8 @@ func addRoutes(
 
 	if auth != nil {
 		mux.HandleFunc("POST /api/v1/auth/login", handleLogin(auth))
+		mux.HandleFunc("POST /api/v1/auth/refresh", handleRefresh(auth))
+		mux.HandleFunc("POST /api/v1/auth/logout", handleLogout(auth))
 	}
 
 	mux.HandleFunc("GET /api/v1/registry/default", handleGetDefaultRegistry())
