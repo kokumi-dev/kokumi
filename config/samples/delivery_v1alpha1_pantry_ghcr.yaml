@@ -4,7 +4,7 @@ metadata:
   labels:
     app.kubernetes.io/name: kokumi
     app.kubernetes.io/managed-by: kustomize
-  name: pantry-sample
+  name: podinfo-chart
 spec:
-  url: oci://ghcr.io/example/charts/podinfo
+  url: oci://ghcr.io/stefanprodan/charts/podinfo
   description: "Public podinfo Helm chart"
