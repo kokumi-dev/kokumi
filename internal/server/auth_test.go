@@ -31,12 +31,7 @@ func newTestAuthenticator(t *testing.T) *authenticator {
 	t.Helper()
 	hash, err := bcrypt.GenerateFromPassword([]byte(testPassword), bcrypt.MinCost)
 	require.NoError(t, err)
-	return &authenticator{
-		username:     testUsername,
-		passwordHash: hash,
-		signingKey:   []byte("test-signing-key-do-not-use-in-prod"),
-		tokenTTL:     defaultTokenTTL,
-	}
+	return newAuthenticator(testUsername, hash, []byte("test-signing-key-do-not-use-in-prod"))
 }
 
 func newAuthSecret(data map[string][]byte) *corev1.Secret {
@@ -127,7 +122,7 @@ func TestLoadAuthenticator(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, auth)
 			assert.Equal(t, tt.wantUser, auth.username)
-			assert.Equal(t, defaultTokenTTL, auth.tokenTTL)
+			assert.Equal(t, defaultAccessTokenTTL, auth.accessTTL)
 			if tt.checkPass {
 				assert.True(t, auth.verifyCredentials(testUsername, testPassword))
 			}
@@ -171,7 +166,7 @@ func TestVerifyCredentialsHtpasswdHash(t *testing.T) {
 		username:     "admin",
 		passwordHash: []byte(htpasswdHash),
 		signingKey:   []byte("key"),
-		tokenTTL:     defaultTokenTTL,
+		accessTTL:    defaultAccessTokenTTL,
 	}
 
 	assert.True(t, auth.verifyCredentials("admin", "admin"),
@@ -184,10 +179,10 @@ func TestIssueAndParseToken(t *testing.T) {
 	auth := newTestAuthenticator(t)
 	now := time.Now()
 
-	token, expires, err := auth.issueToken(now)
+	token, expires, err := auth.issueAccessToken(now)
 	require.NoError(t, err)
 	require.NotEmpty(t, token)
-	assert.WithinDuration(t, now.Add(defaultTokenTTL), expires, time.Second)
+	assert.WithinDuration(t, now.Add(defaultAccessTokenTTL), expires, time.Second)
 
 	claims, err := auth.parseToken(token)
 	require.NoError(t, err)
@@ -211,16 +206,16 @@ func TestParseTokenRejectsInvalidTokens(t *testing.T) {
 		other := &authenticator{
 			username:   testUsername,
 			signingKey: []byte("a-totally-different-key"),
-			tokenTTL:   defaultTokenTTL,
+			accessTTL:  defaultAccessTokenTTL,
 		}
-		token, _, err := other.issueToken(now)
+		token, _, err := other.issueAccessToken(now)
 		require.NoError(t, err)
 		_, err = auth.parseToken(token)
 		assert.Error(t, err, "token signed with another key must be rejected")
 	})
 
 	t.Run("expired token", func(t *testing.T) {
-		token, _, err := auth.issueToken(now.Add(-2 * defaultTokenTTL))
+		token, _, err := auth.issueAccessToken(now.Add(-2 * defaultAccessTokenTTL))
 		require.NoError(t, err)
 		_, err = auth.parseToken(token)
 		require.Error(t, err)
@@ -316,7 +311,7 @@ func TestBearerTokenFromQueryParam(t *testing.T) {
 
 func TestMiddleware(t *testing.T) {
 	auth := newTestAuthenticator(t)
-	validToken, _, err := auth.issueToken(time.Now())
+	validToken, _, err := auth.issueAccessToken(time.Now())
 	require.NoError(t, err)
 
 	// next records whether it was invoked so we can assert pass-through.
@@ -447,4 +442,148 @@ func TestRandomTokenIDUnique(t *testing.T) {
 	b := randomTokenID()
 	assert.Len(t, a, 32)
 	assert.NotEqual(t, a, b)
+}
+
+func TestHandleLoginSetsRefreshCookie(t *testing.T) {
+	auth := newTestAuthenticator(t)
+	handler := handleLogin(auth)
+
+	body := strings.NewReader(`{"username":"admin","password":"s3cret-passw0rd"}`)
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", body)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, r)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	cookies := w.Result().Cookies()
+	require.Len(t, cookies, 1)
+	assert.Equal(t, refreshCookieName, cookies[0].Name)
+	assert.True(t, cookies[0].HttpOnly)
+	assert.NotEmpty(t, cookies[0].Value)
+
+	// The refresh cookie value must validate as a refresh token.
+	_, err := auth.parseRefresh(cookies[0].Value)
+	assert.NoError(t, err)
+}
+
+func TestHandleRefresh(t *testing.T) {
+	auth := newTestAuthenticator(t)
+	loginHandler := handleLogin(auth)
+	refreshHandler := handleRefresh(auth)
+
+	// Log in to obtain a refresh cookie.
+	loginBody := strings.NewReader(`{"username":"admin","password":"s3cret-passw0rd"}`)
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", loginBody)
+	loginRec := httptest.NewRecorder()
+	loginHandler.ServeHTTP(loginRec, loginReq)
+	require.Equal(t, http.StatusOK, loginRec.Code)
+
+	refreshCookie := loginRec.Result().Cookies()[0]
+
+	t.Run("valid refresh cookie issues a new access token and rotates the cookie", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", nil)
+		r.AddCookie(refreshCookie)
+		w := httptest.NewRecorder()
+
+		refreshHandler.ServeHTTP(w, r)
+
+		require.Equal(t, http.StatusOK, w.Code)
+		var resp loginResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.NotEmpty(t, resp.Token)
+		_, err := auth.parseToken(resp.Token)
+		assert.NoError(t, err)
+
+		// The refresh cookie must have been rotated (different value).
+		newCookies := w.Result().Cookies()
+		require.Len(t, newCookies, 1)
+		assert.NotEqual(t, refreshCookie.Value, newCookies[0].Value)
+	})
+
+	t.Run("missing refresh cookie is rejected", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", nil)
+		w := httptest.NewRecorder()
+
+		refreshHandler.ServeHTTP(w, r)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		// The (absent) cookie is cleared.
+		cookies := w.Result().Cookies()
+		require.Len(t, cookies, 1)
+		assert.Equal(t, refreshCookieName, cookies[0].Name)
+		assert.Equal(t, -1, cookies[0].MaxAge)
+	})
+
+	t.Run("access token cannot be used as a refresh token", func(t *testing.T) {
+		// Extract the access token from the login response body.
+		var loginResp loginResponse
+		require.NoError(t, json.Unmarshal(loginRec.Body.Bytes(), &loginResp))
+
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", nil)
+		r.AddCookie(&http.Cookie{Name: refreshCookieName, Value: loginResp.Token})
+		w := httptest.NewRecorder()
+
+		refreshHandler.ServeHTTP(w, r)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+}
+
+func TestHandleLogoutClearsCookie(t *testing.T) {
+	auth := newTestAuthenticator(t)
+	handler := handleLogout(auth)
+
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, r)
+
+	assert.Equal(t, http.StatusNoContent, w.Code)
+	cookies := w.Result().Cookies()
+	require.Len(t, cookies, 1)
+	assert.Equal(t, refreshCookieName, cookies[0].Name)
+	assert.Equal(t, -1, cookies[0].MaxAge)
+}
+
+func TestHandleInfoReportsAuthEnabled(t *testing.T) {
+	auth := newTestAuthenticator(t)
+	handler := handleInfo(auth)
+
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/info", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, r)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp InfoResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.True(t, resp.AuthEnabled)
+}
+
+func TestHandleInfoNoAuthReportsDisabled(t *testing.T) {
+	handler := handleInfo(nil)
+
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/info", nil)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, r)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp InfoResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.False(t, resp.AuthEnabled)
+}
+
+func TestApplyAuthConfig(t *testing.T) {
+	a := newTestAuthenticator(t)
+
+	t.Run("KOKUMI_TOKEN_TTL overrides the access token lifetime", func(t *testing.T) {
+		applyAuthConfig(a, func(k string) string {
+			if k == "KOKUMI_TOKEN_TTL" {
+				return "30m"
+			}
+			return ""
+		})
+		assert.Equal(t, 30*time.Minute, a.accessTTL)
+	})
 }

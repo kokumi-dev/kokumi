@@ -25,10 +25,14 @@ const (
 	defaultAuthSecretName = "kokumi-server-auth"
 	// defaultNamespace is used when the running namespace cannot be determined.
 	defaultNamespace = "kokumi"
-	// defaultTokenTTL is the lifetime of an issued login token.
-	defaultTokenTTL = time.Hour
+	// defaultAccessTokenTTL is the lifetime of an issued access token.
+	defaultAccessTokenTTL = time.Hour
+	// defaultRefreshTokenTTL is the lifetime of a refresh token cookie.
+	defaultRefreshTokenTTL = 7 * 24 * time.Hour
 	// tokenIssuer is the JWT "iss" claim value for tokens minted by this server.
-	tokenIssuer = "kokumi"
+	tokenIssuer      = "kokumi"
+	accessTokenType  = "access"
+	refreshTokenType = "refresh"
 
 	// Secret data keys.
 	secretKeyUsername     = "username"
@@ -38,7 +42,10 @@ const (
 	// signingMethod is the only JWT signing algorithm accepted by this server.
 	signingMethod = "HS256"
 
-	bearerPrefix = "Bearer "
+	bearerPrefix      = "Bearer "
+	refreshCookieName = "kokumi.refresh"
+	// refreshCookiePath scopes the cookie to the auth endpoints only.
+	refreshCookiePath = "/api/v1/auth"
 )
 
 // authenticator validates username/password credentials against a bcrypt hash
@@ -48,13 +55,16 @@ type authenticator struct {
 	username     string
 	passwordHash []byte
 	signingKey   []byte
-	tokenTTL     time.Duration
+	accessTTL    time.Duration
+	refreshTTL   time.Duration
 }
 
-// publicAPIPaths are API paths reachable without a valid token.
+// publicAPIPaths are API paths reachable without a valid access token.
 var publicAPIPaths = map[string]struct{}{
-	"/api/v1/auth/login": {},
-	"/api/v1/info":       {},
+	"/api/v1/auth/login":   {},
+	"/api/v1/auth/refresh": {},
+	"/api/v1/auth/logout":  {},
+	"/api/v1/info":         {},
 }
 
 // loadAuthenticator reads the credentials Secret and builds an authenticator.
@@ -81,12 +91,19 @@ func loadAuthenticator(ctx context.Context, reader client.Reader, namespace, nam
 		return nil, fmt.Errorf("auth secret %s/%s missing %q", namespace, name, secretKeySigningKey)
 	}
 
+	return newAuthenticator(username, passwordHash, signingKey), nil
+}
+
+// newAuthenticator builds an authenticator with the default token lifetimes
+// and a Secure cookie.
+func newAuthenticator(username string, passwordHash, signingKey []byte) *authenticator {
 	return &authenticator{
 		username:     username,
 		passwordHash: passwordHash,
 		signingKey:   signingKey,
-		tokenTTL:     defaultTokenTTL,
-	}, nil
+		accessTTL:    defaultAccessTokenTTL,
+		refreshTTL:   defaultRefreshTokenTTL,
+	}
 }
 
 // verifyCredentials reports whether username and password match the configured
@@ -99,10 +116,21 @@ func (a *authenticator) verifyCredentials(username, password string) bool {
 	return userMatch && passMatch
 }
 
-// issueToken mints a signed JWT valid until now+tokenTTL and returns the token
-// string together with its expiry time.
-func (a *authenticator) issueToken(now time.Time) (string, time.Time, error) {
-	expires := now.Add(a.tokenTTL)
+// issueAccessToken mints a signed access JWT valid until now+accessTTL and returns
+// the token string together with its expiry time.
+func (a *authenticator) issueAccessToken(now time.Time) (string, time.Time, error) {
+	return a.issueTypedToken(now, a.accessTTL, accessTokenType)
+}
+
+// issueRefreshToken mints a signed refresh JWT valid until now+refreshTTLand returns
+// the token string together with its expiry time.
+func (a *authenticator) issueRefreshToken(now time.Time) (string, time.Time, error) {
+	return a.issueTypedToken(now, a.refreshTTL, refreshTokenType)
+}
+
+// issueTypedToken mints a signed JWT of the given type and lifetime.
+func (a *authenticator) issueTypedToken(now time.Time, ttl time.Duration, typ string) (string, time.Time, error) {
+	expires := now.Add(ttl)
 	claims := jwt.RegisteredClaims{
 		Subject:   a.username,
 		Issuer:    tokenIssuer,
@@ -111,7 +139,9 @@ func (a *authenticator) issueToken(now time.Time) (string, time.Time, error) {
 		ExpiresAt: jwt.NewNumericDate(expires),
 		ID:        randomTokenID(),
 	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	// Embed the token type in a private claim so parseTypedToken can reject a
+	// token used in the wrong role (e.g. a refresh token presented as a bearer).
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, typedClaims{RegisteredClaims: claims, TokenType: typ})
 	signed, err := token.SignedString(a.signingKey)
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("signing token: %w", err)
@@ -119,10 +149,26 @@ func (a *authenticator) issueToken(now time.Time) (string, time.Time, error) {
 	return signed, expires, nil
 }
 
-// parseToken verifies the signature, algorithm, issuer, and expiry of a token
-// and returns its claims. Any failure yields a non-nil error.
+// typedClaims extends RegisteredClaims with a private "typ" claim.
+type typedClaims struct {
+	jwt.RegisteredClaims
+	TokenType string `json:"typ"`
+}
+
+// parseToken verifies an access token and returns its claims.
 func (a *authenticator) parseToken(tokenString string) (*jwt.RegisteredClaims, error) {
-	claims := &jwt.RegisteredClaims{}
+	return a.parseTypedToken(tokenString, accessTokenType)
+}
+
+// parseRefresh verifies a refresh token and returns its claims.
+func (a *authenticator) parseRefresh(tokenString string) (*jwt.RegisteredClaims, error) {
+	return a.parseTypedToken(tokenString, refreshTokenType)
+}
+
+// parseTypedToken verifies the signature, algorithm, issuer, expiry, and token
+// type of a token and returns its claims.
+func (a *authenticator) parseTypedToken(tokenString, wantType string) (*jwt.RegisteredClaims, error) {
+	claims := &typedClaims{}
 	_, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
@@ -135,7 +181,47 @@ func (a *authenticator) parseToken(tokenString string) (*jwt.RegisteredClaims, e
 	if err != nil {
 		return nil, err
 	}
-	return claims, nil
+	if claims.TokenType != wantType {
+		return nil, fmt.Errorf("unexpected token type %q, want %q", claims.TokenType, wantType)
+	}
+	return &claims.RegisteredClaims, nil
+}
+
+// setRefreshCookie writes the refresh token as an HttpOnly, SameSite=Lax cookie
+// scoped to the auth endpoints.
+func (a *authenticator) setRefreshCookie(w http.ResponseWriter, refreshToken string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     refreshCookieName,
+		Value:    refreshToken,
+		Path:     refreshCookiePath,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int(a.refreshTTL.Seconds()),
+	})
+}
+
+// clearRefreshCookie expires the refresh cookie so subsequent refresh attempts
+// fail and the client is forced back to login.
+func (a *authenticator) clearRefreshCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     refreshCookieName,
+		Value:    "",
+		Path:     refreshCookiePath,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+	})
+}
+
+// refreshTokenFromCookie extracts the refresh token from the request cookie.
+func (a *authenticator) refreshTokenFromCookie(r *http.Request) string {
+	c, err := r.Cookie(refreshCookieName)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(c.Value)
 }
 
 // middleware wraps next, rejecting requests to protected API paths that do not
@@ -196,25 +282,67 @@ type loginResponse struct {
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
-// handleLogin validates credentials and returns a freshly issued token.
+// handleLogin validates credentials and returns a freshly issued access token
+// plus sets a refresh token as an HttpOnly cookie.
 func handleLogin(a *authenticator) http.HandlerFunc {
+	provider := newAdminProvider(a)
 	return func(w http.ResponseWriter, r *http.Request) {
-		var req loginRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, http.StatusBadRequest, "invalid request body")
-			return
-		}
-		if !a.verifyCredentials(req.Username, req.Password) {
-			respondError(w, http.StatusUnauthorized, "invalid username or password")
-			return
-		}
-		token, expires, err := a.issueToken(time.Now())
+		session, err := provider.Login(r)
 		if err != nil {
-			respondError(w, http.StatusInternalServerError, "failed to issue token")
+			status, msg := mapLoginError(err)
+			respondError(w, status, msg)
 			return
 		}
-		respondJSON(w, http.StatusOK, loginResponse{Token: token, ExpiresAt: expires})
+		writeSession(w, a, session)
 	}
+}
+
+// handleRefresh exchanges a valid refresh cookie for a new access token and a
+// rotated refresh cookie.
+func handleRefresh(a *authenticator) http.HandlerFunc {
+	provider := newAdminProvider(a)
+	return func(w http.ResponseWriter, r *http.Request) {
+		session, err := provider.Refresh(r)
+		if err != nil {
+			a.clearRefreshCookie(w)
+			respondError(w, http.StatusUnauthorized, mapRefreshError(err))
+			return
+		}
+		writeSession(w, a, session)
+	}
+}
+
+// handleLogout expires the refresh cookie.
+func handleLogout(a *authenticator) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		a.clearRefreshCookie(w)
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// writeSession sets the refresh cookie (when issued) and returns the access
+// token to the client.
+func writeSession(w http.ResponseWriter, a *authenticator, s *Session) {
+	if s.SetRefreshCookie {
+		a.setRefreshCookie(w, s.RefreshToken)
+	}
+	respondJSON(w, http.StatusOK, loginResponse{Token: s.AccessToken, ExpiresAt: s.AccessExpiresAt})
+}
+
+// mapLoginError translates provider errors to HTTP status + message.
+func mapLoginError(err error) (int, string) {
+	if err == errInvalidCredentials {
+		return http.StatusUnauthorized, "invalid username or password"
+	}
+	return http.StatusBadRequest, err.Error()
+}
+
+// mapRefreshError translates provider refresh errors to an HTTP message.
+func mapRefreshError(err error) string {
+	if err == errMissingRefresh {
+		return "missing refresh token"
+	}
+	return "invalid or expired refresh token"
 }
 
 // randomTokenID returns a random 128-bit hex string for use as a JWT ID.
@@ -244,10 +372,38 @@ func currentNamespace(getenv func(string) string) string {
 	return defaultNamespace
 }
 
+// errInvalidCredentials is returned by the admin provider when the supplied
+// username/password do not match.
+var errInvalidCredentials = fmt.Errorf("invalid username or password")
+
+// errMissingRefresh is returned by the admin provider when no refresh cookie is
+// present on a refresh request.
+var errMissingRefresh = fmt.Errorf("missing refresh token")
+
+// decodeJSONBody decodes a JSON request body into v, returning a 400-style
+// error when the body is malformed.
+func decodeJSONBody(r *http.Request, v any) error {
+	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+		return fmt.Errorf("invalid request body")
+	}
+	return nil
+}
+
 // authSecretName returns the configured auth Secret name or the default.
 func authSecretName(getenv func(string) string) string {
 	if name := strings.TrimSpace(getenv("AUTH_SECRET_NAME")); name != "" {
 		return name
 	}
 	return defaultAuthSecretName
+}
+
+// applyAuthConfig overrides authenticator defaults from environment variables.
+// KOKUMI_TOKEN_TTL accepts a Go duration string (e.g. "30m", "2h") and tunes the
+// access-token lifetime.
+func applyAuthConfig(a *authenticator, getenv func(string) string) {
+	if v := strings.TrimSpace(getenv("KOKUMI_TOKEN_TTL")); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			a.accessTTL = d
+		}
+	}
 }

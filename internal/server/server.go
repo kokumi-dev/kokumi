@@ -71,6 +71,7 @@ func Run(
 		if a, aerr := loadAuthenticator(ctx, deps.writer, namespace, secretName); aerr != nil {
 			logger.Info("Authentication disabled", "reason", aerr.Error())
 		} else {
+			applyAuthConfig(a, getenv)
 			auth = a
 			logger.Info("Authentication enabled", "namespace", namespace, "secret", secretName)
 		}
