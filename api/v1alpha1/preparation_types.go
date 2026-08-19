@@ -161,10 +161,6 @@ type PreparationSpec struct {
 
 // PreparationStatus defines the observed state of Preparation.
 type PreparationStatus struct {
-	// creationTime is the timestamp when the preparation was created
-	// +optional
-	CreationTime *metav1.Time `json:"creationTime,omitempty"`
-
 	// conditions represent the current state of the Preparation resource.
 	// +listType=map
 	// +listMapKey=type
@@ -179,7 +175,6 @@ type PreparationStatus struct {
 // +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].reason`
 // +kubebuilder:printcolumn:name="Digest",type=string,JSONPath=`.spec.artifact.digest`,priority=1
 // +kubebuilder:printcolumn:name="Signed",type=boolean,JSONPath=`.spec.artifact.signed`,priority=1
-// +kubebuilder:printcolumn:name="Created",type=date,JSONPath=`.status.creationTime`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 // +kubebuilder:resource:shortName=prep
 
