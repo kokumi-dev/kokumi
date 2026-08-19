@@ -33,10 +33,7 @@ func Test_isPlainHTTP(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.ref, func(t *testing.T) {
-			got := isPlainHTTP(tc.ref)
-			if got != tc.want {
-				t.Errorf("isPlainHTTP(%q) = %v, want %v", tc.ref, got, tc.want)
-			}
+			require.Equal(t, tc.want, isPlainHTTP(tc.ref))
 		})
 	}
 }
