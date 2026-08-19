@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -303,7 +302,6 @@ func (r *OrderReconciler) createPreparation(
 	}
 
 	prepStatusUpdater := status.NewPreparationUpdater(r.Client)
-	preparation.Status.CreationTime = &metav1.Time{Time: time.Now()}
 	if err := prepStatusUpdater.Ready(ctx, preparation, "Preparation is ready for serving"); err != nil {
 		logger.Error(err, "Failed to update Preparation status")
 	}

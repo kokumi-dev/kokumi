@@ -987,9 +987,6 @@ spec:
       name: Signed
       priority: 1
       type: boolean
-    - jsonPath: .status.creationTime
-      name: Created
-      type: date
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -1211,11 +1208,6 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              creationTime:
-                description: creationTime is the timestamp when the preparation was
-                  created
-                format: date-time
-                type: string
             type: object
         required:
         - spec

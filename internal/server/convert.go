@@ -256,8 +256,8 @@ func preparationToDTO(p deliveryv1alpha1.Preparation, isActive bool) Preparation
 		},
 		Conditions: conditionsToDTO(p.Status.Conditions),
 	}
-	if p.Status.CreationTime != nil && !p.Status.CreationTime.IsZero() {
-		t := p.Status.CreationTime.UTC()
+	if !p.CreationTimestamp.IsZero() {
+		t := p.CreationTimestamp.UTC()
 		dto.CreatedAt = &t
 	}
 	return dto
