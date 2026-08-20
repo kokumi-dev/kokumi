@@ -124,9 +124,23 @@ export async function login(username: string, password: string): Promise<void> {
  * both proactively (before expiry) and reactively (after a 401). On success
  * the new access token is stored; on failure the token is cleared so the app
  * returns to the login screen.
+ *
+ * Concurrent callers (the proactive timer, the SSE reconnect handler, and the
+ * 401 retry path) share a single in-flight refresh via refreshInFlight, so a
+ * token expiry that triggers several refreshes at once results in exactly one
+ * POST /api/v1/auth/refresh rather than a burst.
  */
+let refreshInFlight: Promise<boolean> | null = null
 export async function refresh(): Promise<boolean> {
-  if (!token) return false
+  if (!refreshInFlight) {
+    refreshInFlight = doRefresh().finally(() => {
+      refreshInFlight = null
+    })
+  }
+  return refreshInFlight
+}
+
+async function doRefresh(): Promise<boolean> {
   try {
     const res = await fetch('/api/v1/auth/refresh', {
       method: 'POST',
@@ -134,6 +148,8 @@ export async function refresh(): Promise<boolean> {
       credentials: 'same-origin',
     })
     if (!res.ok) {
+      // The server rejected the refresh token (invalid/expired) — the session
+      // is genuinely over, so clear the access token and return to login.
       setToken(null)
       return false
     }
@@ -141,7 +157,10 @@ export async function refresh(): Promise<boolean> {
     setToken(data.token)
     return true
   } catch {
-    setToken(null)
+    // A network error (e.g. a brief server restart) does NOT mean the refresh
+    // token is bad — the HttpOnly cookie is still valid. Keep the existing
+    // access token so the app stays on screen and retries on the next call
+    // instead of forcing a full re-login for a transient blip.
     return false
   }
 }
