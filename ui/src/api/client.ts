@@ -295,3 +295,20 @@ export function updatePantry(
 export function deletePantry(namespace: string, name: string): Promise<void> {
   return request<void>(`/pantries/${namespace}/${name}`, { method: 'DELETE' })
 }
+
+// ── Settings (singleton Kitchen) ──────────────────────────────────────────────
+
+export interface Settings {
+  argoCDURL: string
+}
+
+export function getSettings(): Promise<Settings> {
+  return request<Settings>('/settings')
+}
+
+export function saveSettings(argoCDURL: string): Promise<Settings> {
+  return request<Settings>('/settings', {
+    method: 'PUT',
+    body: JSON.stringify({ argoCDURL }),
+  })
+}

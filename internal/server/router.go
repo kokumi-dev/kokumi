@@ -10,6 +10,7 @@ func addRoutes(
 	h *hub,
 	deps *apiDeps,
 	auth *authenticator,
+	installNamespace string,
 ) {
 	mux.HandleFunc("GET /api/v1/info", handleInfo(auth))
 	mux.HandleFunc("GET /api/v1/events", handleEventsStream(h))
@@ -26,6 +27,10 @@ func addRoutes(
 	mux.HandleFunc("GET /api/v1/registry/tags", handleListRegistryTags(deps))
 	mux.HandleFunc("GET /api/v1/registry/artifact", handleGetRegistryArtifact(deps))
 	mux.HandleFunc("GET /api/v1/registry/chart-info", handleGetChartInfo(deps))
+
+	// Settings (singleton Kitchen/default)
+	mux.HandleFunc("GET /api/v1/settings", handleGetSettings(deps, installNamespace))
+	mux.HandleFunc("PUT /api/v1/settings", handlePutSettings(deps, installNamespace))
 
 	// Order CRUD
 	mux.HandleFunc("GET /api/v1/orders", handleListOrders(deps))

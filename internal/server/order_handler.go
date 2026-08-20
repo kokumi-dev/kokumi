@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/namespace"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -91,7 +92,7 @@ func handleCreateOrder(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 		if req.Namespace == "" {
-			req.Namespace = defaultNamespace
+			req.Namespace = namespace.Default
 		}
 
 		order := &deliveryv1alpha1.Order{

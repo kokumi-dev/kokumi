@@ -22,6 +22,9 @@ resources:
 # default, aiding admins in cluster management. Those roles are
 # not used by the kokumi itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
+- kitchen_admin_role.yaml
+- kitchen_editor_role.yaml
+- kitchen_viewer_role.yaml
 - pantry_admin_role.yaml
 - pantry_editor_role.yaml
 - pantry_viewer_role.yaml

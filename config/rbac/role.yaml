@@ -27,6 +27,7 @@ rules:
 - apiGroups:
   - delivery.kokumi.dev
   resources:
+  - kitchens
   - menus
   - orders
   - pantries
@@ -44,6 +45,7 @@ rules:
 - apiGroups:
   - delivery.kokumi.dev
   resources:
+  - kitchens/finalizers
   - menus/finalizers
   - orders/finalizers
   - pantries/finalizers
@@ -55,6 +57,7 @@ rules:
 - apiGroups:
   - delivery.kokumi.dev
   resources:
+  - kitchens/status
   - menus/status
   - orders/status
   - pantries/status

@@ -13,6 +13,8 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+
+	"github.com/kokumi-dev/kokumi/internal/namespace"
 )
 
 type Config struct {
@@ -25,9 +27,10 @@ func NewServer(
 	h *hub,
 	deps *apiDeps,
 	auth *authenticator,
+	installNamespace string,
 ) http.Handler {
 	mux := http.NewServeMux()
-	addRoutes(mux, h, deps, auth)
+	addRoutes(mux, h, deps, auth, installNamespace)
 	var handler http.Handler = mux
 	if auth != nil {
 		handler = auth.middleware(handler)
@@ -64,20 +67,20 @@ func Run(
 		_, _ = fmt.Fprintf(stderr, "Warning: failed to start Kubernetes watcher: %s\n", err)
 	}
 
+	installNamespace := namespace.Current(getenv)
 	var auth *authenticator
 	if deps != nil {
-		namespace := currentNamespace(getenv)
 		secretName := authSecretName(getenv)
-		if a, aerr := loadAuthenticator(ctx, deps.writer, namespace, secretName); aerr != nil {
+		if a, aerr := loadAuthenticator(ctx, deps.writer, installNamespace, secretName); aerr != nil {
 			logger.Info("Authentication disabled", "reason", aerr.Error())
 		} else {
 			applyAuthConfig(a, getenv)
 			auth = a
-			logger.Info("Authentication enabled", "namespace", namespace, "secret", secretName)
+			logger.Info("Authentication enabled", "namespace", installNamespace, "secret", secretName)
 		}
 	}
 
-	srv := NewServer(config, h, deps, auth)
+	srv := NewServer(config, h, deps, auth, installNamespace)
 	httpServer := &http.Server{
 		Addr:    net.JoinHostPort(config.Host, config.Port),
 		Handler: srv,

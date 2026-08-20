@@ -120,6 +120,11 @@ func startK8sWatcher(ctx context.Context, logger logr.Logger, h *hub) (*apiDeps,
 		return nil, fmt.Errorf("getting Pantry informer: %w", err)
 	}
 
+	kitchenInformer, err := k8sCache.GetInformer(ctx, &deliveryv1alpha1.Kitchen{})
+	if err != nil {
+		return nil, fmt.Errorf("getting Kitchen informer: %w", err)
+	}
+
 	// refreshAll reads current state from the in-memory informer cache and
 	// broadcasts counts, full order snapshots, and full preparation snapshots
 	// to all SSE subscribers. All reads are local — no network calls.
@@ -205,6 +210,9 @@ func startK8sWatcher(ctx context.Context, logger logr.Logger, h *hub) (*apiDeps,
 	}
 	if _, err := pantryInformer.AddEventHandler(handler); err != nil {
 		return nil, fmt.Errorf("adding Pantry event handler: %w", err)
+	}
+	if _, err := kitchenInformer.AddEventHandler(handler); err != nil {
+		return nil, fmt.Errorf("adding Kitchen event handler: %w", err)
 	}
 
 	// Start the cache in the background; it runs until ctx is cancelled.
