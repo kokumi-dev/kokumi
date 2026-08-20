@@ -1,14 +1,22 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useServings } from '../hooks/useServings'
+import { getSettings } from '../api/client'
 import { formatDate, stateToStatusKey } from '../utils/format'
 import styles from './pages.module.css'
 
 export default function Servings() {
   const servings = useServings()
   const [query, setQuery] = useState('')
+  const [argoCDBase, setArgoCDBase] = useState('')
 
-  const argoCDBase = useMemo(() => {
-    const raw = (localStorage.getItem('kokumi.argoCDBaseURL') ?? '').trim().replace(/\/$/, '')
+  useEffect(() => {
+    getSettings()
+      .then((s) => setArgoCDBase(s.argoCDURL))
+      .catch(() => {})
+  }, [])
+
+  const argoBase = useMemo(() => {
+    const raw = argoCDBase.trim().replace(/\/$/, '')
     if (!raw) return ''
     try {
       const u = new URL(raw)
@@ -17,7 +25,7 @@ export default function Servings() {
     } catch {
       return ''
     }
-  }, [])
+  }, [argoCDBase])
 
 
   const filtered = useMemo(() => {
@@ -90,8 +98,8 @@ export default function Servings() {
               </thead>
               <tbody>
                 {filtered.map((s) => {
-                  const argoURL = argoCDBase
-                    ? `${argoCDBase}/applications/argocd/${s.name}`
+                  const argoURL = argoBase
+                    ? `${argoBase}/applications/argocd/${s.name}`
                     : null
 
                   return (

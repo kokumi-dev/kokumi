@@ -1,0 +1,9 @@
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Kitchen
+metadata:
+  labels:
+    app.kubernetes.io/name: kokumi
+    app.kubernetes.io/managed-by: kustomize
+  name: default
+spec:
+  argoCDURL: "https://localhost:8443"

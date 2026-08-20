@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/namespace"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -95,9 +96,9 @@ func handleCreatePantry(deps *apiDeps) http.HandlerFunc {
 			respondError(w, http.StatusBadRequest, "url is required")
 			return
 		}
-		namespace := req.Namespace
-		if namespace == "" {
-			namespace = defaultNamespace
+		ns := req.Namespace
+		if ns == "" {
+			ns = namespace.Default
 		}
 
 		var secretRef *corev1.LocalObjectReference
@@ -105,7 +106,7 @@ func handleCreatePantry(deps *apiDeps) http.HandlerFunc {
 		switch {
 		case req.Username != "" && req.Password != "":
 			secretName := req.Name + "-registry-creds"
-			if err := createDockerConfigSecret(r.Context(), deps, namespace, secretName, req.URL, req.Username, req.Password); err != nil {
+			if err := createDockerConfigSecret(r.Context(), deps, ns, secretName, req.URL, req.Username, req.Password); err != nil {
 				deps.logger.Error(err, "Failed to create registry credential Secret")
 				respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create credential secret: %s", err))
 				return
@@ -118,7 +119,7 @@ func handleCreatePantry(deps *apiDeps) http.HandlerFunc {
 		pantry := &deliveryv1alpha1.Pantry{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      req.Name,
-				Namespace: namespace,
+				Namespace: ns,
 			},
 			Spec: deliveryv1alpha1.PantrySpec{
 				URL:         req.URL,
@@ -240,7 +241,7 @@ func handleDeletePantry(deps *apiDeps) http.HandlerFunc {
 }
 
 // createDockerConfigSecret creates a new kubernetes.io/dockerconfigjson Secret.
-func createDockerConfigSecret(ctx context.Context, deps *apiDeps, namespace, name, registry, username, password string) error {
+func createDockerConfigSecret(ctx context.Context, deps *apiDeps, ns, name, registry, username, password string) error {
 	data, err := buildDockerConfigJSON(registry, username, password)
 	if err != nil {
 		return err
@@ -249,7 +250,7 @@ func createDockerConfigSecret(ctx context.Context, deps *apiDeps, namespace, nam
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: namespace,
+			Namespace: ns,
 		},
 		Type: corev1.SecretTypeDockerConfigJson,
 		Data: map[string][]byte{
@@ -261,7 +262,7 @@ func createDockerConfigSecret(ctx context.Context, deps *apiDeps, namespace, nam
 }
 
 // upsertDockerConfigSecret creates or updates a kubernetes.io/dockerconfigjson Secret.
-func upsertDockerConfigSecret(ctx context.Context, deps *apiDeps, namespace, name, registry, username, password string) error {
+func upsertDockerConfigSecret(ctx context.Context, deps *apiDeps, ns, name, registry, username, password string) error {
 	data, err := buildDockerConfigJSON(registry, username, password)
 	if err != nil {
 		return err
@@ -269,7 +270,7 @@ func upsertDockerConfigSecret(ctx context.Context, deps *apiDeps, namespace, nam
 
 	var secret corev1.Secret
 	getErr := deps.reader.Get(ctx, types.NamespacedName{
-		Namespace: namespace,
+		Namespace: ns,
 		Name:      name,
 	}, &secret)
 
@@ -277,7 +278,7 @@ func upsertDockerConfigSecret(ctx context.Context, deps *apiDeps, namespace, nam
 		newSecret := &corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
-				Namespace: namespace,
+				Namespace: ns,
 			},
 			Type: corev1.SecretTypeDockerConfigJson,
 			Data: map[string][]byte{corev1.DockerConfigJsonKey: data},

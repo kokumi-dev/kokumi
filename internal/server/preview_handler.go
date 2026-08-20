@@ -7,6 +7,7 @@ import (
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/credential"
+	"github.com/kokumi-dev/kokumi/internal/namespace"
 	"github.com/kokumi-dev/kokumi/internal/resolve"
 	"github.com/kokumi-dev/kokumi/internal/service"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,15 +45,15 @@ func handlePreviewOrder(deps *apiDeps) http.HandlerFunc {
 		}
 
 		name := req.Name
-		namespace := req.Namespace
-		if namespace == "" {
-			namespace = defaultNamespace
+		ns := req.Namespace
+		if ns == "" {
+			ns = namespace.Default
 		}
 
 		order := &deliveryv1alpha1.Order{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
-				Namespace: namespace,
+				Namespace: ns,
 			},
 			Spec: deliveryv1alpha1.OrderSpec{
 				Render:  renderFromDTO(req.Render),
@@ -86,7 +87,7 @@ func handlePreviewOrder(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		resolvedSource, sourceClient, err := credential.NewKubeResolver(deps.reader).ResolveSource(r.Context(), spec.Source, namespace)
+		resolvedSource, sourceClient, err := credential.NewKubeResolver(deps.reader).ResolveSource(r.Context(), spec.Source, ns)
 		if err != nil {
 			respondError(w, http.StatusUnprocessableEntity, fmt.Sprintf("failed to resolve source: %s", err))
 			return
@@ -101,7 +102,7 @@ func handlePreviewOrder(deps *apiDeps) http.HandlerFunc {
 			spec.Patches,
 			spec.Edits,
 			name,
-			namespace,
+			ns,
 			sourceClient,
 		)
 		if err != nil {
@@ -133,15 +134,15 @@ func handlePreviewOrderFiles(deps *apiDeps) http.HandlerFunc {
 		}
 
 		name := req.Name
-		namespace := req.Namespace
-		if namespace == "" {
-			namespace = defaultNamespace
+		ns := req.Namespace
+		if ns == "" {
+			ns = namespace.Default
 		}
 
 		order := &deliveryv1alpha1.Order{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
-				Namespace: namespace,
+				Namespace: ns,
 			},
 			Spec: deliveryv1alpha1.OrderSpec{
 				Render:  renderFromDTO(req.Render),
@@ -175,7 +176,7 @@ func handlePreviewOrderFiles(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		resolvedSource, sourceClient, err := credential.NewKubeResolver(deps.reader).ResolveSource(r.Context(), spec.Source, namespace)
+		resolvedSource, sourceClient, err := credential.NewKubeResolver(deps.reader).ResolveSource(r.Context(), spec.Source, ns)
 		if err != nil {
 			respondError(w, http.StatusUnprocessableEntity, fmt.Sprintf("failed to resolve source: %s", err))
 			return
@@ -190,7 +191,7 @@ func handlePreviewOrderFiles(deps *apiDeps) http.HandlerFunc {
 			spec.Patches,
 			spec.Edits,
 			name,
-			namespace,
+			ns,
 			sourceClient,
 		)
 		if err != nil {

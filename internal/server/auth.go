@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -23,8 +22,6 @@ const (
 	// defaultAuthSecretName is the name of the Secret holding admin credentials
 	// when AUTH_SECRET_NAME is not set.
 	defaultAuthSecretName = "kokumi-server-auth"
-	// defaultNamespace is used when the running namespace cannot be determined.
-	defaultNamespace = "kokumi"
 	// defaultAccessTokenTTL is the lifetime of an issued access token.
 	defaultAccessTokenTTL = time.Hour
 	// defaultRefreshTokenTTL is the lifetime of a refresh token cookie.
@@ -354,22 +351,6 @@ func randomTokenID() string {
 		return hex.EncodeToString([]byte(time.Now().UTC().Format(time.RFC3339Nano)))
 	}
 	return hex.EncodeToString(b)
-}
-
-// currentNamespace determines the namespace the server is running in, trying
-// the POD_NAMESPACE env var, then the in-cluster service account file, then a
-// default.
-func currentNamespace(getenv func(string) string) string {
-	if ns := strings.TrimSpace(getenv("POD_NAMESPACE")); ns != "" {
-		return ns
-	}
-	const saNamespaceFile = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
-	if data, err := os.ReadFile(saNamespaceFile); err == nil {
-		if ns := strings.TrimSpace(string(data)); ns != "" {
-			return ns
-		}
-	}
-	return defaultNamespace
 }
 
 // errInvalidCredentials is returned by the admin provider when the supplied

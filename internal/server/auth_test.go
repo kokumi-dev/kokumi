@@ -16,6 +16,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	"github.com/kokumi-dev/kokumi/internal/namespace"
 )
 
 const (
@@ -407,13 +409,13 @@ func TestCurrentNamespace(t *testing.T) {
 			}
 			return ""
 		}
-		assert.Equal(t, "custom-ns", currentNamespace(getenv))
+		assert.Equal(t, "custom-ns", namespace.Current(getenv))
 	})
 
 	t.Run("falls back to default when unset", func(t *testing.T) {
 		// In the test environment the in-cluster SA file is absent, so this
 		// exercises the final default branch.
-		assert.Equal(t, defaultNamespace, currentNamespace(func(string) string { return "" }))
+		assert.Equal(t, namespace.Default, namespace.Current(func(string) string { return "" }))
 	})
 
 	t.Run("trims whitespace", func(t *testing.T) {
@@ -423,7 +425,7 @@ func TestCurrentNamespace(t *testing.T) {
 			}
 			return ""
 		}
-		assert.Equal(t, "spaced", currentNamespace(getenv))
+		assert.Equal(t, "spaced", namespace.Current(getenv))
 	})
 }
 

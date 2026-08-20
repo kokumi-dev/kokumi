@@ -1,14 +1,19 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import styles from './pages.module.css'
-
-const ARGO_KEY = 'kokumi.argoCDBaseURL'
+import { getSettings, saveSettings } from '../api/client'
 
 export default function Settings() {
-  const [argoCDBase, setArgoCDBase] = useState<string>(
-    () => localStorage.getItem(ARGO_KEY) ?? '',
-  )
+  const [argoCDBase, setArgoCDBase] = useState('')
   const [saved, setSaved] = useState(false)
   const [urlError, setUrlError] = useState(false)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    getSettings()
+      .then((s) => setArgoCDBase(s.argoCDURL))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
 
   function isValidURL(val: string): boolean {
     if (!val) return true // empty = clear setting, that's fine
@@ -26,11 +31,17 @@ export default function Settings() {
       setUrlError(true)
       return
     }
-    localStorage.setItem(ARGO_KEY, trimmed)
-    setArgoCDBase(trimmed)
-    setUrlError(false)
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
+    saveSettings(trimmed)
+      .then(() => {
+        setArgoCDBase(trimmed)
+        setUrlError(false)
+        setSaved(true)
+        setTimeout(() => setSaved(false), 2000)
+      })
+      .catch((e) => {
+        setUrlError(true)
+        console.error('Failed to save settings', e)
+      })
   }
 
   return (
@@ -56,6 +67,7 @@ export default function Settings() {
                 type="url"
                 placeholder="https://argocd.example.com"
                 value={argoCDBase}
+                disabled={loading}
                 style={urlError ? { borderColor: '#c13a37' } : undefined}
                 onChange={(e) => { setArgoCDBase(e.target.value); setSaved(false); setUrlError(false) }}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleSave() }}
