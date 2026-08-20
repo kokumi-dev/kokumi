@@ -22,6 +22,7 @@ function App() {
   const [info, setInfo] = useState<Info | null>(null)
   const [ready, setReady] = useState(false)
   const [authed, setAuthed] = useState(() => isAuthed())
+  const [bootRefreshDone, setBootRefreshDone] = useState(false)
 
   useEffect(() => {
     fetch('/api/v1/info')
@@ -35,6 +36,18 @@ function App() {
       .catch(() => {/* silently ignore in dev */})
       .finally(() => setReady(true))
   }, [])
+
+  useEffect(() => {
+    if (!ready) return
+    const authRequired = info?.authEnabled ?? false
+    if (!authRequired || isAuthed()) {
+      return
+    }
+    void refresh().then((ok) => {
+      if (ok) setAuthed(true)
+      setBootRefreshDone(true)
+    })
+  }, [ready, info])
 
   // Keep the authed flag in sync with token changes (login, logout, 401).
   useEffect(() => onAuthChange(() => setAuthed(isAuthed())), [])
@@ -66,10 +79,13 @@ function App() {
     }
   }, [])
 
-  // Wait until /api/v1/info resolves so we know whether auth is required.
+  // Wait until /api/v1/info resolves. If auth is required and we have no valid
+  // token, hold off showing the login screen until the boot-time silent
+  // refresh attempt has completed (it may authenticate via the shared cookie).
   if (!ready) return null
 
   const authRequired = info?.authEnabled ?? false
+  if (authRequired && !authed && !bootRefreshDone) return null
   if (authRequired && !authed) {
     return (
       <Login

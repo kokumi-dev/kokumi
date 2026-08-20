@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -587,5 +588,56 @@ func TestApplyAuthConfig(t *testing.T) {
 			return ""
 		})
 		assert.Equal(t, 30*time.Minute, a.accessTTL)
+	})
+}
+
+func TestIsHTTPS(t *testing.T) {
+	t.Run("direct TLS request is https", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.TLS = &tls.ConnectionState{}
+		assert.True(t, isHTTPS(r))
+	})
+
+	t.Run("X-Forwarded-Proto https is https", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("X-Forwarded-Proto", "https")
+		assert.True(t, isHTTPS(r))
+	})
+
+	t.Run("plain HTTP is not https", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		assert.False(t, isHTTPS(r))
+	})
+
+	t.Run("X-Forwarded-Proto http is not https", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("X-Forwarded-Proto", "http")
+		assert.False(t, isHTTPS(r))
+	})
+}
+
+func TestRefreshCookieSecureFlagMatchesRequest(t *testing.T) {
+	auth := newTestAuthenticator(t)
+
+	t.Run("Secure over HTTPS", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
+		r.TLS = &tls.ConnectionState{}
+		w := httptest.NewRecorder()
+		auth.setRefreshCookie(w, r, "rt")
+
+		cookies := w.Result().Cookies()
+		require.Len(t, cookies, 1)
+		assert.True(t, cookies[0].Secure)
+	})
+
+	t.Run("not Secure over plain HTTP so Safari keeps it", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
+		w := httptest.NewRecorder()
+		auth.setRefreshCookie(w, r, "rt")
+
+		cookies := w.Result().Cookies()
+		require.Len(t, cookies, 1)
+		assert.False(t, cookies[0].Secure)
+		assert.True(t, cookies[0].HttpOnly)
 	})
 }

@@ -184,15 +184,25 @@ func (a *authenticator) parseTypedToken(tokenString, wantType string) (*jwt.Regi
 	return &claims.RegisteredClaims, nil
 }
 
+// isHTTPS reports whether the request was received over TLS, either directly
+// or behind a trusted reverse proxy that sets X-Forwarded-Proto. The refresh
+// cookie is only marked Secure in that case, so browsers (notably Safari,
+// which does not treat http://localhost as a secure context) still store it
+// when the UI is served over plain HTTP, allowing silent refresh to work.
+func isHTTPS(r *http.Request) bool {
+	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
 // setRefreshCookie writes the refresh token as an HttpOnly, SameSite=Lax cookie
-// scoped to the auth endpoints.
-func (a *authenticator) setRefreshCookie(w http.ResponseWriter, refreshToken string) {
+// scoped to the auth endpoints. It is only marked Secure when the request was
+// served over HTTPS, so it survives on plain-HTTP deployments too.
+func (a *authenticator) setRefreshCookie(w http.ResponseWriter, r *http.Request, refreshToken string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     refreshCookieName,
 		Value:    refreshToken,
 		Path:     refreshCookiePath,
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   isHTTPS(r),
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int(a.refreshTTL.Seconds()),
 	})
@@ -200,13 +210,13 @@ func (a *authenticator) setRefreshCookie(w http.ResponseWriter, refreshToken str
 
 // clearRefreshCookie expires the refresh cookie so subsequent refresh attempts
 // fail and the client is forced back to login.
-func (a *authenticator) clearRefreshCookie(w http.ResponseWriter) {
+func (a *authenticator) clearRefreshCookie(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     refreshCookieName,
 		Value:    "",
 		Path:     refreshCookiePath,
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   isHTTPS(r),
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
 	})
@@ -290,7 +300,7 @@ func handleLogin(a *authenticator) http.HandlerFunc {
 			respondError(w, status, msg)
 			return
 		}
-		writeSession(w, a, session)
+		writeSession(w, a, r, session)
 	}
 }
 
@@ -301,27 +311,27 @@ func handleRefresh(a *authenticator) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		session, err := provider.Refresh(r)
 		if err != nil {
-			a.clearRefreshCookie(w)
+			a.clearRefreshCookie(w, r)
 			respondError(w, http.StatusUnauthorized, mapRefreshError(err))
 			return
 		}
-		writeSession(w, a, session)
+		writeSession(w, a, r, session)
 	}
 }
 
 // handleLogout expires the refresh cookie.
 func handleLogout(a *authenticator) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		a.clearRefreshCookie(w)
+		a.clearRefreshCookie(w, r)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
 // writeSession sets the refresh cookie (when issued) and returns the access
 // token to the client.
-func writeSession(w http.ResponseWriter, a *authenticator, s *Session) {
+func writeSession(w http.ResponseWriter, a *authenticator, r *http.Request, s *Session) {
 	if s.SetRefreshCookie {
-		a.setRefreshCookie(w, s.RefreshToken)
+		a.setRefreshCookie(w, r, s.RefreshToken)
 	}
 	respondJSON(w, http.StatusOK, loginResponse{Token: s.AccessToken, ExpiresAt: s.AccessExpiresAt})
 }

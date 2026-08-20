@@ -7,24 +7,13 @@ const BASE = '/api/v1'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-// refreshInFlight collapses concurrent 401s into a single refresh call so we
-// don't fire a refresh storm when many requests fail at once after expiry.
-let refreshInFlight: Promise<boolean> | null = null
-function refreshOnce(): Promise<boolean> {
-  if (!refreshInFlight) {
-    refreshInFlight = refresh().finally(() => {
-      refreshInFlight = null
-    })
-  }
-  return refreshInFlight
-}
-
 // handleUnauthorized triggers a silent refresh on 401. If the refresh succeeds
 // the caller should retry the original request; if it fails the token is
-// cleared (via refresh()) and the app returns to the login screen.
+// cleared (via refresh()) and the app returns to the login screen. refresh()
+// itself collapses concurrent callers into a single in-flight request.
 async function handleUnauthorized(status: number): Promise<boolean> {
   if (status !== 401) return false
-  return refreshOnce()
+  return refresh()
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
