@@ -152,7 +152,7 @@ push-artifacts: ## Pushes artifacts to local local registry
 .PHONY: argocd
 argocd: ## Installs Argo CD in the cluster
 	"$(KUBECTL)" create namespace argocd --dry-run=client -o yaml | "$(KUBECTL)" apply -f -
-	"$(KUBECTL)" apply -n argocd --server-side --force-conflicts -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.3.0/manifests/install.yaml
+	"$(KUBECTL)" apply -n argocd --server-side --force-conflicts -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.1/manifests/install.yaml
 	"$(KUBECTL)" patch svc argocd-server -n argocd -p '{"spec": {"type": "NodePort", "ports": [{"port": 80,"targetPort": 8080,"nodePort": 30052}]}}'
 	"$(KUBECTL)" -n argocd create secret generic manifests-registry-creds \
 		--from-literal=type=oci \
