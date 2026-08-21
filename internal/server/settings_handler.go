@@ -76,7 +76,7 @@ func handlePutSettings(deps *apiDeps, namespace string) http.HandlerFunc {
 		}
 
 		kitchen := &deliveryv1alpha1.Kitchen{}
-		err := deps.writer.Get(r.Context(), types.NamespacedName{
+		err := deps.apiReader.Get(r.Context(), types.NamespacedName{
 			Namespace: namespace,
 			Name:      "default",
 		}, kitchen)
@@ -90,7 +90,7 @@ func handlePutSettings(deps *apiDeps, namespace string) http.HandlerFunc {
 			kitchen.Name = "default"
 			kitchen.Namespace = namespace
 			kitchen.Spec.ArgoCDURL = raw
-			if err := deps.writer.Create(r.Context(), kitchen); err != nil {
+			if err := deps.apiReader.Create(r.Context(), kitchen); err != nil {
 				deps.logger.Error(err, "Failed to create Kitchen")
 				respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to save settings: %s", err))
 				return
@@ -104,7 +104,7 @@ func handlePutSettings(deps *apiDeps, namespace string) http.HandlerFunc {
 			return
 		}
 		kitchen.Spec.ArgoCDURL = raw
-		if err := deps.writer.Update(r.Context(), kitchen); err != nil {
+		if err := deps.apiReader.Update(r.Context(), kitchen); err != nil {
 			deps.logger.Error(err, "Failed to update Kitchen")
 			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to save settings: %s", err))
 			return

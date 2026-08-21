@@ -123,7 +123,7 @@ func handleCreateOrder(deps *apiDeps) http.HandlerFunc {
 			order.Annotations[deliveryv1alpha1.AnnotationCommitMessage] = *req.CommitMessage
 		}
 
-		if err := deps.writer.Create(r.Context(), order); err != nil {
+		if err := deps.apiReader.Create(r.Context(), order); err != nil {
 			deps.logger.Error(err, "Failed to create Order", "namespace", req.Namespace, "name", req.Name)
 			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create order: %s", err))
 			return
@@ -183,7 +183,7 @@ func handleUpdateOrder(deps *apiDeps) http.HandlerFunc {
 			order.Annotations[deliveryv1alpha1.AnnotationCommitMessage] = *req.CommitMessage
 		}
 
-		if err := deps.writer.Update(r.Context(), order); err != nil {
+		if err := deps.apiReader.Update(r.Context(), order); err != nil {
 			deps.logger.Error(err, "Failed to update Order", "namespace", namespace, "name", name)
 			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to update order: %s", err))
 			return
@@ -237,7 +237,7 @@ func handleUpdateOrderEdits(deps *apiDeps) http.HandlerFunc {
 			order.Annotations[deliveryv1alpha1.AnnotationCommitMessage] = *req.CommitMessage
 		}
 
-		if err := deps.writer.Update(r.Context(), order); err != nil {
+		if err := deps.apiReader.Update(r.Context(), order); err != nil {
 			deps.logger.Error(err, "Failed to update Order edits", "namespace", namespace, "name", name)
 			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to update order: %s", err))
 			return
@@ -269,7 +269,7 @@ func handleDeleteOrder(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		if err := deps.writer.Delete(r.Context(), order); err != nil {
+		if err := deps.apiReader.Delete(r.Context(), order); err != nil {
 			deps.logger.Error(err, "Failed to delete Order", "namespace", namespace, "name", name)
 			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to delete order: %s", err))
 			return

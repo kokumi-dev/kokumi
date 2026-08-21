@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -18,6 +19,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/namespace"
 )
 
@@ -44,93 +46,99 @@ func newAuthSecret(data map[string][]byte) *corev1.Secret {
 	}
 }
 
-func TestLoadAuthenticator(t *testing.T) {
+func TestMiddlewareFailClosed(t *testing.T) {
+	var reached bool
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reached = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	t.Run("intentionally disabled opens protected paths", func(t *testing.T) {
+		reached = false
+		mgr := &authManager{disabled: true}
+		handler := mgr.middleware(next)
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/orders", nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.True(t, reached, "disabled auth must pass through")
+	})
+
+	t.Run("unresolvable auth fails closed", func(t *testing.T) {
+		reached = false
+		// auth nil + disabled=false: configured but Secret missing.
+		mgr := &authManager{}
+		handler := mgr.middleware(next)
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/orders", nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+		assert.False(t, reached, "unresolvable auth must not pass through")
+	})
+}
+
+func TestResolveAdminUserConfig(t *testing.T) {
+	t.Run("nil adminUser keeps legacy defaults", func(t *testing.T) {
+		cfg := resolveAdminUserConfig(nil)
+		assert.True(t, cfg.Enabled)
+		assert.Equal(t, "admin", cfg.Username)
+		assert.Equal(t, deliveryv1alpha1.DefaultAdminSecretName, cfg.SecretName)
+	})
+
+	t.Run("explicit fields override defaults", func(t *testing.T) {
+		cfg := resolveAdminUserConfig(&deliveryv1alpha1.AdminUserConfig{
+			Enabled:   new(false),
+			Username:  "root",
+			SecretRef: &corev1.LocalObjectReference{Name: "my-secret"},
+		})
+		assert.False(t, cfg.Enabled)
+		assert.Equal(t, "root", cfg.Username)
+		assert.Equal(t, "my-secret", cfg.SecretName)
+	})
+
+	t.Run("partial override keeps other defaults", func(t *testing.T) {
+		cfg := resolveAdminUserConfig(&deliveryv1alpha1.AdminUserConfig{
+			Enabled: new(false),
+		})
+		assert.False(t, cfg.Enabled)
+		assert.Equal(t, "admin", cfg.Username)
+		assert.Equal(t, deliveryv1alpha1.DefaultAdminSecretName, cfg.SecretName)
+	})
+}
+
+func TestBuildAuthenticator(t *testing.T) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(testPassword), bcrypt.MinCost)
 	require.NoError(t, err)
-
-	validData := map[string][]byte{
+	secret := newAuthSecret(map[string][]byte{
 		secretKeyUsername:     []byte(testUsername),
 		secretKeyPasswordHash: hash,
 		secretKeySigningKey:   []byte("a-signing-key"),
-	}
+	})
+	c := fake.NewClientBuilder().WithObjects(secret).Build()
 
-	tests := []struct {
-		name      string
-		objects   []*corev1.Secret
-		wantErr   string
-		wantUser  string
-		checkPass bool
-	}{
-		{
-			name:      "valid secret",
-			objects:   []*corev1.Secret{newAuthSecret(validData)},
-			wantUser:  testUsername,
-			checkPass: true,
-		},
-		{
-			name:    "secret not found",
-			objects: nil,
-			wantErr: "reading auth secret",
-		},
-		{
-			name: "missing username",
-			objects: []*corev1.Secret{newAuthSecret(map[string][]byte{
-				secretKeyPasswordHash: hash,
-				secretKeySigningKey:   []byte("a-signing-key"),
-			})},
-			wantErr: secretKeyUsername,
-		},
-		{
-			name: "blank username trimmed to empty",
-			objects: []*corev1.Secret{newAuthSecret(map[string][]byte{
-				secretKeyUsername:     []byte("   "),
-				secretKeyPasswordHash: hash,
-				secretKeySigningKey:   []byte("a-signing-key"),
-			})},
-			wantErr: secretKeyUsername,
-		},
-		{
-			name: "missing password hash",
-			objects: []*corev1.Secret{newAuthSecret(map[string][]byte{
-				secretKeyUsername:   []byte(testUsername),
-				secretKeySigningKey: []byte("a-signing-key"),
-			})},
-			wantErr: secretKeyPasswordHash,
-		},
-		{
-			name: "missing signing key",
-			objects: []*corev1.Secret{newAuthSecret(map[string][]byte{
-				secretKeyUsername:     []byte(testUsername),
-				secretKeyPasswordHash: hash,
-			})},
-			wantErr: secretKeySigningKey,
-		},
-	}
+	t.Run("disabled returns nil without error", func(t *testing.T) {
+		auth, err := buildAuthenticator(context.Background(), c, testNS, adminUserConfig{Enabled: false, SecretName: testSecret}, func(string) string { return "" })
+		require.NoError(t, err)
+		assert.Nil(t, auth)
+	})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			builder := fake.NewClientBuilder()
-			for _, o := range tt.objects {
-				builder = builder.WithObjects(o)
-			}
-			c := builder.Build()
+	t.Run("enabled with custom username uses config username", func(t *testing.T) {
+		auth, err := buildAuthenticator(context.Background(), c, testNS, adminUserConfig{
+			Enabled:    true,
+			Username:   "root",
+			SecretName: testSecret,
+		}, func(string) string { return "" })
+		require.NoError(t, err)
+		require.NotNil(t, auth)
+		assert.Equal(t, "root", auth.username)
+		assert.True(t, auth.verifyCredentials("root", testPassword))
+	})
 
-			auth, err := loadAuthenticator(context.Background(), c, testNS, testSecret)
-			if tt.wantErr != "" {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), tt.wantErr)
-				assert.Nil(t, auth)
-				return
-			}
-			require.NoError(t, err)
-			require.NotNil(t, auth)
-			assert.Equal(t, tt.wantUser, auth.username)
-			assert.Equal(t, defaultAccessTokenTTL, auth.accessTTL)
-			if tt.checkPass {
-				assert.True(t, auth.verifyCredentials(testUsername, testPassword))
-			}
-		})
-	}
+	t.Run("missing secret errors", func(t *testing.T) {
+		_, err := buildAuthenticator(context.Background(), c, testNS, adminUserConfig{Enabled: true, SecretName: "absent"}, func(string) string { return "" })
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "absent")
+	})
 }
 
 func TestVerifyCredentials(t *testing.T) {
@@ -323,7 +331,8 @@ func TestMiddleware(t *testing.T) {
 		reached = true
 		w.WriteHeader(http.StatusOK)
 	})
-	handler := auth.middleware(next)
+	mgr := &authManager{auth: auth}
+	handler := mgr.middleware(next)
 
 	tests := []struct {
 		name       string
@@ -359,7 +368,7 @@ func TestMiddleware(t *testing.T) {
 
 func TestHandleLogin(t *testing.T) {
 	auth := newTestAuthenticator(t)
-	handler := handleLogin(auth)
+	handler := handleLogin(&authManager{auth: auth})
 
 	t.Run("successful login returns a usable token", func(t *testing.T) {
 		body := strings.NewReader(`{"username":"admin","password":"s3cret-passw0rd"}`)
@@ -430,16 +439,6 @@ func TestCurrentNamespace(t *testing.T) {
 	})
 }
 
-func TestAuthSecretName(t *testing.T) {
-	assert.Equal(t, defaultAuthSecretName, authSecretName(func(string) string { return "" }))
-	assert.Equal(t, "my-secret", authSecretName(func(k string) string {
-		if k == "AUTH_SECRET_NAME" {
-			return "my-secret"
-		}
-		return ""
-	}))
-}
-
 func TestRandomTokenIDUnique(t *testing.T) {
 	a := randomTokenID()
 	b := randomTokenID()
@@ -449,7 +448,7 @@ func TestRandomTokenIDUnique(t *testing.T) {
 
 func TestHandleLoginSetsRefreshCookie(t *testing.T) {
 	auth := newTestAuthenticator(t)
-	handler := handleLogin(auth)
+	handler := handleLogin(&authManager{auth: auth})
 
 	body := strings.NewReader(`{"username":"admin","password":"s3cret-passw0rd"}`)
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", body)
@@ -471,8 +470,8 @@ func TestHandleLoginSetsRefreshCookie(t *testing.T) {
 
 func TestHandleRefresh(t *testing.T) {
 	auth := newTestAuthenticator(t)
-	loginHandler := handleLogin(auth)
-	refreshHandler := handleRefresh(auth)
+	loginHandler := handleLogin(&authManager{auth: auth})
+	refreshHandler := handleRefresh(&authManager{auth: auth})
 
 	// Log in to obtain a refresh cookie.
 	loginBody := strings.NewReader(`{"username":"admin","password":"s3cret-passw0rd"}`)
@@ -534,7 +533,7 @@ func TestHandleRefresh(t *testing.T) {
 
 func TestHandleLogoutClearsCookie(t *testing.T) {
 	auth := newTestAuthenticator(t)
-	handler := handleLogout(auth)
+	handler := handleLogout(&authManager{auth: auth})
 
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
 	w := httptest.NewRecorder()
@@ -550,7 +549,7 @@ func TestHandleLogoutClearsCookie(t *testing.T) {
 
 func TestHandleInfoReportsAuthEnabled(t *testing.T) {
 	auth := newTestAuthenticator(t)
-	handler := handleInfo(auth)
+	handler := handleInfo(&authManager{auth: auth})
 
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/info", nil)
 	w := httptest.NewRecorder()
@@ -577,17 +576,100 @@ func TestHandleInfoNoAuthReportsDisabled(t *testing.T) {
 	assert.False(t, resp.AuthEnabled)
 }
 
-func TestApplyAuthConfig(t *testing.T) {
-	a := newTestAuthenticator(t)
+func TestBuildAuthenticatorAppliesTokenTTL(t *testing.T) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(testPassword), bcrypt.MinCost)
+	require.NoError(t, err)
+	secret := newAuthSecret(map[string][]byte{
+		secretKeyUsername:     []byte(testUsername),
+		secretKeyPasswordHash: hash,
+		secretKeySigningKey:   []byte("a-signing-key"),
+	})
+	reader := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(secret).Build()
 
 	t.Run("KOKUMI_TOKEN_TTL overrides the access token lifetime", func(t *testing.T) {
-		applyAuthConfig(a, func(k string) string {
+		auth, err := buildAuthenticator(context.Background(), reader, testNS, adminUserConfig{
+			Enabled:    true,
+			Username:   testUsername,
+			SecretName: testSecret,
+		}, func(k string) string {
 			if k == "KOKUMI_TOKEN_TTL" {
 				return "30m"
 			}
 			return ""
 		})
-		assert.Equal(t, 30*time.Minute, a.accessTTL)
+		require.NoError(t, err)
+		require.NotNil(t, auth)
+		assert.Equal(t, 30*time.Minute, auth.accessTTL)
+	})
+
+	t.Run("default TTL when env unset", func(t *testing.T) {
+		auth, err := buildAuthenticator(context.Background(), reader, testNS, adminUserConfig{
+			Enabled:    true,
+			Username:   testUsername,
+			SecretName: testSecret,
+		}, func(string) string { return "" })
+		require.NoError(t, err)
+		require.NotNil(t, auth)
+		assert.Equal(t, defaultAccessTokenTTL, auth.accessTTL)
+	})
+}
+
+func TestAuthManagerFailClosed(t *testing.T) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(testPassword), bcrypt.MinCost)
+	require.NoError(t, err)
+	secret := newAuthSecret(map[string][]byte{
+		secretKeyUsername:     []byte(testUsername),
+		secretKeyPasswordHash: hash,
+		secretKeySigningKey:   []byte("a-signing-key"),
+	})
+	reader := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(secret).Build()
+
+	getenv := func(string) string { return "" }
+	logger := logr.Discard()
+
+	t.Run("keeps last-known-good authenticator on transient error", func(t *testing.T) {
+		m := &authManager{
+			reader:    reader,
+			apiReader: reader,
+			ns:        testNS,
+			getenv:    getenv,
+			logger:    logger,
+		}
+		// Establish a working authenticator.
+		m.reload(context.Background(), nil)
+		require.NotNil(t, m.get())
+
+		// Point at a missing Secret: reload must fail closed and keep the
+		// previous authenticator rather than opening the API.
+		m.reload(context.Background(), &deliveryv1alpha1.Kitchen{
+			ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: testNS},
+			Spec: deliveryv1alpha1.KitchenSpec{
+				AdminUser: &deliveryv1alpha1.AdminUserConfig{
+					Enabled:   new(true),
+					SecretRef: &corev1.LocalObjectReference{Name: "does-not-exist"},
+				},
+			},
+		})
+		assert.NotNil(t, m.get(), "auth must remain enabled after a transient error")
+		assert.False(t, m.disabled)
+	})
+
+	t.Run("intentional disable opens the API", func(t *testing.T) {
+		m := &authManager{
+			reader:    reader,
+			apiReader: reader,
+			ns:        testNS,
+			getenv:    getenv,
+			logger:    logger,
+		}
+		m.reload(context.Background(), &deliveryv1alpha1.Kitchen{
+			ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: testNS},
+			Spec: deliveryv1alpha1.KitchenSpec{
+				AdminUser: &deliveryv1alpha1.AdminUserConfig{Enabled: new(false)},
+			},
+		})
+		assert.Nil(t, m.get())
+		assert.True(t, m.disabled)
 	})
 }
 

@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-logr/logr"
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/namespace"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/spf13/afero"
 	corev1 "k8s.io/api/core/v1"
@@ -57,7 +58,12 @@ func newScheme() *runtime.Scheme {
 // If no Kubernetes config is found (e.g. running outside a cluster without a
 // kubeconfig) the function logs the situation and returns nil; the hub simply
 // stays idle.
-func startK8sWatcher(ctx context.Context, logger logr.Logger, h *hub) (*apiDeps, error) {
+func startK8sWatcher(
+	ctx context.Context,
+	logger logr.Logger,
+	h *hub,
+	getenv func(string) string,
+) (*apiDeps, error) {
 	cfg, err := ctrl.GetConfig()
 	if err != nil {
 		logger.Info("No Kubernetes config found, API endpoints will return 503", "error", err)
@@ -65,6 +71,7 @@ func startK8sWatcher(ctx context.Context, logger logr.Logger, h *hub) (*apiDeps,
 	}
 
 	scheme := newScheme()
+	installNamespace := namespace.Current(getenv)
 
 	k8sCache, err := cache.New(cfg, cache.Options{
 		Scheme: scheme,
@@ -73,7 +80,7 @@ func startK8sWatcher(ctx context.Context, logger logr.Logger, h *hub) (*apiDeps,
 		ByObject: map[client.Object]cache.ByObject{
 			&corev1.Secret{}: {
 				Namespaces: map[string]cache.Config{
-					"kokumi": {},
+					installNamespace: {},
 				},
 			},
 		},
@@ -89,41 +96,27 @@ func startK8sWatcher(ctx context.Context, logger logr.Logger, h *hub) (*apiDeps,
 
 	deps := &apiDeps{
 		reader:    k8sCache,
-		writer:    writer,
+		apiReader: writer,
 		ociClient: oci.NewORASClient(),
 		fs:        afero.NewOsFs(),
 		logger:    logger,
 	}
 
-	orderInformer, err := k8sCache.GetInformer(ctx, &deliveryv1alpha1.Order{})
-	if err != nil {
-		return nil, fmt.Errorf("getting Order informer: %w", err)
-	}
+	// Construct the auth manager up front so it is never nil when the cache
+	// event handlers fire (the cache starts in a background goroutine below).
+	deps.authMgr = newAuthManager(ctx, k8sCache, writer, installNamespace, getenv, logger)
 
-	prepInformer, err := k8sCache.GetInformer(ctx, &deliveryv1alpha1.Preparation{})
+	informers, err := getInformers(ctx, k8sCache)
 	if err != nil {
-		return nil, fmt.Errorf("getting Preparation informer: %w", err)
+		return nil, err
 	}
-
-	servingInformer, err := k8sCache.GetInformer(ctx, &deliveryv1alpha1.Serving{})
-	if err != nil {
-		return nil, fmt.Errorf("getting Serving informer: %w", err)
-	}
-
-	menuInformer, err := k8sCache.GetInformer(ctx, &deliveryv1alpha1.Menu{})
-	if err != nil {
-		return nil, fmt.Errorf("getting Menu informer: %w", err)
-	}
-
-	pantryInformer, err := k8sCache.GetInformer(ctx, &deliveryv1alpha1.Pantry{})
-	if err != nil {
-		return nil, fmt.Errorf("getting Pantry informer: %w", err)
-	}
-
-	kitchenInformer, err := k8sCache.GetInformer(ctx, &deliveryv1alpha1.Kitchen{})
-	if err != nil {
-		return nil, fmt.Errorf("getting Kitchen informer: %w", err)
-	}
+	orderInformer := informers.order
+	prepInformer := informers.prep
+	servingInformer := informers.serving
+	menuInformer := informers.menu
+	pantryInformer := informers.pantry
+	kitchenInformer := informers.kitchen
+	secretInformer := informers.secret
 
 	// refreshAll reads current state from the in-memory informer cache and
 	// broadcasts counts, full order snapshots, and full preparation snapshots
@@ -215,6 +208,36 @@ func startK8sWatcher(ctx context.Context, logger logr.Logger, h *hub) (*apiDeps,
 		return nil, fmt.Errorf("adding Kitchen event handler: %w", err)
 	}
 
+	// The auth Secret only affects authentication, so it gets its own handler
+	// that reloads the authenticator without triggering a full SSE broadcast.
+	// Filter to the resolved auth Secret name (from the Kitchen's
+	// spec.adminUser.secretRef, defaulting to kokumi-server-auth) to avoid
+	// reloading on unrelated Secret changes in the namespace.
+	isAuthSecret := func(obj any) bool {
+		o, ok := obj.(client.Object)
+		return ok && o.GetNamespace() == installNamespace && o.GetName() == deps.authMgr.secretName()
+	}
+	secretHandler := toolscache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj any) {
+			if isAuthSecret(obj) {
+				deps.authMgr.refresh(ctx)
+			}
+		},
+		UpdateFunc: func(_, newObj any) {
+			if isAuthSecret(newObj) {
+				deps.authMgr.refresh(ctx)
+			}
+		},
+		DeleteFunc: func(obj any) {
+			if isAuthSecret(obj) {
+				deps.authMgr.refresh(ctx)
+			}
+		},
+	}
+	if _, err := secretInformer.AddEventHandler(secretHandler); err != nil {
+		return nil, fmt.Errorf("adding Secret event handler: %w", err)
+	}
+
 	// Start the cache in the background; it runs until ctx is cancelled.
 	go func() {
 		if err := k8sCache.Start(ctx); err != nil {
@@ -233,4 +256,45 @@ func startK8sWatcher(ctx context.Context, logger logr.Logger, h *hub) (*apiDeps,
 	}()
 
 	return deps, nil
+}
+
+// informers bundles the informers the server watches.
+type informers struct {
+	order   cache.Informer
+	prep    cache.Informer
+	serving cache.Informer
+	menu    cache.Informer
+	pantry  cache.Informer
+	kitchen cache.Informer
+	secret  cache.Informer
+}
+
+// getInformers registers and returns the informers the server needs. It is
+// kept separate from startK8sWatcher to keep that function's cyclomatic
+// complexity within lint limits.
+func getInformers(ctx context.Context, c cache.Cache) (informers, error) {
+	var out informers
+	var err error
+	if out.order, err = c.GetInformer(ctx, &deliveryv1alpha1.Order{}); err != nil {
+		return out, fmt.Errorf("getting Order informer: %w", err)
+	}
+	if out.prep, err = c.GetInformer(ctx, &deliveryv1alpha1.Preparation{}); err != nil {
+		return out, fmt.Errorf("getting Preparation informer: %w", err)
+	}
+	if out.serving, err = c.GetInformer(ctx, &deliveryv1alpha1.Serving{}); err != nil {
+		return out, fmt.Errorf("getting Serving informer: %w", err)
+	}
+	if out.menu, err = c.GetInformer(ctx, &deliveryv1alpha1.Menu{}); err != nil {
+		return out, fmt.Errorf("getting Menu informer: %w", err)
+	}
+	if out.pantry, err = c.GetInformer(ctx, &deliveryv1alpha1.Pantry{}); err != nil {
+		return out, fmt.Errorf("getting Pantry informer: %w", err)
+	}
+	if out.kitchen, err = c.GetInformer(ctx, &deliveryv1alpha1.Kitchen{}); err != nil {
+		return out, fmt.Errorf("getting Kitchen informer: %w", err)
+	}
+	if out.secret, err = c.GetInformer(ctx, &corev1.Secret{}); err != nil {
+		return out, fmt.Errorf("getting Secret informer: %w", err)
+	}
+	return out, nil
 }

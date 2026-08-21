@@ -65,7 +65,7 @@ func handlePromote(deps *apiDeps) http.HandlerFunc {
 		if existing != nil {
 			// Update the existing Serving's desired preparation.
 			existing.Spec.PreparationName = req.Preparation
-			if err := deps.writer.Update(r.Context(), existing); err != nil {
+			if err := deps.apiReader.Update(r.Context(), existing); err != nil {
 				deps.logger.Error(err, "Failed to update Serving",
 					"namespace", namespace, "name", existing.Name)
 				respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to update serving: %s", err))
@@ -94,7 +94,7 @@ func handlePromote(deps *apiDeps) http.HandlerFunc {
 			},
 		}
 
-		if err := deps.writer.Create(r.Context(), newServing); err != nil {
+		if err := deps.apiReader.Create(r.Context(), newServing); err != nil {
 			deps.logger.Error(err, "Failed to create Serving",
 				"namespace", namespace, "name", newServing.Name)
 			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create serving: %s", err))

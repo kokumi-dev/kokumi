@@ -26,14 +26,14 @@ func NewServer(
 	config *Config,
 	h *hub,
 	deps *apiDeps,
-	auth *authenticator,
+	authMgr *authManager,
 	installNamespace string,
 ) http.Handler {
 	mux := http.NewServeMux()
-	addRoutes(mux, h, deps, auth, installNamespace)
+	addRoutes(mux, h, deps, authMgr, installNamespace)
 	var handler http.Handler = mux
-	if auth != nil {
-		handler = auth.middleware(handler)
+	if authMgr != nil {
+		handler = authMgr.middleware(handler)
 	}
 	return handler
 }
@@ -62,25 +62,18 @@ func Run(
 	logger := log.FromContext(ctx)
 
 	h := newHub()
-	deps, err := startK8sWatcher(ctx, logger, h)
+	deps, err := startK8sWatcher(ctx, logger, h, getenv)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "Warning: failed to start Kubernetes watcher: %s\n", err)
 	}
 
 	installNamespace := namespace.Current(getenv)
-	var auth *authenticator
+	var authMgr *authManager
 	if deps != nil {
-		secretName := authSecretName(getenv)
-		if a, aerr := loadAuthenticator(ctx, deps.writer, installNamespace, secretName); aerr != nil {
-			logger.Info("Authentication disabled", "reason", aerr.Error())
-		} else {
-			applyAuthConfig(a, getenv)
-			auth = a
-			logger.Info("Authentication enabled", "namespace", installNamespace, "secret", secretName)
-		}
+		authMgr = deps.authMgr
 	}
 
-	srv := NewServer(config, h, deps, auth, installNamespace)
+	srv := NewServer(config, h, deps, authMgr, installNamespace)
 	httpServer := &http.Server{
 		Addr:    net.JoinHostPort(config.Host, config.Port),
 		Handler: srv,

@@ -60,6 +60,43 @@ spec:
           spec:
             description: spec defines the desired state of Kitchen
             properties:
+              adminUser:
+                description: AdminUser configures the built-in admin account used
+                  for UI login.
+                properties:
+                  enabled:
+                    default: true
+                    description: |-
+                      Enabled toggles the admin account. When false, admin login is disabled and
+                      the server falls back to no authentication unless another identity
+                      provider (e.g. OIDC) is configured. Defaults to true.
+                    type: boolean
+                  secretRef:
+                    description: |-
+                      SecretRef points to the Secret holding the admin credentials. The Secret
+                      must reside in the same namespace as the Kitchen. Recognized keys are
+                      "password-hash" (bcrypt hash) and "signing-key" (HMAC key for JWTs).
+                      When omitted, the server uses the default Secret name
+                      "kokumi-server-auth".
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  username:
+                    description: Username is the login name for the admin account.
+                      Defaults to "admin".
+                    maxLength: 253
+                    pattern: ^[^/\s]+$
+                    type: string
+                type: object
               argoCDURL:
                 description: |-
                   ArgoCDURL is the base URL of the Argo CD instance used to build deep

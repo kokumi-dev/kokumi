@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
@@ -28,6 +29,43 @@ type KitchenSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == '' || (isURL(self) && url(self).getScheme() in ['http', 'https'])",message="must be a valid http or https URL"
 	// +optional
 	ArgoCDURL string `json:"argoCDURL,omitempty"`
+
+	// AdminUser configures the built-in admin account used for UI login.
+	// +optional
+	AdminUser *AdminUserConfig `json:"adminUser,omitempty"`
+}
+
+// DefaultAdminSecretName is the name of the Secret holding the admin
+// credentials when spec.adminUser.secretRef is not set. The Secret must reside
+// in the Kitchen's namespace and carry the keys "username", "password-hash",
+// and "signing-key".
+const DefaultAdminSecretName = "kokumi-server-auth"
+
+// AdminUserConfig configures the built-in admin account used for UI login.
+// Credentials are never stored in this object; they live in the referenced
+// Secret (see SecretRef). This keeps the admin login usable while allowing it
+// to be disabled (e.g. when an external OIDC provider takes over) or renamed.
+type AdminUserConfig struct {
+	// Enabled toggles the admin account. When false, admin login is disabled and
+	// the server falls back to no authentication unless another identity
+	// provider (e.g. OIDC) is configured. Defaults to true.
+	// +kubebuilder:default=true
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// Username is the login name for the admin account. Defaults to "admin".
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[^/\s]+$`
+	// +optional
+	Username string `json:"username,omitempty"`
+
+	// SecretRef points to the Secret holding the admin credentials. The Secret
+	// must reside in the same namespace as the Kitchen. Recognized keys are
+	// "password-hash" (bcrypt hash) and "signing-key" (HMAC key for JWTs).
+	// When omitted, the server uses the default Secret name
+	// "kokumi-server-auth".
+	// +optional
+	SecretRef *corev1.LocalObjectReference `json:"secretRef,omitempty"`
 }
 
 // KitchenStatus defines the observed state of Kitchen.

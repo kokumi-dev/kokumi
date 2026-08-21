@@ -16,12 +16,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 )
 
 const (
-	// defaultAuthSecretName is the name of the Secret holding admin credentials
-	// when AUTH_SECRET_NAME is not set.
-	defaultAuthSecretName = "kokumi-server-auth"
 	// defaultAccessTokenTTL is the lifetime of an issued access token.
 	defaultAccessTokenTTL = time.Hour
 	// defaultRefreshTokenTTL is the lifetime of a refresh token cookie.
@@ -64,33 +63,6 @@ var publicAPIPaths = map[string]struct{}{
 	"/api/v1/info":         {},
 }
 
-// loadAuthenticator reads the credentials Secret and builds an authenticator.
-// It returns an error when the Secret is absent or missing required keys, in
-// which case the caller should treat authentication as disabled.
-func loadAuthenticator(ctx context.Context, reader client.Reader, namespace, name string) (*authenticator, error) {
-	secret := &corev1.Secret{}
-	key := types.NamespacedName{Namespace: namespace, Name: name}
-	if err := reader.Get(ctx, key, secret); err != nil {
-		return nil, fmt.Errorf("reading auth secret %s/%s: %w", namespace, name, err)
-	}
-
-	username := strings.TrimSpace(string(secret.Data[secretKeyUsername]))
-	passwordHash := secret.Data[secretKeyPasswordHash]
-	signingKey := secret.Data[secretKeySigningKey]
-
-	if username == "" {
-		return nil, fmt.Errorf("auth secret %s/%s missing %q", namespace, name, secretKeyUsername)
-	}
-	if len(passwordHash) == 0 {
-		return nil, fmt.Errorf("auth secret %s/%s missing %q", namespace, name, secretKeyPasswordHash)
-	}
-	if len(signingKey) == 0 {
-		return nil, fmt.Errorf("auth secret %s/%s missing %q", namespace, name, secretKeySigningKey)
-	}
-
-	return newAuthenticator(username, passwordHash, signingKey), nil
-}
-
 // newAuthenticator builds an authenticator with the default token lifetimes
 // and a Secure cookie.
 func newAuthenticator(username string, passwordHash, signingKey []byte) *authenticator {
@@ -101,6 +73,100 @@ func newAuthenticator(username string, passwordHash, signingKey []byte) *authent
 		accessTTL:    defaultAccessTokenTTL,
 		refreshTTL:   defaultRefreshTokenTTL,
 	}
+}
+
+// adminUserConfig is the resolved admin-user configuration used to build an
+// authenticator. It is derived from the Kitchen spec with defaults applied.
+type adminUserConfig struct {
+	// Enabled reports whether the admin account is active.
+	Enabled bool
+	// Username is the login name (already defaulted to "admin").
+	Username string
+	// SecretName is the name of the credentials Secret in the install namespace.
+	SecretName string
+}
+
+// kitchenAdminUser returns the adminUser config from a Kitchen, tolerating a
+// nil Kitchen (e.g. before the singleton exists) by returning nil.
+func kitchenAdminUser(kitchen *deliveryv1alpha1.Kitchen) *deliveryv1alpha1.AdminUserConfig {
+	if kitchen == nil {
+		return nil
+	}
+	return kitchen.Spec.AdminUser
+}
+
+// resolveAdminUserConfig merges the Kitchen adminUser settings with defaults.
+// When adminUser is nil the legacy behavior is preserved: admin enabled with
+// the default Secret name.
+func resolveAdminUserConfig(adminUser *deliveryv1alpha1.AdminUserConfig) adminUserConfig {
+	cfg := adminUserConfig{
+		Enabled:    true,
+		Username:   "admin",
+		SecretName: deliveryv1alpha1.DefaultAdminSecretName,
+	}
+	if adminUser == nil {
+		return cfg
+	}
+	if adminUser.Enabled != nil {
+		cfg.Enabled = *adminUser.Enabled
+	}
+	if adminUser.Username != "" {
+		cfg.Username = adminUser.Username
+	}
+	if adminUser.SecretRef != nil && adminUser.SecretRef.Name != "" {
+		cfg.SecretName = adminUser.SecretRef.Name
+	}
+	return cfg
+}
+
+// buildAuthenticator resolves the admin-user config and reads the credentials
+// Secret to construct an authenticator. It returns (nil, nil) when the admin
+// account is disabled, and an error when the Secret is missing or incomplete.
+func buildAuthenticator(
+	ctx context.Context,
+	reader client.Reader,
+	namespace string,
+	cfg adminUserConfig,
+	getenv func(string) string,
+) (*authenticator, error) {
+	if !cfg.Enabled {
+		return nil, nil
+	}
+	secret := &corev1.Secret{}
+	key := types.NamespacedName{Namespace: namespace, Name: cfg.SecretName}
+	if err := reader.Get(ctx, key, secret); err != nil {
+		return nil, fmt.Errorf("reading auth secret %s/%s: %w", namespace, cfg.SecretName, err)
+	}
+
+	passwordHash := secret.Data[secretKeyPasswordHash]
+	signingKey := secret.Data[secretKeySigningKey]
+
+	if len(passwordHash) == 0 {
+		return nil, fmt.Errorf("auth secret %s/%s missing %q", namespace, cfg.SecretName, secretKeyPasswordHash)
+	}
+	if len(signingKey) == 0 {
+		return nil, fmt.Errorf("auth secret %s/%s missing %q", namespace, cfg.SecretName, secretKeySigningKey)
+	}
+
+	// The username comes from the Kitchen config; fall back to the Secret's
+	// username key for backward compatibility, then to the literal default.
+	username := strings.TrimSpace(cfg.Username)
+	if username == "" {
+		username = strings.TrimSpace(string(secret.Data[secretKeyUsername]))
+	}
+	if username == "" {
+		username = "admin"
+	}
+
+	auth := newAuthenticator(username, passwordHash, signingKey)
+	// KOKUMI_TOKEN_TTL overrides the access-token lifetime when set to a valid
+	// positive Go duration.
+	if v := strings.TrimSpace(getenv("KOKUMI_TOKEN_TTL")); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			auth.accessTTL = d
+		}
+	}
+	return auth, nil
 }
 
 // verifyCredentials reports whether username and password match the configured
@@ -233,11 +299,25 @@ func (a *authenticator) refreshTokenFromCookie(r *http.Request) string {
 
 // middleware wraps next, rejecting requests to protected API paths that do not
 // carry a valid bearer token. Static assets, health checks, and the public API
-// paths pass through untouched.
-func (a *authenticator) middleware(next http.Handler) http.Handler {
+// paths pass through untouched. The active authenticator is resolved per
+// request so that adminUser config changes take effect without a restart.
+func (m *authManager) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !requiresAuth(r.URL.Path) {
 			next.ServeHTTP(w, r)
+			return
+		}
+		a, disabled := m.getState()
+		if a == nil {
+			if disabled {
+				// Auth intentionally disabled: protected paths are open.
+				next.ServeHTTP(w, r)
+				return
+			}
+			// Auth is configured but currently unresolvable (e.g. the
+			// credentials Secret is missing). Fail closed rather than
+			// silently exposing protected endpoints.
+			respondError(w, http.StatusServiceUnavailable, "authentication is not available")
 			return
 		}
 		token := bearerToken(r)
@@ -291,9 +371,18 @@ type loginResponse struct {
 
 // handleLogin validates credentials and returns a freshly issued access token
 // plus sets a refresh token as an HttpOnly cookie.
-func handleLogin(a *authenticator) http.HandlerFunc {
-	provider := newAdminProvider(a)
+func handleLogin(m *authManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		a, disabled := m.getState()
+		if a == nil {
+			if disabled {
+				respondError(w, http.StatusServiceUnavailable, "authentication is disabled")
+			} else {
+				respondError(w, http.StatusServiceUnavailable, "authentication is not available")
+			}
+			return
+		}
+		provider := newAdminProvider(a)
 		session, err := provider.Login(r)
 		if err != nil {
 			status, msg := mapLoginError(err)
@@ -306,9 +395,18 @@ func handleLogin(a *authenticator) http.HandlerFunc {
 
 // handleRefresh exchanges a valid refresh cookie for a new access token and a
 // rotated refresh cookie.
-func handleRefresh(a *authenticator) http.HandlerFunc {
-	provider := newAdminProvider(a)
+func handleRefresh(m *authManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		a, disabled := m.getState()
+		if a == nil {
+			if disabled {
+				respondError(w, http.StatusServiceUnavailable, "authentication is disabled")
+			} else {
+				respondError(w, http.StatusServiceUnavailable, "authentication is not available")
+			}
+			return
+		}
+		provider := newAdminProvider(a)
 		session, err := provider.Refresh(r)
 		if err != nil {
 			a.clearRefreshCookie(w, r)
@@ -320,9 +418,11 @@ func handleRefresh(a *authenticator) http.HandlerFunc {
 }
 
 // handleLogout expires the refresh cookie.
-func handleLogout(a *authenticator) http.HandlerFunc {
+func handleLogout(m *authManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		a.clearRefreshCookie(w, r)
+		if a := m.get(); a != nil {
+			a.clearRefreshCookie(w, r)
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -378,23 +478,4 @@ func decodeJSONBody(r *http.Request, v any) error {
 		return fmt.Errorf("invalid request body")
 	}
 	return nil
-}
-
-// authSecretName returns the configured auth Secret name or the default.
-func authSecretName(getenv func(string) string) string {
-	if name := strings.TrimSpace(getenv("AUTH_SECRET_NAME")); name != "" {
-		return name
-	}
-	return defaultAuthSecretName
-}
-
-// applyAuthConfig overrides authenticator defaults from environment variables.
-// KOKUMI_TOKEN_TTL accepts a Go duration string (e.g. "30m", "2h") and tunes the
-// access-token lifetime.
-func applyAuthConfig(a *authenticator, getenv func(string) string) {
-	if v := strings.TrimSpace(getenv("KOKUMI_TOKEN_TTL")); v != "" {
-		if d, err := time.ParseDuration(v); err == nil && d > 0 {
-			a.accessTTL = d
-		}
-	}
 }

@@ -9,18 +9,18 @@ func addRoutes(
 	mux *http.ServeMux,
 	h *hub,
 	deps *apiDeps,
-	auth *authenticator,
+	authMgr *authManager,
 	installNamespace string,
 ) {
-	mux.HandleFunc("GET /api/v1/info", handleInfo(auth))
+	mux.HandleFunc("GET /api/v1/info", handleInfo(authMgr))
 	mux.HandleFunc("GET /api/v1/events", handleEventsStream(h))
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /readyz", handleReadyz)
 
-	if auth != nil {
-		mux.HandleFunc("POST /api/v1/auth/login", handleLogin(auth))
-		mux.HandleFunc("POST /api/v1/auth/refresh", handleRefresh(auth))
-		mux.HandleFunc("POST /api/v1/auth/logout", handleLogout(auth))
+	if authMgr != nil {
+		mux.HandleFunc("POST /api/v1/auth/login", handleLogin(authMgr))
+		mux.HandleFunc("POST /api/v1/auth/refresh", handleRefresh(authMgr))
+		mux.HandleFunc("POST /api/v1/auth/logout", handleLogout(authMgr))
 	}
 
 	mux.HandleFunc("GET /api/v1/registry/default", handleGetDefaultRegistry())

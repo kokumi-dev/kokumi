@@ -31,4 +31,5 @@ It models your delivery workflow as five composable primitives:
   {{< card link="installation" title="Installation" icon="download" subtitle="Requirements, install, upgrade, and uninstall." >}}
   {{< card link="architecture" title="Architecture" icon="cube-transparent" subtitle="Understand the reconciliation model and key concepts." >}}
   {{< card link="user-guide" title="User Guide" icon="book-open" subtitle="How-to guides for Kokumi features." >}}
+  {{< card link="operator-guide" title="Operator Guide" icon="shield-check" subtitle="Operating and securing a Kokumi deployment." >}}
 {{< /cards >}}
