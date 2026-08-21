@@ -12,8 +12,9 @@ import (
 // return 503 Service Unavailable in that case.
 type apiDeps struct {
 	reader    client.Reader
-	writer    client.Client
+	apiReader client.Client
 	ociClient oci.Client
 	fs        afero.Fs
 	logger    logr.Logger
+	authMgr   *authManager
 }

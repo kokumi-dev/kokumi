@@ -1,6 +1,6 @@
 ---
 title: Contribution Guide
-weight: 5
+weight: 6
 description: How to contribute to Kokumi.
 ---
 

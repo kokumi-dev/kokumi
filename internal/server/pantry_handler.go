@@ -128,7 +128,7 @@ func handleCreatePantry(deps *apiDeps) http.HandlerFunc {
 			},
 		}
 
-		if err := deps.writer.Create(r.Context(), pantry); err != nil {
+		if err := deps.apiReader.Create(r.Context(), pantry); err != nil {
 			if apierrors.IsAlreadyExists(err) {
 				respondError(w, http.StatusConflict, fmt.Sprintf("pantry %q already exists", req.Name))
 				return
@@ -195,7 +195,7 @@ func handleUpdatePantry(deps *apiDeps) http.HandlerFunc {
 		pantry.Spec.URL = req.URL
 		pantry.Spec.Description = req.Description
 
-		if err := deps.writer.Patch(r.Context(), pantry, patch); err != nil {
+		if err := deps.apiReader.Patch(r.Context(), pantry, patch); err != nil {
 			deps.logger.Error(err, "Failed to update Pantry", "name", name)
 			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to update pantry: %s", err))
 			return
@@ -230,7 +230,7 @@ func handleDeletePantry(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		if err := deps.writer.Delete(r.Context(), pantry); err != nil {
+		if err := deps.apiReader.Delete(r.Context(), pantry); err != nil {
 			deps.logger.Error(err, "Failed to delete Pantry", "name", name)
 			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to delete pantry: %s", err))
 			return
@@ -258,7 +258,7 @@ func createDockerConfigSecret(ctx context.Context, deps *apiDeps, ns, name, regi
 		},
 	}
 
-	return deps.writer.Create(ctx, secret)
+	return deps.apiReader.Create(ctx, secret)
 }
 
 // upsertDockerConfigSecret creates or updates a kubernetes.io/dockerconfigjson Secret.
@@ -283,7 +283,7 @@ func upsertDockerConfigSecret(ctx context.Context, deps *apiDeps, ns, name, regi
 			Type: corev1.SecretTypeDockerConfigJson,
 			Data: map[string][]byte{corev1.DockerConfigJsonKey: data},
 		}
-		return deps.writer.Create(ctx, newSecret)
+		return deps.apiReader.Create(ctx, newSecret)
 	}
 	if getErr != nil {
 		return getErr
@@ -291,7 +291,7 @@ func upsertDockerConfigSecret(ctx context.Context, deps *apiDeps, ns, name, regi
 
 	patch := client.MergeFrom(secret.DeepCopy())
 	secret.Data = map[string][]byte{corev1.DockerConfigJsonKey: data}
-	return deps.writer.Patch(ctx, &secret, patch)
+	return deps.apiReader.Patch(ctx, &secret, patch)
 }
 
 // buildDockerConfigJSON produces a minimal .dockerconfigjson payload for a

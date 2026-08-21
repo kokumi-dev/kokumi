@@ -16,14 +16,14 @@ type InfoResponse struct {
 }
 
 // handleInfo handles GET /api/v1/info. authEnabled tells the UI whether a login
-// is required; it is true only when an authenticator is configured.
-func handleInfo(auth *authenticator) http.HandlerFunc {
+// is required; it is true only when an authenticator is currently configured.
+func handleInfo(authMgr *authManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(InfoResponse{
 			Name:        "kokumi",
 			Version:     version.Version,
-			AuthEnabled: auth != nil,
+			AuthEnabled: authMgr != nil && authMgr.get() != nil,
 		}); err != nil {
 			http.Error(w, "failed to encode response", http.StatusInternalServerError)
 		}

@@ -88,7 +88,7 @@ func handleCreateMenu(deps *apiDeps) http.HandlerFunc {
 			},
 		}
 
-		if err := deps.writer.Create(r.Context(), menu); err != nil {
+		if err := deps.apiReader.Create(r.Context(), menu); err != nil {
 			deps.logger.Error(err, "Failed to create Menu", "name", req.Name)
 			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create menu: %s", err))
 			return
@@ -131,7 +131,7 @@ func handleUpdateMenu(deps *apiDeps) http.HandlerFunc {
 		menu.Spec.Overrides = overridePolicyFromDTO(req.Overrides)
 		menu.Spec.Defaults = deliveryv1alpha1.MenuDefaults{AutoDeploy: deliveryv1alpha1.AutoDeployPolicy(req.Defaults.AutoDeploy)}
 
-		if err := deps.writer.Update(r.Context(), menu); err != nil {
+		if err := deps.apiReader.Update(r.Context(), menu); err != nil {
 			deps.logger.Error(err, "Failed to update Menu", "name", name)
 			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to update menu: %s", err))
 			return
@@ -162,7 +162,7 @@ func handleDeleteMenu(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		if err := deps.writer.Delete(r.Context(), menu); err != nil {
+		if err := deps.apiReader.Delete(r.Context(), menu); err != nil {
 			deps.logger.Error(err, "Failed to delete Menu", "name", name)
 			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to delete menu: %s", err))
 			return

@@ -69,23 +69,10 @@ The UI requires authentication. The default credentials are:
 | -------- | -------- |
 | `admin`  | `admin`  |
 
-Change the password before any non-development use. Generate a new bcrypt hash
-with `htpasswd` and patch the `kokumi-server-auth` Secret:
-
-```bash
-kubectl -n kokumi patch secret kokumi-server-auth \
-  --type merge \
-  -p "{\"stringData\":{\"password-hash\":\"$(htpasswd -nbB admin 'your-new-password' | cut -d: -f2)\"}}"
-```
-
-Then restart the server so it picks up the change:
-
-```bash
-kubectl -n kokumi rollout restart deployment/kokumi-server
-```
-
-> You can also change the username from the default `admin` by setting
-> `stringData.username` in the same Secret.
+Change the password before any non-development use. See the
+[Operator Guide — Authentication](../operator-guide/authentication/) for how to
+rotate the credentials Secret and configure the admin account via the `Kitchen`
+resource.
 
 ## Pin a specific version
 
