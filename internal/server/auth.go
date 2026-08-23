@@ -17,15 +17,15 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/api/v1alpha1"
 )
 
 const (
-	// defaultAccessTokenTTL is the lifetime of an issued access token.
+	// defaultAccessTokenTTL is the default access-token lifetime.
 	defaultAccessTokenTTL = time.Hour
-	// defaultRefreshTokenTTL is the lifetime of a refresh token cookie.
+	// defaultRefreshTokenTTL is the default refresh-token lifetime.
 	defaultRefreshTokenTTL = 7 * 24 * time.Hour
-	// tokenIssuer is the JWT "iss" claim value for tokens minted by this server.
+	// tokenIssuer is the JWT issuer claim for minted tokens.
 	tokenIssuer      = "kokumi"
 	accessTokenType  = "access"
 	refreshTokenType = "refresh"
@@ -35,18 +35,17 @@ const (
 	secretKeyPasswordHash = "password-hash"
 	secretKeySigningKey   = "signing-key"
 
-	// signingMethod is the only JWT signing algorithm accepted by this server.
+	// signingMethod is the only accepted JWT signing algorithm.
 	signingMethod = "HS256"
 
 	bearerPrefix      = "Bearer "
 	refreshCookieName = "kokumi.refresh"
-	// refreshCookiePath scopes the cookie to the auth endpoints only.
+	// refreshCookiePath scopes the cookie to the auth endpoints.
 	refreshCookiePath = "/api/v1/auth"
 )
 
-// authenticator validates username/password credentials against a bcrypt hash
-// and issues/verifies short-lived HMAC-signed JWTs. It is immutable after
-// construction and safe for concurrent use.
+// authenticator validates admin credentials and issues/verifies HMAC-signed
+// JWTs; immutable and concurrency-safe.
 type authenticator struct {
 	username     string
 	passwordHash []byte
@@ -57,14 +56,15 @@ type authenticator struct {
 
 // publicAPIPaths are API paths reachable without a valid access token.
 var publicAPIPaths = map[string]struct{}{
-	"/api/v1/auth/login":   {},
-	"/api/v1/auth/refresh": {},
-	"/api/v1/auth/logout":  {},
-	"/api/v1/info":         {},
+	"/api/v1/auth/login":         {},
+	"/api/v1/auth/refresh":       {},
+	"/api/v1/auth/logout":        {},
+	"/api/v1/auth/oidc/start":    {},
+	"/api/v1/auth/oidc/callback": {},
+	"/api/v1/info":               {},
 }
 
-// newAuthenticator builds an authenticator with the default token lifetimes
-// and a Secure cookie.
+// newAuthenticator builds an authenticator with default token lifetimes.
 func newAuthenticator(username string, passwordHash, signingKey []byte) *authenticator {
 	return &authenticator{
 		username:     username,
@@ -75,81 +75,51 @@ func newAuthenticator(username string, passwordHash, signingKey []byte) *authent
 	}
 }
 
-// adminUserConfig is the resolved admin-user configuration used to build an
-// authenticator. It is derived from the Kitchen spec with defaults applied.
-type adminUserConfig struct {
-	// Enabled reports whether the admin account is active.
-	Enabled bool
-	// Username is the login name (already defaulted to "admin").
-	Username string
-	// SecretName is the name of the credentials Secret in the install namespace.
-	SecretName string
-}
-
-// kitchenAdminUser returns the adminUser config from a Kitchen, tolerating a
-// nil Kitchen (e.g. before the singleton exists) by returning nil.
-func kitchenAdminUser(kitchen *deliveryv1alpha1.Kitchen) *deliveryv1alpha1.AdminUserConfig {
-	if kitchen == nil {
-		return nil
-	}
-	return kitchen.Spec.AdminUser
-}
-
-// resolveAdminUserConfig merges the Kitchen adminUser settings with defaults.
-// When adminUser is nil the legacy behavior is preserved: admin enabled with
-// the default Secret name.
-func resolveAdminUserConfig(adminUser *deliveryv1alpha1.AdminUserConfig) adminUserConfig {
-	cfg := adminUserConfig{
-		Enabled:    true,
-		Username:   "admin",
-		SecretName: deliveryv1alpha1.DefaultAdminSecretName,
-	}
-	if adminUser == nil {
-		return cfg
-	}
-	if adminUser.Enabled != nil {
-		cfg.Enabled = *adminUser.Enabled
-	}
-	if adminUser.Username != "" {
-		cfg.Username = adminUser.Username
-	}
-	if adminUser.SecretRef != nil && adminUser.SecretRef.Name != "" {
-		cfg.SecretName = adminUser.SecretRef.Name
-	}
-	return cfg
-}
-
-// buildAuthenticator resolves the admin-user config and reads the credentials
-// Secret to construct an authenticator. It returns (nil, nil) when the admin
-// account is disabled, and an error when the Secret is missing or incomplete.
+// buildAuthenticator reads the credentials Secret to build an authenticator. A
+// disabled admin still builds a token-only authenticator (signing key only) so
+// OIDC sessions share the trust root; a missing/incomplete Secret fails closed.
 func buildAuthenticator(
 	ctx context.Context,
 	reader client.Reader,
 	namespace string,
-	cfg adminUserConfig,
+	cfg *v1alpha1.AdminUserConfig,
 	getenv func(string) string,
 ) (*authenticator, error) {
-	if !cfg.Enabled {
-		return nil, nil
+
+	if cfg == nil || cfg.SecretRef == nil {
+		return nil, fmt.Errorf("admin secretRef not set")
 	}
 	secret := &corev1.Secret{}
-	key := types.NamespacedName{Namespace: namespace, Name: cfg.SecretName}
+	key := types.NamespacedName{Namespace: namespace, Name: cfg.SecretRef.Name}
 	if err := reader.Get(ctx, key, secret); err != nil {
-		return nil, fmt.Errorf("reading auth secret %s/%s: %w", namespace, cfg.SecretName, err)
+		return nil, fmt.Errorf("reading auth secret %s/%s: %w", namespace, cfg.SecretRef.Name, err)
 	}
 
 	passwordHash := secret.Data[secretKeyPasswordHash]
 	signingKey := secret.Data[secretKeySigningKey]
 
-	if len(passwordHash) == 0 {
-		return nil, fmt.Errorf("auth secret %s/%s missing %q", namespace, cfg.SecretName, secretKeyPasswordHash)
-	}
+	// The signing key is the trust root for all session tokens; required regardless of mode.
 	if len(signingKey) == 0 {
-		return nil, fmt.Errorf("auth secret %s/%s missing %q", namespace, cfg.SecretName, secretKeySigningKey)
+		return nil, fmt.Errorf("auth secret %s/%s missing %q", namespace, cfg.SecretRef.Name, secretKeySigningKey)
 	}
 
-	// The username comes from the Kitchen config; fall back to the Secret's
-	// username key for backward compatibility, then to the literal default.
+	// Disabled admin: only the signing key is needed; credential keys are ignored so login is impossible.
+	if !cfg.IsEnabled() {
+		auth := newAuthenticator("", nil, signingKey)
+		if v := strings.TrimSpace(getenv("KOKUMI_TOKEN_TTL")); v != "" {
+			if d, err := time.ParseDuration(v); err == nil && d > 0 {
+				auth.accessTTL = d
+			}
+		}
+		return auth, nil
+	}
+
+	// Enabled admin: password hash is mandatory so credentials can be verified.
+	if len(passwordHash) == 0 {
+		return nil, fmt.Errorf("auth secret %s/%s missing %q", namespace, cfg.SecretRef.Name, secretKeyPasswordHash)
+	}
+
+	// Username from config, else Secret key, else "admin".
 	username := strings.TrimSpace(cfg.Username)
 	if username == "" {
 		username = strings.TrimSpace(string(secret.Data[secretKeyUsername]))
@@ -159,8 +129,7 @@ func buildAuthenticator(
 	}
 
 	auth := newAuthenticator(username, passwordHash, signingKey)
-	// KOKUMI_TOKEN_TTL overrides the access-token lifetime when set to a valid
-	// positive Go duration.
+	// KOKUMI_TOKEN_TTL overrides the access-token lifetime when valid.
 	if v := strings.TrimSpace(getenv("KOKUMI_TOKEN_TTL")); v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d > 0 {
 			auth.accessTTL = d
@@ -169,41 +138,59 @@ func buildAuthenticator(
 	return auth, nil
 }
 
-// verifyCredentials reports whether username and password match the configured
-// admin account. The bcrypt comparison runs even when the username does not
-// match so the cost is constant regardless of which field is wrong, avoiding
-// username enumeration via timing.
+// verifyCredentials checks username/password; bcrypt runs even on username
+// mismatch to keep timing constant and avoid enumeration.
 func (a *authenticator) verifyCredentials(username, password string) bool {
 	userMatch := subtle.ConstantTimeCompare([]byte(username), []byte(a.username)) == 1
 	passMatch := bcrypt.CompareHashAndPassword(a.passwordHash, []byte(password)) == nil
 	return userMatch && passMatch
 }
 
-// issueAccessToken mints a signed access JWT valid until now+accessTTL and returns
-// the token string together with its expiry time.
+// issueAccessToken mints a signed access JWT.
 func (a *authenticator) issueAccessToken(now time.Time) (string, time.Time, error) {
-	return a.issueTypedToken(now, a.accessTTL, accessTokenType)
+	return a.issueTypedToken(now, a.accessTTL, accessTokenType, a.username)
 }
 
-// issueRefreshToken mints a signed refresh JWT valid until now+refreshTTLand returns
-// the token string together with its expiry time.
-func (a *authenticator) issueRefreshToken(now time.Time) (string, time.Time, error) {
-	return a.issueTypedToken(now, a.refreshTTL, refreshTokenType)
-}
-
-// issueTypedToken mints a signed JWT of the given type and lifetime.
-func (a *authenticator) issueTypedToken(now time.Time, ttl time.Duration, typ string) (string, time.Time, error) {
-	expires := now.Add(ttl)
+// issueAccessTokenFor mints an access JWT for an explicit subject (OIDC ID-token username).
+func (a *authenticator) issueAccessTokenFor(now time.Time, username string) (string, time.Time, error) {
+	expires := now.Add(a.accessTTL)
 	claims := jwt.RegisteredClaims{
-		Subject:   a.username,
+		Subject:   username,
 		Issuer:    tokenIssuer,
 		IssuedAt:  jwt.NewNumericDate(now),
 		NotBefore: jwt.NewNumericDate(now),
 		ExpiresAt: jwt.NewNumericDate(expires),
 		ID:        randomTokenID(),
 	}
-	// Embed the token type in a private claim so parseTypedToken can reject a
-	// token used in the wrong role (e.g. a refresh token presented as a bearer).
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, typedClaims{RegisteredClaims: claims, TokenType: accessTokenType})
+	signed, err := token.SignedString(a.signingKey)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("signing token: %w", err)
+	}
+	return signed, expires, nil
+}
+
+// issueRefreshToken mints a refresh JWT; subject is carried so refresh preserves
+// identity (an OIDC login must not flip to the admin username).
+func (a *authenticator) issueRefreshToken(now time.Time, subject string) (string, time.Time, error) {
+	return a.issueTypedToken(now, a.refreshTTL, refreshTokenType, subject)
+}
+
+// issueTypedToken mints a typed JWT; sub defaults to the admin username when empty.
+func (a *authenticator) issueTypedToken(now time.Time, ttl time.Duration, typ, sub string) (string, time.Time, error) {
+	if sub == "" {
+		sub = a.username
+	}
+	expires := now.Add(ttl)
+	claims := jwt.RegisteredClaims{
+		Subject:   sub,
+		Issuer:    tokenIssuer,
+		IssuedAt:  jwt.NewNumericDate(now),
+		NotBefore: jwt.NewNumericDate(now),
+		ExpiresAt: jwt.NewNumericDate(expires),
+		ID:        randomTokenID(),
+	}
+	// Embed token type so parseTypedToken rejects cross-role use (e.g. refresh as bearer).
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, typedClaims{RegisteredClaims: claims, TokenType: typ})
 	signed, err := token.SignedString(a.signingKey)
 	if err != nil {
@@ -212,24 +199,23 @@ func (a *authenticator) issueTypedToken(now time.Time, ttl time.Duration, typ st
 	return signed, expires, nil
 }
 
-// typedClaims extends RegisteredClaims with a private "typ" claim.
+// typedClaims adds a private "typ" claim to RegisteredClaims.
 type typedClaims struct {
 	jwt.RegisteredClaims
 	TokenType string `json:"typ"`
 }
 
-// parseToken verifies an access token and returns its claims.
+// parseToken verifies an access token.
 func (a *authenticator) parseToken(tokenString string) (*jwt.RegisteredClaims, error) {
 	return a.parseTypedToken(tokenString, accessTokenType)
 }
 
-// parseRefresh verifies a refresh token and returns its claims.
+// parseRefresh verifies a refresh token.
 func (a *authenticator) parseRefresh(tokenString string) (*jwt.RegisteredClaims, error) {
 	return a.parseTypedToken(tokenString, refreshTokenType)
 }
 
-// parseTypedToken verifies the signature, algorithm, issuer, expiry, and token
-// type of a token and returns its claims.
+// parseTypedToken verifies signature, algorithm, issuer, expiry, and type.
 func (a *authenticator) parseTypedToken(tokenString, wantType string) (*jwt.RegisteredClaims, error) {
 	claims := &typedClaims{}
 	_, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (any, error) {
@@ -250,18 +236,13 @@ func (a *authenticator) parseTypedToken(tokenString, wantType string) (*jwt.Regi
 	return &claims.RegisteredClaims, nil
 }
 
-// isHTTPS reports whether the request was received over TLS, either directly
-// or behind a trusted reverse proxy that sets X-Forwarded-Proto. The refresh
-// cookie is only marked Secure in that case, so browsers (notably Safari,
-// which does not treat http://localhost as a secure context) still store it
-// when the UI is served over plain HTTP, allowing silent refresh to work.
+// isHTTPS reports TLS (direct or via X-Forwarded-Proto). The refresh cookie is
+// only Secure then, so plain-HTTP UIs (e.g. Safari on localhost) still allow silent refresh.
 func isHTTPS(r *http.Request) bool {
 	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
-// setRefreshCookie writes the refresh token as an HttpOnly, SameSite=Lax cookie
-// scoped to the auth endpoints. It is only marked Secure when the request was
-// served over HTTPS, so it survives on plain-HTTP deployments too.
+// setRefreshCookie writes an HttpOnly, SameSite=Lax refresh cookie; Secure only over HTTPS.
 func (a *authenticator) setRefreshCookie(w http.ResponseWriter, r *http.Request, refreshToken string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     refreshCookieName,
@@ -274,8 +255,7 @@ func (a *authenticator) setRefreshCookie(w http.ResponseWriter, r *http.Request,
 	})
 }
 
-// clearRefreshCookie expires the refresh cookie so subsequent refresh attempts
-// fail and the client is forced back to login.
+// clearRefreshCookie expires the refresh cookie, forcing re-login.
 func (a *authenticator) clearRefreshCookie(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     refreshCookieName,
@@ -288,7 +268,7 @@ func (a *authenticator) clearRefreshCookie(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// refreshTokenFromCookie extracts the refresh token from the request cookie.
+// refreshTokenFromCookie returns the refresh token from the cookie.
 func (a *authenticator) refreshTokenFromCookie(r *http.Request) string {
 	c, err := r.Cookie(refreshCookieName)
 	if err != nil {
@@ -297,10 +277,8 @@ func (a *authenticator) refreshTokenFromCookie(r *http.Request) string {
 	return strings.TrimSpace(c.Value)
 }
 
-// middleware wraps next, rejecting requests to protected API paths that do not
-// carry a valid bearer token. Static assets, health checks, and the public API
-// paths pass through untouched. The active authenticator is resolved per
-// request so that adminUser config changes take effect without a restart.
+// middleware rejects protected API paths without a valid bearer token; the
+// authenticator is resolved per request so config changes apply without restart.
 func (m *authManager) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !requiresAuth(r.URL.Path) {
@@ -342,10 +320,8 @@ func requiresAuth(path string) bool {
 	return !public
 }
 
-// bearerToken extracts the token from an "Authorization: Bearer <token>"
-// header. As a fallback it accepts an "access_token" query parameter, which is
-// required for the SSE endpoint because the browser EventSource API cannot set
-// request headers. Returns "" when no token is present.
+// bearerToken extracts the bearer token from the Authorization header, falling
+// back to the access_token query param (needed for SSE, whose EventSource can't set headers).
 func bearerToken(r *http.Request) string {
 	h := r.Header.Get("Authorization")
 	if len(h) > len(bearerPrefix) && strings.EqualFold(h[:len(bearerPrefix)], bearerPrefix) {
@@ -357,29 +333,35 @@ func bearerToken(r *http.Request) string {
 	return ""
 }
 
-// loginRequest is the JSON body for POST /api/v1/auth/login.
+// loginRequest is the POST /api/v1/auth/login body.
 type loginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
 
-// loginResponse is the JSON body returned on a successful login.
+// loginResponse is returned on a successful login.
 type loginResponse struct {
 	Token     string    `json:"token"`
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
-// handleLogin validates credentials and returns a freshly issued access token
-// plus sets a refresh token as an HttpOnly cookie.
+// handleLogin validates credentials and issues an access token + refresh cookie.
 func handleLogin(m *authManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		a, disabled := m.getState()
 		if a == nil {
 			if disabled {
+				// Intentionally off: no login endpoint at all.
 				respondError(w, http.StatusServiceUnavailable, "authentication is disabled")
 			} else {
+				// Configured but unresolvable (e.g. Secret missing).
 				respondError(w, http.StatusServiceUnavailable, "authentication is not available")
 			}
+			return
+		}
+		// Token-only (OIDC-only) mode: server healthy but rejects password logins.
+		if !m.adminLoginEnabled() {
+			respondError(w, http.StatusForbidden, "admin login is disabled")
 			return
 		}
 		provider := newAdminProvider(a)
@@ -393,8 +375,7 @@ func handleLogin(m *authManager) http.HandlerFunc {
 	}
 }
 
-// handleRefresh exchanges a valid refresh cookie for a new access token and a
-// rotated refresh cookie.
+// handleRefresh exchanges a valid refresh cookie for a new access token + rotated cookie.
 func handleRefresh(m *authManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		a, disabled := m.getState()
@@ -427,8 +408,7 @@ func handleLogout(m *authManager) http.HandlerFunc {
 	}
 }
 
-// writeSession sets the refresh cookie (when issued) and returns the access
-// token to the client.
+// writeSession sets the refresh cookie (when issued) and returns the access token.
 func writeSession(w http.ResponseWriter, a *authenticator, r *http.Request, s *Session) {
 	if s.SetRefreshCookie {
 		a.setRefreshCookie(w, r, s.RefreshToken)
@@ -436,7 +416,7 @@ func writeSession(w http.ResponseWriter, a *authenticator, r *http.Request, s *S
 	respondJSON(w, http.StatusOK, loginResponse{Token: s.AccessToken, ExpiresAt: s.AccessExpiresAt})
 }
 
-// mapLoginError translates provider errors to HTTP status + message.
+// mapLoginError maps provider errors to HTTP status + message.
 func mapLoginError(err error) (int, string) {
 	if err == errInvalidCredentials {
 		return http.StatusUnauthorized, "invalid username or password"
@@ -444,7 +424,7 @@ func mapLoginError(err error) (int, string) {
 	return http.StatusBadRequest, err.Error()
 }
 
-// mapRefreshError translates provider refresh errors to an HTTP message.
+// mapRefreshError maps provider refresh errors to an HTTP message.
 func mapRefreshError(err error) string {
 	if err == errMissingRefresh {
 		return "missing refresh token"
@@ -456,19 +436,16 @@ func mapRefreshError(err error) string {
 func randomTokenID() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		// crypto/rand failures are catastrophic and effectively never happen;
-		// fall back to a time-based value so a token is still produced.
+		// crypto/rand failure is effectively impossible; fall back to a time-based value.
 		return hex.EncodeToString([]byte(time.Now().UTC().Format(time.RFC3339Nano)))
 	}
 	return hex.EncodeToString(b)
 }
 
-// errInvalidCredentials is returned by the admin provider when the supplied
-// username/password do not match.
+// errInvalidCredentials is returned when username/password do not match.
 var errInvalidCredentials = fmt.Errorf("invalid username or password")
 
-// errMissingRefresh is returned by the admin provider when no refresh cookie is
-// present on a refresh request.
+// errMissingRefresh is returned when no refresh cookie is present.
 var errMissingRefresh = fmt.Errorf("missing refresh token")
 
 // decodeJSONBody decodes a JSON request body into v, returning a 400-style

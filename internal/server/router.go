@@ -21,6 +21,8 @@ func addRoutes(
 		mux.HandleFunc("POST /api/v1/auth/login", handleLogin(authMgr))
 		mux.HandleFunc("POST /api/v1/auth/refresh", handleRefresh(authMgr))
 		mux.HandleFunc("POST /api/v1/auth/logout", handleLogout(authMgr))
+		mux.HandleFunc("GET /api/v1/auth/oidc/start", handleOIDCStart(authMgr))
+		mux.HandleFunc("GET /api/v1/auth/oidc/callback", handleOIDCCallback(authMgr))
 	}
 
 	mux.HandleFunc("GET /api/v1/registry/default", handleGetDefaultRegistry())

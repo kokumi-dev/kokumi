@@ -32,16 +32,25 @@ export function onAuthChange(listener: () => void): () => void {
 }
 
 // decodeTokenPayload returns the parsed JWT payload, or null if the token is
-// missing or unreadable. Used to derive expiry without a server-provided TTL.
-function decodeTokenPayload(tokenToCheck: string | null = token): { exp?: number } | null {
+// missing or unreadable. Used to derive expiry and the username without a
+// server-provided TTL.
+function decodeTokenPayload(tokenToCheck: string | null = token): { exp?: number; sub?: string } | null {
   if (!tokenToCheck) return null
   const parts = tokenToCheck.split('.')
   if (parts.length < 2) return null
   try {
-    return JSON.parse(atob(parts[1])) as { exp?: number }
+    return JSON.parse(atob(parts[1])) as { exp?: number; sub?: string }
   } catch {
     return null
   }
+}
+
+/**
+ * Returns the username (JWT `sub` claim) of the current token, or null when
+ * there is no token or it is unreadable. Shown in the sidebar.
+ */
+export function getUsername(): string | null {
+  return decodeTokenPayload()?.sub ?? null
 }
 
 /**
@@ -176,4 +185,24 @@ export async function logout(): Promise<void> {
     // best-effort; the cookie is cleared server-side regardless
   }
   setToken(null)
+}
+
+/**
+ * Reads an access token from the URL fragment (`#access_token=...`), stores it,
+ * and strips the fragment so it is not leaked via referrers/history. The OIDC
+ * callback uses the fragment because it is never sent to the server.
+ */
+export function consumeFragmentToken(): boolean {
+  if (typeof window === 'undefined') return false
+  const hash = window.location.hash
+  if (!hash.includes('access_token=')) return false
+  const params = new URLSearchParams(hash.slice(1))
+  const t = params.get('access_token')
+  if (t) {
+    setToken(t)
+    // Strip the fragment so the token is not persisted in history or sent on later navigations.
+    history.replaceState(null, '', window.location.pathname + window.location.search)
+    return true
+  }
+  return false
 }

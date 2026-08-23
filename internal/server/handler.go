@@ -10,35 +10,37 @@ import (
 
 // InfoResponse is the response body for GET /api/v1/info.
 type InfoResponse struct {
-	Name        string `json:"name"`
-	Version     string `json:"version"`
-	AuthEnabled bool   `json:"authEnabled"`
+	Name          string   `json:"name"`
+	Version       string   `json:"version"`
+	AuthEnabled   bool     `json:"authEnabled"`
+	AuthProviders []string `json:"authProviders,omitempty"`
 }
 
-// handleInfo handles GET /api/v1/info. authEnabled tells the UI whether a login
-// is required; it is true only when an authenticator is currently configured.
+// handleInfo handles GET /api/v1/info; authEnabled/authProviders tell the UI whether
+// and how to render login.
 func handleInfo(authMgr *authManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		var providers []string
+		authEnabled := false
+		if authMgr != nil {
+			providers = authMgr.providers()
+			authEnabled = len(providers) > 0
+		}
 		if err := json.NewEncoder(w).Encode(InfoResponse{
-			Name:        "kokumi",
-			Version:     version.Version,
-			AuthEnabled: authMgr != nil && authMgr.get() != nil,
+			Name:          "kokumi",
+			Version:       version.Version,
+			AuthEnabled:   authEnabled,
+			AuthProviders: providers,
 		}); err != nil {
 			http.Error(w, "failed to encode response", http.StatusInternalServerError)
 		}
 	}
 }
 
-// handleEventsStream streams all SSE event types on a single connection.
-// Each event is written in the standard SSE format:
-//
-//	event: <type>
-//	data: <json>
-//	(blank line)
-//
-// The browser EventSource API will automatically reconnect if the connection
-// drops, and the hub replays the latest value of each event type on reconnect.
+// handleEventsStream streams all SSE event types on one connection. Events use the
+// standard SSE format (event:/data:/blank line); EventSource auto-reconnects and the
+// hub replays the latest value of each type on reconnect.
 func handleEventsStream(h *hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

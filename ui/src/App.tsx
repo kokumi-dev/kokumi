@@ -9,12 +9,13 @@ import Preparations from './pages/Preparations'
 import Servings from './pages/Servings'
 import Settings from './pages/Settings'
 import Login from './pages/Login'
-import { logout, onAuthChange, refresh, getTokenTTL, isAuthed } from './api/auth'
+import { logout, onAuthChange, refresh, getTokenTTL, isAuthed, consumeFragmentToken } from './api/auth'
 
 interface Info {
   name: string
   version: string
   authEnabled: boolean
+  authProviders?: string[]
 }
 
 function App() {
@@ -24,7 +25,13 @@ function App() {
   const [authed, setAuthed] = useState(() => isAuthed())
   const [bootRefreshDone, setBootRefreshDone] = useState(false)
 
+  // Keep authed in sync with token changes (login/logout/401/OIDC fragment).
+  // Registered before the mount effect so consumeFragmentToken() updates it via this subscription, not a direct setState.
+  useEffect(() => onAuthChange(() => setAuthed(isAuthed())), [])
+
   useEffect(() => {
+    // Consume the OIDC callback's access token from the URL fragment first so the app boots authed.
+    consumeFragmentToken()
     fetch('/api/v1/info')
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -41,6 +48,9 @@ function App() {
     if (!ready) return
     const authRequired = info?.authEnabled ?? false
     if (!authRequired || isAuthed()) {
+      // No silent refresh needed (auth off, or a valid token already held).
+      // Defer to a microtask to avoid a synchronous setState in the effect body.
+      void Promise.resolve().then(() => setBootRefreshDone(true))
       return
     }
     void refresh().then((ok) => {
@@ -48,9 +58,6 @@ function App() {
       setBootRefreshDone(true)
     })
   }, [ready, info])
-
-  // Keep the authed flag in sync with token changes (login, logout, 401).
-  useEffect(() => onAuthChange(() => setAuthed(isAuthed())), [])
 
   // Proactively refresh the access token shortly before it expires, so the SSE
   // dashboard stream and API calls never hit a 401.
@@ -90,6 +97,7 @@ function App() {
     return (
       <Login
         operatorVersion={info?.version}
+        authProviders={info?.authProviders}
         onSuccess={() => setAuthed(true)}
       />
     )
