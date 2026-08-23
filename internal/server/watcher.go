@@ -28,19 +28,14 @@ type Counts struct {
 	Pantries     int `json:"pantries"`
 }
 
+// SSE event type names.
 const (
-	// eventCounts is the SSE event type name for resource count updates.
-	eventCounts = "counts"
-	// eventOrders is the SSE event type name for full order list snapshots.
-	eventOrders = "orders"
-	// eventPreparations is the SSE event type name for full preparation list snapshots.
+	eventCounts       = "counts"
+	eventOrders       = "orders"
 	eventPreparations = "preparations"
-	// eventServings is the SSE event type name for full serving list snapshots.
-	eventServings = "servings"
-	// eventMenus is the SSE event type name for full menu list snapshots.
-	eventMenus = "menus"
-	// eventPantries is the SSE event type name for full pantry list snapshots.
-	eventPantries = "pantries"
+	eventServings     = "servings"
+	eventMenus        = "menus"
+	eventPantries     = "pantries"
 )
 
 // newScheme builds a runtime Scheme with the types the server needs.
@@ -51,13 +46,9 @@ func newScheme() *runtime.Scheme {
 	return s
 }
 
-// startK8sWatcher connects to the Kubernetes API, registers informers for
-// Order, Preparation, and Serving resources, and broadcasts updated Counts,
-// Order snapshots, and Preparation snapshots to h on every change event.
-//
-// If no Kubernetes config is found (e.g. running outside a cluster without a
-// kubeconfig) the function logs the situation and returns nil; the hub simply
-// stays idle.
+// startK8sWatcher connects to the Kubernetes API, registers informers, and
+// broadcasts resource snapshots to h on every change. With no kubeconfig it
+// logs and returns nil so the hub stays idle.
 func startK8sWatcher(
 	ctx context.Context,
 	logger logr.Logger,
@@ -75,8 +66,7 @@ func startK8sWatcher(
 
 	k8sCache, err := cache.New(cfg, cache.Options{
 		Scheme: scheme,
-		// Restrict Secret watches to the server's own namespace so that the
-		// namespaced RBAC Role (not a ClusterRole) is sufficient.
+		// Restrict Secret watches to the server namespace so the namespaced RBAC Role suffices.
 		ByObject: map[client.Object]cache.ByObject{
 			&corev1.Secret{}: {
 				Namespaces: map[string]cache.Config{
@@ -102,8 +92,7 @@ func startK8sWatcher(
 		logger:    logger,
 	}
 
-	// Construct the auth manager up front so it is never nil when the cache
-	// event handlers fire (the cache starts in a background goroutine below).
+	// Build the auth manager up front so it is never nil when cache handlers fire.
 	deps.authMgr = newAuthManager(ctx, k8sCache, writer, installNamespace, getenv, logger)
 
 	informers, err := getInformers(ctx, k8sCache)
@@ -118,9 +107,7 @@ func startK8sWatcher(
 	kitchenInformer := informers.kitchen
 	secretInformer := informers.secret
 
-	// refreshAll reads current state from the in-memory informer cache and
-	// broadcasts counts, full order snapshots, and full preparation snapshots
-	// to all SSE subscribers. All reads are local — no network calls.
+	// refreshAll reads from the local informer cache and broadcasts snapshots to all SSE subscribers.
 	refreshAll := func() {
 		orderList := &deliveryv1alpha1.OrderList{}
 		if err := k8sCache.List(ctx, orderList); err != nil {
@@ -183,39 +170,21 @@ func startK8sWatcher(
 		}
 	}
 
-	handler := toolscache.ResourceEventHandlerFuncs{
-		AddFunc:    func(_ any) { refreshAll() },
-		UpdateFunc: func(_, _ any) { refreshAll() },
-		DeleteFunc: func(_ any) { refreshAll() },
-	}
-
-	if _, err := orderInformer.AddEventHandler(handler); err != nil {
-		return nil, fmt.Errorf("adding Order event handler: %w", err)
-	}
-	if _, err := prepInformer.AddEventHandler(handler); err != nil {
-		return nil, fmt.Errorf("adding Preparation event handler: %w", err)
-	}
-	if _, err := servingInformer.AddEventHandler(handler); err != nil {
-		return nil, fmt.Errorf("adding Serving event handler: %w", err)
-	}
-	if _, err := menuInformer.AddEventHandler(handler); err != nil {
-		return nil, fmt.Errorf("adding Menu event handler: %w", err)
-	}
-	if _, err := pantryInformer.AddEventHandler(handler); err != nil {
-		return nil, fmt.Errorf("adding Pantry event handler: %w", err)
-	}
-	if _, err := kitchenInformer.AddEventHandler(handler); err != nil {
-		return nil, fmt.Errorf("adding Kitchen event handler: %w", err)
-	}
-
-	// The auth Secret only affects authentication, so it gets its own handler
-	// that reloads the authenticator without triggering a full SSE broadcast.
-	// Filter to the resolved auth Secret name (from the Kitchen's
-	// spec.adminUser.secretRef, defaulting to kokumi-server-auth) to avoid
-	// reloading on unrelated Secret changes in the namespace.
+	// Kitchen changes reload the authenticator (plus SSE refresh). Auth Secrets only
+	// affect authentication, so they get a dedicated handler that reloads without a
+	// full SSE broadcast; filter to the resolved admin/OIDC Secret names to skip unrelated Secrets.
 	isAuthSecret := func(obj any) bool {
 		o, ok := obj.(client.Object)
-		return ok && o.GetNamespace() == installNamespace && o.GetName() == deps.authMgr.secretName()
+		if !ok || o.GetNamespace() != installNamespace {
+			return false
+		}
+		name := o.GetName()
+		return name == deps.authMgr.secretName() || name == deps.authMgr.oidcSecretName()
+	}
+	kitchenHandler := toolscache.ResourceEventHandlerFuncs{
+		AddFunc:    func(_ any) { refreshAll(); deps.authMgr.refresh(ctx) },
+		UpdateFunc: func(_, _ any) { refreshAll(); deps.authMgr.refresh(ctx) },
+		DeleteFunc: func(_ any) { refreshAll(); deps.authMgr.refresh(ctx) },
 	}
 	secretHandler := toolscache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj any) {
@@ -234,20 +203,23 @@ func startK8sWatcher(
 			}
 		},
 	}
-	if _, err := secretInformer.AddEventHandler(secretHandler); err != nil {
-		return nil, fmt.Errorf("adding Secret event handler: %w", err)
+
+	if err := registerWatchers(
+		orderInformer, prepInformer, servingInformer, menuInformer, pantryInformer,
+		kitchenInformer, secretInformer,
+		refreshAll, kitchenHandler, secretHandler,
+	); err != nil {
+		return nil, err
 	}
 
-	// Start the cache in the background; it runs until ctx is cancelled.
+	// Start the cache in the background until ctx is cancelled.
 	go func() {
 		if err := k8sCache.Start(ctx); err != nil {
 			logger.Error(err, "Kubernetes cache stopped with error")
 		}
 	}()
 
-	// After the cache has synced, broadcast the current state immediately so
-	// that clients connecting before the first Kubernetes change event already
-	// receive the full resource lists.
+	// After sync, broadcast current state so early clients get the full lists.
 	go func() {
 		if !k8sCache.WaitForCacheSync(ctx) {
 			return
@@ -256,6 +228,39 @@ func startK8sWatcher(
 	}()
 
 	return deps, nil
+}
+
+// registerWatchers wires the SSE-refresh handler onto resource informers and the
+// auth handlers onto Kitchen/Secret informers (split out to keep startK8sWatcher small).
+func registerWatchers(
+	order, prep, serving, menu, pantry, kitchen, secret cache.Informer,
+	refreshAll func(),
+	kitchenHandler, secretHandler toolscache.ResourceEventHandlerFuncs,
+) error {
+	sseHandler := toolscache.ResourceEventHandlerFuncs{
+		AddFunc:    func(_ any) { refreshAll() },
+		UpdateFunc: func(_, _ any) { refreshAll() },
+		DeleteFunc: func(_ any) { refreshAll() },
+	}
+	type reg struct {
+		informer cache.Informer
+		handler  toolscache.ResourceEventHandlerFuncs
+		name     string
+	}
+	for _, r := range []reg{
+		{order, sseHandler, "Order"},
+		{prep, sseHandler, "Preparation"},
+		{serving, sseHandler, "Serving"},
+		{menu, sseHandler, "Menu"},
+		{pantry, sseHandler, "Pantry"},
+		{kitchen, kitchenHandler, "Kitchen"},
+		{secret, secretHandler, "Secret"},
+	} {
+		if _, err := r.informer.AddEventHandler(r.handler); err != nil {
+			return fmt.Errorf("adding %s event handler: %w", r.name, err)
+		}
+	}
+	return nil
 }
 
 // informers bundles the informers the server watches.
@@ -269,9 +274,7 @@ type informers struct {
 	secret  cache.Informer
 }
 
-// getInformers registers and returns the informers the server needs. It is
-// kept separate from startK8sWatcher to keep that function's cyclomatic
-// complexity within lint limits.
+// getInformers registers and returns the informers the server needs (split out to keep startK8sWatcher small).
 func getInformers(ctx context.Context, c cache.Cache) (informers, error) {
 	var out informers
 	var err error

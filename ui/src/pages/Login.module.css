@@ -115,3 +115,41 @@
   font-size: 0.75rem;
   color: var(--color-text-muted-light);
 }
+
+.ssoButton {
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  padding: 11px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(49, 54, 56, 0.22);
+  background: var(--color-bg-card);
+  color: var(--color-text-on-light);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+
+.ssoButton:hover {
+  background: rgba(49, 54, 56, 0.06);
+  border-color: var(--color-accent);
+}
+
+.ssoButton:active {
+  transform: scale(0.98);
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--color-text-muted-light);
+  font-size: 0.78rem;
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(49, 54, 56, 0.18);
+}

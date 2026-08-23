@@ -1,5 +1,6 @@
 import styles from './Sidebar.module.css'
 import logo from '../assets/logo.png'
+import { getUsername } from '../api/auth'
 
 export type Page = 'dashboard' | 'orders' | 'menus' | 'preparations' | 'servings' | 'pantries' | 'settings'
 
@@ -149,6 +150,11 @@ export default function Sidebar({ activePage, onNavigate, operatorVersion, onLog
           <button className={styles.logout} onClick={onLogout}>
             Sign out
           </button>
+        )}
+        {getUsername() && (
+          <div className={styles.userInfo}>
+            <span className={styles.userName}>{getUsername()}</span>
+          </div>
         )}
         {operatorVersion && (
           <div className={styles.footerInfo}>

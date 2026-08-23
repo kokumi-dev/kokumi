@@ -60,8 +60,7 @@ const singletonName = "default"
 func (r *KitchenReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
-	// Singleton: only the Kitchen named "default" in the install namespace is
-	// managed. Others are ignored (no webhook enforcement yet).
+	// Singleton: only the "default" Kitchen in the install namespace is managed.
 	if req.Name != singletonName || req.Namespace != namespace.Current(os.Getenv) {
 		return ctrl.Result{}, nil
 	}
@@ -86,20 +85,44 @@ func (r *KitchenReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	updater := status.NewKitchenUpdater(r.Client)
 
-	// When the admin user is enabled, the referenced credentials Secret must
-	// exist and carry the required keys. Report a non-Ready condition instead
-	// of silently disabling auth, so the misconfiguration is visible.
+	// When admin is enabled, the credentials Secret must exist with the required keys;
+	// report non-Ready (not silent disable) so the misconfig is visible. secretRef is
+	// defaulted by CRD defaulting, so a missing ref is a configuration error.
 	if kitchen.Spec.AdminUser != nil &&
 		kitchen.Spec.AdminUser.Enabled != nil &&
 		*kitchen.Spec.AdminUser.Enabled {
-		secretName := deliveryv1alpha1.DefaultAdminSecretName
-		if kitchen.Spec.AdminUser.SecretRef != nil && kitchen.Spec.AdminUser.SecretRef.Name != "" {
-			secretName = kitchen.Spec.AdminUser.SecretRef.Name
+		if kitchen.Spec.AdminUser.SecretRef == nil || kitchen.Spec.AdminUser.SecretRef.Name == "" {
+			if uerr := updater.Failed(ctx, kitchen, fmt.Errorf("admin credentials secretRef not set")); uerr != nil {
+				return ctrl.Result{}, uerr
+			}
+			return ctrl.Result{}, nil
 		}
+		secretName := kitchen.Spec.AdminUser.SecretRef.Name
 		secret := &corev1.Secret{}
 		err := r.Get(ctx, client.ObjectKey{Namespace: kitchen.Namespace, Name: secretName}, secret)
 		if err != nil || secret.Data["password-hash"] == nil || secret.Data["signing-key"] == nil {
 			if uerr := updater.Failed(ctx, kitchen, fmt.Errorf("admin credentials Secret %q missing or incomplete", secretName)); uerr != nil {
+				return ctrl.Result{}, uerr
+			}
+			return ctrl.Result{}, nil
+		}
+	}
+
+	// When OIDC is configured, the client Secret must exist with the "client-secret" key.
+	// The signing-key (from the admin Secret) is validated at runtime by the server.
+	// clientSecretRef is defaulted by CRD defaulting, so a missing ref is a configuration error.
+	if kitchen.Spec.OIDC != nil && kitchen.Spec.OIDC.IssuerURL != "" && kitchen.Spec.OIDC.ClientID != "" {
+		if kitchen.Spec.OIDC.ClientSecretRef == nil || kitchen.Spec.OIDC.ClientSecretRef.Name == "" {
+			if uerr := updater.Failed(ctx, kitchen, fmt.Errorf("oidc client secretRef not set")); uerr != nil {
+				return ctrl.Result{}, uerr
+			}
+			return ctrl.Result{}, nil
+		}
+		oidcSecretName := kitchen.Spec.OIDC.ClientSecretRef.Name
+		secret := &corev1.Secret{}
+		err := r.Get(ctx, client.ObjectKey{Namespace: kitchen.Namespace, Name: oidcSecretName}, secret)
+		if err != nil || secret.Data["client-secret"] == nil {
+			if uerr := updater.Failed(ctx, kitchen, fmt.Errorf("oidc client Secret %q missing or incomplete", oidcSecretName)); uerr != nil {
 				return ctrl.Result{}, uerr
 			}
 			return ctrl.Result{}, nil

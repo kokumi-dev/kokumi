@@ -33,13 +33,14 @@ type KitchenSpec struct {
 	// AdminUser configures the built-in admin account used for UI login.
 	// +optional
 	AdminUser *AdminUserConfig `json:"adminUser,omitempty"`
-}
 
-// DefaultAdminSecretName is the name of the Secret holding the admin
-// credentials when spec.adminUser.secretRef is not set. The Secret must reside
-// in the Kitchen's namespace and carry the keys "username", "password-hash",
-// and "signing-key".
-const DefaultAdminSecretName = "kokumi-server-auth"
+	// OIDC configures an external OpenID Connect identity provider for UI
+	// login. When set, the login page offers an SSO button alongside (or
+	// instead of) the admin account, depending on whether AdminUser is also
+	// enabled.
+	// +optional
+	OIDC *OIDCConfig `json:"oidc,omitempty"`
+}
 
 // AdminUserConfig configures the built-in admin account used for UI login.
 // Credentials are never stored in this object; they live in the referenced
@@ -56,16 +57,61 @@ type AdminUserConfig struct {
 	// Username is the login name for the admin account. Defaults to "admin".
 	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:validation:Pattern=`^[^/\s]+$`
+	// +kubebuilder:default="admin"
 	// +optional
 	Username string `json:"username,omitempty"`
 
 	// SecretRef points to the Secret holding the admin credentials. The Secret
 	// must reside in the same namespace as the Kitchen. Recognized keys are
 	// "password-hash" (bcrypt hash) and "signing-key" (HMAC key for JWTs).
-	// When omitted, the server uses the default Secret name
-	// "kokumi-server-auth".
+	// Defaults to "kokumi-server-auth".
+	// +kubebuilder:default={name:"kokumi-server-auth"}
 	// +optional
 	SecretRef *corev1.LocalObjectReference `json:"secretRef,omitempty"`
+}
+
+func (c *AdminUserConfig) IsEnabled() bool {
+	if c == nil {
+		return true
+	}
+	return c.Enabled == nil || *c.Enabled
+}
+
+// OIDCConfig configures an external OpenID Connect identity provider for UI
+// login. The client secret lives in a referenced Secret.
+type OIDCConfig struct {
+	// IssuerURL is the base URL of the OIDC issuer (e.g.
+	// "https://accounts.google.com"). The server discovers the authorization
+	// and token endpoints from the issuer's well-known configuration.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() in ['http', 'https']",message="must be a valid http or https URL"
+	IssuerURL string `json:"issuerURL"`
+
+	// ClientID is the OAuth2/OIDC client identifier registered with the issuer.
+	// +kubebuilder:validation:Required
+	ClientID string `json:"clientID"`
+
+	// ClientSecretRef points to the Secret holding the OAuth2 client secret in
+	// the "client-secret" key. The Secret must reside in the same namespace as
+	// the Kitchen.
+	// Defaults to "kokumi-server-oidc".
+	// +kubebuilder:default={name:"kokumi-server-oidc"}
+	// +optional
+	ClientSecretRef *corev1.LocalObjectReference `json:"clientSecretRef,omitempty"`
+
+	// UsernameClaim is the ID-token claim used as the kokumi username.
+	// Defaults to "email".
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:default=email
+	// +optional
+	UsernameClaim string `json:"usernameClaim,omitempty"`
+
+	// Scopes is the list of OAuth2 scopes requested at login.
+	// Defaults to ["openid", "profile", "email"].
+	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:default={openid,profile,email}
+	// +optional
+	Scopes []string `json:"scopes,omitempty"`
 }
 
 // KitchenStatus defines the observed state of Kitchen.

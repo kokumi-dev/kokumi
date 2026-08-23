@@ -34,6 +34,7 @@ import (
 
 // Secret data keys expected by the server's authenticator builder.
 const (
+	secretName            = "kokumi-server-auth"
 	secretKeyUsername     = "username"
 	secretKeyPasswordHash = "password-hash"
 	secretKeySigningKey   = "signing-key"
@@ -95,9 +96,8 @@ var _ = Describe("Kitchen Controller", func() {
 	})
 })
 
-// singletonName/namespace mirror the controller's singleton semantics. In
-// envtest neither POD_NAMESPACE nor the SA file is set, so namespace.Current
-// falls back to the "kokumi" default.
+// singletonName/namespace mirror the controller's singleton semantics; in envtest
+// namespace.Current falls back to the "kokumi" default.
 const (
 	singletonKitchenName      = "default"
 	singletonKitchenNamespace = namespace.Default
@@ -147,7 +147,7 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 			ObjectMeta: metav1.ObjectMeta{Name: singletonKitchenName, Namespace: singletonKitchenNamespace},
 		})
 		_ = k8sClient.Delete(ctx, &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: deliveryv1alpha1.DefaultAdminSecretName, Namespace: singletonKitchenNamespace},
+			ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: singletonKitchenNamespace},
 		})
 	})
 
@@ -156,7 +156,7 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 		kitchen := &deliveryv1alpha1.Kitchen{
 			ObjectMeta: metav1.ObjectMeta{Name: singletonKitchenName, Namespace: singletonKitchenNamespace},
 			Spec: deliveryv1alpha1.KitchenSpec{
-				AdminUser: &deliveryv1alpha1.AdminUserConfig{Enabled: new(true)},
+				AdminUser: &deliveryv1alpha1.AdminUserConfig{},
 			},
 		}
 		Expect(k8sClient.Create(ctx, kitchen)).To(Succeed())
@@ -168,7 +168,7 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 		cond := readyCondition(getKitchen(ctx))
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Message).To(ContainSubstring(deliveryv1alpha1.DefaultAdminSecretName))
+		Expect(cond.Message).To(ContainSubstring(secretName))
 	})
 
 	It("recovers to Ready=True once the credentials Secret appears", func() {
@@ -176,7 +176,7 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 		kitchen := &deliveryv1alpha1.Kitchen{
 			ObjectMeta: metav1.ObjectMeta{Name: singletonKitchenName, Namespace: singletonKitchenNamespace},
 			Spec: deliveryv1alpha1.KitchenSpec{
-				AdminUser: &deliveryv1alpha1.AdminUserConfig{Enabled: new(true)},
+				AdminUser: &deliveryv1alpha1.AdminUserConfig{},
 			},
 		}
 		Expect(k8sClient.Create(ctx, kitchen)).To(Succeed())
@@ -187,7 +187,7 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 		hash, err := bcrypt.GenerateFromPassword([]byte("s3cret-passw0rd"), bcrypt.MinCost)
 		Expect(err).NotTo(HaveOccurred())
 		secret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: deliveryv1alpha1.DefaultAdminSecretName, Namespace: singletonKitchenNamespace},
+			ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: singletonKitchenNamespace},
 			Data: map[string][]byte{
 				secretKeyUsername:     []byte("admin"),
 				secretKeyPasswordHash: hash,
@@ -210,14 +210,14 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 		kitchen := &deliveryv1alpha1.Kitchen{
 			ObjectMeta: metav1.ObjectMeta{Name: singletonKitchenName, Namespace: singletonKitchenNamespace},
 			Spec: deliveryv1alpha1.KitchenSpec{
-				AdminUser: &deliveryv1alpha1.AdminUserConfig{Enabled: new(true)},
+				AdminUser: &deliveryv1alpha1.AdminUserConfig{},
 			},
 		}
 		Expect(k8sClient.Create(ctx, kitchen)).To(Succeed())
 		hash, err := bcrypt.GenerateFromPassword([]byte("s3cret-passw0rd"), bcrypt.MinCost)
 		Expect(err).NotTo(HaveOccurred())
 		secret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: deliveryv1alpha1.DefaultAdminSecretName, Namespace: singletonKitchenNamespace},
+			ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: singletonKitchenNamespace},
 			Data: map[string][]byte{
 				secretKeyUsername:     []byte("admin"),
 				secretKeyPasswordHash: hash,
@@ -232,6 +232,6 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 		cond := readyCondition(getKitchen(ctx))
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Message).To(ContainSubstring(deliveryv1alpha1.DefaultAdminSecretName))
+		Expect(cond.Message).To(ContainSubstring(secretName))
 	})
 })

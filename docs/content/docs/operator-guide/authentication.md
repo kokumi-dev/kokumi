@@ -1,16 +1,19 @@
 ---
 title: Authentication
 weight: 1
-description: Configure the built-in admin account, rotate credentials, and disable login.
+description: Configure the built-in admin account, OIDC single sign-on, rotate credentials, and disable login.
 ---
 
-Kokumi's web UI and API server require authentication. The built-in admin
-account is the default identity provider; it can be disabled or renamed, and a
-future release will add OIDC as a second provider.
+Kokumi's web UI and API server require authentication. Two identity providers
+are supported and can be enabled independently:
+
+- **Admin account**: the built-in username/password login (default).
+- **OIDC**: single sign-on through any standards-compliant OpenID Connect
+  provider (Dex, Keycloak, Okta, Google, Entra ID, ...).
 
 ## Logging in
 
-The default credentials are:
+The default admin credentials are:
 
 | Username | Password |
 | -------- | -------- |
@@ -83,4 +86,53 @@ metadata:
 spec:
   adminUser:
     enabled: false
+```
+
+## OIDC single sign-on
+
+Kokumi can delegate authentication to an OIDC provider. When OIDC is enabled,
+the login page shows a "Sign in with SSO" button that starts the standard
+authorization-code flow (with PKCE). After the provider authenticates the
+user, Kokumi mints its own short-lived session token, sp that upstream tokens
+are never stored on the server.
+
+> **Authorization scope.** OIDC in Kokumi is an authentication mechanism only.
+> Any successfully authenticated user is granted full admin access. Fine-grained
+> authorization (per-user roles/permissions) is currently not supported but will
+> be added later.
+
+### Configuration
+
+OIDC is configured under `spec.oidc` on the singleton `Kitchen` resource:
+
+| Field | Type | Default | Description |
+| ----- | ---- | ------- | ----------- |
+| `issuerURL` | `string` | _(required)_ | OIDC issuer base URL (must be a valid `https://` or `http://` URL). Discovery is performed against `<issuerURL>/.well-known/openid-configuration`. |
+| `clientID` | `string` | _(required)_ | OAuth2 client identifier registered with the provider. |
+| `clientSecretRef` | `*LocalObjectReference` | `kokumi-server-oidc` | Name of the `Secret` (in the install namespace) holding the client secret under the `client-secret` key. |
+| `usernameClaim` | `string` | `email` | ID-token claim used as the Kokumi username. Supports dotted nested paths (e.g. `realm_access.preferred_username`). Must resolve to a string. |
+| `scopes` | `[]string` | `["openid","profile","email"]` | OAuth2 scopes requested during the flow (max 16). |
+
+Create the client-secret Secret:
+
+```bash
+kubectl -n kokumi create secret generic kokumi-server-oidc \
+  --from-literal=client-secret='your-oauth-client-secret'
+```
+
+Enable OIDC on the `Kitchen`:
+
+```yaml
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Kitchen
+metadata:
+  name: default
+  namespace: kokumi
+spec:
+  oidc:
+    issuerURL: https://dex.example.com
+    clientID: kokumi
+    clientSecretRef:
+      name: kokumi-server-oidc
+    usernameClaim: email
 ```
