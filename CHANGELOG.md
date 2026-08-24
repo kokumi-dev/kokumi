@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.15.0](https://github.com/kokumi-dev/kokumi/compare/0.14.0...0.15.0) (2026-08-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* remove CreationTime field from preparation status ([#313](https://github.com/kokumi-dev/kokumi/issues/313))
+
+### Features
+
+* add hot reloadable admin user configuration settings ([#327](https://github.com/kokumi-dev/kokumi/issues/327)) ([d5f825d](https://github.com/kokumi-dev/kokumi/commit/d5f825d93d1b944fecea6cc6a84b11647d0f25b6))
+* add Kitchen CRD for managing Kokumi configuration settings ([#322](https://github.com/kokumi-dev/kokumi/issues/322)) ([f37adf2](https://github.com/kokumi-dev/kokumi/commit/f37adf221f550c85be3d9a8b86eae6542e28ab4e))
+* add OIDC authentication flow for SSO ([#328](https://github.com/kokumi-dev/kokumi/issues/328)) ([d636332](https://github.com/kokumi-dev/kokumi/commit/d6363329572a5be6e3ea23faadeefaf0916fb4d8))
+* **auth:** implement access and refresh token handling with admin provider ([#315](https://github.com/kokumi-dev/kokumi/issues/315)) ([f1f7d16](https://github.com/kokumi-dev/kokumi/commit/f1f7d16ef4c876a8ddc8395af1c38e99028d7a8a))
+* enhance refresh token handling and secure cookie management for localhost ([#323](https://github.com/kokumi-dev/kokumi/issues/323)) ([d1c44aa](https://github.com/kokumi-dev/kokumi/commit/d1c44aa3d57fbe658734b6373b0eef61cf05dc34))
+* implement multi-file support for order processing and preview ([#311](https://github.com/kokumi-dev/kokumi/issues/311)) ([0fab37d](https://github.com/kokumi-dev/kokumi/commit/0fab37de7c488e9e738eabb83bb6d603c8fba12d))
+* list tags and show artifact content for pantries ([#301](https://github.com/kokumi-dev/kokumi/issues/301)) ([c96f7d0](https://github.com/kokumi-dev/kokumi/commit/c96f7d0ab582ecb1763e95438b2daa174c5c9373))
+* pass trough git source annotation to preparation and present in ui ([#303](https://github.com/kokumi-dev/kokumi/issues/303)) ([0031d48](https://github.com/kokumi-dev/kokumi/commit/0031d48f9b241edd30d98e4c336093f15ae9f2e9))
+* reconcile order on pantry change by updating config hash calculation ([#297](https://github.com/kokumi-dev/kokumi/issues/297)) ([5b113ca](https://github.com/kokumi-dev/kokumi/commit/5b113ca6b6d7e46fb831c0c85e8fd2a2b75ed631))
+* refactor authentication configuration to use unified auth structure ([#330](https://github.com/kokumi-dev/kokumi/issues/330)) ([00ff6ec](https://github.com/kokumi-dev/kokumi/commit/00ff6ec0ee7805a37672d1fca58ba1b19fa51d03))
+
+
+### Code Refactoring
+
+* remove CreationTime field from preparation status ([#313](https://github.com/kokumi-dev/kokumi/issues/313)) ([6a0c80f](https://github.com/kokumi-dev/kokumi/commit/6a0c80fbf973dd016040ba7c9360de49764662d6))
+
 ## [0.14.0](https://github.com/kokumi-dev/kokumi/compare/0.13.0...0.14.0) (2026-07-28)
 
 
