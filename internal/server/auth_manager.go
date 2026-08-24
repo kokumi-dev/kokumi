@@ -108,13 +108,13 @@ func (m *authManager) oidcSecretName() string {
 }
 
 // reload resolves the admin-user and OIDC config from the Kitchen singleton and
-// rebuilds both providers. A nil kitchen leaves them unconfigured (no default
-// Secret fallback). The two providers are resolved independently so a broken
-// OIDC config never disables admin login, and vice versa.
+// rebuilds both providers. A nil kitchen or nil auth block leaves them
+// unconfigured (no default Secret fallback). The two providers are resolved
+// independently so a broken OIDC config never disables admin login, and vice versa.
 func (m *authManager) reload(ctx context.Context, kitchen *deliveryv1alpha1.Kitchen) {
 	var adminCfg *deliveryv1alpha1.AdminUserConfig
 	var oidcCfg *deliveryv1alpha1.OIDCConfig
-	if kitchen != nil {
+	if kitchen != nil && kitchen.Spec.Auth != nil {
 		adminCfg = kitchen.Spec.Auth.AdminUser
 		oidcCfg = kitchen.Spec.Auth.OIDC
 	}

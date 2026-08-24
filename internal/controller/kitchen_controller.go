@@ -85,47 +85,49 @@ func (r *KitchenReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	updater := status.NewKitchenUpdater(r.Client)
 
-	// When admin is enabled, the credentials Secret must exist with the required keys;
-	// report non-Ready (not silent disable) so the misconfig is visible. secretRef is
-	// defaulted by CRD defaulting, so a missing ref is a configuration error.
-	if adminUser := kitchen.Spec.Auth.AdminUser; adminUser != nil &&
-		adminUser.Enabled != nil &&
-		*adminUser.Enabled {
-		if adminUser.SecretRef == nil || adminUser.SecretRef.Name == "" {
-			if uerr := updater.Failed(ctx, kitchen, fmt.Errorf("admin credentials secretRef not set")); uerr != nil {
-				return ctrl.Result{}, uerr
+	if authCfg := kitchen.Spec.Auth; authCfg != nil {
+		// When admin is enabled, the credentials Secret must exist with the required keys;
+		// report non-Ready (not silent disable) so the misconfig is visible. secretRef is
+		// defaulted by CRD defaulting, so a missing ref is a configuration error.
+		if adminUser := authCfg.AdminUser; adminUser != nil &&
+			adminUser.Enabled != nil &&
+			*adminUser.Enabled {
+			if adminUser.SecretRef == nil || adminUser.SecretRef.Name == "" {
+				if uerr := updater.Failed(ctx, kitchen, fmt.Errorf("admin credentials secretRef not set")); uerr != nil {
+					return ctrl.Result{}, uerr
+				}
+				return ctrl.Result{}, nil
 			}
-			return ctrl.Result{}, nil
-		}
-		secretName := adminUser.SecretRef.Name
-		secret := &corev1.Secret{}
-		err := r.Get(ctx, client.ObjectKey{Namespace: kitchen.Namespace, Name: secretName}, secret)
-		if err != nil || secret.Data["password-hash"] == nil || secret.Data["signing-key"] == nil {
-			if uerr := updater.Failed(ctx, kitchen, fmt.Errorf("admin credentials Secret %q missing or incomplete", secretName)); uerr != nil {
-				return ctrl.Result{}, uerr
+			secretName := adminUser.SecretRef.Name
+			secret := &corev1.Secret{}
+			err := r.Get(ctx, client.ObjectKey{Namespace: kitchen.Namespace, Name: secretName}, secret)
+			if err != nil || secret.Data["password-hash"] == nil || secret.Data["signing-key"] == nil {
+				if uerr := updater.Failed(ctx, kitchen, fmt.Errorf("admin credentials Secret %q missing or incomplete", secretName)); uerr != nil {
+					return ctrl.Result{}, uerr
+				}
+				return ctrl.Result{}, nil
 			}
-			return ctrl.Result{}, nil
 		}
-	}
 
-	// When OIDC is configured, the client Secret must exist with the "client-secret" key.
-	// The signing-key (from the admin Secret) is validated at runtime by the server.
-	// clientSecretRef is defaulted by CRD defaulting, so a missing ref is a configuration error.
-	if oidc := kitchen.Spec.Auth.OIDC; oidc != nil && oidc.IssuerURL != "" && oidc.ClientID != "" {
-		if oidc.ClientSecretRef == nil || oidc.ClientSecretRef.Name == "" {
-			if uerr := updater.Failed(ctx, kitchen, fmt.Errorf("oidc client secretRef not set")); uerr != nil {
-				return ctrl.Result{}, uerr
+		// When OIDC is configured, the client Secret must exist with the "client-secret" key.
+		// The signing-key (from the admin Secret) is validated at runtime by the server.
+		// clientSecretRef is defaulted by CRD defaulting, so a missing ref is a configuration error.
+		if oidc := authCfg.OIDC; oidc != nil && oidc.IssuerURL != "" && oidc.ClientID != "" {
+			if oidc.ClientSecretRef == nil || oidc.ClientSecretRef.Name == "" {
+				if uerr := updater.Failed(ctx, kitchen, fmt.Errorf("oidc client secretRef not set")); uerr != nil {
+					return ctrl.Result{}, uerr
+				}
+				return ctrl.Result{}, nil
 			}
-			return ctrl.Result{}, nil
-		}
-		oidcSecretName := oidc.ClientSecretRef.Name
-		secret := &corev1.Secret{}
-		err := r.Get(ctx, client.ObjectKey{Namespace: kitchen.Namespace, Name: oidcSecretName}, secret)
-		if err != nil || secret.Data["client-secret"] == nil {
-			if uerr := updater.Failed(ctx, kitchen, fmt.Errorf("oidc client Secret %q missing or incomplete", oidcSecretName)); uerr != nil {
-				return ctrl.Result{}, uerr
+			oidcSecretName := oidc.ClientSecretRef.Name
+			secret := &corev1.Secret{}
+			err := r.Get(ctx, client.ObjectKey{Namespace: kitchen.Namespace, Name: oidcSecretName}, secret)
+			if err != nil || secret.Data["client-secret"] == nil {
+				if uerr := updater.Failed(ctx, kitchen, fmt.Errorf("oidc client Secret %q missing or incomplete", oidcSecretName)); uerr != nil {
+					return ctrl.Result{}, uerr
+				}
+				return ctrl.Result{}, nil
 			}
-			return ctrl.Result{}, nil
 		}
 	}
 
