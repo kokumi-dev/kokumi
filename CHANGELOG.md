@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/kokumi-dev/kokumi/compare/0.15.0...0.15.1) (2026-08-24)
+
+
+### Bug Fixes
+
+* nil-deref on Kitchen without spec.auth ([#331](https://github.com/kokumi-dev/kokumi/issues/331)) ([72af7ca](https://github.com/kokumi-dev/kokumi/commit/72af7ca39a767526e7cef1af15ac51726ea00d20))
+
 ## [0.15.0](https://github.com/kokumi-dev/kokumi/compare/0.14.0...0.15.0) (2026-08-24)
 
 
