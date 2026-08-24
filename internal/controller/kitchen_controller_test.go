@@ -156,7 +156,9 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 		kitchen := &deliveryv1alpha1.Kitchen{
 			ObjectMeta: metav1.ObjectMeta{Name: singletonKitchenName, Namespace: singletonKitchenNamespace},
 			Spec: deliveryv1alpha1.KitchenSpec{
-				AdminUser: &deliveryv1alpha1.AdminUserConfig{},
+				Auth: &deliveryv1alpha1.KitchenAuth{
+					AdminUser: &deliveryv1alpha1.AdminUserConfig{},
+				},
 			},
 		}
 		Expect(k8sClient.Create(ctx, kitchen)).To(Succeed())
@@ -176,7 +178,9 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 		kitchen := &deliveryv1alpha1.Kitchen{
 			ObjectMeta: metav1.ObjectMeta{Name: singletonKitchenName, Namespace: singletonKitchenNamespace},
 			Spec: deliveryv1alpha1.KitchenSpec{
-				AdminUser: &deliveryv1alpha1.AdminUserConfig{},
+				Auth: &deliveryv1alpha1.KitchenAuth{
+					AdminUser: &deliveryv1alpha1.AdminUserConfig{},
+				},
 			},
 		}
 		Expect(k8sClient.Create(ctx, kitchen)).To(Succeed())
@@ -210,7 +214,9 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 		kitchen := &deliveryv1alpha1.Kitchen{
 			ObjectMeta: metav1.ObjectMeta{Name: singletonKitchenName, Namespace: singletonKitchenNamespace},
 			Spec: deliveryv1alpha1.KitchenSpec{
-				AdminUser: &deliveryv1alpha1.AdminUserConfig{},
+				Auth: &deliveryv1alpha1.KitchenAuth{
+					AdminUser: &deliveryv1alpha1.AdminUserConfig{},
+				},
 			},
 		}
 		Expect(k8sClient.Create(ctx, kitchen)).To(Succeed())

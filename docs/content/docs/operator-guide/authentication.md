@@ -43,7 +43,7 @@ The Secret must carry three keys:
 
 The built-in admin account is configured through the singleton `Kitchen`
 resource (named `default` in the install namespace). The following fields are
-supported under `spec.adminUser`:
+supported under `spec.auth.adminUser`:
 
 | Field | Type | Default | Description |
 | ----- | ---- | ------- | ----------- |
@@ -63,10 +63,11 @@ metadata:
   name: default
   namespace: kokumi
 spec:
-  adminUser:
-    username: root
-    secretRef:
-      name: kokumi-admin-creds
+  auth:
+    adminUser:
+      username: root
+      secretRef:
+        name: kokumi-admin-creds
 ```
 
 The server watches the Secret and the `Kitchen` resource, so credential and
@@ -84,8 +85,9 @@ metadata:
   name: default
   namespace: kokumi
 spec:
-  adminUser:
-    enabled: false
+  auth:
+    adminUser:
+      enabled: false
 ```
 
 ## OIDC single sign-on
@@ -103,7 +105,7 @@ are never stored on the server.
 
 ### Configuration
 
-OIDC is configured under `spec.oidc` on the singleton `Kitchen` resource:
+OIDC is configured under `spec.auth.oidc` on the singleton `Kitchen` resource:
 
 | Field | Type | Default | Description |
 | ----- | ---- | ------- | ----------- |
@@ -129,10 +131,11 @@ metadata:
   name: default
   namespace: kokumi
 spec:
-  oidc:
-    issuerURL: https://dex.example.com
-    clientID: kokumi
-    clientSecretRef:
-      name: kokumi-server-oidc
-    usernameClaim: email
+  auth:
+    oidc:
+      issuerURL: https://dex.example.com
+      clientID: kokumi
+      clientSecretRef:
+        name: kokumi-server-oidc
+      usernameClaim: email
 ```

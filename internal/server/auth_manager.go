@@ -115,8 +115,8 @@ func (m *authManager) reload(ctx context.Context, kitchen *deliveryv1alpha1.Kitc
 	var adminCfg *deliveryv1alpha1.AdminUserConfig
 	var oidcCfg *deliveryv1alpha1.OIDCConfig
 	if kitchen != nil {
-		adminCfg = kitchen.Spec.AdminUser
-		oidcCfg = kitchen.Spec.OIDC
+		adminCfg = kitchen.Spec.Auth.AdminUser
+		oidcCfg = kitchen.Spec.Auth.OIDC
 	}
 
 	// Admin: absent adminUser or unset SecretRef -> unconfigured (fail closed,

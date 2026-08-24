@@ -619,9 +619,11 @@ func TestAuthManagerFailClosed(t *testing.T) {
 		m.reload(context.Background(), &deliveryv1alpha1.Kitchen{
 			ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: testNS},
 			Spec: deliveryv1alpha1.KitchenSpec{
-				AdminUser: &deliveryv1alpha1.AdminUserConfig{
-					Enabled:   new(true),
-					SecretRef: &corev1.LocalObjectReference{Name: testSecret},
+				Auth: &deliveryv1alpha1.KitchenAuth{
+					AdminUser: &deliveryv1alpha1.AdminUserConfig{
+						Enabled:   new(true),
+						SecretRef: &corev1.LocalObjectReference{Name: testSecret},
+					},
 				},
 			},
 		})
@@ -631,9 +633,11 @@ func TestAuthManagerFailClosed(t *testing.T) {
 		m.reload(context.Background(), &deliveryv1alpha1.Kitchen{
 			ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: testNS},
 			Spec: deliveryv1alpha1.KitchenSpec{
-				AdminUser: &deliveryv1alpha1.AdminUserConfig{
-					Enabled:   new(true),
-					SecretRef: &corev1.LocalObjectReference{Name: "does-not-exist"},
+				Auth: &deliveryv1alpha1.KitchenAuth{
+					AdminUser: &deliveryv1alpha1.AdminUserConfig{
+						Enabled:   new(true),
+						SecretRef: &corev1.LocalObjectReference{Name: "does-not-exist"},
+					},
 				},
 			},
 		})
@@ -652,9 +656,11 @@ func TestAuthManagerFailClosed(t *testing.T) {
 		m.reload(context.Background(), &deliveryv1alpha1.Kitchen{
 			ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: testNS},
 			Spec: deliveryv1alpha1.KitchenSpec{
-				AdminUser: &deliveryv1alpha1.AdminUserConfig{
-					Enabled:   new(false),
-					SecretRef: &corev1.LocalObjectReference{Name: "kokumi-server-auth"},
+				Auth: &deliveryv1alpha1.KitchenAuth{
+					AdminUser: &deliveryv1alpha1.AdminUserConfig{
+						Enabled:   new(false),
+						SecretRef: &corev1.LocalObjectReference{Name: "kokumi-server-auth"},
+					},
 				},
 			},
 		})

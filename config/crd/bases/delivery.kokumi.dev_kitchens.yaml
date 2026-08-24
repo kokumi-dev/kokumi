@@ -52,45 +52,6 @@ spec:
           spec:
             description: spec defines the desired state of Kitchen
             properties:
-              adminUser:
-                description: AdminUser configures the built-in admin account used
-                  for UI login.
-                properties:
-                  enabled:
-                    default: true
-                    description: |-
-                      Enabled toggles the admin account. When false, admin login is disabled and
-                      the server falls back to no authentication unless another identity
-                      provider (e.g. OIDC) is configured. Defaults to true.
-                    type: boolean
-                  secretRef:
-                    default:
-                      name: kokumi-server-auth
-                    description: |-
-                      SecretRef points to the Secret holding the admin credentials. The Secret
-                      must reside in the same namespace as the Kitchen. Recognized keys are
-                      "password-hash" (bcrypt hash) and "signing-key" (HMAC key for JWTs).
-                      Defaults to "kokumi-server-auth".
-                    properties:
-                      name:
-                        default: ""
-                        description: |-
-                          Name of the referent.
-                          This field is effectively required, but due to backwards compatibility is
-                          allowed to be empty. Instances of this type with an empty value here are
-                          almost certainly wrong.
-                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                        type: string
-                    type: object
-                    x-kubernetes-map-type: atomic
-                  username:
-                    default: admin
-                    description: Username is the login name for the admin account.
-                      Defaults to "admin".
-                    maxLength: 253
-                    pattern: ^[^/\s]+$
-                    type: string
-                type: object
               argoCDURL:
                 description: |-
                   ArgoCDURL is the base URL of the Argo CD instance used to build deep
@@ -100,68 +61,115 @@ spec:
                 - message: must be a valid http or https URL
                   rule: self == '' || (isURL(self) && url(self).getScheme() in ['http',
                     'https'])
-              oidc:
+              auth:
                 description: |-
-                  OIDC configures an external OpenID Connect identity provider for UI
-                  login. When set, the login page offers an SSO button alongside (or
-                  instead of) the admin account, depending on whether AdminUser is also
-                  enabled.
+                  Auth configures UI/API authentication. The built-in admin account
+                  (auth.adminUser) and an external OIDC provider (auth.oidc) can be enabled
+                  independently; both may be active at once. When Auth is unset, no identity
+                  provider is configured and the server runs without authentication.
                 properties:
-                  clientID:
-                    description: ClientID is the OAuth2/OIDC client identifier registered
-                      with the issuer.
-                    type: string
-                  clientSecretRef:
-                    default:
-                      name: kokumi-server-oidc
-                    description: |-
-                      ClientSecretRef points to the Secret holding the OAuth2 client secret in
-                      the "client-secret" key. The Secret must reside in the same namespace as
-                      the Kitchen.
-                      Defaults to "kokumi-server-oidc".
+                  adminUser:
+                    description: AdminUser configures the built-in admin account used
+                      for UI login.
                     properties:
-                      name:
-                        default: ""
+                      enabled:
+                        default: true
                         description: |-
-                          Name of the referent.
-                          This field is effectively required, but due to backwards compatibility is
-                          allowed to be empty. Instances of this type with an empty value here are
-                          almost certainly wrong.
-                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                          Enabled toggles the admin account. When false, admin login is disabled and
+                          the server falls back to no authentication unless another identity
+                          provider (e.g. OIDC) is configured. Defaults to true.
+                        type: boolean
+                      secretRef:
+                        default:
+                          name: kokumi-server-auth
+                        description: |-
+                          SecretRef points to the Secret holding the admin credentials. The Secret
+                          must reside in the same namespace as the Kitchen. Recognized keys are
+                          "password-hash" (bcrypt hash) and "signing-key" (HMAC key for JWTs).
+                          Defaults to "kokumi-server-auth".
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
+                      username:
+                        default: admin
+                        description: Username is the login name for the admin account.
+                          Defaults to "admin".
+                        maxLength: 253
+                        pattern: ^[^/\s]+$
                         type: string
                     type: object
-                    x-kubernetes-map-type: atomic
-                  issuerURL:
+                  oidc:
                     description: |-
-                      IssuerURL is the base URL of the OIDC issuer (e.g.
-                      "https://accounts.google.com"). The server discovers the authorization
-                      and token endpoints from the issuer's well-known configuration.
-                    type: string
-                    x-kubernetes-validations:
-                    - message: must be a valid http or https URL
-                      rule: isURL(self) && url(self).getScheme() in ['http', 'https']
-                  scopes:
-                    default:
-                    - openid
-                    - profile
-                    - email
-                    description: |-
-                      Scopes is the list of OAuth2 scopes requested at login.
-                      Defaults to ["openid", "profile", "email"].
-                    items:
-                      type: string
-                    maxItems: 16
-                    type: array
-                  usernameClaim:
-                    default: email
-                    description: |-
-                      UsernameClaim is the ID-token claim used as the kokumi username.
-                      Defaults to "email".
-                    maxLength: 253
-                    type: string
-                required:
-                - clientID
-                - issuerURL
+                      OIDC configures an external OpenID Connect identity provider for UI
+                      login. When set, the login page offers an SSO button alongside (or
+                      instead of) the admin account, depending on whether AdminUser is also
+                      enabled.
+                    properties:
+                      clientID:
+                        description: ClientID is the OAuth2/OIDC client identifier
+                          registered with the issuer.
+                        type: string
+                      clientSecretRef:
+                        default:
+                          name: kokumi-server-oidc
+                        description: |-
+                          ClientSecretRef points to the Secret holding the OAuth2 client secret in
+                          the "client-secret" key. The Secret must reside in the same namespace as
+                          the Kitchen.
+                          Defaults to "kokumi-server-oidc".
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
+                      issuerURL:
+                        description: |-
+                          IssuerURL is the base URL of the OIDC issuer (e.g.
+                          "https://accounts.google.com"). The server discovers the authorization
+                          and token endpoints from the issuer's well-known configuration.
+                        type: string
+                        x-kubernetes-validations:
+                        - message: must be a valid http or https URL
+                          rule: isURL(self) && url(self).getScheme() in ['http', 'https']
+                      scopes:
+                        default:
+                        - openid
+                        - profile
+                        - email
+                        description: |-
+                          Scopes is the list of OAuth2 scopes requested at login.
+                          Defaults to ["openid", "profile", "email"].
+                        items:
+                          type: string
+                        maxItems: 16
+                        type: array
+                      usernameClaim:
+                        default: email
+                        description: |-
+                          UsernameClaim is the ID-token claim used as the kokumi username.
+                          Defaults to "email".
+                        maxLength: 253
+                        type: string
+                    required:
+                    - clientID
+                    - issuerURL
+                    type: object
                 type: object
             type: object
           status:

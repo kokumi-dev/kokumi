@@ -254,15 +254,17 @@ func TestAuthManagerReloadWithKitchenOIDC(t *testing.T) {
 	kitchen := &deliveryv1alpha1.Kitchen{
 		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: testNS},
 		Spec: deliveryv1alpha1.KitchenSpec{
-			AdminUser: &deliveryv1alpha1.AdminUserConfig{
-				Enabled:   new(true),
-				Username:  testUsername,
-				SecretRef: &corev1.LocalObjectReference{Name: testSecret},
-			},
-			OIDC: &deliveryv1alpha1.OIDCConfig{
-				IssuerURL:       "https://issuer.example",
-				ClientID:        testClientID,
-				ClientSecretRef: &corev1.LocalObjectReference{Name: testOIDCSecret},
+			Auth: &deliveryv1alpha1.KitchenAuth{
+				AdminUser: &deliveryv1alpha1.AdminUserConfig{
+					Enabled:   new(true),
+					Username:  testUsername,
+					SecretRef: &corev1.LocalObjectReference{Name: testSecret},
+				},
+				OIDC: &deliveryv1alpha1.OIDCConfig{
+					IssuerURL:       "https://issuer.example",
+					ClientID:        testClientID,
+					ClientSecretRef: &corev1.LocalObjectReference{Name: testOIDCSecret},
+				},
 			},
 		},
 	}
@@ -278,14 +280,16 @@ func TestAuthManagerReloadWithKitchenOIDC(t *testing.T) {
 	oidcKitchen := &deliveryv1alpha1.Kitchen{
 		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: testNS},
 		Spec: deliveryv1alpha1.KitchenSpec{
-			AdminUser: &deliveryv1alpha1.AdminUserConfig{
-				Enabled:   &disabled,
-				SecretRef: &corev1.LocalObjectReference{Name: "kokumi-server-auth"},
-			},
-			OIDC: &deliveryv1alpha1.OIDCConfig{
-				IssuerURL:       httpSrv.URL,
-				ClientID:        testClientID,
-				ClientSecretRef: &corev1.LocalObjectReference{Name: testOIDCSecret},
+			Auth: &deliveryv1alpha1.KitchenAuth{
+				AdminUser: &deliveryv1alpha1.AdminUserConfig{
+					Enabled:   &disabled,
+					SecretRef: &corev1.LocalObjectReference{Name: "kokumi-server-auth"},
+				},
+				OIDC: &deliveryv1alpha1.OIDCConfig{
+					IssuerURL:       httpSrv.URL,
+					ClientID:        testClientID,
+					ClientSecretRef: &corev1.LocalObjectReference{Name: testOIDCSecret},
+				},
 			},
 		},
 	}
@@ -382,14 +386,16 @@ func TestHandleLoginForbiddenWhenAdminDisabled(t *testing.T) {
 	kitchen := &deliveryv1alpha1.Kitchen{
 		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: testNS},
 		Spec: deliveryv1alpha1.KitchenSpec{
-			AdminUser: &deliveryv1alpha1.AdminUserConfig{
-				Enabled:   &disabled,
-				SecretRef: &corev1.LocalObjectReference{Name: "kokumi-server-auth"},
-			},
-			OIDC: &deliveryv1alpha1.OIDCConfig{
-				IssuerURL:       "https://issuer.example",
-				ClientID:        testClientID,
-				ClientSecretRef: &corev1.LocalObjectReference{Name: testOIDCSecret},
+			Auth: &deliveryv1alpha1.KitchenAuth{
+				AdminUser: &deliveryv1alpha1.AdminUserConfig{
+					Enabled:   &disabled,
+					SecretRef: &corev1.LocalObjectReference{Name: "kokumi-server-auth"},
+				},
+				OIDC: &deliveryv1alpha1.OIDCConfig{
+					IssuerURL:       "https://issuer.example",
+					ClientID:        testClientID,
+					ClientSecretRef: &corev1.LocalObjectReference{Name: testOIDCSecret},
+				},
 			},
 		},
 	}
