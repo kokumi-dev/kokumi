@@ -30,6 +30,16 @@ type KitchenSpec struct {
 	// +optional
 	ArgoCDURL string `json:"argoCDURL,omitempty"`
 
+	// Auth configures UI/API authentication. The built-in admin account
+	// (auth.adminUser) and an external OIDC provider (auth.oidc) can be enabled
+	// independently; both may be active at once. When Auth is unset, no identity
+	// provider is configured and the server runs without authentication.
+	// +optional
+	Auth *KitchenAuth `json:"auth,omitempty"`
+}
+
+// KitchenAuth groups the authentication configuration for the Kitchen server.
+type KitchenAuth struct {
 	// AdminUser configures the built-in admin account used for UI login.
 	// +optional
 	AdminUser *AdminUserConfig `json:"adminUser,omitempty"`

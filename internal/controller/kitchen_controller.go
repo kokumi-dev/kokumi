@@ -88,16 +88,16 @@ func (r *KitchenReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// When admin is enabled, the credentials Secret must exist with the required keys;
 	// report non-Ready (not silent disable) so the misconfig is visible. secretRef is
 	// defaulted by CRD defaulting, so a missing ref is a configuration error.
-	if kitchen.Spec.AdminUser != nil &&
-		kitchen.Spec.AdminUser.Enabled != nil &&
-		*kitchen.Spec.AdminUser.Enabled {
-		if kitchen.Spec.AdminUser.SecretRef == nil || kitchen.Spec.AdminUser.SecretRef.Name == "" {
+	if adminUser := kitchen.Spec.Auth.AdminUser; adminUser != nil &&
+		adminUser.Enabled != nil &&
+		*adminUser.Enabled {
+		if adminUser.SecretRef == nil || adminUser.SecretRef.Name == "" {
 			if uerr := updater.Failed(ctx, kitchen, fmt.Errorf("admin credentials secretRef not set")); uerr != nil {
 				return ctrl.Result{}, uerr
 			}
 			return ctrl.Result{}, nil
 		}
-		secretName := kitchen.Spec.AdminUser.SecretRef.Name
+		secretName := adminUser.SecretRef.Name
 		secret := &corev1.Secret{}
 		err := r.Get(ctx, client.ObjectKey{Namespace: kitchen.Namespace, Name: secretName}, secret)
 		if err != nil || secret.Data["password-hash"] == nil || secret.Data["signing-key"] == nil {
@@ -111,14 +111,14 @@ func (r *KitchenReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// When OIDC is configured, the client Secret must exist with the "client-secret" key.
 	// The signing-key (from the admin Secret) is validated at runtime by the server.
 	// clientSecretRef is defaulted by CRD defaulting, so a missing ref is a configuration error.
-	if kitchen.Spec.OIDC != nil && kitchen.Spec.OIDC.IssuerURL != "" && kitchen.Spec.OIDC.ClientID != "" {
-		if kitchen.Spec.OIDC.ClientSecretRef == nil || kitchen.Spec.OIDC.ClientSecretRef.Name == "" {
+	if oidc := kitchen.Spec.Auth.OIDC; oidc != nil && oidc.IssuerURL != "" && oidc.ClientID != "" {
+		if oidc.ClientSecretRef == nil || oidc.ClientSecretRef.Name == "" {
 			if uerr := updater.Failed(ctx, kitchen, fmt.Errorf("oidc client secretRef not set")); uerr != nil {
 				return ctrl.Result{}, uerr
 			}
 			return ctrl.Result{}, nil
 		}
-		oidcSecretName := kitchen.Spec.OIDC.ClientSecretRef.Name
+		oidcSecretName := oidc.ClientSecretRef.Name
 		secret := &corev1.Secret{}
 		err := r.Get(ctx, client.ObjectKey{Namespace: kitchen.Namespace, Name: oidcSecretName}, secret)
 		if err != nil || secret.Data["client-secret"] == nil {
