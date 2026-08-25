@@ -22,6 +22,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
+const (
+	DefaultKitchenName = "default"
+)
+
 // KitchenSpec defines the desired state of Kitchen
 type KitchenSpec struct {
 	// ArgoCDURL is the base URL of the Argo CD instance used to build deep

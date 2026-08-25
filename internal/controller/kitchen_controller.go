@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"os"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -34,18 +33,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
-	"github.com/kokumi-dev/kokumi/internal/namespace"
 	"github.com/kokumi-dev/kokumi/internal/status"
 )
 
 // KitchenReconciler reconciles a Kitchen object
 type KitchenReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme    *runtime.Scheme
+	Namespace string
 }
-
-// singletonName is the only Kitchen name the operator manages.
-const singletonName = "default"
 
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=kitchens,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=kitchens/status,verbs=get;update;patch
@@ -61,7 +57,7 @@ func (r *KitchenReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	log := logf.FromContext(ctx)
 
 	// Singleton: only the "default" Kitchen in the install namespace is managed.
-	if req.Name != singletonName || req.Namespace != namespace.Current(os.Getenv) {
+	if req.Name != deliveryv1alpha1.DefaultKitchenName || req.Namespace != r.Namespace {
 		return ctrl.Result{}, nil
 	}
 
@@ -73,8 +69,8 @@ func (r *KitchenReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		// Ensure the singleton exists so the UI always has a resource to read/write.
 		kitchen = &deliveryv1alpha1.Kitchen{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      singletonName,
-				Namespace: namespace.Current(os.Getenv),
+				Name:      deliveryv1alpha1.DefaultKitchenName,
+				Namespace: r.Namespace,
 			},
 		}
 		if err := r.Create(ctx, kitchen); err != nil && !apierrors.IsAlreadyExists(err) {
@@ -147,8 +143,8 @@ func (r *KitchenReconciler) ensureDefaultRunner(mgr manager.Manager) manager.Run
 		reader := mgr.GetAPIReader()
 		kitchen := &deliveryv1alpha1.Kitchen{}
 		err := reader.Get(ctx, client.ObjectKey{
-			Namespace: namespace.Current(os.Getenv),
-			Name:      singletonName,
+			Namespace: r.Namespace,
+			Name:      deliveryv1alpha1.DefaultKitchenName,
 		}, kitchen)
 		if err == nil {
 			return nil
@@ -158,8 +154,8 @@ func (r *KitchenReconciler) ensureDefaultRunner(mgr manager.Manager) manager.Run
 		}
 		kitchen = &deliveryv1alpha1.Kitchen{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      singletonName,
-				Namespace: namespace.Current(os.Getenv),
+				Name:      deliveryv1alpha1.DefaultKitchenName,
+				Namespace: r.Namespace,
 			},
 		}
 		if err := r.Create(ctx, kitchen); err != nil && !apierrors.IsAlreadyExists(err) {
@@ -182,17 +178,16 @@ func (r *KitchenReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(
 			&corev1.Secret{},
 			handler.EnqueueRequestsFromMapFunc(r.mapSecretToKitchen),
-			builder.WithPredicates(secretInInstallNamespace(os.Getenv)),
+			builder.WithPredicates(r.secretInInstallNamespace()),
 		).
 		Named("kitchen").
 		Complete(r)
 }
 
 // secretInInstallNamespace filters Secret events to the install namespace.
-func secretInInstallNamespace(getenv func(string) string) predicate.Predicate {
-	ns := namespace.Current(getenv)
+func (r *KitchenReconciler) secretInInstallNamespace() predicate.Predicate {
 	return predicate.NewPredicateFuncs(func(obj client.Object) bool {
-		return obj.GetNamespace() == ns
+		return obj.GetNamespace() == r.Namespace
 	})
 }
 
@@ -200,6 +195,6 @@ func secretInInstallNamespace(getenv func(string) string) predicate.Predicate {
 // Kitchen so its readiness is re-evaluated when credentials change.
 func (r *KitchenReconciler) mapSecretToKitchen(_ context.Context, obj client.Object) []ctrl.Request {
 	return []ctrl.Request{
-		{NamespacedName: client.ObjectKey{Namespace: obj.GetNamespace(), Name: singletonName}},
+		{NamespacedName: client.ObjectKey{Namespace: obj.GetNamespace(), Name: deliveryv1alpha1.DefaultKitchenName}},
 	}
 }

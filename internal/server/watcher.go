@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/go-logr/logr"
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
@@ -92,8 +94,15 @@ func startK8sWatcher(
 		logger:    logger,
 	}
 
+	var tokenTTL time.Duration
+	if v := strings.TrimSpace(getenv("KOKUMI_TOKEN_TTL")); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			tokenTTL = d
+		}
+	}
+
 	// Build the auth manager up front so it is never nil when cache handlers fire.
-	deps.authMgr = newAuthManager(ctx, k8sCache, writer, installNamespace, getenv, logger)
+	deps.authMgr = newAuthManager(ctx, k8sCache, writer, installNamespace, tokenTTL, logger)
 
 	informers, err := getInformers(ctx, k8sCache)
 	if err != nil {

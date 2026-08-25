@@ -18,33 +18,33 @@ func TestResolve(t *testing.T) {
 		{
 			name: "version only, no revision",
 			annotations: map[string]string{
-				ocispec.AnnotationSource:  "https://github.com/kokumi-dev/example",
-				ocispec.AnnotationVersion: "1.2.3",
+				ocispec.AnnotationSource:  testRepo,
+				ocispec.AnnotationVersion: testTag,
 			},
-			wantRepo: "https://github.com/kokumi-dev/example",
-			wantTag:  "1.2.3",
+			wantRepo: testRepo,
+			wantTag:  testTag,
 			wantHash: "",
 		},
 		{
 			name: "source absent, falls back to url",
 			annotations: map[string]string{
-				ocispec.AnnotationURL:     "https://github.com/kokumi-dev/example",
-				ocispec.AnnotationVersion: "1.2.3",
+				ocispec.AnnotationURL:     testRepo,
+				ocispec.AnnotationVersion: testTag,
 			},
-			wantRepo: "https://github.com/kokumi-dev/example",
-			wantTag:  "1.2.3",
+			wantRepo: testRepo,
+			wantTag:  testTag,
 			wantHash: "",
 		},
 		{
 			name: "both tag and revision present",
 			annotations: map[string]string{
-				ocispec.AnnotationSource:   "https://github.com/kokumi-dev/example",
-				ocispec.AnnotationVersion:  "1.2.3",
-				ocispec.AnnotationRevision: "abcdef1234567890abcdef1234567890abcdef12",
+				ocispec.AnnotationSource:   testRepo,
+				ocispec.AnnotationVersion:  testTag,
+				ocispec.AnnotationRevision: testCommit,
 			},
-			wantRepo: "https://github.com/kokumi-dev/example",
-			wantTag:  "1.2.3",
-			wantHash: "abcdef1234567890abcdef1234567890abcdef12",
+			wantRepo: testRepo,
+			wantTag:  testTag,
+			wantHash: testCommit,
 		},
 	}
 

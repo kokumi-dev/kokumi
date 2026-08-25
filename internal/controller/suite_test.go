@@ -48,6 +48,12 @@ var (
 	k8sClient client.Client
 )
 
+const (
+	testOCIRef    = "oci://registry.kokumi.svc.cluster.local:5000/order/test-resource"
+	testVersion   = "0.1.0"
+	testNamespace = "default"
+)
+
 func TestControllers(t *testing.T) {
 	RegisterFailHandler(Fail)
 

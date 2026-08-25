@@ -46,7 +46,7 @@ func newTestOIDCProvider(t *testing.T) (*oidcProvider, *httptest.Server) {
 
 	client := fake.NewClientBuilder().WithObjects(&corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: testOIDCSecret, Namespace: testNS},
-		Data:       map[string][]byte{"client-secret": []byte(testClientSec)},
+		Data:       map[string][]byte{secretKeyClientSecret: []byte(testClientSec)},
 	}, &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: testSecret, Namespace: testNS},
 		Data:       map[string][]byte{"signing-key": []byte("test-signing-key-do-not-use-in-prod")},
@@ -207,13 +207,13 @@ func TestIssueSessionFromOIDC(t *testing.T) {
 func TestAuthManagerProviders(t *testing.T) {
 	a := newTestAuthenticator(t)
 	mgr := &authManager{auth: a, adminLogin: true, oidc: &oidcProvider{}}
-	assert.ElementsMatch(t, []string{"admin", "oidc"}, mgr.providers())
+	assert.ElementsMatch(t, []string{providerAdmin, providerOIDC}, mgr.providers())
 
 	mgr2 := &authManager{auth: a, adminLogin: true}
-	assert.Equal(t, []string{"admin"}, mgr2.providers())
+	assert.Equal(t, []string{providerAdmin}, mgr2.providers())
 
 	mgr3 := &authManager{oidc: &oidcProvider{}}
-	assert.Equal(t, []string{"oidc"}, mgr3.providers())
+	assert.Equal(t, []string{providerOIDC}, mgr3.providers())
 
 	mgr4 := &authManager{}
 	assert.Empty(t, mgr4.providers())
@@ -239,20 +239,19 @@ func TestAuthManagerReloadWithKitchenOIDC(t *testing.T) {
 		},
 	}, &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: testOIDCSecret, Namespace: testNS},
-		Data:       map[string][]byte{"client-secret": []byte(testClientSec)},
+		Data:       map[string][]byte{secretKeyClientSecret: []byte(testClientSec)},
 	}).Build()
 
 	m := &authManager{
 		reader:    client,
 		apiReader: client,
 		ns:        testNS,
-		getenv:    func(string) string { return "" },
 		logger:    logr.Discard(),
 	}
 
 	// Kitchen with both admin and a (valid) OIDC issuer.
 	kitchen := &deliveryv1alpha1.Kitchen{
-		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: testNS},
+		ObjectMeta: metav1.ObjectMeta{Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS},
 		Spec: deliveryv1alpha1.KitchenSpec{
 			Auth: &deliveryv1alpha1.KitchenAuth{
 				AdminUser: &deliveryv1alpha1.AdminUserConfig{
@@ -270,7 +269,7 @@ func TestAuthManagerReloadWithKitchenOIDC(t *testing.T) {
 	}
 	m.reload(context.Background(), kitchen)
 	// Admin resolves; OIDC fails discovery (fake issuer) so only admin is active and auth stays enabled.
-	assert.ElementsMatch(t, []string{"admin"}, m.providers())
+	assert.ElementsMatch(t, []string{providerAdmin}, m.providers())
 	assert.False(t, m.disabled)
 
 	// Disable admin and point OIDC at a reachable test OP to confirm it can be the sole provider.
@@ -278,12 +277,12 @@ func TestAuthManagerReloadWithKitchenOIDC(t *testing.T) {
 	p, httpSrv := newTestOIDCProvider(t)
 	defer httpSrv.Close()
 	oidcKitchen := &deliveryv1alpha1.Kitchen{
-		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: testNS},
+		ObjectMeta: metav1.ObjectMeta{Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS},
 		Spec: deliveryv1alpha1.KitchenSpec{
 			Auth: &deliveryv1alpha1.KitchenAuth{
 				AdminUser: &deliveryv1alpha1.AdminUserConfig{
 					Enabled:   &disabled,
-					SecretRef: &corev1.LocalObjectReference{Name: "kokumi-server-auth"},
+					SecretRef: &corev1.LocalObjectReference{Name: testSecret},
 				},
 				OIDC: &deliveryv1alpha1.OIDCConfig{
 					IssuerURL:       httpSrv.URL,
@@ -294,7 +293,7 @@ func TestAuthManagerReloadWithKitchenOIDC(t *testing.T) {
 		},
 	}
 	m.reload(context.Background(), oidcKitchen)
-	assert.ElementsMatch(t, []string{"oidc"}, m.providers())
+	assert.ElementsMatch(t, []string{providerOIDC}, m.providers())
 	assert.False(t, m.disabled)
 	_ = p
 }
@@ -372,24 +371,23 @@ func TestHandleLoginForbiddenWhenAdminDisabled(t *testing.T) {
 		},
 	}, &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: testOIDCSecret, Namespace: testNS},
-		Data:       map[string][]byte{"client-secret": []byte(testClientSec)},
+		Data:       map[string][]byte{secretKeyClientSecret: []byte(testClientSec)},
 	}).Build()
 
 	m := &authManager{
 		reader:    client,
 		apiReader: client,
 		ns:        testNS,
-		getenv:    func(string) string { return "" },
 		logger:    logr.Discard(),
 	}
 	disabled := false
 	kitchen := &deliveryv1alpha1.Kitchen{
-		ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: testNS},
+		ObjectMeta: metav1.ObjectMeta{Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS},
 		Spec: deliveryv1alpha1.KitchenSpec{
 			Auth: &deliveryv1alpha1.KitchenAuth{
 				AdminUser: &deliveryv1alpha1.AdminUserConfig{
 					Enabled:   &disabled,
-					SecretRef: &corev1.LocalObjectReference{Name: "kokumi-server-auth"},
+					SecretRef: &corev1.LocalObjectReference{Name: testSecret},
 				},
 				OIDC: &deliveryv1alpha1.OIDCConfig{
 					IssuerURL:       "https://issuer.example",

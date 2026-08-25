@@ -38,7 +38,7 @@ var _ = Describe("Preparation Controller", func() {
 
 		typeNamespacedName := types.NamespacedName{
 			Name:      resourceName,
-			Namespace: "default",
+			Namespace: testNamespace,
 		}
 		preparation := &deliveryv1alpha1.Preparation{}
 
@@ -49,18 +49,18 @@ var _ = Describe("Preparation Controller", func() {
 				resource := &deliveryv1alpha1.Preparation{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
-						Namespace: "default",
+						Namespace: testNamespace,
 					},
 					Spec: deliveryv1alpha1.PreparationSpec{
 						OrderName:  "order",
 						ConfigHash: "sha256:448093f1b28dc7147740d8e400946e9b228650aa31a54b0ed734ca9ab0ae5b6b",
 						Renderer: deliveryv1alpha1.Renderer{
-							Version:    "0.1.0",
+							Version:    testVersion,
 							Digest:     "sha256:fdf90e00e7605d65cdf4a5d3a404c9823ee2e473f7468f68c29694f1b909e2bc",
 							RenderType: deliveryv1alpha1.RenderTypeManifest,
 						},
 						Source: deliveryv1alpha1.OrderSource{
-							OCI:        "oci://registry.kokumi.svc.cluster.local:5000/order/test-resource",
+							OCI:        testOCIRef,
 							BaseDigest: "sha256:6c2069fa6684d3659d93538331711b09a33cb42ae305802195d6a4d58847b345",
 						},
 						Artifact: deliveryv1alpha1.Artifact{

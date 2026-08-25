@@ -15,7 +15,12 @@ import (
 )
 
 const (
-	fakeDigest = "sha256:fdf90e00e76bf3f0d2e5042c4c4e6c42a6d38c1e2b4f5a7d8e9f0a1b2c3d4e5f"
+	fakeDigest         = "sha256:fdf90e00e76bf3f0d2e5042c4c4e6c42a6d38c1e2b4f5a7d8e9f0a1b2c3d4e5f"
+	testVersion        = "1.0.0"
+	testDeploymentFile = "deployment.yaml"
+	testServiceFile    = "service.yaml"
+	testDeploymentYAML = "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: my-app\nspec:\n  replicas: 1\n"
+	testServiceYAML    = "apiVersion: v1\nkind: Service\nmetadata:\n  name: my-app\nspec:\n  port: 80\n"
 )
 
 func TestOrderService_ProcessOrder(t *testing.T) {
@@ -35,7 +40,7 @@ func TestOrderService_ProcessOrder(t *testing.T) {
 				Spec: deliveryv1alpha1.OrderSpec{
 					Source: &deliveryv1alpha1.OCISource{
 						OCI:     "oci://kokumi-registry.kokumi.svc.cluster.local:5000/order/external-secrets",
-						Version: "1.0.0",
+						Version: testVersion,
 					},
 					Destination: &deliveryv1alpha1.OCIDestination{
 						OCI: "oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/external-secrets",
@@ -52,7 +57,7 @@ func TestOrderService_ProcessOrder(t *testing.T) {
 				Spec: deliveryv1alpha1.OrderSpec{
 					Source: &deliveryv1alpha1.OCISource{
 						OCI:     "oci://kokumi-registry.kokumi.svc.cluster.local:5000/order/my-app",
-						Version: "1.0.0",
+						Version: testVersion,
 					},
 					Destination: &deliveryv1alpha1.OCIDestination{
 						OCI: "oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/my-app",
@@ -77,7 +82,7 @@ func TestOrderService_ProcessOrder(t *testing.T) {
 				Spec: deliveryv1alpha1.OrderSpec{
 					Source: &deliveryv1alpha1.OCISource{
 						OCI:     "oci://registry.svc.cluster.local:5000/order/multi-file-app",
-						Version: "1.0.0",
+						Version: testVersion,
 					},
 					Destination: &deliveryv1alpha1.OCIDestination{
 						OCI: "oci://registry.svc.cluster.local:5000/preparation/multi-file-app",
@@ -137,7 +142,7 @@ func TestOrderService_Provenance(t *testing.T) {
 		Spec: deliveryv1alpha1.OrderSpec{
 			Source: &deliveryv1alpha1.OCISource{
 				OCI:     "oci://registry.svc.cluster.local:5000/order/app",
-				Version: "1.0.0",
+				Version: testVersion,
 			},
 			Destination: &deliveryv1alpha1.OCIDestination{
 				OCI: "oci://registry.svc.cluster.local:5000/preparation/app",
@@ -219,7 +224,7 @@ func TestOrderService_PullCache(t *testing.T) {
 		Spec: deliveryv1alpha1.OrderSpec{
 			Source: &deliveryv1alpha1.OCISource{
 				OCI:     "oci://registry.svc.cluster.local:5000/order/app",
-				Version: "1.0.0",
+				Version: testVersion,
 			},
 			Destination: &deliveryv1alpha1.OCIDestination{
 				OCI: "oci://registry.svc.cluster.local:5000/preparation/app",
@@ -241,7 +246,7 @@ func TestOrderService_PullCache(t *testing.T) {
 		// Verify cache entry was written.
 		key := pullCacheKey(
 			"registry.svc.cluster.local:5000/order/app",
-			"1.0.0",
+			testVersion,
 			deliveryv1alpha1.FileLayoutSingle,
 		)
 		exists, err := afero.Exists(fs, filepath.Join(cacheDir, key, "meta.json"))
@@ -278,8 +283,8 @@ var _ oci.Client = (*multiFileFakeClient)(nil)
 
 func (c *multiFileFakeClient) Pull(_ context.Context, _, _, targetDir string) (string, string, map[string]string, error) {
 	files := map[string]string{
-		"deployment.yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: my-app\nspec:\n  replicas: 1\n",
-		"service.yaml":    "apiVersion: v1\nkind: Service\nmetadata:\n  name: my-app\nspec:\n  port: 80\n",
+		testDeploymentFile: testDeploymentYAML,
+		testServiceFile:    testServiceYAML,
 	}
 	for name, content := range files {
 		if err := afero.WriteFile(c.fs, filepath.Join(targetDir, name), []byte(content), 0600); err != nil {
@@ -337,20 +342,20 @@ func TestMergeYAMLFiles(t *testing.T) {
 		{
 			name: "multiple yaml files are merged in sorted order",
 			setup: map[string]string{
-				"service.yaml":    "kind: Service\n",
-				"deployment.yaml": "kind: Deployment\n",
+				testServiceFile:    "kind: Service\n",
+				testDeploymentFile: "kind: Deployment\n",
 			},
 			wantManifest: "---\n# Source: deployment.yaml\nkind: Deployment\n---\n# Source: service.yaml\nkind: Service\n",
-			wantGone:     []string{"deployment.yaml", "service.yaml"},
+			wantGone:     []string{testDeploymentFile, testServiceFile},
 		},
 		{
 			name: "existing manifest.yaml included and removed before rewrite",
 			setup: map[string]string{
 				"manifest.yaml": "kind: ConfigMap\n",
-				"service.yaml":  "kind: Service\n",
+				testServiceFile: "kind: Service\n",
 			},
 			wantManifest: "---\n# Source: manifest.yaml\nkind: ConfigMap\n---\n# Source: service.yaml\nkind: Service\n",
-			wantGone:     []string{"service.yaml"},
+			wantGone:     []string{testServiceFile},
 		},
 	}
 
@@ -445,7 +450,7 @@ func multiFileOrder(render *deliveryv1alpha1.Render) *deliveryv1alpha1.Order {
 		Spec: deliveryv1alpha1.OrderSpec{
 			Source: &deliveryv1alpha1.OCISource{
 				OCI:     "oci://registry.svc.cluster.local:5000/order/multi-file-app",
-				Version: "1.0.0",
+				Version: testVersion,
 			},
 			Destination: &deliveryv1alpha1.OCIDestination{
 				OCI: "oci://registry.svc.cluster.local:5000/preparation/multi-file-app",

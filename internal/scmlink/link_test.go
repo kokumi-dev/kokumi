@@ -7,6 +7,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	testRepo   = "https://github.com/kokumi-dev/example"
+	testCommit = "abcdef1234567890abcdef1234567890abcdef12"
+	testTag    = "1.2.3"
+)
+
 func TestBuild(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -19,36 +25,36 @@ func TestBuild(t *testing.T) {
 	}{
 		{
 			name:      "github https url with commit sha",
-			repo:      "https://github.com/kokumi-dev/example",
-			commit:    "abcdef1234567890abcdef1234567890abcdef12",
+			repo:      testRepo,
+			commit:    testCommit,
 			wantURL:   "https://github.com/kokumi-dev/example/commit/abcdef1234567890abcdef1234567890abcdef12",
 			wantLabel: "abcdef1",
 		},
 		{
 			name:      "tag preferred over commit hash",
-			repo:      "https://github.com/kokumi-dev/example",
-			tag:       "1.2.3",
-			commit:    "abcdef1234567890abcdef1234567890abcdef12",
+			repo:      testRepo,
+			tag:       testTag,
+			commit:    testCommit,
 			wantURL:   "https://github.com/kokumi-dev/example/tree/1.2.3",
-			wantLabel: "1.2.3",
+			wantLabel: testTag,
 		},
 		{
 			name:      "tag only, no commit",
-			repo:      "https://github.com/kokumi-dev/example",
-			tag:       "1.2.3",
+			repo:      testRepo,
+			tag:       testTag,
 			wantURL:   "https://github.com/kokumi-dev/example/tree/1.2.3",
-			wantLabel: "1.2.3",
+			wantLabel: testTag,
 		},
 		{
 			name:      "commit only when no tag",
-			repo:      "https://github.com/kokumi-dev/example",
-			commit:    "abcdef1234567890abcdef1234567890abcdef12",
+			repo:      testRepo,
+			commit:    testCommit,
 			wantURL:   "https://github.com/kokumi-dev/example/commit/abcdef1234567890abcdef1234567890abcdef12",
 			wantLabel: "abcdef1",
 		},
 		{
 			name:    "missing ref returns nil",
-			repo:    "https://github.com/kokumi-dev/example",
+			repo:    testRepo,
 			wantNil: true,
 		},
 		{

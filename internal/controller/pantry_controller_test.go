@@ -38,7 +38,7 @@ var _ = Describe("Pantry Controller", func() {
 
 		typeNamespacedName := types.NamespacedName{
 			Name:      resourceName,
-			Namespace: "default",
+			Namespace: testNamespace,
 		}
 		pantry := &deliveryv1alpha1.Pantry{}
 
@@ -49,7 +49,7 @@ var _ = Describe("Pantry Controller", func() {
 				resource := &deliveryv1alpha1.Pantry{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
-						Namespace: "default",
+						Namespace: testNamespace,
 					},
 					Spec: deliveryv1alpha1.PantrySpec{
 						URL: "oci://registry.kokumi.svc.cluster.local:5000/test/charts",

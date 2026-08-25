@@ -38,7 +38,7 @@ var _ = Describe("Recipe Controller", func() {
 
 		typeNamespacedName := types.NamespacedName{
 			Name:      resourceName,
-			Namespace: "default",
+			Namespace: testNamespace,
 		}
 		recipe := &deliveryv1alpha1.Recipe{}
 
@@ -49,7 +49,7 @@ var _ = Describe("Recipe Controller", func() {
 				resource := &deliveryv1alpha1.Recipe{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
-						Namespace: "default",
+						Namespace: testNamespace,
 					},
 					// TODO(user): Specify other spec details if needed.
 				}

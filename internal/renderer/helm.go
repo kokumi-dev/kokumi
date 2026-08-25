@@ -125,7 +125,7 @@ func RenderChart(ctx context.Context, chartPath, releaseName, namespace string, 
 		}
 
 		renderedManifest.WriteString("\n---\n")
-		renderedManifest.WriteString(fmt.Sprintf("# Source: %s\n", hookAcc.Path()))
+		fmt.Fprintf(&renderedManifest, "# Source: %s\n", hookAcc.Path())
 		renderedManifest.WriteString(strings.TrimSpace(hookAcc.Manifest()))
 		renderedManifest.WriteString("\n")
 	}

@@ -24,6 +24,8 @@ const (
 	oidcStateCookie = "kokumi.oidc.state"
 	// oidcStateTTL bounds how long an in-flight authorization request stays valid.
 	oidcStateTTL = 10 * time.Minute
+	// secretKeyClientSecret is the key within the OIDC Secret that holds the client secret.
+	secretKeyClientSecret = "client-secret"
 )
 
 // oidcProvider implements IdentityProvider via the OIDC authorization-code flow
@@ -63,9 +65,9 @@ func buildOIDCProvider(
 	if err := reader.Get(ctx, key, secret); err != nil {
 		return nil, fmt.Errorf("reading oidc secret %s/%s: %w", namespace, cfg.ClientSecretRef.Name, err)
 	}
-	clientSecret := strings.TrimSpace(string(secret.Data["client-secret"]))
+	clientSecret := strings.TrimSpace(string(secret.Data[secretKeyClientSecret]))
 	if clientSecret == "" {
-		return nil, fmt.Errorf("oidc secret %s/%s missing %q", namespace, cfg.ClientSecretRef.Name, "client-secret")
+		return nil, fmt.Errorf("oidc secret %s/%s missing %q", namespace, cfg.ClientSecretRef.Name, secretKeyClientSecret)
 	}
 
 	// Discovery must succeed; a short timeout keeps startup responsive if the issuer is down.

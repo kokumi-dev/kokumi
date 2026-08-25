@@ -44,6 +44,7 @@ linters:
       - third_party$
       - builtin$
       - examples$
+      - ui/
 formatters:
   enable:
     - gofmt

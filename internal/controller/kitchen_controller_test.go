@@ -29,7 +29,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
-	"github.com/kokumi-dev/kokumi/internal/namespace"
 )
 
 // Secret data keys expected by the server's authenticator builder.
@@ -42,16 +41,13 @@ const (
 
 var _ = Describe("Kitchen Controller", func() {
 	Context("When reconciling a resource", func() {
-		const (
-			resourceName      = "test-resource"
-			resourceNamespace = "default"
-		)
+		const resourceName = "test-resource"
 
 		ctx := context.Background()
 
 		typeNamespacedName := types.NamespacedName{
 			Name:      resourceName,
-			Namespace: resourceNamespace,
+			Namespace: testNamespace,
 		}
 		kitchen := &deliveryv1alpha1.Kitchen{}
 
@@ -62,7 +58,7 @@ var _ = Describe("Kitchen Controller", func() {
 				resource := &deliveryv1alpha1.Kitchen{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
-						Namespace: resourceNamespace,
+						Namespace: testNamespace,
 					},
 					// TODO(user): Specify other spec details if needed.
 				}
@@ -82,8 +78,9 @@ var _ = Describe("Kitchen Controller", func() {
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
 			controllerReconciler := &KitchenReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:    k8sClient,
+				Scheme:    k8sClient.Scheme(),
+				Namespace: testNamespace,
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -96,27 +93,20 @@ var _ = Describe("Kitchen Controller", func() {
 	})
 })
 
-// singletonName/namespace mirror the controller's singleton semantics; in envtest
-// namespace.Current falls back to the "kokumi" default.
-const (
-	singletonKitchenName      = "default"
-	singletonKitchenNamespace = namespace.Default
-)
-
 func newKitchenReconciler() *KitchenReconciler {
-	return &KitchenReconciler{Client: k8sClient, Scheme: k8sClient.Scheme()}
+	return &KitchenReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Namespace: testNamespace}
 }
 
 func reconcileSingleton(ctx context.Context) {
 	_, err := newKitchenReconciler().Reconcile(ctx, reconcile.Request{
-		NamespacedName: types.NamespacedName{Name: singletonKitchenName, Namespace: singletonKitchenNamespace},
+		NamespacedName: types.NamespacedName{Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace},
 	})
 	Expect(err).NotTo(HaveOccurred())
 }
 
 func getKitchen(ctx context.Context) *deliveryv1alpha1.Kitchen {
 	k := &deliveryv1alpha1.Kitchen{}
-	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: singletonKitchenName, Namespace: singletonKitchenNamespace}, k)).To(Succeed())
+	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace}, k)).To(Succeed())
 	return k
 }
 
@@ -134,7 +124,7 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 
 	BeforeEach(func() {
 		By("ensuring the install namespace exists")
-		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: singletonKitchenNamespace}}
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: testNamespace}}
 		err := k8sClient.Create(ctx, ns)
 		if err != nil && !errors.IsAlreadyExists(err) {
 			Expect(err).NotTo(HaveOccurred())
@@ -144,17 +134,17 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 	AfterEach(func() {
 		By("removing the singleton Kitchen and any auth Secret")
 		_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Kitchen{
-			ObjectMeta: metav1.ObjectMeta{Name: singletonKitchenName, Namespace: singletonKitchenNamespace},
+			ObjectMeta: metav1.ObjectMeta{Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace},
 		})
 		_ = k8sClient.Delete(ctx, &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: singletonKitchenNamespace},
+			ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: testNamespace},
 		})
 	})
 
 	It("reports Ready=False when the admin credentials Secret is missing", func() {
 		By("creating a Kitchen with adminUser enabled and no Secret")
 		kitchen := &deliveryv1alpha1.Kitchen{
-			ObjectMeta: metav1.ObjectMeta{Name: singletonKitchenName, Namespace: singletonKitchenNamespace},
+			ObjectMeta: metav1.ObjectMeta{Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace},
 			Spec: deliveryv1alpha1.KitchenSpec{
 				Auth: &deliveryv1alpha1.KitchenAuth{
 					AdminUser: &deliveryv1alpha1.AdminUserConfig{},
@@ -176,7 +166,7 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 	It("recovers to Ready=True once the credentials Secret appears", func() {
 		By("creating a Kitchen with adminUser enabled and no Secret")
 		kitchen := &deliveryv1alpha1.Kitchen{
-			ObjectMeta: metav1.ObjectMeta{Name: singletonKitchenName, Namespace: singletonKitchenNamespace},
+			ObjectMeta: metav1.ObjectMeta{Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace},
 			Spec: deliveryv1alpha1.KitchenSpec{
 				Auth: &deliveryv1alpha1.KitchenAuth{
 					AdminUser: &deliveryv1alpha1.AdminUserConfig{},
@@ -191,7 +181,7 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 		hash, err := bcrypt.GenerateFromPassword([]byte("s3cret-passw0rd"), bcrypt.MinCost)
 		Expect(err).NotTo(HaveOccurred())
 		secret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: singletonKitchenNamespace},
+			ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: testNamespace},
 			Data: map[string][]byte{
 				secretKeyUsername:     []byte("admin"),
 				secretKeyPasswordHash: hash,
@@ -212,7 +202,7 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 	It("reports Ready=False when the Secret is incomplete", func() {
 		By("creating the Kitchen and an incomplete Secret (missing signing-key)")
 		kitchen := &deliveryv1alpha1.Kitchen{
-			ObjectMeta: metav1.ObjectMeta{Name: singletonKitchenName, Namespace: singletonKitchenNamespace},
+			ObjectMeta: metav1.ObjectMeta{Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace},
 			Spec: deliveryv1alpha1.KitchenSpec{
 				Auth: &deliveryv1alpha1.KitchenAuth{
 					AdminUser: &deliveryv1alpha1.AdminUserConfig{},
@@ -223,7 +213,7 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 		hash, err := bcrypt.GenerateFromPassword([]byte("s3cret-passw0rd"), bcrypt.MinCost)
 		Expect(err).NotTo(HaveOccurred())
 		secret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: singletonKitchenNamespace},
+			ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: testNamespace},
 			Data: map[string][]byte{
 				secretKeyUsername:     []byte("admin"),
 				secretKeyPasswordHash: hash,
