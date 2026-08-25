@@ -2,10 +2,7 @@ package status
 
 import (
 	"context"
-	"fmt"
-	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -24,40 +21,18 @@ func NewKitchenUpdater(c client.Client) *KitchenUpdater {
 }
 
 // Ready marks the Kitchen as valid and available for use.
-func (u *KitchenUpdater) Ready(ctx context.Context, k *deliveryv1alpha1.Kitchen, msg string) error {
-	return u.set(ctx, k, metav1.ConditionTrue, "Ready", msg)
+func (u *KitchenUpdater) Ready(ctx context.Context, kitchen *deliveryv1alpha1.Kitchen, msg string) error {
+	return u.set(ctx, kitchen, metav1.ConditionTrue, "Ready", msg)
 }
 
 // Failed marks the Kitchen as having a configuration error.
-func (u *KitchenUpdater) Failed(ctx context.Context, k *deliveryv1alpha1.Kitchen, err error) error {
-	return u.set(ctx, k, metav1.ConditionFalse, "Failed", err.Error())
+func (u *KitchenUpdater) Failed(ctx context.Context, kitchen *deliveryv1alpha1.Kitchen, err error) error {
+	return u.set(ctx, kitchen, metav1.ConditionFalse, "Failed", err.Error())
 }
 
-func (u *KitchenUpdater) set(
-	ctx context.Context,
-	kitchen *deliveryv1alpha1.Kitchen,
-	condStatus metav1.ConditionStatus,
-	reason string,
-	msg string,
-) error {
-	kitchen.Status.ObservedGeneration = kitchen.Generation
-
-	condition := metav1.Condition{
-		Type:               deliveryv1alpha1.ConditionTypeReady,
-		Status:             condStatus,
-		Reason:             reason,
-		Message:            msg,
-		ObservedGeneration: kitchen.Generation,
-		LastTransitionTime: metav1.NewTime(time.Now()),
-	}
-
-	meta.SetStatusCondition(&kitchen.Status.Conditions, condition)
-
-	if err := u.client.Status().Update(ctx, kitchen); err != nil {
-		if apierrors.IsConflict(err) {
-			return nil
-		}
-		return fmt.Errorf("failed to update Kitchen status: %w", err)
-	}
-	return nil
+func (u *KitchenUpdater) set(ctx context.Context, kitchen *deliveryv1alpha1.Kitchen, condStatus metav1.ConditionStatus, reason, msg string) error {
+	return SetCondition(ctx, u.client, kitchen, func(latest *deliveryv1alpha1.Kitchen) {
+		latest.Status.ObservedGeneration = latest.Generation
+		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(latest.Generation, condStatus, reason, msg))
+	})
 }
