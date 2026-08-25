@@ -39,6 +39,34 @@ var argoAppGVK = schema.GroupVersionKind{
 	Kind:    "Application",
 }
 
+// buildArgoAppMap returns a map for an unstructured Argo CD Application.
+func buildArgoAppMap(name, repoURL, targetRevision string, annotations map[string]any) map[string]any {
+	meta := map[string]any{
+		"name":      name,
+		"namespace": argoNamespace,
+	}
+	if len(annotations) > 0 {
+		meta["annotations"] = annotations
+	}
+	return map[string]any{
+		"apiVersion": "argoproj.io/v1alpha1",
+		"kind":       "Application",
+		"metadata":   meta,
+		"spec": map[string]any{
+			"project": "default",
+			"source": map[string]any{
+				"repoURL":        repoURL,
+				"targetRevision": targetRevision,
+				"path":           ".",
+			},
+			"destination": map[string]any{
+				"server":    "https://kubernetes.default.svc",
+				"namespace": testNamespace,
+			},
+		},
+	}
+}
+
 var _ = Describe("Serving Controller", func() {
 	Context("When reconciling a resource", func() {
 		const resourceName = "serving"
@@ -50,25 +78,25 @@ var _ = Describe("Serving Controller", func() {
 
 		typeNamespacedName := types.NamespacedName{
 			Name:      resourceName,
-			Namespace: "default",
+			Namespace: testNamespace,
 		}
 		serving := &deliveryv1alpha1.Serving{}
 
 		BeforeEach(func() {
 			By("creating the Preparation referenced by the Serving")
 			preparation := &deliveryv1alpha1.Preparation{}
-			preparationKey := types.NamespacedName{Name: preparationName, Namespace: "default"}
+			preparationKey := types.NamespacedName{Name: preparationName, Namespace: testNamespace}
 			err := k8sClient.Get(ctx, preparationKey, preparation)
 			if err != nil && errors.IsNotFound(err) {
 				Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Preparation{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      preparationName,
-						Namespace: "default",
+						Namespace: testNamespace,
 					},
 					Spec: deliveryv1alpha1.PreparationSpec{
 						OrderName: orderName,
 						Source: deliveryv1alpha1.OrderSource{
-							OCI:        "oci://registry.kokumi.svc.cluster.local:5000/order/test-resource",
+							OCI:        testOCIRef,
 							BaseDigest: fakeDigest,
 						},
 						Renderer: deliveryv1alpha1.Renderer{
@@ -88,7 +116,7 @@ var _ = Describe("Serving Controller", func() {
 			By("ensuring the argocd namespace exists")
 			ns := &unstructured.Unstructured{}
 			ns.SetGroupVersionKind(schema.GroupVersionKind{Version: "v1", Kind: "Namespace"})
-			ns.SetName("argocd")
+			ns.SetName(argoNamespace)
 			_ = k8sClient.Create(ctx, ns)
 
 			By("creating the custom resource for the Kind Serving")
@@ -97,7 +125,7 @@ var _ = Describe("Serving Controller", func() {
 				resource := &deliveryv1alpha1.Serving{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
-						Namespace: "default",
+						Namespace: testNamespace,
 					},
 					Spec: deliveryv1alpha1.ServingSpec{
 						OrderName:       orderName,
@@ -122,7 +150,7 @@ var _ = Describe("Serving Controller", func() {
 
 			By("Cleanup the Preparation")
 			preparation := &deliveryv1alpha1.Preparation{}
-			preparationKey := types.NamespacedName{Name: preparationName, Namespace: "default"}
+			preparationKey := types.NamespacedName{Name: preparationName, Namespace: testNamespace}
 			if err := k8sClient.Get(ctx, preparationKey, preparation); err == nil {
 				Expect(k8sClient.Delete(ctx, preparation)).To(Succeed())
 			}
@@ -130,7 +158,7 @@ var _ = Describe("Serving Controller", func() {
 			By("Cleanup any Argo CD Application created during the test")
 			app := &unstructured.Unstructured{}
 			app.SetGroupVersionKind(argoAppGVK)
-			app.SetNamespace("argocd")
+			app.SetNamespace(argoNamespace)
 			app.SetName(resourceName)
 			_ = k8sClient.Delete(ctx, app)
 		})
@@ -145,7 +173,7 @@ var _ = Describe("Serving Controller", func() {
 		getApp := func() *unstructured.Unstructured {
 			app := &unstructured.Unstructured{}
 			app.SetGroupVersionKind(argoAppGVK)
-			Expect(k8sClient.Get(ctx, client.ObjectKey{Namespace: "argocd", Name: resourceName}, app)).To(Succeed())
+			Expect(k8sClient.Get(ctx, client.ObjectKey{Namespace: argoNamespace, Name: resourceName}, app)).To(Succeed())
 			return app
 		}
 
@@ -170,26 +198,7 @@ var _ = Describe("Serving Controller", func() {
 		It("refuses to update a pre-existing Argo CD Application that is missing the opt-in annotation", func() {
 			By("creating an Argo CD Application out-of-band without the opt-in annotation")
 			preExisting := &unstructured.Unstructured{
-				Object: map[string]any{
-					"apiVersion": "argoproj.io/v1alpha1",
-					"kind":       "Application",
-					"metadata": map[string]any{
-						"name":      resourceName,
-						"namespace": "argocd",
-					},
-					"spec": map[string]any{
-						"project": "default",
-						"source": map[string]any{
-							"repoURL":        "oci://example.com/foreign",
-							"targetRevision": "sha256:foreign",
-							"path":           ".",
-						},
-						"destination": map[string]any{
-							"server":    "https://kubernetes.default.svc",
-							"namespace": "default",
-						},
-					},
-				},
+				Object: buildArgoAppMap(resourceName, "oci://example.com/foreign", "sha256:foreign", nil),
 			}
 			Expect(k8sClient.Create(ctx, preExisting)).To(Succeed())
 
@@ -236,36 +245,14 @@ var _ = Describe("Serving Controller", func() {
 		It("refuses to update an Application whose allowed-order annotation references a different Order", func() {
 			By("creating an Argo CD Application annotated for a different Order")
 			preExisting := &unstructured.Unstructured{
-				Object: map[string]any{
-					"apiVersion": "argoproj.io/v1alpha1",
-					"kind":       "Application",
-					"metadata": map[string]any{
-						"name":      resourceName,
-						"namespace": "argocd",
-						"annotations": map[string]any{
-							deliveryv1alpha1.AnnotationAllowedOrder: "some-other-order",
-						},
-					},
-					"spec": map[string]any{
-						"project": "default",
-						"source": map[string]any{
-							"repoURL":        "oci://example.com/foreign",
-							"targetRevision": "sha256:foreign",
-							"path":           ".",
-						},
-						"destination": map[string]any{
-							"server":    "https://kubernetes.default.svc",
-							"namespace": "default",
-						},
-					},
-				},
+				Object: buildArgoAppMap(resourceName, "oci://example.com/foreign", "sha256:foreign", map[string]any{
+					deliveryv1alpha1.AnnotationAllowedOrder: "some-other-order",
+				}),
 			}
 			Expect(k8sClient.Create(ctx, preExisting)).To(Succeed())
 
 			_, err := newReconciler().Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred(), "opt-in denial must not return an error (would cause requeue/flapping)")
-			Expect(err).NotTo(HaveOccurred())
-
 			app := getApp()
 			Expect(app.GetAnnotations()).To(HaveKeyWithValue(deliveryv1alpha1.AnnotationAllowedOrder, "some-other-order"))
 
@@ -281,29 +268,9 @@ var _ = Describe("Serving Controller", func() {
 		It("updates an Application whose allowed-order annotation matches the Order name", func() {
 			By("creating an Argo CD Application annotated with the matching opt-in")
 			preExisting := &unstructured.Unstructured{
-				Object: map[string]any{
-					"apiVersion": "argoproj.io/v1alpha1",
-					"kind":       "Application",
-					"metadata": map[string]any{
-						"name":      resourceName,
-						"namespace": "argocd",
-						"annotations": map[string]any{
-							deliveryv1alpha1.AnnotationAllowedOrder: orderName,
-						},
-					},
-					"spec": map[string]any{
-						"project": "default",
-						"source": map[string]any{
-							"repoURL":        "oci://example.com/stale",
-							"targetRevision": "sha256:stale",
-							"path":           ".",
-						},
-						"destination": map[string]any{
-							"server":    "https://kubernetes.default.svc",
-							"namespace": "default",
-						},
-					},
-				},
+				Object: buildArgoAppMap(resourceName, "oci://example.com/stale", "sha256:stale", map[string]any{
+					deliveryv1alpha1.AnnotationAllowedOrder: orderName,
+				}),
 			}
 			Expect(k8sClient.Create(ctx, preExisting)).To(Succeed())
 

@@ -51,8 +51,8 @@ var _ = Describe("Menu Controller", func() {
 					},
 					Spec: deliveryv1alpha1.MenuSpec{
 						Source: deliveryv1alpha1.OCISource{
-							OCI:     "oci://registry.kokumi.svc.cluster.local:5000/order/test-resource",
-							Version: "0.1.0",
+							OCI:     testOCIRef,
+							Version: testVersion,
 						},
 						Overrides: deliveryv1alpha1.OverridePolicy{
 							Values:  deliveryv1alpha1.ValueOverridePolicy{Policy: deliveryv1alpha1.OverridePolicyAll},

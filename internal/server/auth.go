@@ -83,7 +83,7 @@ func buildAuthenticator(
 	reader client.Reader,
 	namespace string,
 	cfg *v1alpha1.AdminUserConfig,
-	getenv func(string) string,
+	tokenTTL time.Duration,
 ) (*authenticator, error) {
 
 	if cfg == nil || cfg.SecretRef == nil {
@@ -106,10 +106,8 @@ func buildAuthenticator(
 	// Disabled admin: only the signing key is needed; credential keys are ignored so login is impossible.
 	if !cfg.IsEnabled() {
 		auth := newAuthenticator("", nil, signingKey)
-		if v := strings.TrimSpace(getenv("KOKUMI_TOKEN_TTL")); v != "" {
-			if d, err := time.ParseDuration(v); err == nil && d > 0 {
-				auth.accessTTL = d
-			}
+		if tokenTTL > 0 {
+			auth.accessTTL = tokenTTL
 		}
 		return auth, nil
 	}
@@ -129,11 +127,8 @@ func buildAuthenticator(
 	}
 
 	auth := newAuthenticator(username, passwordHash, signingKey)
-	// KOKUMI_TOKEN_TTL overrides the access-token lifetime when valid.
-	if v := strings.TrimSpace(getenv("KOKUMI_TOKEN_TTL")); v != "" {
-		if d, err := time.ParseDuration(v); err == nil && d > 0 {
-			auth.accessTTL = d
-		}
+	if tokenTTL > 0 {
+		auth.accessTTL = tokenTTL
 	}
 	return auth, nil
 }

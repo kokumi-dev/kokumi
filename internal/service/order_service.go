@@ -701,7 +701,7 @@ func mergeYAMLFiles(fs afero.Fs, dir string) error {
 		}
 
 		renderedManifest.WriteString("---\n")
-		renderedManifest.WriteString(fmt.Sprintf("# Source: %s\n", filepath.Base(file)))
+		fmt.Fprintf(&renderedManifest, "# Source: %s\n", filepath.Base(file))
 		renderedManifest.WriteString(strings.TrimSpace(string(content)))
 		renderedManifest.WriteString("\n")
 	}

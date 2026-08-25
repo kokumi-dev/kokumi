@@ -39,6 +39,7 @@ import (
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/controller"
 	"github.com/kokumi-dev/kokumi/internal/credential"
+	"github.com/kokumi-dev/kokumi/internal/namespace"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/service"
 	// +kubebuilder:scaffold:imports
@@ -231,8 +232,9 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.KitchenReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:    mgr.GetClient(),
+		Scheme:    mgr.GetScheme(),
+		Namespace: namespace.Current(os.Getenv),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "kitchen")
 		os.Exit(1)

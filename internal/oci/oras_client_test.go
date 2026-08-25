@@ -57,19 +57,26 @@ func writeTar(t *testing.T, entries map[string]string) *bytes.Buffer {
 	return &buf
 }
 
+const (
+	testDeploymentFile = "deployment.yaml"
+	testServiceFile    = "service.yaml"
+	testDeploymentYAML = "kind: Deployment\n"
+	testServiceYAML    = "kind: Service\n"
+)
+
 func TestExtractTar(t *testing.T) {
 	t.Run("extracts regular files preserving names", func(t *testing.T) {
 		dir := t.TempDir()
 		buf := writeTar(t, map[string]string{
-			"deployment.yaml": "kind: Deployment\n",
-			"service.yaml":    "kind: Service\n",
+			testDeploymentFile: testDeploymentYAML,
+			testServiceFile:    testServiceYAML,
 		})
 
 		require.NoError(t, extractTar(buf, dir))
 
 		for name, want := range map[string]string{
-			"deployment.yaml": "kind: Deployment\n",
-			"service.yaml":    "kind: Service\n",
+			testDeploymentFile: testDeploymentYAML,
+			testServiceFile:    testServiceYAML,
 		} {
 			data, err := os.ReadFile(filepath.Join(dir, name))
 			require.NoError(t, err)

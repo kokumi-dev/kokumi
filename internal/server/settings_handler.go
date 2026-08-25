@@ -35,7 +35,7 @@ func handleGetSettings(deps *apiDeps, namespace string) http.HandlerFunc {
 		kitchen := &deliveryv1alpha1.Kitchen{}
 		err := deps.reader.Get(r.Context(), types.NamespacedName{
 			Namespace: namespace,
-			Name:      "default",
+			Name:      deliveryv1alpha1.DefaultKitchenName,
 		}, kitchen)
 		if err != nil {
 			if client.IgnoreNotFound(err) == nil {
@@ -78,7 +78,7 @@ func handlePutSettings(deps *apiDeps, namespace string) http.HandlerFunc {
 		kitchen := &deliveryv1alpha1.Kitchen{}
 		err := deps.apiReader.Get(r.Context(), types.NamespacedName{
 			Namespace: namespace,
-			Name:      "default",
+			Name:      deliveryv1alpha1.DefaultKitchenName,
 		}, kitchen)
 		if err != nil {
 			if !apierrors.IsNotFound(err) {
@@ -87,7 +87,7 @@ func handlePutSettings(deps *apiDeps, namespace string) http.HandlerFunc {
 				return
 			}
 			kitchen = &deliveryv1alpha1.Kitchen{}
-			kitchen.Name = "default"
+			kitchen.Name = deliveryv1alpha1.DefaultKitchenName
 			kitchen.Namespace = namespace
 			kitchen.Spec.ArgoCDURL = raw
 			if err := deps.apiReader.Create(r.Context(), kitchen); err != nil {

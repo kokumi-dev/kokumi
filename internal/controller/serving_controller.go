@@ -40,6 +40,7 @@ import (
 
 const (
 	argoNamespace = "argocd"
+	argoAppKind   = "Application"
 )
 
 // errAllowedOrderOptInRequired is returned when an existing Argo CD Application
@@ -146,7 +147,7 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 			if err := r.Update(ctx, serving); err != nil {
 				return ctrl.Result{}, err
 			}
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: 0}, nil
 		}
 	}
 
@@ -221,7 +222,7 @@ func (r *ServingReconciler) reconcileArgoApplication(ctx context.Context, servin
 	app := &unstructured.Unstructured{
 		Object: map[string]any{
 			"apiVersion": "argoproj.io/v1alpha1",
-			"kind":       "Application",
+			"kind":       argoAppKind,
 			"metadata": map[string]any{
 				"name":      appName,
 				"namespace": argoNamespace,
@@ -307,7 +308,7 @@ func (r *ServingReconciler) checkArgoApplicationOptIn(ctx context.Context, servi
 	existing.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   "argoproj.io",
 		Version: "v1alpha1",
-		Kind:    "Application",
+		Kind:    argoAppKind,
 	})
 
 	err := r.Get(ctx, client.ObjectKey{Namespace: argoNamespace, Name: serving.Name}, existing)
@@ -351,7 +352,7 @@ func (r *ServingReconciler) reconcileDelete(ctx context.Context, serving *delive
 		app.SetGroupVersionKind(schema.GroupVersionKind{
 			Group:   "argoproj.io",
 			Version: "v1alpha1",
-			Kind:    "Application",
+			Kind:    argoAppKind,
 		})
 		app.SetNamespace(argoNamespace)
 		app.SetName(serving.Name)

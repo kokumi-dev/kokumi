@@ -45,7 +45,7 @@ var _ = Describe("Order Controller", func() {
 
 		typeNamespacedName := types.NamespacedName{
 			Name:      resourceName,
-			Namespace: "default",
+			Namespace: testNamespace,
 		}
 		order := &deliveryv1alpha1.Order{}
 
@@ -56,13 +56,13 @@ var _ = Describe("Order Controller", func() {
 				resource := &deliveryv1alpha1.Order{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
-						Namespace: "default",
+						Namespace: testNamespace,
 					},
 					Spec: deliveryv1alpha1.OrderSpec{
 						AutoDeploy: deliveryv1alpha1.AutoDeployDisabled,
 						Source: &deliveryv1alpha1.OCISource{
-							OCI:     "oci://registry.kokumi.svc.cluster.local:5000/order/test-resource",
-							Version: "0.1.0",
+							OCI:     testOCIRef,
+							Version: testVersion,
 						},
 						Destination: &deliveryv1alpha1.OCIDestination{
 							OCI: "oci://registry.kokumi.svc.cluster.local:5000/preparation/test-resource",
@@ -103,7 +103,7 @@ var _ = Describe("Order Controller", func() {
 
 			preparationList := &deliveryv1alpha1.PreparationList{}
 			Expect(k8sClient.List(ctx, preparationList,
-				client.InNamespace("default"),
+				client.InNamespace(testNamespace),
 				client.MatchingLabels{deliveryv1alpha1.LabelOrder: resourceName},
 			)).To(Succeed())
 			Expect(preparationList.Items).To(HaveLen(1))
@@ -111,7 +111,7 @@ var _ = Describe("Order Controller", func() {
 	})
 
 	Context("When Order uses pantryRef", func() {
-		const ns = "default"
+		const ns = testNamespace
 
 		ctx := context.Background()
 
@@ -203,7 +203,7 @@ var _ = Describe("Order Controller", func() {
 			createPantry(pantryName, pantryURL, nil)
 			createOrder(orderName, &deliveryv1alpha1.OCISource{
 				PantryRef: &deliveryv1alpha1.PantryRef{Name: pantryName},
-				Version:   "0.1.0",
+				Version:   testVersion,
 			}, &deliveryv1alpha1.OCIDestination{
 				OCI: "oci://registry.kokumi.svc.cluster.local:5000/preparation/app",
 			})
@@ -233,7 +233,7 @@ var _ = Describe("Order Controller", func() {
 			createPantry(pantryName, firstURL, nil)
 			createOrder(orderName, &deliveryv1alpha1.OCISource{
 				PantryRef: &deliveryv1alpha1.PantryRef{Name: pantryName},
-				Version:   "0.1.0",
+				Version:   testVersion,
 			}, &deliveryv1alpha1.OCIDestination{
 				OCI: "oci://registry.kokumi.svc.cluster.local:5000/preparation/app-change",
 			})
@@ -270,7 +270,7 @@ var _ = Describe("Order Controller", func() {
 			createPantry(pantryName, pantryURL, nil)
 			createOrder(orderName, &deliveryv1alpha1.OCISource{
 				PantryRef: &deliveryv1alpha1.PantryRef{Name: pantryName},
-				Version:   "0.1.0",
+				Version:   testVersion,
 			}, &deliveryv1alpha1.OCIDestination{
 				OCI: "oci://registry.kokumi.svc.cluster.local:5000/preparation/stable",
 			})
@@ -338,7 +338,7 @@ var _ = Describe("Order Controller", func() {
 			createPantry(pantryName, pantryURL, &corev1.LocalObjectReference{Name: secretName})
 			createOrder(orderName, &deliveryv1alpha1.OCISource{
 				PantryRef: &deliveryv1alpha1.PantryRef{Name: pantryName},
-				Version:   "0.1.0",
+				Version:   testVersion,
 			}, &deliveryv1alpha1.OCIDestination{
 				OCI: "oci://registry.kokumi.svc.cluster.local:5000/preparation/private",
 			})
@@ -364,7 +364,7 @@ var _ = Describe("Order Controller", func() {
 
 			createOrder(orderName, &deliveryv1alpha1.OCISource{
 				PantryRef: &deliveryv1alpha1.PantryRef{Name: "does-not-exist"},
-				Version:   "0.1.0",
+				Version:   testVersion,
 			}, &deliveryv1alpha1.OCIDestination{
 				OCI: "oci://registry.kokumi.svc.cluster.local:5000/preparation/missing",
 			})
@@ -382,7 +382,7 @@ var _ = Describe("Order Controller", func() {
 
 	Context("When Order configuration returns to a previous state", func() {
 		const (
-			ns        = "default"
+			ns        = testNamespace
 			orderName = "order-edit-revert"
 		)
 

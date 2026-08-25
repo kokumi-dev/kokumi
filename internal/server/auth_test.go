@@ -24,10 +24,13 @@ import (
 )
 
 const (
-	testUsername = "admin"
-	testPassword = "s3cret-passw0rd"
-	testNS       = "kokumi"
-	testSecret   = "kokumi-server-auth"
+	testUsername   = "admin"
+	testPassword   = "s3cret-passw0rd"
+	testNS         = "kokumi"
+	testSecret     = "kokumi-server-auth"
+	testRootUser   = "root"
+	testOrdersPath = "/api/v1/orders"
+	testToken      = "abc.def.ghi"
 )
 
 // newTestAuthenticator builds an authenticator with a bcrypt hash of testPassword.
@@ -95,7 +98,7 @@ func TestBuildAuthenticator(t *testing.T) {
 		auth, err := buildAuthenticator(context.Background(), cr, testNS, &deliveryv1alpha1.AdminUserConfig{
 			Enabled:   new(false),
 			SecretRef: &corev1.LocalObjectReference{Name: testSecret},
-		}, func(string) string { return "" })
+		}, 0)
 		require.NoError(t, err)
 		require.NotNil(t, auth)
 		assert.Empty(t, auth.username)
@@ -106,20 +109,20 @@ func TestBuildAuthenticator(t *testing.T) {
 	t.Run("enabled with custom username uses config username", func(t *testing.T) {
 		auth, err := buildAuthenticator(context.Background(), c, testNS, &deliveryv1alpha1.AdminUserConfig{
 			Enabled:   new(true),
-			Username:  "root",
+			Username:  testRootUser,
 			SecretRef: &corev1.LocalObjectReference{Name: testSecret},
-		}, func(string) string { return "" })
+		}, 0)
 		require.NoError(t, err)
 		require.NotNil(t, auth)
-		assert.Equal(t, "root", auth.username)
-		assert.True(t, auth.verifyCredentials("root", testPassword))
+		assert.Equal(t, testRootUser, auth.username)
+		assert.True(t, auth.verifyCredentials(testRootUser, testPassword))
 	})
 
 	t.Run("missing secret errors", func(t *testing.T) {
 		_, err := buildAuthenticator(context.Background(), c, testNS, &deliveryv1alpha1.AdminUserConfig{
 			Enabled:   new(true),
 			SecretRef: &corev1.LocalObjectReference{Name: "absent"},
-		}, func(string) string { return "" })
+		}, 0)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "absent")
 	})
@@ -136,8 +139,8 @@ func TestVerifyCredentials(t *testing.T) {
 	}{
 		{"correct credentials", testUsername, testPassword, true},
 		{"wrong password", testUsername, "nope", false},
-		{"wrong username", "root", testPassword, false},
-		{"both wrong", "root", "nope", false},
+		{"wrong username", testRootUser, testPassword, false},
+		{"both wrong", testRootUser, "nope", false},
 		{"empty password", testUsername, "", false},
 		{"empty username", "", testPassword, false},
 		{"username case sensitive", "Admin", testPassword, false},
@@ -246,7 +249,7 @@ func TestRequiresAuth(t *testing.T) {
 		path string
 		want bool
 	}{
-		{"/api/v1/orders", true},
+		{testOrdersPath, true},
 		{"/api/v1/menus/foo", true},
 		{"/api/v1/events", true},
 		{"/api/v1/auth/login", false},
@@ -269,17 +272,17 @@ func TestBearerToken(t *testing.T) {
 		header string
 		want   string
 	}{
-		{"valid bearer", "Bearer abc.def.ghi", "abc.def.ghi"},
-		{"case-insensitive scheme", "bearer abc.def.ghi", "abc.def.ghi"},
+		{"valid bearer", "Bearer " + testToken, testToken},
+		{"case-insensitive scheme", "bearer " + testToken, testToken},
 		{"trims surrounding space", "Bearer   abc  ", "abc"},
 		{"empty header", "", ""},
-		{"no scheme", "abc.def.ghi", ""},
+		{"no scheme", testToken, ""},
 		{"wrong scheme", "Basic abc", ""},
 		{"scheme only", "Bearer ", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := httptest.NewRequest(http.MethodGet, "/api/v1/orders", nil)
+			r := httptest.NewRequest(http.MethodGet, testOrdersPath, nil)
 			if tt.header != "" {
 				r.Header.Set("Authorization", tt.header)
 			}
@@ -326,9 +329,9 @@ func TestMiddleware(t *testing.T) {
 		{"login passes without token", "/api/v1/auth/login", "", http.StatusOK, true},
 		{"static asset passes without token", "/assets/app.js", "", http.StatusOK, true},
 		{"health passes without token", "/healthz", "", http.StatusOK, true},
-		{"protected without token is rejected", "/api/v1/orders", "", http.StatusUnauthorized, false},
-		{"protected with bad token is rejected", "/api/v1/orders", "Bearer bad", http.StatusUnauthorized, false},
-		{"protected with valid token passes", "/api/v1/orders", "Bearer " + validToken, http.StatusOK, true},
+		{"protected without token is rejected", testOrdersPath, "", http.StatusUnauthorized, false},
+		{"protected with bad token is rejected", testOrdersPath, "Bearer bad", http.StatusUnauthorized, false},
+		{"protected with valid token passes", testOrdersPath, "Bearer " + validToken, http.StatusOK, true},
 	}
 
 	for _, tt := range tests {
@@ -571,12 +574,7 @@ func TestBuildAuthenticatorAppliesTokenTTL(t *testing.T) {
 			Enabled:   new(true),
 			Username:  testUsername,
 			SecretRef: &corev1.LocalObjectReference{Name: testSecret},
-		}, func(k string) string {
-			if k == "KOKUMI_TOKEN_TTL" {
-				return "30m"
-			}
-			return ""
-		})
+		}, 30*time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, auth)
 		assert.Equal(t, 30*time.Minute, auth.accessTTL)
@@ -587,7 +585,7 @@ func TestBuildAuthenticatorAppliesTokenTTL(t *testing.T) {
 			Enabled:   new(true),
 			Username:  testUsername,
 			SecretRef: &corev1.LocalObjectReference{Name: testSecret},
-		}, func(string) string { return "" })
+		}, 0)
 		require.NoError(t, err)
 		require.NotNil(t, auth)
 		assert.Equal(t, defaultAccessTokenTTL, auth.accessTTL)
@@ -604,7 +602,6 @@ func TestAuthManagerFailClosed(t *testing.T) {
 	})
 	reader := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(secret).Build()
 
-	getenv := func(string) string { return "" }
 	logger := logr.Discard()
 
 	t.Run("keeps last-known-good authenticator on transient error", func(t *testing.T) {
@@ -612,12 +609,11 @@ func TestAuthManagerFailClosed(t *testing.T) {
 			reader:    reader,
 			apiReader: reader,
 			ns:        testNS,
-			getenv:    getenv,
 			logger:    logger,
 		}
 		// Establish a working authenticator.
 		m.reload(context.Background(), &deliveryv1alpha1.Kitchen{
-			ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: testNS},
+			ObjectMeta: metav1.ObjectMeta{Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS},
 			Spec: deliveryv1alpha1.KitchenSpec{
 				Auth: &deliveryv1alpha1.KitchenAuth{
 					AdminUser: &deliveryv1alpha1.AdminUserConfig{
@@ -631,7 +627,7 @@ func TestAuthManagerFailClosed(t *testing.T) {
 
 		// Point at a missing Secret: reload must fail closed and keep the previous authenticator.
 		m.reload(context.Background(), &deliveryv1alpha1.Kitchen{
-			ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: testNS},
+			ObjectMeta: metav1.ObjectMeta{Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS},
 			Spec: deliveryv1alpha1.KitchenSpec{
 				Auth: &deliveryv1alpha1.KitchenAuth{
 					AdminUser: &deliveryv1alpha1.AdminUserConfig{
@@ -650,16 +646,15 @@ func TestAuthManagerFailClosed(t *testing.T) {
 			reader:    reader,
 			apiReader: reader,
 			ns:        testNS,
-			getenv:    getenv,
 			logger:    logger,
 		}
 		m.reload(context.Background(), &deliveryv1alpha1.Kitchen{
-			ObjectMeta: metav1.ObjectMeta{Name: "default", Namespace: testNS},
+			ObjectMeta: metav1.ObjectMeta{Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS},
 			Spec: deliveryv1alpha1.KitchenSpec{
 				Auth: &deliveryv1alpha1.KitchenAuth{
 					AdminUser: &deliveryv1alpha1.AdminUserConfig{
 						Enabled:   new(false),
-						SecretRef: &corev1.LocalObjectReference{Name: "kokumi-server-auth"},
+						SecretRef: &corev1.LocalObjectReference{Name: testSecret},
 					},
 				},
 			},

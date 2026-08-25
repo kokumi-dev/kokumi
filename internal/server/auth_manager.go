@@ -3,11 +3,17 @@ package server
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+)
+
+const (
+	providerAdmin = "admin"
+	providerOIDC  = "oidc"
 )
 
 // authManager holds the active authenticator and OIDC provider behind a mutex
@@ -25,7 +31,7 @@ type authManager struct {
 	reader     client.Reader  // informer cache, used for the Kitchen singleton
 	apiReader  client.Reader  // direct API client, used for live Secret reads
 	ns         string
-	getenv     func(string) string
+	tokenTTL   time.Duration
 	logger     logr.Logger
 }
 
@@ -35,14 +41,14 @@ func newAuthManager(
 	reader client.Reader,
 	apiReader client.Reader,
 	ns string,
-	getenv func(string) string,
+	tokenTTL time.Duration,
 	logger logr.Logger,
 ) *authManager {
 	m := &authManager{
 		reader:    reader,
 		apiReader: apiReader,
 		ns:        ns,
-		getenv:    getenv,
+		tokenTTL:  tokenTTL,
 		logger:    logger,
 	}
 	m.reload(ctx, nil)
@@ -85,10 +91,10 @@ func (m *authManager) providers() []string {
 	defer m.mu.RUnlock()
 	var out []string
 	if m.adminLogin {
-		out = append(out, "admin")
+		out = append(out, providerAdmin)
 	}
 	if m.oidc != nil {
-		out = append(out, "oidc")
+		out = append(out, providerOIDC)
 	}
 	return out
 }
@@ -130,7 +136,7 @@ func (m *authManager) reload(ctx context.Context, kitchen *deliveryv1alpha1.Kitc
 	} else if adminCfg.SecretRef == nil {
 		m.logger.Info("Admin authentication not configured", "reason", "admin secretRef not set")
 	} else {
-		auth, authErr = buildAuthenticator(ctx, m.apiReader, m.ns, adminCfg, m.getenv)
+		auth, authErr = buildAuthenticator(ctx, m.apiReader, m.ns, adminCfg, m.tokenTTL)
 		if authErr != nil {
 			m.logger.Info("Admin authentication not configured", "reason", authErr.Error())
 		}
@@ -189,7 +195,7 @@ func (m *authManager) reload(ctx context.Context, kitchen *deliveryv1alpha1.Kitc
 // It is safe to call from informer event handlers.
 func (m *authManager) refresh(ctx context.Context) {
 	kitchen := &deliveryv1alpha1.Kitchen{}
-	if err := m.reader.Get(ctx, client.ObjectKey{Namespace: m.ns, Name: "default"}, kitchen); err != nil {
+	if err := m.reader.Get(ctx, client.ObjectKey{Namespace: m.ns, Name: deliveryv1alpha1.DefaultKitchenName}, kitchen); err != nil {
 		// If the singleton is gone, keep the last known state rather than
 		// flipping auth off unexpectedly.
 		m.logger.Info("Could not read Kitchen for auth reload", "error", err.Error())
