@@ -112,13 +112,17 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 			client.MatchingLabels{deliveryv1alpha1.LabelOrder: serving.Spec.OrderName},
 		); err != nil {
 			logger.Error(err, "Failed to list Preparations")
-			_ = statusUpdater.Failed(ctx, serving, fmt.Errorf("failed to list preparations: %w", err))
+			if uerr := statusUpdater.Failed(ctx, serving, fmt.Errorf("failed to list preparations: %w", err)); uerr != nil {
+				logger.Error(uerr, "Failed to update Serving status")
+			}
 			return ctrl.Result{}, err
 		}
 
 		if len(preparationList.Items) == 0 {
 			logger.Info("No preparations found for order", "order", serving.Spec.OrderName)
-			_ = statusUpdater.Pending(ctx, serving, "Waiting for preparations")
+			if uerr := statusUpdater.Pending(ctx, serving, "Waiting for preparations"); uerr != nil {
+				logger.Error(uerr, "Failed to update Serving status")
+			}
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
 
@@ -135,7 +139,9 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 
 		if latestPreparation == nil {
 			logger.Info("No ready preparations found for order", "order", serving.Spec.OrderName)
-			_ = statusUpdater.Pending(ctx, serving, "Waiting for ready preparation")
+			if uerr := statusUpdater.Pending(ctx, serving, "Waiting for ready preparation"); uerr != nil {
+				logger.Error(uerr, "Failed to update Serving status")
+			}
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
 
@@ -155,7 +161,9 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 	preparationKey := client.ObjectKey{Namespace: serving.Namespace, Name: preparationName}
 	if err := r.Get(ctx, preparationKey, preparation); err != nil {
 		logger.Error(err, "Failed to get Preparation", "preparation", preparationName)
-		_ = statusUpdater.Failed(ctx, serving, fmt.Errorf("preparation not found: %w", err))
+		if uerr := statusUpdater.Failed(ctx, serving, fmt.Errorf("preparation not found: %w", err)); uerr != nil {
+			logger.Error(uerr, "Failed to update Serving status")
+		}
 		return ctrl.Result{}, err
 	}
 
@@ -175,12 +183,16 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 	if err := r.checkArgoApplicationOptIn(ctx, serving); err != nil {
 		if errors.Is(err, errAllowedOrderOptInRequired) {
 			logger.Info("Cannot update Argo CD Application, opt-in annotation must exist", "error", err.Error())
-			_ = statusUpdater.Failed(ctx, serving, err)
+			if uerr := statusUpdater.Failed(ctx, serving, err); uerr != nil {
+				logger.Error(uerr, "Failed to update Serving status")
+			}
 			// Terminal for this generation: do not requeue. A change to the
 			// Application (annotation) or Serving will trigger a fresh event.
 			return ctrl.Result{}, nil
 		}
-		_ = statusUpdater.Failed(ctx, serving, fmt.Errorf("failed to check Argo CD Application: %w", err))
+		if uerr := statusUpdater.Failed(ctx, serving, fmt.Errorf("failed to check Argo CD Application: %w", err)); uerr != nil {
+			logger.Error(uerr, "Failed to update Serving status")
+		}
 		return ctrl.Result{}, err
 	}
 
@@ -190,15 +202,15 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 
 	if err := r.reconcileArgoApplication(ctx, serving, preparation); err != nil {
 		logger.Error(err, "Failed to reconcile Argo CD Application")
-		_ = statusUpdater.Failed(ctx, serving, fmt.Errorf("failed to create Argo CD Application: %w", err))
+		if uerr := statusUpdater.Failed(ctx, serving, fmt.Errorf("failed to create Argo CD Application: %w", err)); uerr != nil {
+			logger.Error(uerr, "Failed to update Serving status")
+		}
 		return ctrl.Result{}, err
 	}
 
 	logger.Info("Successfully created/updated Argo CD Application", "preparation", preparationName)
 
-	serving.Status.ObservedPreparationName = preparationName
-	serving.Status.DeployedDigest = preparation.Spec.Artifact.Digest
-	if err := statusUpdater.Deployed(ctx, serving, "Successfully deployed component"); err != nil {
+	if err := statusUpdater.Deployed(ctx, serving, preparationName, preparation.Spec.Artifact.Digest, "Successfully deployed component"); err != nil {
 		return ctrl.Result{}, err
 	}
 

@@ -98,7 +98,9 @@ func (r *OrderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	effective, err := r.resolveEffectiveSpec(ctx, order)
 	if err != nil {
 		statusUpdater := status.NewOrderUpdater(r.Client)
-		_ = statusUpdater.Failed(ctx, order, err)
+		if uerr := statusUpdater.Failed(ctx, order, err); uerr != nil {
+			logger.Error(uerr, "Failed to update Order status")
+		}
 		return ctrl.Result{}, err
 	}
 
@@ -143,13 +145,17 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 	// Pantry URL change is part of artifact identity.
 	resolvedSource, sourceClient, err := r.PantryResolver.ResolveSource(ctx, effective.Source, order.Namespace)
 	if err != nil {
-		_ = statusUpdater.Failed(ctx, order, fmt.Errorf("failed to resolve source Pantry: %w", err))
+		if uerr := statusUpdater.Failed(ctx, order, fmt.Errorf("failed to resolve source Pantry: %w", err)); uerr != nil {
+			logger.Error(uerr, "Failed to update Order status")
+		}
 		return ctrl.Result{}, err
 	}
 
 	resolvedDest, destClient, err := r.PantryResolver.ResolveDestination(ctx, order.Spec.Destination, effectiveDest, order.Namespace, order.Namespace, order.Name)
 	if err != nil {
-		_ = statusUpdater.Failed(ctx, order, fmt.Errorf("failed to resolve destination Pantry: %w", err))
+		if uerr := statusUpdater.Failed(ctx, order, fmt.Errorf("failed to resolve destination Pantry: %w", err)); uerr != nil {
+			logger.Error(uerr, "Failed to update Order status")
+		}
 		return ctrl.Result{}, err
 	}
 
@@ -175,7 +181,9 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 	result, err := r.Service.ProcessOrder(ctx, order, resolvedSource, effective.Render, effective.Patches, effective.Edits, resolvedDest, commitMessage, parentDigest, sourceClient, destClient)
 	if err != nil {
 		logger.Error(err, "Failed to process Order")
-		_ = statusUpdater.Failed(ctx, order, err)
+		if uerr := statusUpdater.Failed(ctx, order, err); uerr != nil {
+			logger.Error(uerr, "Failed to update Order status")
+		}
 
 		return ctrl.Result{}, err
 	}
@@ -183,17 +191,16 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 	preparation, err := r.createPreparation(ctx, order, result.SourceRef, result.SourceDigest, resolvedSource.Version, result.DestRef, result.DestDigest, commitMessage, parentDigest, specHash, deliveryv1alpha1.GitSource{Repo: result.GitRepo, Tag: result.GitTag, CommitHash: result.GitCommitHash})
 	if err != nil {
 		logger.Error(err, "Failed to create Preparation")
-		_ = statusUpdater.Failed(ctx, order, fmt.Errorf("failed to create revision: %w", err))
+		if uerr := statusUpdater.Failed(ctx, order, fmt.Errorf("failed to create revision: %w", err)); uerr != nil {
+			logger.Error(uerr, "Failed to update Order status")
+		}
 
 		return ctrl.Result{}, err
 	}
 
 	logger.Info("Created Preparation", "revision", preparation.Name)
 
-	order.Status.LatestPreparationName = preparation.Name
-	order.Status.LatestArtifactDigest = result.DestDigest
-
-	if err := statusUpdater.Ready(ctx, order, specHash, fmt.Sprintf("Successfully pushed to %s", result.DestRef)); err != nil {
+	if err := statusUpdater.Ready(ctx, order, specHash, preparation.Name, result.DestDigest, fmt.Sprintf("Successfully pushed to %s", result.DestRef)); err != nil {
 		return ctrl.Result{}, err
 	}
 
