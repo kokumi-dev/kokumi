@@ -9,7 +9,7 @@ import (
 // Resolve extracts SCM provenance from the OCI annotation map:
 //   - repo:       org.opencontainers.image.source, else org.opencontainers.image.url
 //   - tag:        org.opencontainers.image.version
-//   - commitHash: org.opencontainers.image.revision (a trailing "@sha265:<hash>"
+//   - commitHash: org.opencontainers.image.revision (a trailing "@sha256:<hash>"
 //     suffix is stripped)
 func Resolve(annotations map[string]string) (repo, tag, commitHash string) {
 	if annotations == nil {
