@@ -25,8 +25,9 @@ func handleGetDefaultRegistry() http.HandlerFunc {
 // handleListRegistryTags handles GET /api/v1/registry/tags?ref=<oci-ref>.
 // Optional query parameters pantryName and pantryNamespace select a specific
 // Pantry to use for authenticated access. When omitted the shared
-// unauthenticated client is used. It strips the oci:// scheme prefix if present,
-// fetches all tags from the registry and returns {"tags": [...]}.
+// unauthenticated client is used. The ref is parsed and validated via
+// oci.Parse, then all tags are fetched from the registry and returned
+// as {"tags": [...]}.
 func handleListRegistryTags(deps *apiDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if deps == nil {
@@ -40,15 +41,15 @@ func handleListRegistryTags(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		ref = strings.TrimPrefix(ref, "oci://")
-		if ref == "" {
-			respondError(w, http.StatusBadRequest, "ref is empty after stripping scheme")
+		ociRef, err := oci.Parse(ref)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "unexpected format for ref")
 			return
 		}
 
 		ociClient := ociClientForPantryRef(r.Context(), deps, r.URL.Query().Get("pantryName"), r.URL.Query().Get("pantryNamespace"))
 
-		tags, err := ociClient.ListTags(r.Context(), ref)
+		tags, err := ociClient.ListTags(r.Context(), ociRef)
 		if err != nil {
 			deps.logger.Error(err, "Failed to list tags", "ref", ref)
 			respondError(w, http.StatusBadGateway, "could not list tags: "+err.Error())
@@ -93,11 +94,12 @@ func handleGetChartInfo(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		ref = strings.TrimPrefix(ref, "oci://")
-		if ref == "" {
-			respondError(w, http.StatusBadRequest, "ref is empty after stripping scheme")
+		ociRef, err := oci.Parse(ref)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "unexpected format for ref")
 			return
 		}
+		ociRef.Tag = version
 
 		ociClient := ociClientForPantryRef(r.Context(), deps, r.URL.Query().Get("pantryName"), r.URL.Query().Get("pantryNamespace"))
 
@@ -109,7 +111,7 @@ func handleGetChartInfo(deps *apiDeps) http.HandlerFunc {
 		}
 		defer deps.fs.RemoveAll(tmpDir) //nolint:errcheck
 
-		mediaType, _, _, err := ociClient.Pull(r.Context(), ref, version, tmpDir)
+		mediaType, _, _, err := ociClient.Pull(r.Context(), ociRef, tmpDir)
 		if err != nil {
 			deps.logger.Error(err, "Failed to pull OCI artifact", "ref", ref, "version", version)
 			respondError(w, http.StatusBadGateway, "could not pull artifact: "+err.Error())
@@ -165,11 +167,12 @@ func handleGetRegistryArtifact(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		ref = strings.TrimPrefix(ref, "oci://")
-		if ref == "" {
-			respondError(w, http.StatusBadRequest, "ref is empty after stripping scheme")
+		ociRef, err := oci.Parse(ref)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, "unexpected format for ref")
 			return
 		}
+		ociRef.Tag = version
 
 		ociClient := ociClientForPantryRef(r.Context(), deps, r.URL.Query().Get("pantryName"), r.URL.Query().Get("pantryNamespace"))
 
@@ -181,7 +184,7 @@ func handleGetRegistryArtifact(deps *apiDeps) http.HandlerFunc {
 		}
 		defer deps.fs.RemoveAll(tmpDir) //nolint:errcheck
 
-		mediaType, digest, _, err := ociClient.Pull(r.Context(), ref, version, tmpDir)
+		mediaType, digest, _, err := ociClient.Pull(r.Context(), ociRef, tmpDir)
 		if err != nil {
 			deps.logger.Error(err, "Failed to pull OCI artifact", "ref", ref, "version", version)
 			respondError(w, http.StatusBadGateway, "could not pull artifact: "+err.Error())

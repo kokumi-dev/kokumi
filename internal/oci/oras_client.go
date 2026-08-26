@@ -103,18 +103,21 @@ func isPlainHTTP(ref string) bool {
 //
 // The first return value is the layer media type (empty string for non-Helm artifacts).
 // The third return value is the manifest annotations map (may be nil/empty).
-func (c *ORASClient) Pull(ctx context.Context, ref, tag, targetDir string) (string, string, map[string]string, error) {
+func (c *ORASClient) Pull(ctx context.Context, ref Reference, targetDir string) (string, string, map[string]string, error) {
 	log := ctrl.LoggerFrom(ctx)
 
-	repo, err := c.newRepository(ref)
+	repository := ref.RepositoryReference()
+	reference := ref.GetReference()
+
+	repo, err := c.newRepository(repository)
 	if err != nil {
 		return "", "", nil, fmt.Errorf("create repository for %q: %w", ref, err)
 	}
-	log.Info("Resolving OCI manifest", "ref", fmt.Sprintf("%s:%s", ref, tag))
+	log.Info("Resolving OCI manifest", "ref", fmt.Sprintf("%s:%s", ref, reference))
 
-	manifestDesc, err := repo.Resolve(ctx, tag)
+	manifestDesc, err := repo.Resolve(ctx, reference)
 	if err != nil {
-		return "", "", nil, fmt.Errorf("resolve %s:%s: %w", ref, tag, err)
+		return "", "", nil, fmt.Errorf("resolve %s:%s: %w", ref, reference, err)
 	}
 
 	rc, err := repo.Fetch(ctx, manifestDesc)
@@ -137,11 +140,11 @@ func (c *ORASClient) Pull(ctx context.Context, ref, tag, targetDir string) (stri
 	annotations := manifest.Annotations
 
 	if len(manifest.Layers) == 0 {
-		return "", "", nil, fmt.Errorf("artifact %s:%s has no layers", ref, tag)
+		return "", "", nil, fmt.Errorf("artifact %s:%s has no layers", ref, reference)
 	}
 
 	if manifest.Layers[0].MediaType == HelmChartLayerMediaType {
-		log.Info("Pulling Helm chart blob", "ref", fmt.Sprintf("%s:%s", ref, tag))
+		log.Info("Pulling Helm chart blob", "ref", fmt.Sprintf("%s:%s", ref, reference))
 
 		if err := c.fetchBlob(ctx, repo, manifest.Layers[0], filepath.Join(targetDir, "chart.tgz")); err != nil {
 			return "", "", nil, fmt.Errorf("fetch helm chart blob: %w", err)
@@ -151,7 +154,7 @@ func (c *ORASClient) Pull(ctx context.Context, ref, tag, targetDir string) (stri
 	}
 
 	if manifest.Layers[0].MediaType == FluxContentMediaType {
-		log.Info("Pulling Flux content layer", "ref", fmt.Sprintf("%s:%s", ref, tag))
+		log.Info("Pulling Flux content layer", "ref", fmt.Sprintf("%s:%s", ref, reference))
 
 		for _, layer := range manifest.Layers {
 			if err := c.extractLayer(ctx, repo, layer, targetDir); err != nil {
@@ -162,7 +165,7 @@ func (c *ORASClient) Pull(ctx context.Context, ref, tag, targetDir string) (stri
 		return "", digest, annotations, nil
 	}
 
-	log.Info("Pulling OCI artifact", "ref", fmt.Sprintf("%s:%s", ref, tag))
+	log.Info("Pulling OCI artifact", "ref", fmt.Sprintf("%s:%s", ref, reference))
 
 	fs, err := file.New(targetDir)
 	if err != nil {
@@ -170,8 +173,8 @@ func (c *ORASClient) Pull(ctx context.Context, ref, tag, targetDir string) (stri
 	}
 	defer fs.Close() //nolint:errcheck
 
-	if _, err := oras.Copy(ctx, repo, tag, fs, "", oras.DefaultCopyOptions); err != nil {
-		return "", "", nil, fmt.Errorf("pull artifact %s:%s: %w", ref, tag, err)
+	if _, err := oras.Copy(ctx, repo, reference, fs, "", oras.DefaultCopyOptions); err != nil {
+		return "", "", nil, fmt.Errorf("pull artifact %s:%s: %w", ref, reference, err)
 	}
 
 	return "", digest, annotations, nil
@@ -271,8 +274,10 @@ func (c *ORASClient) fetchBlob(ctx context.Context, repo *remote.Repository, des
 }
 
 // ListTags returns all tags available for the repository at ref.
-func (c *ORASClient) ListTags(ctx context.Context, ref string) ([]string, error) {
-	repo, err := c.newRepository(ref)
+func (c *ORASClient) ListTags(ctx context.Context, ref Reference) ([]string, error) {
+	repository := ref.RepositoryReference()
+
+	repo, err := c.newRepository(repository)
 	if err != nil {
 		return nil, fmt.Errorf("create repository for %q: %w", ref, err)
 	}
@@ -290,10 +295,13 @@ func (c *ORASClient) ListTags(ctx context.Context, ref string) ([]string, error)
 
 // Push packages sourceDir as an OCI artifact and pushes it to ref:tag, returning its digest.
 // annotations are attached as OCI manifest annotations; pass nil for none.
-func (c *ORASClient) Push(ctx context.Context, ref, tag, sourceDir string, annotations map[string]string) (string, error) {
+func (c *ORASClient) Push(ctx context.Context, ref Reference, sourceDir string, annotations map[string]string) (string, error) {
 	log := ctrl.LoggerFrom(ctx)
 
-	repo, err := c.newRepository(ref)
+	repository := ref.RepositoryReference()
+	reference := ref.GetReference()
+
+	repo, err := c.newRepository(repository)
 	if err != nil {
 		return "", fmt.Errorf("failed to create repository for %q: %w", ref, err)
 	}
@@ -318,15 +326,15 @@ func (c *ORASClient) Push(ctx context.Context, ref, tag, sourceDir string, annot
 		return "", fmt.Errorf("failed to pack manifest: %w", err)
 	}
 
-	if err := fs.Tag(ctx, manifest, tag); err != nil {
-		return "", fmt.Errorf("failed to tag manifest as %q: %w", tag, err)
+	if err := fs.Tag(ctx, manifest, reference); err != nil {
+		return "", fmt.Errorf("failed to tag manifest as %q: %w", reference, err)
 	}
 
-	log.Info("Pushing OCI artifact", "ref", fmt.Sprintf("%s:%s", ref, tag))
+	log.Info("Pushing OCI artifact", "ref", fmt.Sprintf("%s:%s", ref, reference))
 
-	desc, err := oras.Copy(ctx, fs, tag, repo, tag, oras.DefaultCopyOptions)
+	desc, err := oras.Copy(ctx, fs, reference, repo, reference, oras.DefaultCopyOptions)
 	if err != nil {
-		return "", fmt.Errorf("failed to push artifact %s:%s: %w", ref, tag, err)
+		return "", fmt.Errorf("failed to push artifact %s:%s: %w", ref, reference, err)
 	}
 
 	return desc.Digest.String(), nil

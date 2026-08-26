@@ -290,13 +290,16 @@ func upsertDockerConfigSecret(ctx context.Context, deps *apiDeps, ns, name, regi
 // buildDockerConfigJSON produces a minimal .dockerconfigjson payload for a
 // single registry host from the given credentials.
 func buildDockerConfigJSON(url, username, password string) ([]byte, error) {
-	host := oci.ExtractHost(url)
+	ref, err := oci.Parse(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse URL: %w", err)
+	}
 
 	auth := base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
 
 	cfg := map[string]any{
 		"auths": map[string]any{
-			host: map[string]any{
+			ref.Registry: map[string]any{
 				"auth": auth,
 			},
 		},

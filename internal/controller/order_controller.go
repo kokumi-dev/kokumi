@@ -31,6 +31,7 @@ import (
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/credential"
+	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/renderer"
 	"github.com/kokumi-dev/kokumi/internal/resolve"
 	"github.com/kokumi-dev/kokumi/internal/service"
@@ -186,7 +187,7 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 		return ctrl.Result{}, err
 	}
 
-	preparation, err := r.createPreparation(ctx, order, result.SourceRef, result.SourceDigest, resolvedSource.Version, result.DestRef, result.DestDigest, commitMessage, parentDigest, specHash, deliveryv1alpha1.GitSource{Repo: result.GitRepo, Tag: result.GitTag, CommitHash: result.GitCommitHash})
+	preparation, err := r.createPreparation(ctx, order, result.SourceRef, result.DestRef, commitMessage, parentDigest, specHash, deliveryv1alpha1.GitSource{Repo: result.GitRepo, Tag: result.GitTag, CommitHash: result.GitCommitHash})
 	if err != nil {
 		logger.Error(err, "Failed to create Preparation")
 		if uerr := statusUpdater.Failed(ctx, order, fmt.Errorf("failed to create revision: %w", err)); uerr != nil {
@@ -198,7 +199,7 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 
 	logger.Info("Created Preparation", "revision", preparation.Name)
 
-	if err := statusUpdater.Ready(ctx, order, specHash, preparation.Name, result.DestDigest, fmt.Sprintf("Successfully pushed to %s", result.DestRef)); err != nil {
+	if err := statusUpdater.Ready(ctx, order, specHash, preparation.Name, result.DestRef.Digest, fmt.Sprintf("Successfully pushed to %s", result.DestRef)); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -237,7 +238,7 @@ func (r *OrderReconciler) reconcileDelete(ctx context.Context, order *deliveryv1
 func (r *OrderReconciler) createPreparation(
 	ctx context.Context,
 	order *deliveryv1alpha1.Order,
-	sourceRef, sourceDigest, sourceVersion, destRef, destDigest string,
+	sourceRef, destRef oci.Reference,
 	commitMessage string,
 	parentDigest string,
 	configHash string,
@@ -245,8 +246,7 @@ func (r *OrderReconciler) createPreparation(
 ) (*deliveryv1alpha1.Preparation, error) {
 	logger := log.FromContext(ctx)
 
-	shortDigest := destDigest[len("sha256:") : len("sha256:")+12]
-	revisionName := fmt.Sprintf("%s-%s", order.Name, shortDigest)
+	revisionName := fmt.Sprintf("%s-%s", order.Name, destRef.ShortDigest())
 
 	existing := &deliveryv1alpha1.Preparation{}
 
@@ -270,24 +270,24 @@ func (r *OrderReconciler) createPreparation(
 		Namespace: order.Namespace,
 		Labels: map[string]string{
 			deliveryv1alpha1.LabelOrder:      order.Name,
-			deliveryv1alpha1.LabelVersion:    sourceVersion,
+			deliveryv1alpha1.LabelVersion:    sourceRef.Tag,
 			deliveryv1alpha1.LabelAutoDeploy: string(order.Spec.AutoDeploy),
 		},
 		Spec: deliveryv1alpha1.PreparationSpec{
 			OrderName: order.Name,
 			Source: deliveryv1alpha1.OrderSource{
-				OCI:        fmt.Sprintf("oci://%s", sourceRef),
-				BaseDigest: sourceDigest,
+				OCI:        sourceRef.OCIRepositoryReference(),
+				BaseDigest: sourceRef.Digest,
 			},
 			Renderer: deliveryv1alpha1.Renderer{
 				Version:    "v1.0.0",
-				Digest:     destDigest,
+				Digest:     destRef.Digest,
 				RenderType: renderType,
 			},
 			ConfigHash: configHash,
 			Artifact: deliveryv1alpha1.Artifact{
-				OCIRef: fmt.Sprintf("oci://%s@%s", destRef, destDigest),
-				Digest: destDigest,
+				OCIRef: destRef.OCIString(),
+				Digest: destRef.Digest,
 				Signed: false,
 			},
 			CommitMessage: commitMessage,

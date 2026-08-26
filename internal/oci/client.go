@@ -18,19 +18,20 @@ const AnnotationParentDigest = "kokumi.dev/parent"
 // Client defines the interface for interacting with an OCI registry.
 type Client interface {
 	// Pull fetches an OCI artifact from a registry into targetDir.
+	// It resolves the artifact by ref.Reference() (digest when set, else tag).
 	// It returns the media type of the primary layer, the manifest digest, the
 	// manifest annotations, and any error.
 	// For Helm charts the media type is HelmChartLayerMediaType and the blob is
 	// written to targetDir/chart.tgz. For all other artifacts the layer's files
 	// are extracted into targetDir.
-	Pull(ctx context.Context, ref, tag, targetDir string) (mediaType, digest string, annotations map[string]string, err error)
+	Pull(ctx context.Context, ref Reference, targetDir string) (mediaType, digest string, annotations map[string]string, err error)
 
 	// Push pushes an OCI artifact from sourceDir to a registry and returns its digest.
 	// annotations are attached as OCI manifest annotations; pass nil for none.
-	Push(ctx context.Context, ref, tag, sourceDir string, annotations map[string]string) (digest string, err error)
+	Push(ctx context.Context, ref Reference, sourceDir string, annotations map[string]string) (digest string, err error)
 
 	// ListTags returns the list of tags available for the given repository reference.
 	// The ref should not include a tag or digest. Returns an error if the registry
 	// is unreachable or the repository does not exist.
-	ListTags(ctx context.Context, ref string) ([]string, error)
+	ListTags(ctx context.Context, ref Reference) ([]string, error)
 }

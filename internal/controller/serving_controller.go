@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -35,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/status"
 )
 
@@ -221,14 +221,12 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 func (r *ServingReconciler) reconcileArgoApplication(ctx context.Context, serving *deliveryv1alpha1.Serving, preparation *deliveryv1alpha1.Preparation) error {
 	logger := log.FromContext(ctx)
 
-	ociRef := strings.TrimPrefix(preparation.Spec.Artifact.OCIRef, "oci://")
-	parts := strings.Split(ociRef, "@")
-	if len(parts) != 2 {
-		return fmt.Errorf("invalid OCI reference format: %s", ociRef)
+	ociRef, err := oci.Parse(preparation.Spec.Artifact.OCIRef)
+	if err != nil {
+		return fmt.Errorf("failed to parse OCI Ref: %w", err)
 	}
-	repoURL := "oci://" + parts[0]
-	targetRevision := preparation.Spec.Artifact.Digest
 
+	targetRevision := ociRef.Digest
 	appName := serving.Name
 
 	app := &unstructured.Unstructured{
@@ -249,7 +247,7 @@ func (r *ServingReconciler) reconcileArgoApplication(ctx context.Context, servin
 			"spec": map[string]any{
 				"project": "default",
 				"source": map[string]any{
-					"repoURL":        repoURL,
+					"repoURL":        ociRef.RepositoryReference(),
 					"targetRevision": targetRevision,
 					"path":           ".",
 				},
@@ -273,7 +271,7 @@ func (r *ServingReconciler) reconcileArgoApplication(ctx context.Context, servin
 
 	existing := &unstructured.Unstructured{}
 	existing.SetGroupVersionKind(app.GroupVersionKind())
-	err := r.Get(ctx, client.ObjectKey{Namespace: argoNamespace, Name: appName}, existing)
+	err = r.Get(ctx, client.ObjectKey{Namespace: argoNamespace, Name: appName}, existing)
 
 	if err != nil {
 		if apierrors.IsNotFound(err) {

@@ -122,10 +122,10 @@ func TestOrderService_ProcessOrder(t *testing.T) {
 
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			assert.Equal(t, tc.wantSourceRef, result.SourceRef)
-			assert.Equal(t, tc.wantDestRef, result.DestRef)
-			assert.Equal(t, tc.wantSourceDig, result.SourceDigest)
-			assert.Regexp(t, `^sha256:[a-f0-9]{64}$`, result.DestDigest)
+			assert.Equal(t, tc.wantSourceRef, result.SourceRef.RepositoryReference())
+			assert.Equal(t, tc.wantDestRef, result.DestRef.RepositoryReference())
+			assert.Equal(t, tc.wantSourceDig, result.SourceRef.Digest)
+			assert.Regexp(t, `^sha256:[a-f0-9]{64}$`, result.DestRef.Digest)
 		})
 	}
 }
@@ -200,20 +200,20 @@ type capturingFakeClient struct {
 
 var _ oci.Client = (*capturingFakeClient)(nil)
 
-func (c *capturingFakeClient) Pull(_ context.Context, ref, tag, targetDir string) (string, string, map[string]string, error) {
-	_, _, _, err := oci.NewFakeClient(c.fs).Pull(context.Background(), ref, tag, targetDir)
+func (c *capturingFakeClient) Pull(_ context.Context, ref oci.Reference, targetDir string) (string, string, map[string]string, error) {
+	_, _, _, err := oci.NewFakeClient(c.fs).Pull(context.Background(), ref, targetDir)
 	if err != nil {
 		return "", "", nil, err
 	}
 	return "", fakeDigest, c.annotations, nil
 }
 
-func (c *capturingFakeClient) Push(_ context.Context, ref, tag, sourceDir string, annotations map[string]string) (string, error) {
+func (c *capturingFakeClient) Push(_ context.Context, ref oci.Reference, sourceDir string, annotations map[string]string) (string, error) {
 	c.lastPushAnnotations = annotations
-	return oci.NewFakeClient(c.fs).Push(context.Background(), ref, tag, sourceDir, annotations)
+	return oci.NewFakeClient(c.fs).Push(context.Background(), ref, sourceDir, annotations)
 }
 
-func (c *capturingFakeClient) ListTags(_ context.Context, _ string) ([]string, error) {
+func (c *capturingFakeClient) ListTags(_ context.Context, _ oci.Reference) ([]string, error) {
 	return nil, nil
 }
 
@@ -243,10 +243,13 @@ func TestOrderService_PullCache(t *testing.T) {
 
 		assert.Equal(t, 1, pullCount, "expected one pull on cache miss")
 
+		ociRef, err := oci.Parse("registry.svc.cluster.local:5000/order/app")
+		assert.NoError(t, err)
+		ociRef.Tag = testVersion
+
 		// Verify cache entry was written.
 		key := pullCacheKey(
-			"registry.svc.cluster.local:5000/order/app",
-			testVersion,
+			ociRef,
 			deliveryv1alpha1.FileLayoutSingle,
 		)
 		exists, err := afero.Exists(fs, filepath.Join(cacheDir, key, "meta.json"))
@@ -281,7 +284,7 @@ type multiFileFakeClient struct {
 
 var _ oci.Client = (*multiFileFakeClient)(nil)
 
-func (c *multiFileFakeClient) Pull(_ context.Context, _, _, targetDir string) (string, string, map[string]string, error) {
+func (c *multiFileFakeClient) Pull(_ context.Context, _ oci.Reference, targetDir string) (string, string, map[string]string, error) {
 	files := map[string]string{
 		testDeploymentFile: testDeploymentYAML,
 		testServiceFile:    testServiceYAML,
@@ -294,11 +297,11 @@ func (c *multiFileFakeClient) Pull(_ context.Context, _, _, targetDir string) (s
 	return "", fakeDigest, nil, nil
 }
 
-func (c *multiFileFakeClient) Push(_ context.Context, _, _, _ string, _ map[string]string) (string, error) {
+func (c *multiFileFakeClient) Push(_ context.Context, _ oci.Reference, _ string, _ map[string]string) (string, error) {
 	return fakeDigest, nil
 }
 
-func (c *multiFileFakeClient) ListTags(_ context.Context, _ string) ([]string, error) {
+func (c *multiFileFakeClient) ListTags(_ context.Context, _ oci.Reference) ([]string, error) {
 	return nil, nil
 }
 
@@ -310,16 +313,16 @@ type countingFakeClient struct {
 
 var _ oci.Client = (*countingFakeClient)(nil)
 
-func (c *countingFakeClient) Pull(ctx context.Context, ref, tag, targetDir string) (string, string, map[string]string, error) {
+func (c *countingFakeClient) Pull(ctx context.Context, ref oci.Reference, targetDir string) (string, string, map[string]string, error) {
 	c.onPull()
-	return oci.NewFakeClient(c.fs).Pull(ctx, ref, tag, targetDir)
+	return oci.NewFakeClient(c.fs).Pull(ctx, ref, targetDir)
 }
 
-func (c *countingFakeClient) Push(ctx context.Context, ref, tag, sourceDir string, annotations map[string]string) (string, error) {
-	return oci.NewFakeClient(c.fs).Push(ctx, ref, tag, sourceDir, annotations)
+func (c *countingFakeClient) Push(ctx context.Context, ref oci.Reference, sourceDir string, annotations map[string]string) (string, error) {
+	return oci.NewFakeClient(c.fs).Push(ctx, ref, sourceDir, annotations)
 }
 
-func (c *countingFakeClient) ListTags(_ context.Context, _ string) ([]string, error) {
+func (c *countingFakeClient) ListTags(_ context.Context, _ oci.Reference) ([]string, error) {
 	return nil, nil
 }
 
@@ -392,7 +395,7 @@ type kustomizeFakeClient struct {
 
 var _ oci.Client = (*kustomizeFakeClient)(nil)
 
-func (c *kustomizeFakeClient) Pull(_ context.Context, _, _, targetDir string) (string, string, map[string]string, error) {
+func (c *kustomizeFakeClient) Pull(_ context.Context, _ oci.Reference, targetDir string) (string, string, map[string]string, error) {
 	files := map[string]string{
 		"kustomization.yaml": "resources:\n- deployment.yaml\n",
 		"deployment.yaml":    "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: my-app\n",
@@ -405,11 +408,11 @@ func (c *kustomizeFakeClient) Pull(_ context.Context, _, _, targetDir string) (s
 	return "", fakeDigest, nil, nil
 }
 
-func (c *kustomizeFakeClient) Push(_ context.Context, _, _, _ string, _ map[string]string) (string, error) {
+func (c *kustomizeFakeClient) Push(_ context.Context, _ oci.Reference, _ string, _ map[string]string) (string, error) {
 	return fakeDigest, nil
 }
 
-func (c *kustomizeFakeClient) ListTags(_ context.Context, _ string) ([]string, error) {
+func (c *kustomizeFakeClient) ListTags(_ context.Context, _ oci.Reference) ([]string, error) {
 	return nil, nil
 }
 
@@ -423,7 +426,7 @@ type fluxFakeClient struct {
 
 var _ oci.Client = (*fluxFakeClient)(nil)
 
-func (c *fluxFakeClient) Pull(_ context.Context, _, _, targetDir string) (string, string, map[string]string, error) {
+func (c *fluxFakeClient) Pull(_ context.Context, _ oci.Reference, targetDir string) (string, string, map[string]string, error) {
 	files := map[string]string{
 		"kustomization.yaml": "resources:\n- deployment.yaml\n- service.yaml\n",
 		"deployment.yaml":    "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: podinfo\n",
@@ -437,11 +440,11 @@ func (c *fluxFakeClient) Pull(_ context.Context, _, _, targetDir string) (string
 	return "", fakeDigest, nil, nil
 }
 
-func (c *fluxFakeClient) Push(_ context.Context, _, _, _ string, _ map[string]string) (string, error) {
+func (c *fluxFakeClient) Push(_ context.Context, _ oci.Reference, _ string, _ map[string]string) (string, error) {
 	return fakeDigest, nil
 }
 
-func (c *fluxFakeClient) ListTags(_ context.Context, _ string) ([]string, error) {
+func (c *fluxFakeClient) ListTags(_ context.Context, _ oci.Reference) ([]string, error) {
 	return nil, nil
 }
 
