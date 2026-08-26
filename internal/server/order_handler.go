@@ -7,7 +7,6 @@ import (
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/namespace"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -96,10 +95,8 @@ func handleCreateOrder(deps *apiDeps) http.HandlerFunc {
 		}
 
 		order := &deliveryv1alpha1.Order{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      req.Name,
-				Namespace: req.Namespace,
-			},
+			Name:      req.Name,
+			Namespace: req.Namespace,
 			Spec: deliveryv1alpha1.OrderSpec{
 				Render:     renderFromDTO(req.Render),
 				Patches:    patchesFromDTO(req.Patches),

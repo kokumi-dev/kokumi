@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -81,10 +80,8 @@ func handlePromote(deps *apiDeps) http.HandlerFunc {
 
 		// No Serving exists yet — create one named after the Order.
 		newServing := &deliveryv1alpha1.Serving{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      orderName,
-				Namespace: namespace,
-			},
+			Name:      orderName,
+			Namespace: namespace,
 			Spec: deliveryv1alpha1.ServingSpec{
 				OrderName:       orderName,
 				PreparationName: req.Preparation,

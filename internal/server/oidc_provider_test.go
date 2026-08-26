@@ -18,7 +18,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
@@ -45,11 +44,11 @@ func newTestOIDCProvider(t *testing.T) (*oidcProvider, *httptest.Server) {
 	srv.SetIssuer(httpSrv.URL)
 
 	client := fake.NewClientBuilder().WithObjects(&corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: testOIDCSecret, Namespace: testNS},
-		Data:       map[string][]byte{secretKeyClientSecret: []byte(testClientSec)},
+		Name: testOIDCSecret, Namespace: testNS,
+		Data: map[string][]byte{secretKeyClientSecret: []byte(testClientSec)},
 	}, &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: testSecret, Namespace: testNS},
-		Data:       map[string][]byte{"signing-key": []byte("test-signing-key-do-not-use-in-prod")},
+		Name: testSecret, Namespace: testNS,
+		Data: map[string][]byte{"signing-key": []byte("test-signing-key-do-not-use-in-prod")},
 	}).Build()
 
 	cfg := &deliveryv1alpha1.OIDCConfig{
@@ -231,15 +230,15 @@ func TestRedirectURIDerivesFromHost(t *testing.T) {
 // broken OIDC config does not disable a working admin account.
 func TestAuthManagerReloadWithKitchenOIDC(t *testing.T) {
 	client := fake.NewClientBuilder().WithObjects(&corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: testSecret, Namespace: testNS},
+		Name: testSecret, Namespace: testNS,
 		Data: map[string][]byte{
 			secretKeyUsername:     []byte(testUsername),
 			secretKeyPasswordHash: mustBcrypt(t, testPassword),
 			secretKeySigningKey:   []byte("test-signing-key-do-not-use-in-prod"),
 		},
 	}, &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: testOIDCSecret, Namespace: testNS},
-		Data:       map[string][]byte{secretKeyClientSecret: []byte(testClientSec)},
+		Name: testOIDCSecret, Namespace: testNS,
+		Data: map[string][]byte{secretKeyClientSecret: []byte(testClientSec)},
 	}).Build()
 
 	m := &authManager{
@@ -251,7 +250,7 @@ func TestAuthManagerReloadWithKitchenOIDC(t *testing.T) {
 
 	// Kitchen with both admin and a (valid) OIDC issuer.
 	kitchen := &deliveryv1alpha1.Kitchen{
-		ObjectMeta: metav1.ObjectMeta{Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS},
+		Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS,
 		Spec: deliveryv1alpha1.KitchenSpec{
 			Auth: &deliveryv1alpha1.KitchenAuth{
 				AdminUser: &deliveryv1alpha1.AdminUserConfig{
@@ -277,7 +276,7 @@ func TestAuthManagerReloadWithKitchenOIDC(t *testing.T) {
 	p, httpSrv := newTestOIDCProvider(t)
 	defer httpSrv.Close()
 	oidcKitchen := &deliveryv1alpha1.Kitchen{
-		ObjectMeta: metav1.ObjectMeta{Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS},
+		Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS,
 		Spec: deliveryv1alpha1.KitchenSpec{
 			Auth: &deliveryv1alpha1.KitchenAuth{
 				AdminUser: &deliveryv1alpha1.AdminUserConfig{
@@ -365,13 +364,13 @@ func mustBcrypt(t *testing.T, pw string) []byte {
 // TestHandleLoginForbiddenWhenAdminDisabled verifies OIDC-only mode returns 403 (not 503) on login.
 func TestHandleLoginForbiddenWhenAdminDisabled(t *testing.T) {
 	client := fake.NewClientBuilder().WithObjects(&corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: testSecret, Namespace: testNS},
+		Name: testSecret, Namespace: testNS,
 		Data: map[string][]byte{
 			secretKeySigningKey: []byte("test-signing-key-do-not-use-in-prod"),
 		},
 	}, &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: testOIDCSecret, Namespace: testNS},
-		Data:       map[string][]byte{secretKeyClientSecret: []byte(testClientSec)},
+		Name: testOIDCSecret, Namespace: testNS,
+		Data: map[string][]byte{secretKeyClientSecret: []byte(testClientSec)},
 	}).Build()
 
 	m := &authManager{
@@ -382,7 +381,7 @@ func TestHandleLoginForbiddenWhenAdminDisabled(t *testing.T) {
 	}
 	disabled := false
 	kitchen := &deliveryv1alpha1.Kitchen{
-		ObjectMeta: metav1.ObjectMeta{Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS},
+		Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS,
 		Spec: deliveryv1alpha1.KitchenSpec{
 			Auth: &deliveryv1alpha1.KitchenAuth{
 				AdminUser: &deliveryv1alpha1.AdminUserConfig{

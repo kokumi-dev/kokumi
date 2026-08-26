@@ -89,10 +89,8 @@ var _ = Describe("Serving Controller", func() {
 			err := k8sClient.Get(ctx, preparationKey, preparation)
 			if err != nil && errors.IsNotFound(err) {
 				Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Preparation{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      preparationName,
-						Namespace: testNamespace,
-					},
+					Name:      preparationName,
+					Namespace: testNamespace,
 					Spec: deliveryv1alpha1.PreparationSpec{
 						OrderName: orderName,
 						Source: deliveryv1alpha1.OrderSource{
@@ -123,10 +121,8 @@ var _ = Describe("Serving Controller", func() {
 			err = k8sClient.Get(ctx, typeNamespacedName, serving)
 			if err != nil && errors.IsNotFound(err) {
 				resource := &deliveryv1alpha1.Serving{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: testNamespace,
-					},
+					Name:      resourceName,
+					Namespace: testNamespace,
 					Spec: deliveryv1alpha1.ServingSpec{
 						OrderName:       orderName,
 						PreparationName: preparationName,

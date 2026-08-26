@@ -12,7 +12,6 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -117,10 +116,8 @@ func handleCreatePantry(deps *apiDeps) http.HandlerFunc {
 		}
 
 		pantry := &deliveryv1alpha1.Pantry{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      req.Name,
-				Namespace: ns,
-			},
+			Name:      req.Name,
+			Namespace: ns,
 			Spec: deliveryv1alpha1.PantrySpec{
 				URL:         req.URL,
 				Description: req.Description,
@@ -248,11 +245,9 @@ func createDockerConfigSecret(ctx context.Context, deps *apiDeps, ns, name, regi
 	}
 
 	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: ns,
-		},
-		Type: corev1.SecretTypeDockerConfigJson,
+		Name:      name,
+		Namespace: ns,
+		Type:      corev1.SecretTypeDockerConfigJson,
 		Data: map[string][]byte{
 			corev1.DockerConfigJsonKey: data,
 		},
@@ -276,12 +271,10 @@ func upsertDockerConfigSecret(ctx context.Context, deps *apiDeps, ns, name, regi
 
 	if apierrors.IsNotFound(getErr) {
 		newSecret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      name,
-				Namespace: ns,
-			},
-			Type: corev1.SecretTypeDockerConfigJson,
-			Data: map[string][]byte{corev1.DockerConfigJsonKey: data},
+			Name:      name,
+			Namespace: ns,
+			Type:      corev1.SecretTypeDockerConfigJson,
+			Data:      map[string][]byte{corev1.DockerConfigJsonKey: data},
 		}
 		return deps.apiReader.Create(ctx, newSecret)
 	}

@@ -25,8 +25,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 )
 
@@ -47,10 +45,8 @@ var _ = Describe("Preparation Controller", func() {
 			err := k8sClient.Get(ctx, typeNamespacedName, preparation)
 			if err != nil && errors.IsNotFound(err) {
 				resource := &deliveryv1alpha1.Preparation{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: testNamespace,
-					},
+					Name:      resourceName,
+					Namespace: testNamespace,
 					Spec: deliveryv1alpha1.PreparationSpec{
 						OrderName:  "order",
 						ConfigHash: "sha256:448093f1b28dc7147740d8e400946e9b228650aa31a54b0ed734ca9ab0ae5b6b",
