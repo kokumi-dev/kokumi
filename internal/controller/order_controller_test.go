@@ -54,10 +54,8 @@ var _ = Describe("Order Controller", func() {
 			err := k8sClient.Get(ctx, typeNamespacedName, order)
 			if err != nil && errors.IsNotFound(err) {
 				resource := &deliveryv1alpha1.Order{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: testNamespace,
-					},
+					Name:      resourceName,
+					Namespace: testNamespace,
 					Spec: deliveryv1alpha1.OrderSpec{
 						AutoDeploy: deliveryv1alpha1.AutoDeployDisabled,
 						Source: &deliveryv1alpha1.OCISource{
@@ -140,7 +138,7 @@ var _ = Describe("Order Controller", func() {
 
 		reconcileOrder := func(name string) error {
 			_, err := newReconciler().Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: name, Namespace: ns},
+				Name: name, Namespace: ns,
 			})
 			return err
 		}
@@ -153,7 +151,7 @@ var _ = Describe("Order Controller", func() {
 
 		createPantry := func(name, url string, secretRef *corev1.LocalObjectReference) {
 			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Pantry{
-				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+				Name: name, Namespace: ns,
 				Spec: deliveryv1alpha1.PantrySpec{
 					URL:       url,
 					SecretRef: secretRef,
@@ -163,7 +161,7 @@ var _ = Describe("Order Controller", func() {
 
 		createOrder := func(name string, source *deliveryv1alpha1.OCISource, dest *deliveryv1alpha1.OCIDestination) {
 			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Order{
-				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+				Name: name, Namespace: ns,
 				Spec: deliveryv1alpha1.OrderSpec{
 					AutoDeploy:  deliveryv1alpha1.AutoDeployDisabled,
 					Source:      source,
@@ -179,12 +177,12 @@ var _ = Describe("Order Controller", func() {
 			)
 			if orderName != "" {
 				_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Order{
-					ObjectMeta: metav1.ObjectMeta{Name: orderName, Namespace: ns},
+					Name: orderName, Namespace: ns,
 				})
 			}
 			if pantryName != "" {
 				_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Pantry{
-					ObjectMeta: metav1.ObjectMeta{Name: pantryName, Namespace: ns},
+					Name: pantryName, Namespace: ns,
 				})
 			}
 			for _, obj := range extra {
@@ -328,9 +326,9 @@ var _ = Describe("Order Controller", func() {
 				pantryURL  = "oci://registry.kokumi.svc.cluster.local:5000/charts/private"
 			)
 			secret := &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{Name: secretName, Namespace: ns},
-				Type:       corev1.SecretTypeOpaque,
-				Data:       map[string][]byte{"placeholder": []byte("x")},
+				Name: secretName, Namespace: ns,
+				Type: corev1.SecretTypeOpaque,
+				Data: map[string][]byte{"placeholder": []byte("x")},
 			}
 			defer cleanup(orderName, pantryName, secret)
 
@@ -409,12 +407,12 @@ var _ = Describe("Order Controller", func() {
 					client.MatchingLabels{deliveryv1alpha1.LabelOrder: orderName},
 				)
 				_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Order{
-					ObjectMeta: metav1.ObjectMeta{Name: orderName, Namespace: ns},
+					Name: orderName, Namespace: ns,
 				})
 			}()
 
 			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Order{
-				ObjectMeta: metav1.ObjectMeta{Name: orderName, Namespace: ns},
+				Name: orderName, Namespace: ns,
 				Spec: deliveryv1alpha1.OrderSpec{
 					AutoDeploy: deliveryv1alpha1.AutoDeployDisabled,
 					Source: &deliveryv1alpha1.OCISource{
@@ -429,7 +427,7 @@ var _ = Describe("Order Controller", func() {
 
 			reconcile := func() {
 				_, err := newReconciler().Reconcile(ctx, reconcile.Request{
-					NamespacedName: types.NamespacedName{Name: orderName, Namespace: ns},
+					Name: orderName, Namespace: ns,
 				})
 				Expect(err).NotTo(HaveOccurred())
 			}

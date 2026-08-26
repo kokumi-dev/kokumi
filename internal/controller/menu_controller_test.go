@@ -25,8 +25,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 )
 
@@ -46,9 +44,7 @@ var _ = Describe("Menu Controller", func() {
 			err := k8sClient.Get(ctx, typeNamespacedName, menu)
 			if err != nil && errors.IsNotFound(err) {
 				resource := &deliveryv1alpha1.Menu{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: resourceName,
-					},
+					Name: resourceName,
 					Spec: deliveryv1alpha1.MenuSpec{
 						Source: deliveryv1alpha1.OCISource{
 							OCI:     testOCIRef,

@@ -10,7 +10,6 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/namespace"
 	"github.com/kokumi-dev/kokumi/internal/resolve"
 	"github.com/kokumi-dev/kokumi/internal/service"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -51,10 +50,8 @@ func handlePreviewOrder(deps *apiDeps) http.HandlerFunc {
 		}
 
 		order := &deliveryv1alpha1.Order{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      name,
-				Namespace: ns,
-			},
+			Name:      name,
+			Namespace: ns,
 			Spec: deliveryv1alpha1.OrderSpec{
 				Render:  renderFromDTO(req.Render),
 				Patches: patchesFromDTO(req.Patches),
@@ -140,10 +137,8 @@ func handlePreviewOrderFiles(deps *apiDeps) http.HandlerFunc {
 		}
 
 		order := &deliveryv1alpha1.Order{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      name,
-				Namespace: ns,
-			},
+			Name:      name,
+			Namespace: ns,
 			Spec: deliveryv1alpha1.OrderSpec{
 				Render:  renderFromDTO(req.Render),
 				Patches: patchesFromDTO(req.Patches),

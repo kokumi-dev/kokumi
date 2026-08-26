@@ -21,9 +21,7 @@ import (
 	"fmt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -268,14 +266,12 @@ func (r *OrderReconciler) createPreparation(
 	}
 
 	preparation := &deliveryv1alpha1.Preparation{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      revisionName,
-			Namespace: order.Namespace,
-			Labels: map[string]string{
-				deliveryv1alpha1.LabelOrder:      order.Name,
-				deliveryv1alpha1.LabelVersion:    sourceVersion,
-				deliveryv1alpha1.LabelAutoDeploy: string(order.Spec.AutoDeploy),
-			},
+		Name:      revisionName,
+		Namespace: order.Namespace,
+		Labels: map[string]string{
+			deliveryv1alpha1.LabelOrder:      order.Name,
+			deliveryv1alpha1.LabelVersion:    sourceVersion,
+			deliveryv1alpha1.LabelAutoDeploy: string(order.Spec.AutoDeploy),
 		},
 		Spec: deliveryv1alpha1.PreparationSpec{
 			OrderName: order.Name,
@@ -371,10 +367,8 @@ func (r *OrderReconciler) enqueueOrdersForPantry() handler.EventHandler {
 
 			for _, order := range list.Items {
 				reqs = append(reqs, reconcile.Request{
-					NamespacedName: types.NamespacedName{
-						Namespace: order.Namespace,
-						Name:      order.Name,
-					},
+					Namespace: order.Namespace,
+					Name:      order.Name,
 				})
 			}
 		}

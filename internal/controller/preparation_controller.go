@@ -22,7 +22,6 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -106,13 +105,11 @@ func (r *PreparationReconciler) reconcileServing(ctx context.Context, preparatio
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			serving = &deliveryv1alpha1.Serving{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      servingName,
-					Namespace: preparation.Namespace,
-					Labels: map[string]string{
-						deliveryv1alpha1.LabelOrder:      orderName,
-						deliveryv1alpha1.LabelAutoDeploy: fmt.Sprintf("%v", automatic),
-					},
+				Name:      servingName,
+				Namespace: preparation.Namespace,
+				Labels: map[string]string{
+					deliveryv1alpha1.LabelOrder:      orderName,
+					deliveryv1alpha1.LabelAutoDeploy: fmt.Sprintf("%v", automatic),
 				},
 				Spec: deliveryv1alpha1.ServingSpec{
 					OrderName:       orderName,

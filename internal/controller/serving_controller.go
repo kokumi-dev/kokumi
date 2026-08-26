@@ -404,18 +404,14 @@ func (r *ServingReconciler) enqueueServingForPreparation() handler.EventHandler 
 		for _, serving := range servings.Items {
 			if serving.Spec.PreparationName == preparation.Name {
 				requests = append(requests, ctrl.Request{
-					NamespacedName: client.ObjectKey{
-						Namespace: serving.Namespace,
-						Name:      serving.Name,
-					},
+					Namespace: serving.Namespace,
+					Name:      serving.Name,
 				})
 			} else if serving.Spec.PreparationPolicy.Type == deliveryv1alpha1.PreparationPolicyAutomatic {
 				if preparation.Labels[deliveryv1alpha1.LabelOrder] == serving.Spec.OrderName {
 					requests = append(requests, ctrl.Request{
-						NamespacedName: client.ObjectKey{
-							Namespace: serving.Namespace,
-							Name:      serving.Name,
-						},
+						Namespace: serving.Namespace,
+						Name:      serving.Name,
 					})
 				}
 			}

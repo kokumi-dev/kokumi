@@ -22,7 +22,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -68,10 +67,8 @@ func (r *KitchenReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 		// Ensure the singleton exists so the UI always has a resource to read/write.
 		kitchen = &deliveryv1alpha1.Kitchen{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      deliveryv1alpha1.DefaultKitchenName,
-				Namespace: r.Namespace,
-			},
+			Name:      deliveryv1alpha1.DefaultKitchenName,
+			Namespace: r.Namespace,
 		}
 		if err := r.Create(ctx, kitchen); err != nil && !apierrors.IsAlreadyExists(err) {
 			log.Error(err, "Failed to create default Kitchen")
@@ -153,10 +150,8 @@ func (r *KitchenReconciler) ensureDefaultRunner(mgr manager.Manager) manager.Run
 			return err
 		}
 		kitchen = &deliveryv1alpha1.Kitchen{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      deliveryv1alpha1.DefaultKitchenName,
-				Namespace: r.Namespace,
-			},
+			Name:      deliveryv1alpha1.DefaultKitchenName,
+			Namespace: r.Namespace,
 		}
 		if err := r.Create(ctx, kitchen); err != nil && !apierrors.IsAlreadyExists(err) {
 			return err
@@ -195,6 +190,6 @@ func (r *KitchenReconciler) secretInInstallNamespace() predicate.Predicate {
 // Kitchen so its readiness is re-evaluated when credentials change.
 func (r *KitchenReconciler) mapSecretToKitchen(_ context.Context, obj client.Object) []ctrl.Request {
 	return []ctrl.Request{
-		{NamespacedName: client.ObjectKey{Namespace: obj.GetNamespace(), Name: deliveryv1alpha1.DefaultKitchenName}},
+		{Namespace: obj.GetNamespace(), Name: deliveryv1alpha1.DefaultKitchenName},
 	}
 }

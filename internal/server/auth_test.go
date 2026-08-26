@@ -16,7 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
@@ -43,8 +42,8 @@ func newTestAuthenticator(t *testing.T) *authenticator {
 
 func newAuthSecret(data map[string][]byte) *corev1.Secret {
 	return &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: testSecret, Namespace: testNS},
-		Data:       data,
+		Name: testSecret, Namespace: testNS,
+		Data: data,
 	}
 }
 
@@ -613,7 +612,7 @@ func TestAuthManagerFailClosed(t *testing.T) {
 		}
 		// Establish a working authenticator.
 		m.reload(context.Background(), &deliveryv1alpha1.Kitchen{
-			ObjectMeta: metav1.ObjectMeta{Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS},
+			Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS,
 			Spec: deliveryv1alpha1.KitchenSpec{
 				Auth: &deliveryv1alpha1.KitchenAuth{
 					AdminUser: &deliveryv1alpha1.AdminUserConfig{
@@ -627,7 +626,7 @@ func TestAuthManagerFailClosed(t *testing.T) {
 
 		// Point at a missing Secret: reload must fail closed and keep the previous authenticator.
 		m.reload(context.Background(), &deliveryv1alpha1.Kitchen{
-			ObjectMeta: metav1.ObjectMeta{Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS},
+			Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS,
 			Spec: deliveryv1alpha1.KitchenSpec{
 				Auth: &deliveryv1alpha1.KitchenAuth{
 					AdminUser: &deliveryv1alpha1.AdminUserConfig{
@@ -649,7 +648,7 @@ func TestAuthManagerFailClosed(t *testing.T) {
 			logger:    logger,
 		}
 		m.reload(context.Background(), &deliveryv1alpha1.Kitchen{
-			ObjectMeta: metav1.ObjectMeta{Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS},
+			Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS,
 			Spec: deliveryv1alpha1.KitchenSpec{
 				Auth: &deliveryv1alpha1.KitchenAuth{
 					AdminUser: &deliveryv1alpha1.AdminUserConfig{

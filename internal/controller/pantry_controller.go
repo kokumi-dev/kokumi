@@ -182,10 +182,8 @@ func (r *PantryReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			for _, p := range pantryList.Items {
 				if p.Spec.SecretRef != nil && p.Spec.SecretRef.Name == secret.Name {
 					reqs = append(reqs, reconcile.Request{
-						NamespacedName: types.NamespacedName{
-							Namespace: p.Namespace,
-							Name:      p.Name,
-						},
+						Namespace: p.Namespace,
+						Name:      p.Name,
 					})
 				}
 			}
