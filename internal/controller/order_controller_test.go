@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -293,7 +294,7 @@ var _ = Describe("Order Controller", func() {
 			createPantry(pantryName, firstURL, nil)
 			createOrder(orderName, &deliveryv1alpha1.OCISource{
 				OCI:     "oci://registry.kokumi.svc.cluster.local:5000/order/app",
-				Version: "0.1.0",
+				Version: testVersion,
 			}, &deliveryv1alpha1.OCIDestination{
 				PantryRef: &deliveryv1alpha1.PantryRef{Name: pantryName},
 			})
@@ -301,7 +302,8 @@ var _ = Describe("Order Controller", func() {
 			Expect(reconcileOrder(orderName)).To(Succeed())
 			firstHash := getOrder(orderName).Status.LatestConfigHash
 			Expect(listPreparations(orderName).Items).To(HaveLen(1))
-			Expect(listPreparations(orderName).Items[0].Spec.Artifact.OCIRef).To(HavePrefix(firstURL + "@"))
+			Expect(listPreparations(orderName).Items[0].Spec.Artifact.OCIRef).
+				To(HavePrefix(fmt.Sprintf("%s:%s@", firstURL, testVersion)))
 
 			pantry := &deliveryv1alpha1.Pantry{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: pantryName, Namespace: ns}, pantry)).To(Succeed())
@@ -314,8 +316,8 @@ var _ = Describe("Order Controller", func() {
 			preps := listPreparations(orderName)
 			Expect(preps.Items).To(HaveLen(2))
 			refs := []string{preps.Items[0].Spec.Artifact.OCIRef, preps.Items[1].Spec.Artifact.OCIRef}
-			Expect(refs).To(ContainElement(HavePrefix(firstURL + "@")))
-			Expect(refs).To(ContainElement(HavePrefix(secondURL + "@")))
+			Expect(refs).To(ContainElement(HavePrefix(fmt.Sprintf("%s:%s@", firstURL, testVersion))))
+			Expect(refs).To(ContainElement(HavePrefix(fmt.Sprintf("%s:%s@", secondURL, testVersion))))
 		})
 
 		It("does not rebuild when only Pantry credentials change", func() {

@@ -87,7 +87,10 @@ func (r *PantryReconciler) reconcilePantry(ctx context.Context, pantry *delivery
 	logger := ctrl.LoggerFrom(ctx)
 	updater := status.NewPantryUpdater(r.Client)
 
-	host := oci.ExtractHost(pantry.Spec.URL)
+	ref, err := oci.Parse(pantry.Spec.URL)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to parse URL: %w", err)
+	}
 
 	var credData []byte
 	if pantry.Spec.SecretRef != nil {
@@ -123,20 +126,20 @@ func (r *PantryReconciler) reconcilePantry(ctx context.Context, pantry *delivery
 			}
 			return ctrl.Result{}, nil
 		}
-		pingErr = oci.PingRegistry(pingCtx, host, cs)
+		pingErr = oci.PingRegistry(pingCtx, ref.Registry, cs)
 	} else {
-		pingErr = oci.PingRegistry(pingCtx, host, nil)
+		pingErr = oci.PingRegistry(pingCtx, ref.Registry, nil)
 	}
 
 	if pingErr != nil {
-		logger.Info("Registry connectivity check failed", "host", host, "error", pingErr)
+		logger.Info("Registry connectivity check failed", "registry", ref.Registry, "error", pingErr)
 		if statusErr := updater.Failed(ctx, pantry, pingErr); statusErr != nil {
 			return ctrl.Result{}, statusErr
 		}
 		return ctrl.Result{}, nil
 	}
 
-	logger.Info("Registry connectivity check passed", "host", host)
+	logger.Info("Registry connectivity check passed", "registry", ref.Registry)
 
 	if err := updater.Ready(ctx, pantry, "Registry is reachable"); err != nil {
 		return ctrl.Result{}, err

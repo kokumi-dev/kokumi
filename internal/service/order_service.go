@@ -22,10 +22,8 @@ import (
 
 // OrderResult holds the outcome of processing an Order artifact.
 type OrderResult struct {
-	SourceRef     string
-	SourceDigest  string
-	DestRef       string
-	DestDigest    string
+	SourceRef     oci.Reference
+	DestRef       oci.Reference
 	GitRepo       string
 	GitTag        string
 	GitCommitHash string
@@ -84,10 +82,19 @@ func (rs *OrderService) ProcessOrder(
 	srcClient := cmp.Or(sourceClient, rs.client)
 	dstClient := cmp.Or(destClient, rs.client)
 
-	sourceRef := strings.TrimPrefix(source.OCI, "oci://")
-	destRef := strings.TrimPrefix(destination, "oci://")
+	sourceRef, err := oci.Parse(source.OCI)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse OCI Ref: %w", err)
+	}
+	sourceRef.Tag = source.Version
 
-	logger.Info("Processing artifact", "source", sourceRef, "destination", destRef, "version", source.Version)
+	destRef, err := oci.Parse(destination)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse OCI Ref: %w", err)
+	}
+	destRef.Tag = source.Version
+
+	logger.Info("Processing artifact", "source", sourceRef.RepositoryReference(), "destination", destRef.RepositoryReference(), "version", source.Version)
 
 	tempDir, err := afero.TempDir(rs.fs, "", "order-*")
 	if err != nil {
@@ -98,10 +105,11 @@ func (rs *OrderService) ProcessOrder(
 	logger.Info("Fetching artifact from source")
 
 	layout := layoutPolicy(render)
-	mediaType, sourceDigest, sourceAnnotations, err := rs.pullWithCache(ctx, srcClient, sourceRef, source.Version, tempDir, layout)
+	mediaType, sourceDigest, sourceAnnotations, err := rs.pullWithCache(ctx, srcClient, sourceRef, tempDir, layout)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pull artifact: %w", err)
 	}
+	sourceRef.Digest = sourceDigest
 
 	manifestPath := filepath.Join(tempDir, "manifest.yaml")
 
@@ -171,21 +179,20 @@ func (rs *OrderService) ProcessOrder(
 	if commitHash != "" {
 		ociAnnotations[ocispec.AnnotationRevision] = commitHash
 	}
-	ociAnnotations[ocispec.AnnotationBaseImageName] = sourceRef
-	ociAnnotations[ocispec.AnnotationBaseImageDigest] = sourceDigest
+	ociAnnotations[ocispec.AnnotationBaseImageName] = sourceRef.RepositoryReference()
+	ociAnnotations[ocispec.AnnotationBaseImageDigest] = sourceRef.Digest
 
-	destDigest, err := dstClient.Push(ctx, destRef, source.Version, tempDir, ociAnnotations)
+	destDigest, err := dstClient.Push(ctx, destRef, tempDir, ociAnnotations)
 	if err != nil {
 		return nil, fmt.Errorf("failed to push artifact: %w", err)
 	}
+	destRef.Digest = destDigest
 
 	logger.Info("Successfully processed artifact", "digest", destDigest)
 
 	return &OrderResult{
 		SourceRef:     sourceRef,
-		SourceDigest:  sourceDigest,
 		DestRef:       destRef,
-		DestDigest:    destDigest,
 		GitRepo:       repo,
 		GitTag:        tag,
 		GitCommitHash: commitHash,
@@ -211,9 +218,13 @@ func (rs *OrderService) PreviewOrder(
 	logger := log.FromContext(ctx)
 
 	srcClient := cmp.Or(sourceClient, rs.client)
-	sourceRef := strings.TrimPrefix(source.OCI, "oci://")
+	sourceRef, err := oci.Parse(source.OCI)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse OCI Ref: %w", err)
+	}
+	sourceRef.Tag = source.Version
 
-	logger.Info("Previewing artifact", "source", sourceRef, "version", source.Version)
+	logger.Info("Previewing artifact", "source", sourceRef.RepositoryReference(), "version", source.Version)
 
 	tempDir, err := afero.TempDir(rs.fs, "", "order-preview-*")
 	if err != nil {
@@ -222,7 +233,7 @@ func (rs *OrderService) PreviewOrder(
 	defer rs.fs.RemoveAll(tempDir) //nolint:errcheck
 
 	layout := layoutPolicy(render)
-	mediaType, _, _, err := rs.pullWithCache(ctx, srcClient, sourceRef, source.Version, tempDir, layout)
+	mediaType, _, _, err := rs.pullWithCache(ctx, srcClient, sourceRef, tempDir, layout)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pull artifact: %w", err)
 	}
@@ -287,7 +298,11 @@ func (rs *OrderService) PreviewFiles(
 	sourceClient oci.Client,
 ) ([]PreviewFile, error) {
 	srcClient := cmp.Or(sourceClient, rs.client)
-	sourceRef := strings.TrimPrefix(source.OCI, "oci://")
+	sourceRef, err := oci.Parse(source.OCI)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse OCI Ref: %w", err)
+	}
+	sourceRef.Tag = source.Version
 
 	tempDir, err := afero.TempDir(rs.fs, "", "order-preview-*")
 	if err != nil {
@@ -296,7 +311,7 @@ func (rs *OrderService) PreviewFiles(
 	defer rs.fs.RemoveAll(tempDir) //nolint:errcheck
 
 	layout := layoutPolicy(render)
-	mediaType, _, _, err := rs.pullWithCache(ctx, srcClient, sourceRef, source.Version, tempDir, layout)
+	mediaType, _, _, err := rs.pullWithCache(ctx, srcClient, sourceRef, tempDir, layout)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pull artifact: %w", err)
 	}
@@ -502,8 +517,8 @@ type cacheEntry struct {
 // pullCacheKey returns a filesystem-safe directory name for the given OCI ref + version.
 // The file layout is mixed in because merged and separate file layouts
 // must not share a cache entry.
-func pullCacheKey(ref, version string, layout deliveryv1alpha1.FileLayout) string {
-	sum := sha256.Sum256(fmt.Appendf(nil, "%s@%s#%s", ref, version, layout))
+func pullCacheKey(ref oci.Reference, layout deliveryv1alpha1.FileLayout) string {
+	sum := sha256.Sum256(fmt.Appendf(nil, "%s#%s", ref.String(), layout))
 	return fmt.Sprintf("%x", sum)
 }
 
@@ -535,11 +550,11 @@ func hasKustomization(fs afero.Fs, dir string) bool {
 // Non-Helm artifacts are merged into a single manifest.yaml unless the file
 // layout is Multi or the artifact contains a kustomization file.
 // It returns the media type, manifest digest, manifest annotations, and any error.
-func (rs *OrderService) pullWithCache(ctx context.Context, client oci.Client, ref, version, workDir string, layout deliveryv1alpha1.FileLayout) (string, string, map[string]string, error) {
+func (rs *OrderService) pullWithCache(ctx context.Context, client oci.Client, ref oci.Reference, workDir string, layout deliveryv1alpha1.FileLayout) (string, string, map[string]string, error) {
 	logger := log.FromContext(ctx)
 
 	if rs.cacheDir == "" {
-		mediaType, digest, annotations, err := client.Pull(ctx, ref, version, workDir)
+		mediaType, digest, annotations, err := client.Pull(ctx, ref, workDir)
 		if err != nil {
 			return "", "", nil, err
 		}
@@ -551,7 +566,7 @@ func (rs *OrderService) pullWithCache(ctx context.Context, client oci.Client, re
 		return mediaType, digest, annotations, nil
 	}
 
-	key := pullCacheKey(ref, version, layout)
+	key := pullCacheKey(ref, layout)
 	entryDir := filepath.Join(rs.cacheDir, key)
 	metaPath := filepath.Join(entryDir, "meta.json")
 
@@ -559,15 +574,15 @@ func (rs *OrderService) pullWithCache(ctx context.Context, client oci.Client, re
 		var entry cacheEntry
 		if err := json.Unmarshal(metaBytes, &entry); err == nil {
 			if err := rs.restoreCacheEntry(entryDir, workDir); err == nil {
-				logger.Info("Pulled source artifact from cache", "ref", ref, "version", version, "digest", entry.Digest)
+				logger.Info("Pulled source artifact from cache", "ref", ref.RepositoryReference(), "version", ref.GetReference(), "digest", entry.Digest)
 				return entry.MediaType, entry.Digest, entry.Annotations, nil
 			}
 		}
 
-		logger.Info("Cache entry invalid, re-pulling source artifact", "ref", ref, "version", version)
+		logger.Info("Cache entry invalid, re-pulling source artifact", "ref", ref.RepositoryReference(), "version", ref.GetReference())
 	}
 
-	mediaType, digest, annotations, err := client.Pull(ctx, ref, version, workDir)
+	mediaType, digest, annotations, err := client.Pull(ctx, ref, workDir)
 	if err != nil {
 		return "", "", nil, err
 	}

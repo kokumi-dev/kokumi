@@ -100,13 +100,11 @@ func handleGetPreparationManifest(deps *apiDeps) http.HandlerFunc {
 // with oci.FakeClient and afero.MemMapFs without touching the real filesystem.
 //
 // ociRef format: oci://<registry>/<repo>@sha256:<digest>
-func fetchManifest(ctx context.Context, ociClient oci.Client, fs afero.Fs, ociRef string) (string, error) {
-	rawRef := strings.TrimPrefix(ociRef, "oci://")
-	parts := strings.SplitN(rawRef, "@", 2)
-	if len(parts) != 2 {
-		return "", fmt.Errorf("invalid OCI reference format: %q", ociRef)
+func fetchManifest(ctx context.Context, ociClient oci.Client, fs afero.Fs, ref string) (string, error) {
+	ociRef, err := oci.Parse(ref)
+	if err != nil {
+		return "", fmt.Errorf("invalid OCI reference format: %q", ref)
 	}
-	ref, tag := parts[0], parts[1]
 
 	tmpDir, err := afero.TempDir(fs, "", "kokumi-manifest-*")
 	if err != nil {
@@ -114,8 +112,8 @@ func fetchManifest(ctx context.Context, ociClient oci.Client, fs afero.Fs, ociRe
 	}
 	defer fs.RemoveAll(tmpDir) //nolint:errcheck
 
-	if _, _, _, err := ociClient.Pull(ctx, ref, tag, tmpDir); err != nil {
-		return "", fmt.Errorf("pulling artifact %s@%s: %w", ref, tag, err)
+	if _, _, _, err := ociClient.Pull(ctx, ociRef, tmpDir); err != nil {
+		return "", fmt.Errorf("pulling artifact %s: %w", ociRef.String(), err)
 	}
 
 	return readYAMLFiles(fs, tmpDir)
@@ -208,9 +206,8 @@ func handleGetPreparationManifestFiles(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		rawRef := strings.TrimPrefix(prep.Spec.Artifact.OCIRef, "oci://")
-		parts := strings.SplitN(rawRef, "@", 2)
-		if len(parts) != 2 {
+		ociRef, err := oci.Parse(prep.Spec.Artifact.OCIRef)
+		if err != nil {
 			respondError(w, http.StatusBadRequest, fmt.Sprintf("invalid OCI reference format: %q", prep.Spec.Artifact.OCIRef))
 			return
 		}
@@ -222,7 +219,7 @@ func handleGetPreparationManifestFiles(deps *apiDeps) http.HandlerFunc {
 		}
 		defer deps.fs.RemoveAll(tmpDir) //nolint:errcheck
 
-		if _, _, _, err := deps.ociClient.Pull(r.Context(), parts[0], parts[1], tmpDir); err != nil {
+		if _, _, _, err := deps.ociClient.Pull(r.Context(), ociRef, tmpDir); err != nil {
 			deps.logger.Error(err, "Failed to pull artifact", "ociRef", prep.Spec.Artifact.OCIRef)
 			respondError(w, http.StatusBadGateway, "could not pull artifact: "+err.Error())
 			return

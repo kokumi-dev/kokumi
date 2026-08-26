@@ -27,7 +27,7 @@ func NewFakeClient(fs afero.Fs) *FakeClient {
 // Pull writes a minimal stub manifest.yaml into targetDir so that callers that
 // expect a manifest after pulling an artifact do not fail. It returns the
 // Annotations configured on the client (may be nil).
-func (c *FakeClient) Pull(ctx context.Context, ref, tag, targetDir string) (string, string, map[string]string, error) {
+func (c *FakeClient) Pull(ctx context.Context, ref Reference, targetDir string) (string, string, map[string]string, error) {
 	manifestPath := filepath.Join(targetDir, "manifest.yaml")
 	if err := afero.WriteFile(c.fs, manifestPath, []byte("---\n"), 0600); err != nil {
 		return "", "", nil, err
@@ -38,7 +38,7 @@ func (c *FakeClient) Pull(ctx context.Context, ref, tag, targetDir string) (stri
 
 // Push returns a unique dest digest per call. Real ORAS PackManifest adds
 // org.opencontainers.image.created, so same payloads still get different digests.
-func (c *FakeClient) Push(_ context.Context, _, _, _ string, _ map[string]string) (string, error) {
+func (c *FakeClient) Push(_ context.Context, _ Reference, _ string, _ map[string]string) (string, error) {
 	var b [32]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", err
@@ -49,6 +49,6 @@ func (c *FakeClient) Push(_ context.Context, _, _, _ string, _ map[string]string
 
 // ListTags returns an empty tag list. To return specific tags in a test,
 // embed FakeClient in a local struct and override the ListTags method.
-func (c *FakeClient) ListTags(_ context.Context, _ string) ([]string, error) {
+func (c *FakeClient) ListTags(_ context.Context, _ Reference) ([]string, error) {
 	return nil, nil
 }
