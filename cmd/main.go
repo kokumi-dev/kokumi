@@ -39,6 +39,7 @@ import (
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/controller"
 	"github.com/kokumi-dev/kokumi/internal/credential"
+	"github.com/kokumi-dev/kokumi/internal/deployer"
 	"github.com/kokumi-dev/kokumi/internal/namespace"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/service"
@@ -198,8 +199,9 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.ServingReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Deployer: deployer.NewArgoCD(mgr.GetClient()),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Serving")
 		os.Exit(1)

@@ -24,37 +24,24 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
-	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/deployer"
 	"github.com/kokumi-dev/kokumi/internal/status"
 )
-
-const (
-	argoNamespace = "argocd"
-	argoAppKind   = "Application"
-)
-
-// errAllowedOrderOptInRequired is returned when an existing Argo CD Application
-// is missing (or has a mismatched) opt-in annotation. It is treated as a
-// terminal state for the current Serving generation: the reconciler records
-// the failure on the status and stops requeueing, so the Serving does not
-// flap between "Deploying" and "DeploymentFailed". The user must update the
-// Application's annotation (or change the Serving) to retry.
-var errAllowedOrderOptInRequired = errors.New("opt-in annotation required")
 
 // ServingReconciler reconciles a Serving object
 type ServingReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Deployer deployer.Deployer
 }
 
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=servings,verbs=get;list;watch;create;update;patch;delete
@@ -96,65 +83,16 @@ func (r *ServingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return r.reconcileServing(ctx, serving)
 }
 
-// reconcileServing handles the serving by creating/updating an Argo CD Application
+// reconcileServing handles the serving by driving the deployment through the
+// configured Deployer.
 func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliveryv1alpha1.Serving) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	statusUpdater := status.NewServingUpdater(r.Client)
 
-	preparationName := serving.Spec.PreparationName
-	if serving.Spec.PreparationPolicy.Type == deliveryv1alpha1.PreparationPolicyAutomatic {
-		logger.Info("Automatic preparation policy, finding latest preparation", "order", serving.Spec.OrderName)
-
-		preparationList := &deliveryv1alpha1.PreparationList{}
-		if err := r.List(ctx, preparationList,
-			client.InNamespace(serving.Namespace),
-			client.MatchingLabels{deliveryv1alpha1.LabelOrder: serving.Spec.OrderName},
-		); err != nil {
-			logger.Error(err, "Failed to list Preparations")
-			if uerr := statusUpdater.Failed(ctx, serving, fmt.Errorf("failed to list preparations: %w", err)); uerr != nil {
-				logger.Error(uerr, "Failed to update Serving status")
-			}
-			return ctrl.Result{}, err
-		}
-
-		if len(preparationList.Items) == 0 {
-			logger.Info("No preparations found for order", "order", serving.Spec.OrderName)
-			if uerr := statusUpdater.Pending(ctx, serving, "Waiting for preparations"); uerr != nil {
-				logger.Error(uerr, "Failed to update Serving status")
-			}
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-		}
-
-		var latestPreparation *deliveryv1alpha1.Preparation
-		for i := range preparationList.Items {
-			prep := &preparationList.Items[i]
-			if !apimeta.IsStatusConditionTrue(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeReady) {
-				continue
-			}
-			if latestPreparation == nil || prep.CreationTimestamp.After(latestPreparation.CreationTimestamp.Time) {
-				latestPreparation = prep
-			}
-		}
-
-		if latestPreparation == nil {
-			logger.Info("No ready preparations found for order", "order", serving.Spec.OrderName)
-			if uerr := statusUpdater.Pending(ctx, serving, "Waiting for ready preparation"); uerr != nil {
-				logger.Error(uerr, "Failed to update Serving status")
-			}
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-		}
-
-		preparationName = latestPreparation.Name
-		logger.Info("Selected latest preparation", "preparation", preparationName)
-
-		if serving.Spec.PreparationName != preparationName {
-			serving.Spec.PreparationName = preparationName
-			if err := r.Update(ctx, serving); err != nil {
-				return ctrl.Result{}, err
-			}
-			return ctrl.Result{RequeueAfter: 0}, nil
-		}
+	preparationName, result, err := r.resolvePreparationName(ctx, serving, statusUpdater)
+	if result != nil || err != nil {
+		return *result, err
 	}
 
 	preparation := &deliveryv1alpha1.Preparation{}
@@ -169,185 +107,147 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 
 	logger.Info("Found Preparation", "preparation", preparation.Name, "digest", preparation.Spec.Artifact.Digest)
 
+	desiredDigest := preparation.Spec.Artifact.Digest
+
 	if serving.Status.ObservedPreparationName == preparationName &&
-		serving.Status.DeployedDigest == preparation.Spec.Artifact.Digest &&
+		serving.Status.DeployedDigest == desiredDigest &&
 		apimeta.IsStatusConditionTrue(serving.Status.Conditions, deliveryv1alpha1.ConditionTypeReady) {
-		logger.Info("Deployment is up-to-date", "preparation", preparationName)
-		return ctrl.Result{}, nil
+		deploymentStatus, err := r.Deployer.Status(ctx, serving)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to get deployment status: %w", err)
+		}
+
+		if deploymentStatus.Phase == deployer.PhaseHealthy && deploymentStatus.Revision == desiredDigest {
+			logger.Info("Deployment is up-to-date", "preparation", preparationName)
+			return ctrl.Result{}, nil
+		}
+		logger.Info("Deployment drifted from desired state, redeploying", "preparation", preparationName, "phase", deploymentStatus.Phase)
 	}
 
-	// Validate the opt-in annotation on any pre-existing Argo CD Application
-	// BEFORE transitioning the status to "Deploying". This avoids flapping
-	// between "Deploying" and "DeploymentFailed" on every reconcile pass when
-	// the annotation is missing.
-	if err := r.checkArgoApplicationOptIn(ctx, serving); err != nil {
-		if errors.Is(err, errAllowedOrderOptInRequired) {
-			logger.Info("Cannot update Argo CD Application, opt-in annotation must exist", "error", err.Error())
+	// Validate the opt-in on any pre-existing deployment BEFORE transitioning
+	// the status to "Deploying". This avoids flapping between "Deploying" and
+	// "DeploymentFailed" on every reconcile pass when the opt-in is missing.
+	if err := r.Deployer.VerifyOptIn(ctx, serving); err != nil {
+		if errors.Is(err, deployer.ErrOptInRequired) {
+			logger.Info("Cannot update deployment, opt-in required", "error", err.Error())
 			if uerr := statusUpdater.Failed(ctx, serving, err); uerr != nil {
 				logger.Error(uerr, "Failed to update Serving status")
 			}
 			// Terminal for this generation: do not requeue. A change to the
-			// Application (annotation) or Serving will trigger a fresh event.
+			// deployment (opt-in) or Serving will trigger a fresh event.
 			return ctrl.Result{}, nil
 		}
-		if uerr := statusUpdater.Failed(ctx, serving, fmt.Errorf("failed to check Argo CD Application: %w", err)); uerr != nil {
+		if uerr := statusUpdater.Failed(ctx, serving, fmt.Errorf("failed to check deployment opt-in: %w", err)); uerr != nil {
 			logger.Error(uerr, "Failed to update Serving status")
 		}
 		return ctrl.Result{}, err
 	}
 
-	if err := statusUpdater.Deploying(ctx, serving); err != nil {
+	if err := statusUpdater.Deploying(ctx, serving, preparationName); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	if err := r.reconcileArgoApplication(ctx, serving, preparation); err != nil {
-		logger.Error(err, "Failed to reconcile Argo CD Application")
-		if uerr := statusUpdater.Failed(ctx, serving, fmt.Errorf("failed to create Argo CD Application: %w", err)); uerr != nil {
+	if err := r.Deployer.Deploy(ctx, serving, preparation); err != nil {
+		logger.Error(err, "Failed to deploy")
+		if uerr := statusUpdater.Failed(ctx, serving, fmt.Errorf("failed to deploy: %w", err)); uerr != nil {
 			logger.Error(uerr, "Failed to update Serving status")
 		}
 		return ctrl.Result{}, err
 	}
 
-	logger.Info("Successfully created/updated Argo CD Application", "preparation", preparationName)
+	logger.Info("Successfully created/updated deployment", "preparation", preparationName)
 
-	if err := statusUpdater.Deployed(ctx, serving, preparationName, preparation.Spec.Artifact.Digest, "Successfully deployed component"); err != nil {
-		return ctrl.Result{}, err
+	deploymentStatus, err := r.Deployer.Status(ctx, serving)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to get deployment status: %w", err)
 	}
 
+	if deploymentStatus.Phase == deployer.PhaseDegraded {
+		if uerr := statusUpdater.Failed(ctx, serving, fmt.Errorf("deployment degraded: %s", deploymentStatus.Message)); uerr != nil {
+			logger.Error(uerr, "Failed to update Serving status")
+		}
+		return ctrl.Result{}, nil
+	}
+
+	if deploymentStatus.Phase == deployer.PhaseHealthy && deploymentStatus.Revision == desiredDigest {
+		if err := statusUpdater.Deployed(ctx, serving, preparationName, desiredDigest, "Successfully deployed component"); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+
+	logger.Info("Deployment not yet healthy at desired revision, staying in Deploying",
+		"preparation", preparationName, "phase", deploymentStatus.Phase, "revision", deploymentStatus.Revision)
 	return ctrl.Result{}, nil
 }
 
-// reconcileArgoApplication creates or updates an Argo CD Application resource
-func (r *ServingReconciler) reconcileArgoApplication(ctx context.Context, serving *deliveryv1alpha1.Serving, preparation *deliveryv1alpha1.Preparation) error {
+// resolvePreparationName determines the Preparation the Serving should
+// deploy. Under the Manual policy this is simply spec.preparationName. Under
+// the Automatic policy it is the newest Ready Preparation of the Serving's
+// Order.
+func (r *ServingReconciler) resolvePreparationName(ctx context.Context, serving *deliveryv1alpha1.Serving, statusUpdater *status.ServingUpdater) (string, *ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	ociRef, err := oci.Parse(preparation.Spec.Artifact.OCIRef)
-	if err != nil {
-		return fmt.Errorf("failed to parse OCI Ref: %w", err)
+	if serving.Spec.PreparationPolicy.Type != deliveryv1alpha1.PreparationPolicyAutomatic {
+		return serving.Spec.PreparationName, nil, nil
 	}
 
-	targetRevision := ociRef.Digest
-	appName := serving.Name
+	logger.Info("Automatic preparation policy, finding latest preparation", "order", serving.Spec.OrderName)
 
-	app := &unstructured.Unstructured{
-		Object: map[string]any{
-			"apiVersion": "argoproj.io/v1alpha1",
-			"kind":       argoAppKind,
-			"metadata": map[string]any{
-				"name":      appName,
-				"namespace": argoNamespace,
-				"labels": map[string]any{
-					deliveryv1alpha1.LabelOrder:   serving.Spec.OrderName,
-					deliveryv1alpha1.LabelServing: serving.Name,
-				},
-				"annotations": map[string]any{
-					deliveryv1alpha1.AnnotationAllowedOrder: serving.Spec.OrderName,
-				},
-			},
-			"spec": map[string]any{
-				"project": "default",
-				"source": map[string]any{
-					"repoURL":        ociRef.RepositoryReference(),
-					"targetRevision": targetRevision,
-					"path":           ".",
-				},
-				"destination": map[string]any{
-					"server":    "https://kubernetes.default.svc",
-					"namespace": serving.Namespace,
-				},
-			},
-		},
-	}
-
-	app.Object["spec"].(map[string]any)["syncPolicy"] = map[string]any{
-		"automated": map[string]any{
-			"prune":    true,
-			"selfHeal": true,
-		},
-		"syncOptions": []any{
-			"ServerSideApply=true",
-		},
-	}
-
-	existing := &unstructured.Unstructured{}
-	existing.SetGroupVersionKind(app.GroupVersionKind())
-	err = r.Get(ctx, client.ObjectKey{Namespace: argoNamespace, Name: appName}, existing)
-
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			logger.Info("Creating Argo CD Application", "name", appName, "namespace", argoNamespace, "revision", targetRevision)
-			if err := r.Create(ctx, app); err != nil {
-				return fmt.Errorf("failed to create Application: %w", err)
-			}
-			logger.Info("Created Argo CD Application", "name", appName)
-		} else {
-			return fmt.Errorf("failed to get existing Application: %w", err)
+	preparationList := &deliveryv1alpha1.PreparationList{}
+	if err := r.List(ctx, preparationList,
+		client.InNamespace(serving.Namespace),
+		client.MatchingLabels{deliveryv1alpha1.LabelOrder: serving.Spec.OrderName},
+	); err != nil {
+		logger.Error(err, "Failed to list Preparations")
+		if uerr := statusUpdater.Failed(ctx, serving, fmt.Errorf("failed to list preparations: %w", err)); uerr != nil {
+			logger.Error(uerr, "Failed to update Serving status")
 		}
-	} else {
-		if err := assertAllowedOrderAnnotation(existing, serving.Spec.OrderName); err != nil {
-			logger.Info(
-				"Cannot update Argo CD Application, opt-in annotation must exist",
-				"name", appName,
-				"namespace", argoNamespace,
-				"requiredAnnotation", deliveryv1alpha1.AnnotationAllowedOrder,
-				"expectedValue", serving.Spec.OrderName,
-				"actualValue", existing.GetAnnotations()[deliveryv1alpha1.AnnotationAllowedOrder],
-			)
-			return err
-		}
-
-		app.SetResourceVersion(existing.GetResourceVersion())
-		logger.Info("Updating Argo CD Application", "name", appName, "namespace", argoNamespace, "revision", targetRevision)
-		if err := r.Update(ctx, app); err != nil {
-			return fmt.Errorf("failed to update Application: %w", err)
-		}
-		logger.Info("Updated Argo CD Application", "name", appName)
+		return "", &ctrl.Result{}, err
 	}
 
-	return nil
-}
-
-// checkArgoApplicationOptIn looks up the Argo CD Application that this Serving
-// would manage and verifies the opt-in annotation. It returns nil when the
-// Application does not yet exist (the create path is always allowed) or when
-// the annotation matches the Serving's Order. When the annotation is missing
-// or refers to a different Order it returns an error wrapping
-// errAllowedOrderOptInRequired.
-func (r *ServingReconciler) checkArgoApplicationOptIn(ctx context.Context, serving *deliveryv1alpha1.Serving) error {
-	existing := &unstructured.Unstructured{}
-	existing.SetGroupVersionKind(schema.GroupVersionKind{
-		Group:   "argoproj.io",
-		Version: "v1alpha1",
-		Kind:    argoAppKind,
-	})
-
-	err := r.Get(ctx, client.ObjectKey{Namespace: argoNamespace, Name: serving.Name}, existing)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil
+	if len(preparationList.Items) == 0 {
+		logger.Info("No preparations found for order", "order", serving.Spec.OrderName)
+		if uerr := statusUpdater.Pending(ctx, serving, "Waiting for preparations"); uerr != nil {
+			logger.Error(uerr, "Failed to update Serving status")
 		}
-		return fmt.Errorf("failed to get existing Application: %w", err)
+		result := ctrl.Result{RequeueAfter: 30 * time.Second}
+		return "", &result, nil
 	}
 
-	return assertAllowedOrderAnnotation(existing, serving.Spec.OrderName)
-}
-
-// assertAllowedOrderAnnotation returns errAllowedOrderOptInRequired (wrapped
-// with a descriptive message) if the given Application is not annotated with
-// the expected delivery.kokumi.dev/allowed-order value.
-func assertAllowedOrderAnnotation(app *unstructured.Unstructured, expectedOrder string) error {
-	actual := app.GetAnnotations()[deliveryv1alpha1.AnnotationAllowedOrder]
-	if actual == expectedOrder {
-		return nil
+	var latestPreparation *deliveryv1alpha1.Preparation
+	for i := range preparationList.Items {
+		prep := &preparationList.Items[i]
+		if !apimeta.IsStatusConditionTrue(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeReady) {
+			continue
+		}
+		if latestPreparation == nil || prep.CreationTimestamp.After(latestPreparation.CreationTimestamp.Time) {
+			latestPreparation = prep
+		}
 	}
-	return fmt.Errorf(
-		"%w: Argo CD Application %q must be annotated with %q=%q (current value: %q)",
-		errAllowedOrderOptInRequired,
-		app.GetName(),
-		deliveryv1alpha1.AnnotationAllowedOrder,
-		expectedOrder,
-		actual,
-	)
+
+	if latestPreparation == nil {
+		logger.Info("No ready preparations found for order", "order", serving.Spec.OrderName)
+		if uerr := statusUpdater.Pending(ctx, serving, "Waiting for ready preparation"); uerr != nil {
+			logger.Error(uerr, "Failed to update Serving status")
+		}
+		result := ctrl.Result{RequeueAfter: 30 * time.Second}
+		return "", &result, nil
+	}
+
+	preparationName := latestPreparation.Name
+	logger.Info("Selected latest preparation", "preparation", preparationName)
+
+	if serving.Spec.PreparationName != preparationName {
+		serving.Spec.PreparationName = preparationName
+		if err := r.Update(ctx, serving); err != nil {
+			return "", &ctrl.Result{}, err
+		}
+		result := ctrl.Result{RequeueAfter: 0}
+		return "", &result, nil
+	}
+
+	return preparationName, nil, nil
 }
 
 // reconcileDelete handles the deletion of a Serving
@@ -356,25 +256,9 @@ func (r *ServingReconciler) reconcileDelete(ctx context.Context, serving *delive
 	logger.Info("Handling deletion of Serving")
 
 	if controllerutil.ContainsFinalizer(serving, deliveryv1alpha1.Finalizer) {
-		logger.Info("Cleaning up Argo CD Application")
-
-		app := &unstructured.Unstructured{}
-		app.SetGroupVersionKind(schema.GroupVersionKind{
-			Group:   "argoproj.io",
-			Version: "v1alpha1",
-			Kind:    argoAppKind,
-		})
-		app.SetNamespace(argoNamespace)
-		app.SetName(serving.Name)
-
-		if err := r.Delete(ctx, app); err != nil {
-			if !apierrors.IsNotFound(err) {
-				logger.Error(err, "Failed to delete Argo CD Application")
-				return ctrl.Result{}, err
-			}
-			logger.Info("Argo CD Application already deleted")
-		} else {
-			logger.Info("Deleted Argo CD Application", "name", serving.Name)
+		logger.Info("Cleaning up deployment")
+		if err := r.Deployer.Remove(ctx, serving); err != nil {
+			return ctrl.Result{}, err
 		}
 
 		controllerutil.RemoveFinalizer(serving, deliveryv1alpha1.Finalizer)
@@ -386,7 +270,8 @@ func (r *ServingReconciler) reconcileDelete(ctx context.Context, serving *delive
 	return ctrl.Result{}, nil
 }
 
-// enqueueServingForPreparation triggers reconciliation for Servings that reference a serving
+// enqueueServingForPreparation triggers reconciliation for Servings that
+// reference or are associated with the Preparation.
 func (r *ServingReconciler) enqueueServingForPreparation() handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []ctrl.Request {
 		logger := log.FromContext(ctx)
@@ -425,6 +310,9 @@ func (r *ServingReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&deliveryv1alpha1.Serving{}).
 		Watches(&deliveryv1alpha1.Preparation{}, r.enqueueServingForPreparation()).
+		Watches(r.Deployer.WatchObject(),
+			handler.EnqueueRequestsFromMapFunc(r.Deployer.EnqueueRequests),
+			builder.WithPredicates(r.Deployer.WatchPredicate())).
 		Named("serving").
 		Complete(r)
 }

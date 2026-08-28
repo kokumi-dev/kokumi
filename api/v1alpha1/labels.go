@@ -32,6 +32,12 @@ const (
 
 	// LabelServing is the name of the Serving that owns an Argo CD Application.
 	LabelServing = "delivery.kokumi.dev/serving"
+
+	// LabelServingNamespace is the namespace of the Serving that owns an
+	// Argo CD Application. It is required to map events on the Application,
+	// which lives in the argocd namespace, back to the Serving, which lives
+	// in its own namespace.
+	LabelServingNamespace = "delivery.kokumi.dev/serving-namespace"
 )
 
 // Annotation keys applied to kokumi-managed resources.

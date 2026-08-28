@@ -205,10 +205,15 @@ directly. A Serving is created or updated in three ways:
 When a Serving is reconciled, the controller:
 
 1. Resolves the referenced Preparation and its immutable OCI artifact digest.
-2. Creates or updates an Argo CD `Application` in the `argocd` namespace,
+2. Verifies the opt-in on any pre-existing Argo CD `Application` and
+   transitions the Serving to `Deploying`, recording the preparation as the
+   observed (active) one.
+3. Creates or updates the Argo CD `Application` in the `argocd` namespace,
    pointing `spec.source.repoURL` at the Preparation's OCI artifact and
    `spec.source.targetRevision` at its exact digest.
-3. Argo CD takes over and syncs the manifests into the target namespace.
+4. Keeps the `Deploying` status until the Application reports `Healthy` and
+   is synced to the desired revision, then transitions the Serving to
+   `Deployed`. A degraded Application surfaces as `DeploymentFailed`.
 
 Rollback is promoting any previous Preparation — no re-rendering required.
 
