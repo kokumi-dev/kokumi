@@ -304,11 +304,6 @@ func (r *OrderReconciler) createPreparation(
 		return nil, fmt.Errorf("failed to create Preparation: %w", err)
 	}
 
-	prepStatusUpdater := status.NewPreparationUpdater(r.Client)
-	if err := prepStatusUpdater.Ready(ctx, preparation, "Preparation is ready for serving"); err != nil {
-		logger.Error(err, "Failed to update Preparation status")
-	}
-
 	return preparation, nil
 }
 

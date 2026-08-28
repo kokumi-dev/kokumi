@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/status"
 )
 
 // PreparationReconciler reconciles a Preparation object
@@ -62,6 +63,14 @@ func (r *PreparationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	if !apimeta.IsStatusConditionTrue(preparation.Status.Conditions, deliveryv1alpha1.ConditionTypeReady) {
 		logger.Info("Preparation not ready, skipping")
+
+		// Temporary no-op to mark the Preparation as ready.
+		// This should be replaced with proper validation and readiness
+		// conditions once the remaining readiness criteria are defined.
+		statusUpdater := status.NewPreparationUpdater(r.Client)
+		if uerr := statusUpdater.Ready(ctx, preparation, "Preparation is ready for serving"); uerr != nil {
+			logger.Error(uerr, "Failed to update Preparation status")
+		}
 		return ctrl.Result{}, nil
 	}
 

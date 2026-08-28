@@ -66,7 +66,7 @@ func stateFromConditions(conditions []metav1.Condition) string {
 			return c.Reason
 		}
 	}
-	return ""
+	return "Unknown"
 }
 
 // orderToDTO converts a Order CRD object and the name of its currently active
