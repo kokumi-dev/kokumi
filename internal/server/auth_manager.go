@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 )
@@ -42,8 +43,8 @@ func newAuthManager(
 	apiReader client.Reader,
 	ns string,
 	tokenTTL time.Duration,
-	logger logr.Logger,
 ) *authManager {
+	logger := log.FromContext(ctx)
 	m := &authManager{
 		reader:    reader,
 		apiReader: apiReader,

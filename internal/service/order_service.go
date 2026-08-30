@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
@@ -434,7 +434,7 @@ func yamlFiles(fs afero.Fs, dir string) ([]string, error) {
 		files = append(files, matches...)
 	}
 
-	sort.Strings(files)
+	slices.Sort(files)
 
 	return files, nil
 }

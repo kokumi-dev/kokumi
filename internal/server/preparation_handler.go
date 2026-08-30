@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
@@ -177,7 +177,7 @@ func listArtifactFiles(fs afero.Fs, dir string) ([]ArtifactFileDTO, error) {
 		return nil, fmt.Errorf("no YAML/JSON files found in artifact")
 	}
 
-	sort.Slice(files, func(i, j int) bool { return files[i].Path < files[j].Path })
+	slices.SortFunc(files, func(a, b ArtifactFileDTO) int { return strings.Compare(a.Path, b.Path) })
 
 	return files, nil
 }

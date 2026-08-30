@@ -3,7 +3,7 @@ package server
 import (
 	"encoding/json"
 	"net/http"
-	"sort"
+	"slices"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 
@@ -369,14 +369,14 @@ func enrichPreparations(preps []deliveryv1alpha1.Preparation, servings []deliver
 	}
 
 	// Sort newest-first by CreatedAt so the latest preparation is always at the top.
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].CreatedAt == nil {
-			return false
+	slices.SortFunc(out, func(a, b PreparationDTO) int {
+		if a.CreatedAt == nil {
+			return 1
 		}
-		if out[j].CreatedAt == nil {
-			return true
+		if b.CreatedAt == nil {
+			return -1
 		}
-		return out[i].CreatedAt.After(*out[j].CreatedAt)
+		return b.CreatedAt.Compare(*a.CreatedAt)
 	})
 
 	return out
