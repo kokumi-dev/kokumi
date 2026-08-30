@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-logr/logr"
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/namespace"
 	"github.com/kokumi-dev/kokumi/internal/oci"
@@ -19,6 +18,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // Counts holds the current resource count for each CRD type.
@@ -53,10 +53,10 @@ func newScheme() *runtime.Scheme {
 // logs and returns nil so the hub stays idle.
 func startK8sWatcher(
 	ctx context.Context,
-	logger logr.Logger,
 	h *hub,
 	getenv func(string) string,
 ) (*apiDeps, error) {
+	logger := log.FromContext(ctx)
 	cfg, err := ctrl.GetConfig()
 	if err != nil {
 		logger.Info("No Kubernetes config found, API endpoints will return 503", "error", err)
@@ -102,7 +102,7 @@ func startK8sWatcher(
 	}
 
 	// Build the auth manager up front so it is never nil when cache handlers fire.
-	deps.authMgr = newAuthManager(ctx, k8sCache, writer, installNamespace, tokenTTL, logger)
+	deps.authMgr = newAuthManager(ctx, k8sCache, writer, installNamespace, tokenTTL)
 
 	informers, err := getInformers(ctx, k8sCache)
 	if err != nil {

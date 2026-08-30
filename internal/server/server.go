@@ -62,7 +62,7 @@ func Run(
 	logger := log.FromContext(ctx)
 
 	h := newHub()
-	deps, err := startK8sWatcher(ctx, logger, h, getenv)
+	deps, err := startK8sWatcher(ctx, h, getenv)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "Warning: failed to start Kubernetes watcher: %s\n", err)
 	}
