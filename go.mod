@@ -10,7 +10,7 @@ require (
 	github.com/onsi/gomega v1.42.1
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.1.1
-	github.com/oras-project/oras-go/v3 v3.0.2-dev
+	github.com/oras-project/oras-go/v3 v3.0.3-dev
 	github.com/spf13/afero v1.15.0
 	github.com/stretchr/testify v1.12.1
 	golang.org/x/crypto v0.55.0
