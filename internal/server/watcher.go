@@ -68,9 +68,15 @@ func startK8sWatcher(
 
 	k8sCache, err := cache.New(cfg, cache.Options{
 		Scheme: scheme,
-		// Restrict Secret watches to the server namespace so the namespaced RBAC Role suffices.
+		// Restrict Secret and ServiceAccount watches to the server namespace so
+		// the namespaced RBAC Role suffices.
 		ByObject: map[client.Object]cache.ByObject{
 			&corev1.Secret{}: {
+				Namespaces: map[string]cache.Config{
+					installNamespace: {},
+				},
+			},
+			&corev1.ServiceAccount{}: {
 				Namespaces: map[string]cache.Config{
 					installNamespace: {},
 				},
@@ -87,12 +93,14 @@ func startK8sWatcher(
 	}
 
 	deps := &apiDeps{
-		reader:    k8sCache,
-		apiReader: writer,
 		ociClient: oci.NewORASClient(),
 		fs:        afero.NewOsFs(),
 		logger:    logger,
 	}
+
+	// Impersonation layer: all user-facing operations execute as the mapped
+	// ServiceAccount so Kubernetes RBAC is the single source of truth.
+	deps.impersonator = newImpersonator(cfg, scheme, installNamespace)
 
 	var tokenTTL time.Duration
 	if v := strings.TrimSpace(getenv("KOKUMI_TOKEN_TTL")); v != "" {
@@ -115,6 +123,22 @@ func startK8sWatcher(
 	pantryInformer := informers.pantry
 	kitchenInformer := informers.kitchen
 	secretInformer := informers.secret
+	saInformer := informers.sa
+
+	// saList reads ServiceAccounts in the install namespace from the informer
+	// cache; used per request to resolve identity -> ServiceAccount mappings.
+	deps.saList = func() []*corev1.ServiceAccount {
+		list := &corev1.ServiceAccountList{}
+		if err := k8sCache.List(ctx, list, client.InNamespace(installNamespace)); err != nil {
+			logger.Error(err, "Failed to list ServiceAccounts from cache")
+			return nil
+		}
+		out := make([]*corev1.ServiceAccount, 0, len(list.Items))
+		for i := range list.Items {
+			out = append(out, &list.Items[i])
+		}
+		return out
+	}
 
 	// refreshAll reads from the local informer cache and broadcasts snapshots to all SSE subscribers.
 	refreshAll := func() {
@@ -215,7 +239,7 @@ func startK8sWatcher(
 
 	if err := registerWatchers(
 		orderInformer, prepInformer, servingInformer, menuInformer, pantryInformer,
-		kitchenInformer, secretInformer,
+		kitchenInformer, secretInformer, saInformer,
 		refreshAll, kitchenHandler, secretHandler,
 	); err != nil {
 		return nil, err
@@ -242,7 +266,7 @@ func startK8sWatcher(
 // registerWatchers wires the SSE-refresh handler onto resource informers and the
 // auth handlers onto Kitchen/Secret informers (split out to keep startK8sWatcher small).
 func registerWatchers(
-	order, prep, serving, menu, pantry, kitchen, secret cache.Informer,
+	order, prep, serving, menu, pantry, kitchen, secret, sa cache.Informer,
 	refreshAll func(),
 	kitchenHandler, secretHandler toolscache.ResourceEventHandlerFuncs,
 ) error {
@@ -251,6 +275,8 @@ func registerWatchers(
 		UpdateFunc: func(_, _ any) { refreshAll() },
 		DeleteFunc: func(_ any) { refreshAll() },
 	}
+	// ServiceAccount changes can alter identity mappings; no SSE refresh needed.
+	noopHandler := toolscache.ResourceEventHandlerFuncs{}
 	type reg struct {
 		informer cache.Informer
 		handler  toolscache.ResourceEventHandlerFuncs
@@ -264,6 +290,7 @@ func registerWatchers(
 		{pantry, sseHandler, "Pantry"},
 		{kitchen, kitchenHandler, "Kitchen"},
 		{secret, secretHandler, "Secret"},
+		{sa, noopHandler, "ServiceAccount"},
 	} {
 		if _, err := r.informer.AddEventHandler(r.handler); err != nil {
 			return fmt.Errorf("adding %s event handler: %w", r.name, err)
@@ -281,6 +308,7 @@ type informers struct {
 	pantry  cache.Informer
 	kitchen cache.Informer
 	secret  cache.Informer
+	sa      cache.Informer
 }
 
 // getInformers registers and returns the informers the server needs (split out to keep startK8sWatcher small).
@@ -307,6 +335,9 @@ func getInformers(ctx context.Context, c cache.Cache) (informers, error) {
 	}
 	if out.secret, err = c.GetInformer(ctx, &corev1.Secret{}); err != nil {
 		return out, fmt.Errorf("getting Secret informer: %w", err)
+	}
+	if out.sa, err = c.GetInformer(ctx, &corev1.ServiceAccount{}); err != nil {
+		return out, fmt.Errorf("getting ServiceAccount informer: %w", err)
 	}
 	return out, nil
 }

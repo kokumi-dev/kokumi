@@ -35,6 +35,8 @@ type oidcProvider struct {
 	verifier      *oidc.IDTokenVerifier
 	oauth         oauth2.Config
 	usernameClaim string
+	emailClaim    string
+	groupsClaim   string
 	auth          *authenticator
 }
 
@@ -89,8 +91,18 @@ func buildOIDCProvider(
 		verifier:      provider.Verifier(&oidc.Config{ClientID: cfg.ClientID}),
 		oauth:         oauth,
 		usernameClaim: cfg.UsernameClaim,
+		emailClaim:    defaultString(cfg.EmailClaim, "email"),
+		groupsClaim:   defaultString(cfg.GroupsClaim, "groups"),
 		auth:          auth,
 	}, nil
+}
+
+// defaultString returns the value when non-empty, else the fallback.
+func defaultString(v, fallback string) string {
+	if strings.TrimSpace(v) == "" {
+		return fallback
+	}
+	return v
 }
 
 // redirectURI derives the callback URL from the request, honoring X-Forwarded-Proto.
@@ -112,14 +124,16 @@ func (p *oidcProvider) Refresh(_ *http.Request) (*Session, error) {
 	return nil, fmt.Errorf("oidc refresh uses the shared refresh cookie")
 }
 
-// issueSession mints a kokumi access + refresh token pair; minting errors are returned.
-func (p *oidcProvider) issueSession(username string) (*Session, error) {
+// issueSession mints a kokumi access + refresh token pair carrying the OIDC
+// identity claims (sub, email, groups) used for ServiceAccount mapping;
+// minting errors are returned.
+func (p *oidcProvider) issueSession(id *Identity) (*Session, error) {
 	now := time.Now()
-	access, expires, err := p.auth.issueAccessTokenFor(now, username)
+	access, expires, err := p.auth.issueAccessTokenFor(now, id)
 	if err != nil {
 		return nil, fmt.Errorf("issuing access token: %w", err)
 	}
-	refresh, _, err := p.auth.issueRefreshToken(now, username)
+	refresh, err := p.auth.issueRefreshToken(now, id)
 	if err != nil {
 		return nil, fmt.Errorf("issuing refresh token: %w", err)
 	}
@@ -240,12 +254,12 @@ func handleOIDCCallback(m *authManager) http.HandlerFunc {
 			respondError(w, http.StatusBadRequest, "failed to parse id token claims")
 			return
 		}
-		username, err := extractClaim(claims, p.usernameClaim)
+		id, err := identityFromClaims(claims, p.usernameClaim, p.emailClaim, p.groupsClaim)
 		if err != nil {
 			respondError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		session, err := p.issueSession(username)
+		session, err := p.issueSession(id)
 		if err != nil {
 			log := logr.FromContextOrDiscard(r.Context())
 			log.Error(err, "Failed to issue OIDC session")

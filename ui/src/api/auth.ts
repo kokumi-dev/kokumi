@@ -34,23 +34,29 @@ export function onAuthChange(listener: () => void): () => void {
 // decodeTokenPayload returns the parsed JWT payload, or null if the token is
 // missing or unreadable. Used to derive expiry and the username without a
 // server-provided TTL.
-function decodeTokenPayload(tokenToCheck: string | null = token): { exp?: number; sub?: string } | null {
+function decodeTokenPayload(tokenToCheck: string | null = token): {
+  exp?: number
+  sub?: string
+  email?: string
+} | null {
   if (!tokenToCheck) return null
   const parts = tokenToCheck.split('.')
   if (parts.length < 2) return null
   try {
-    return JSON.parse(atob(parts[1])) as { exp?: number; sub?: string }
+    return JSON.parse(atob(parts[1])) as { exp?: number; sub?: string; email?: string }
   } catch {
     return null
   }
 }
 
 /**
- * Returns the username (JWT `sub` claim) of the current token, or null when
- * there is no token or it is unreadable. Shown in the sidebar.
+ * Returns the username of the current token, or null when there is no token
+ * or it is unreadable. Shown in the sidebar. Prefers the email claim and falls
+ *  back to the subject claim
  */
 export function getUsername(): string | null {
-  return decodeTokenPayload()?.sub ?? null
+  const payload = decodeTokenPayload()
+  return payload?.email || payload?.sub || null
 }
 
 /**

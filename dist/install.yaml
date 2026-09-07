@@ -146,6 +146,23 @@ spec:
                             type: string
                         type: object
                         x-kubernetes-map-type: atomic
+                      emailClaim:
+                        default: email
+                        description: |-
+                          EmailClaim is the ID-token claim used as the user's email for
+                          ServiceAccount identity mapping (kokumi.dev/identity-email). Supports
+                          dotted paths for nested claims (e.g. "user.email"). Defaults to "email".
+                        maxLength: 253
+                        type: string
+                      groupsClaim:
+                        default: groups
+                        description: |-
+                          GroupsClaim is the ID-token claim holding the user's group memberships
+                          (a list of strings) for ServiceAccount identity mapping
+                          (kokumi.dev/identity-groups). Supports dotted paths for nested claims
+                          (e.g. "realm_access.roles" for Keycloak). Defaults to "groups".
+                        maxLength: 253
+                        type: string
                       issuerURL:
                         description: |-
                           IssuerURL is the base URL of the OIDC issuer (e.g.
@@ -1782,6 +1799,17 @@ spec:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
+  annotations:
+    kokumi.dev/description: Full access; used by the built-in admin login
+  labels:
+    app.kubernetes.io/component: server
+    app.kubernetes.io/name: kokumi
+  name: kokumi-admin
+  namespace: kokumi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: kokumi
@@ -1791,10 +1819,34 @@ metadata:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
+  annotations:
+    kokumi.dev/description: Create/update/delete kokumi resources; map users via kokumi.dev/identity-*
+      annotations
+  labels:
+    app.kubernetes.io/component: server
+    app.kubernetes.io/name: kokumi
+  name: kokumi-editor
+  namespace: kokumi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
   labels:
     app.kubernetes.io/component: server
     app.kubernetes.io/name: kokumi
   name: kokumi-server
+  namespace: kokumi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  annotations:
+    kokumi.dev/description: Read-only access; map users via kokumi.dev/identity-*
+      annotations
+  labels:
+    app.kubernetes.io/component: server
+    app.kubernetes.io/name: kokumi
+  name: kokumi-viewer
   namespace: kokumi
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -1846,8 +1898,6 @@ metadata:
 rules:
 - apiGroups:
   - ""
-  resourceNames:
-  - kokumi-server-auth
   resources:
   - secrets
   verbs:
@@ -1858,21 +1908,23 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: kokumi-server-secrets-role
+  name: kokumi-server-impersonator
   namespace: kokumi
 rules:
 - apiGroups:
   - ""
   resources:
-  - secrets
+  - serviceaccounts
   verbs:
   - get
   - list
   - watch
-  - create
-  - update
-  - patch
-  - delete
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  verbs:
+  - impersonate
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -2401,6 +2453,57 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
+  name: kokumi-server-editor-role
+rules:
+- apiGroups:
+  - delivery.kokumi.dev
+  resources:
+  - menus
+  - orders
+  - preparations
+  - recipes
+  - servings
+  - pantries
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - create
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kokumi-server-kitchen-watcher
+rules:
+- apiGroups:
+  - delivery.kokumi.dev
+  resources:
+  - kitchens
+  - menus
+  - orders
+  - preparations
+  - recipes
+  - servings
+  - pantries
+  verbs:
+  - get
+  - list
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
   name: kokumi-server-role
 rules:
 - apiGroups:
@@ -2421,6 +2524,34 @@ rules:
   - update
   - patch
   - delete
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - create
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kokumi-server-viewer-role
+rules:
+- apiGroups:
+  - delivery.kokumi.dev
+  resources:
+  - menus
+  - orders
+  - preparations
+  - recipes
+  - servings
+  - pantries
+  - kitchens
+  verbs:
+  - get
+  - list
+  - watch
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -2527,12 +2658,12 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: kokumi-server-secrets-rolebinding
+  name: kokumi-server-impersonator-binding
   namespace: kokumi
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: kokumi-server-secrets-role
+  name: kokumi-server-impersonator
 subjects:
 - kind: ServiceAccount
   name: kokumi-server
@@ -2570,14 +2701,53 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: kokumi-server-rolebinding
+  name: kokumi-server-admin-rolebinding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: kokumi-server-role
 subjects:
 - kind: ServiceAccount
+  name: kokumi-admin
+  namespace: kokumi
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kokumi-server-editor-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kokumi-server-editor-role
+subjects:
+- kind: ServiceAccount
+  name: kokumi-editor
+  namespace: kokumi
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kokumi-server-kitchen-watcher-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kokumi-server-kitchen-watcher
+subjects:
+- kind: ServiceAccount
   name: kokumi-server
+  namespace: kokumi
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kokumi-server-viewer-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kokumi-server-viewer-role
+subjects:
+- kind: ServiceAccount
+  name: kokumi-viewer
   namespace: kokumi
 ---
 apiVersion: v1

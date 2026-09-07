@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -141,23 +142,31 @@ func (a *authenticator) verifyCredentials(username, password string) bool {
 	return userMatch && passMatch
 }
 
-// issueAccessToken mints a signed access JWT.
+// issueAccessToken mints a signed access JWT for the admin identity.
 func (a *authenticator) issueAccessToken(now time.Time) (string, time.Time, error) {
-	return a.issueTypedToken(now, a.accessTTL, accessTokenType, a.username)
+	return a.issueAdminToken(now)
 }
 
-// issueAccessTokenFor mints an access JWT for an explicit subject (OIDC ID-token username).
-func (a *authenticator) issueAccessTokenFor(now time.Time, username string) (string, time.Time, error) {
+// issueAccessTokenFor mints an access JWT for an explicit identity (OIDC claims
+// or admin username); email/groups/provider are embedded for SA mapping.
+func (a *authenticator) issueAccessTokenFor(now time.Time, id *Identity) (string, time.Time, error) {
 	expires := now.Add(a.accessTTL)
-	claims := jwt.RegisteredClaims{
-		Subject:   username,
+	registered := jwt.RegisteredClaims{
+		Subject:   id.Subject,
 		Issuer:    tokenIssuer,
 		IssuedAt:  jwt.NewNumericDate(now),
 		NotBefore: jwt.NewNumericDate(now),
 		ExpiresAt: jwt.NewNumericDate(expires),
 		ID:        randomTokenID(),
 	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, typedClaims{RegisteredClaims: claims, TokenType: accessTokenType})
+	claims := identityClaims{
+		RegisteredClaims: registered,
+		TokenType:        accessTokenType,
+		Email:            id.Email,
+		Groups:           id.Groups,
+		Provider:         id.Provider,
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, err := token.SignedString(a.signingKey)
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("signing token: %w", err)
@@ -165,54 +174,69 @@ func (a *authenticator) issueAccessTokenFor(now time.Time, username string) (str
 	return signed, expires, nil
 }
 
-// issueRefreshToken mints a refresh JWT; subject is carried so refresh preserves
-// identity (an OIDC login must not flip to the admin username).
-func (a *authenticator) issueRefreshToken(now time.Time, subject string) (string, time.Time, error) {
-	return a.issueTypedToken(now, a.refreshTTL, refreshTokenType, subject)
-}
-
-// issueTypedToken mints a typed JWT; sub defaults to the admin username when empty.
-func (a *authenticator) issueTypedToken(now time.Time, ttl time.Duration, typ, sub string) (string, time.Time, error) {
-	if sub == "" {
-		sub = a.username
+// issueRefreshToken mints a refresh JWT carrying the full identity so a
+// refresh preserves it (an OIDC login must not flip to the admin identity).
+func (a *authenticator) issueRefreshToken(now time.Time, id *Identity) (string, error) {
+	if id.Subject == "" {
+		id = &Identity{Subject: a.username, Provider: providerAdmin}
 	}
-	expires := now.Add(ttl)
-	claims := jwt.RegisteredClaims{
-		Subject:   sub,
+	expires := now.Add(a.refreshTTL)
+	registered := jwt.RegisteredClaims{
+		Subject:   id.Subject,
 		Issuer:    tokenIssuer,
 		IssuedAt:  jwt.NewNumericDate(now),
 		NotBefore: jwt.NewNumericDate(now),
 		ExpiresAt: jwt.NewNumericDate(expires),
 		ID:        randomTokenID(),
 	}
-	// Embed token type so parseTypedToken rejects cross-role use (e.g. refresh as bearer).
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, typedClaims{RegisteredClaims: claims, TokenType: typ})
+	claims := identityClaims{
+		RegisteredClaims: registered,
+		TokenType:        refreshTokenType,
+		Email:            id.Email,
+		Groups:           id.Groups,
+		Provider:         id.Provider,
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, err := token.SignedString(a.signingKey)
 	if err != nil {
-		return "", time.Time{}, fmt.Errorf("signing token: %w", err)
+		return "", fmt.Errorf("signing token: %w", err)
 	}
-	return signed, expires, nil
+	return signed, nil
 }
 
-// typedClaims adds a private "typ" claim to RegisteredClaims.
-type typedClaims struct {
-	jwt.RegisteredClaims
-	TokenType string `json:"typ"`
+// issueAdminToken mints the admin session's access token with the admin
+// identity embedded (provider=admin so it maps to the admin ServiceAccount).
+func (a *authenticator) issueAdminToken(now time.Time) (string, time.Time, error) {
+	return a.issueAccessTokenFor(now, &Identity{Subject: a.username, Provider: providerAdmin})
 }
 
 // parseToken verifies an access token.
 func (a *authenticator) parseToken(tokenString string) (*jwt.RegisteredClaims, error) {
-	return a.parseTypedToken(tokenString, accessTokenType)
+	claims, err := a.parseTypedToken(tokenString, accessTokenType)
+	if err != nil {
+		return nil, err
+	}
+	return &claims.RegisteredClaims, nil
 }
 
-// parseRefresh verifies a refresh token.
-func (a *authenticator) parseRefresh(tokenString string) (*jwt.RegisteredClaims, error) {
-	return a.parseTypedToken(tokenString, refreshTokenType)
+// parseRefresh verifies a refresh token and returns the identity it carries.
+func (a *authenticator) parseRefresh(tokenString string) (*Identity, error) {
+	claims, err := a.parseTypedToken(tokenString, refreshTokenType)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", errInvalidRefresh, err)
+	}
+	return &Identity{
+		Subject:  claims.Subject,
+		Email:    claims.Email,
+		Groups:   claims.Groups,
+		Provider: claims.Provider,
+	}, nil
 }
 
-// parseTypedToken verifies signature, algorithm, issuer, expiry, and type.
-func (a *authenticator) parseTypedToken(tokenString, wantType string) (*jwt.RegisteredClaims, error) {
-	claims := &typedClaims{}
+// parseTypedToken verifies signature, algorithm, issuer, expiry, and type;
+// returns the full identity claims.
+func (a *authenticator) parseTypedToken(tokenString, wantType string) (*identityClaims, error) {
+	claims := &identityClaims{}
 	_, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
@@ -228,7 +252,7 @@ func (a *authenticator) parseTypedToken(tokenString, wantType string) (*jwt.Regi
 	if claims.TokenType != wantType {
 		return nil, fmt.Errorf("unexpected token type %q, want %q", claims.TokenType, wantType)
 	}
-	return &claims.RegisteredClaims, nil
+	return claims, nil
 }
 
 // isHTTPS reports TLS (direct or via X-Forwarded-Proto). The refresh cookie is
@@ -263,7 +287,7 @@ func (a *authenticator) clearRefreshCookie(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// refreshTokenFromCookie returns the refresh token from the cookie.
+// refreshTokenFromCookie returns the refresh token from the cookie, trimmed.
 func (a *authenticator) refreshTokenFromCookie(r *http.Request) string {
 	c, err := r.Cookie(refreshCookieName)
 	if err != nil {
@@ -298,11 +322,12 @@ func (m *authManager) middleware(next http.Handler) http.Handler {
 			respondError(w, http.StatusUnauthorized, "missing or malformed Authorization header")
 			return
 		}
-		if _, err := a.parseToken(token); err != nil {
+		id, err := parseIdentityToken(a, token)
+		if err != nil {
 			respondError(w, http.StatusUnauthorized, "invalid or expired token")
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(withIdentity(r.Context(), id)))
 	})
 }
 
@@ -362,8 +387,17 @@ func handleLogin(m *authManager) http.HandlerFunc {
 		provider := newAdminProvider(a)
 		session, err := provider.Login(r)
 		if err != nil {
-			status, msg := mapLoginError(err)
-			respondError(w, status, msg)
+			if errors.Is(err, errInvalidCredentials) {
+				status, msg := mapLoginError(err)
+				respondError(w, status, msg)
+				return
+			}
+			if errors.Is(err, errMalformedBody) {
+				respondError(w, http.StatusBadRequest, "invalid request body")
+				return
+			}
+			// Token minting failed (signing key problem); not the client's fault.
+			respondError(w, http.StatusInternalServerError, "failed to issue session")
 			return
 		}
 		writeSession(w, a, r, session)
@@ -385,8 +419,13 @@ func handleRefresh(m *authManager) http.HandlerFunc {
 		provider := newAdminProvider(a)
 		session, err := provider.Refresh(r)
 		if err != nil {
-			a.clearRefreshCookie(w, r)
-			respondError(w, http.StatusUnauthorized, mapRefreshError(err))
+			if errors.Is(err, errMissingRefresh) || errors.Is(err, errInvalidRefresh) {
+				a.clearRefreshCookie(w, r)
+				respondError(w, http.StatusUnauthorized, mapRefreshError(err))
+				return
+			}
+			// Token minting failed (signing key problem); not the client's fault.
+			respondError(w, http.StatusInternalServerError, "failed to refresh session")
 			return
 		}
 		writeSession(w, a, r, session)
@@ -413,7 +452,7 @@ func writeSession(w http.ResponseWriter, a *authenticator, r *http.Request, s *S
 
 // mapLoginError maps provider errors to HTTP status + message.
 func mapLoginError(err error) (int, string) {
-	if err == errInvalidCredentials {
+	if errors.Is(err, errInvalidCredentials) {
 		return http.StatusUnauthorized, "invalid username or password"
 	}
 	return http.StatusBadRequest, err.Error()
@@ -421,7 +460,7 @@ func mapLoginError(err error) (int, string) {
 
 // mapRefreshError maps provider refresh errors to an HTTP message.
 func mapRefreshError(err error) string {
-	if err == errMissingRefresh {
+	if errors.Is(err, errMissingRefresh) {
 		return "missing refresh token"
 	}
 	return "invalid or expired refresh token"
@@ -440,14 +479,20 @@ func randomTokenID() string {
 // errInvalidCredentials is returned when username/password do not match.
 var errInvalidCredentials = fmt.Errorf("invalid username or password")
 
+// errMalformedBody is returned when the request body is not valid JSON.
+var errMalformedBody = fmt.Errorf("invalid request body")
+
 // errMissingRefresh is returned when no refresh cookie is present.
 var errMissingRefresh = fmt.Errorf("missing refresh token")
+
+// errInvalidRefresh is returned when the refresh cookie fails verification.
+var errInvalidRefresh = fmt.Errorf("invalid or expired refresh token")
 
 // decodeJSONBody decodes a JSON request body into v, returning a 400-style
 // error when the body is malformed.
 func decodeJSONBody(r *http.Request, v any) error {
 	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
-		return fmt.Errorf("invalid request body")
+		return errMalformedBody
 	}
 	return nil
 }

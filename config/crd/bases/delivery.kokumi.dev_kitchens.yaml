@@ -138,6 +138,23 @@ spec:
                             type: string
                         type: object
                         x-kubernetes-map-type: atomic
+                      emailClaim:
+                        default: email
+                        description: |-
+                          EmailClaim is the ID-token claim used as the user's email for
+                          ServiceAccount identity mapping (kokumi.dev/identity-email). Supports
+                          dotted paths for nested claims (e.g. "user.email"). Defaults to "email".
+                        maxLength: 253
+                        type: string
+                      groupsClaim:
+                        default: groups
+                        description: |-
+                          GroupsClaim is the ID-token claim holding the user's group memberships
+                          (a list of strings) for ServiceAccount identity mapping
+                          (kokumi.dev/identity-groups). Supports dotted paths for nested claims
+                          (e.g. "realm_access.roles" for Keycloak). Defaults to "groups".
+                        maxLength: 253
+                        type: string
                       issuerURL:
                         description: |-
                           IssuerURL is the base URL of the OIDC issuer (e.g.

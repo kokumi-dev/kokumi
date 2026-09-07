@@ -139,7 +139,7 @@ kubectl apply -f order.yaml
 ## Watch a Preparation being created
 
 Kokumi automatically reconciles the Order and produces an immutable **Preparation**.
-You never create Preparations manually — every Order change produces a new one
+You never create Preparations manually. Every Order change produces a new one
 and the full history is retained indefinitely.
 
 ```bash
@@ -158,7 +158,7 @@ Three ways to activate or change a Serving:
 
 | Method | How |
 |---|---|
-| **Auto-deploy** | Set `spec.autoDeploy: Enabled` on the Order — Kokumi updates the Serving on every new Preparation |
+| **Auto-deploy** | Set `spec.autoDeploy: Enabled` on the Order. Kokumi updates the Serving on every new Preparation |
 | **Label promotion** | Label a Preparation with `delivery.kokumi.dev/approve-deploy: "true"` |
 | **UI** | Click **Promote** on any Preparation in the Kokumi UI |
 
@@ -185,7 +185,7 @@ kubectl get applications -n argocd
 # external-secrets   Synced        Healthy
 ```
 
-To roll back, promote any previous Preparation — no re-rendering required.
+To roll back, promote any previous Preparation. No re-rendering required.
 
 ## Create a Menu
 
@@ -266,7 +266,7 @@ spec:
 
 The Order inherits the source, version, and base values from the Menu. Only the
 allowed override keys are set. Kokumi validates the overrides against the Menu's
-policy during reconciliation — any disallowed key causes the Order to fail with
+policy during reconciliation. Any disallowed key causes the Order to fail with
 a clear status message.
 
 ## Access the UI

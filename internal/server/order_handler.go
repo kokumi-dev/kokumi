@@ -20,18 +20,21 @@ func handleListOrders(deps *apiDeps) http.HandlerFunc {
 			unavailable(w)
 			return
 		}
+		uc, err := deps.resolveUserClient(r)
+		if err != nil {
+			respondForbiddenOrError(w, err, "failed to resolve identity")
+			return
+		}
 
 		orderList := &deliveryv1alpha1.OrderList{}
-		if err := deps.reader.List(r.Context(), orderList); err != nil {
-			deps.logger.Error(err, "Failed to list Orders")
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to list orders: %s", err))
+		if err := uc.list(r.Context(), orderList); err != nil {
+			respondForbiddenOrError(w, err, "failed to list orders")
 			return
 		}
 
 		servingList := &deliveryv1alpha1.ServingList{}
-		if err := deps.reader.List(r.Context(), servingList); err != nil {
-			deps.logger.Error(err, "Failed to list Servings")
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to list servings: %s", err))
+		if err := uc.list(r.Context(), servingList); err != nil {
+			respondForbiddenOrError(w, err, "failed to list servings")
 			return
 		}
 
@@ -50,21 +53,25 @@ func handleGetOrder(deps *apiDeps) http.HandlerFunc {
 		namespace := r.PathValue("namespace")
 		name := r.PathValue("name")
 
+		uc, err := deps.resolveUserClient(r)
+		if err != nil {
+			respondForbiddenOrError(w, err, "failed to resolve identity")
+			return
+		}
+
 		order := &deliveryv1alpha1.Order{}
-		if err := deps.reader.Get(r.Context(), types.NamespacedName{Namespace: namespace, Name: name}, order); err != nil {
+		if err := uc.get(r.Context(), types.NamespacedName{Namespace: namespace, Name: name}, order); err != nil {
 			if client.IgnoreNotFound(err) == nil {
 				respondError(w, http.StatusNotFound, fmt.Sprintf("order %s/%s not found", namespace, name))
 				return
 			}
-			deps.logger.Error(err, "Failed to get Order", "namespace", namespace, "name", name)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get order: %s", err))
+			respondForbiddenOrError(w, err, "failed to get order")
 			return
 		}
 
 		servingList := &deliveryv1alpha1.ServingList{}
-		if err := deps.reader.List(r.Context(), servingList, client.InNamespace(namespace)); err != nil {
-			deps.logger.Error(err, "Failed to list Servings", "namespace", namespace)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to list servings: %s", err))
+		if err := uc.list(r.Context(), servingList, client.InNamespace(namespace)); err != nil {
+			respondForbiddenOrError(w, err, "failed to list servings")
 			return
 		}
 
@@ -120,9 +127,14 @@ func handleCreateOrder(deps *apiDeps) http.HandlerFunc {
 			order.Annotations[deliveryv1alpha1.AnnotationCommitMessage] = *req.CommitMessage
 		}
 
-		if err := deps.apiReader.Create(r.Context(), order); err != nil {
+		uc, err := deps.resolveUserClient(r)
+		if err != nil {
+			respondForbiddenOrError(w, err, "failed to resolve identity")
+			return
+		}
+		if err := uc.create(r.Context(), order, "orders"); err != nil {
 			deps.logger.Error(err, "Failed to create Order", "namespace", req.Namespace, "name", req.Name)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create order: %s", err))
+			respondForbiddenOrError(w, err, "failed to create order")
 			return
 		}
 
@@ -147,14 +159,19 @@ func handleUpdateOrder(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
+		uc, err := deps.resolveUserClient(r)
+		if err != nil {
+			respondForbiddenOrError(w, err, "failed to resolve identity")
+			return
+		}
+
 		order := &deliveryv1alpha1.Order{}
-		if err := deps.reader.Get(r.Context(), types.NamespacedName{Namespace: namespace, Name: name}, order); err != nil {
+		if err := uc.get(r.Context(), types.NamespacedName{Namespace: namespace, Name: name}, order); err != nil {
 			if client.IgnoreNotFound(err) == nil {
 				respondError(w, http.StatusNotFound, fmt.Sprintf("order %s/%s not found", namespace, name))
 				return
 			}
-			deps.logger.Error(err, "Failed to get Order", "namespace", namespace, "name", name)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get order: %s", err))
+			respondForbiddenOrError(w, err, "failed to get order")
 			return
 		}
 
@@ -180,9 +197,9 @@ func handleUpdateOrder(deps *apiDeps) http.HandlerFunc {
 			order.Annotations[deliveryv1alpha1.AnnotationCommitMessage] = *req.CommitMessage
 		}
 
-		if err := deps.apiReader.Update(r.Context(), order); err != nil {
+		if err := uc.update(r.Context(), order, "orders"); err != nil {
 			deps.logger.Error(err, "Failed to update Order", "namespace", namespace, "name", name)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to update order: %s", err))
+			respondForbiddenOrError(w, err, "failed to update order")
 			return
 		}
 
@@ -214,14 +231,19 @@ func handleUpdateOrderEdits(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
+		uc, err := deps.resolveUserClient(r)
+		if err != nil {
+			respondForbiddenOrError(w, err, "failed to resolve identity")
+			return
+		}
+
 		order := &deliveryv1alpha1.Order{}
-		if err := deps.reader.Get(r.Context(), types.NamespacedName{Namespace: namespace, Name: name}, order); err != nil {
+		if err := uc.get(r.Context(), types.NamespacedName{Namespace: namespace, Name: name}, order); err != nil {
 			if client.IgnoreNotFound(err) == nil {
 				respondError(w, http.StatusNotFound, fmt.Sprintf("order %s/%s not found", namespace, name))
 				return
 			}
-			deps.logger.Error(err, "Failed to get Order", "namespace", namespace, "name", name)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get order: %s", err))
+			respondForbiddenOrError(w, err, "failed to get order")
 			return
 		}
 
@@ -234,9 +256,9 @@ func handleUpdateOrderEdits(deps *apiDeps) http.HandlerFunc {
 			order.Annotations[deliveryv1alpha1.AnnotationCommitMessage] = *req.CommitMessage
 		}
 
-		if err := deps.apiReader.Update(r.Context(), order); err != nil {
+		if err := uc.update(r.Context(), order, "orders"); err != nil {
 			deps.logger.Error(err, "Failed to update Order edits", "namespace", namespace, "name", name)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to update order: %s", err))
+			respondForbiddenOrError(w, err, "failed to update order edits")
 			return
 		}
 
@@ -255,20 +277,25 @@ func handleDeleteOrder(deps *apiDeps) http.HandlerFunc {
 		namespace := r.PathValue("namespace")
 		name := r.PathValue("name")
 
+		uc, err := deps.resolveUserClient(r)
+		if err != nil {
+			respondForbiddenOrError(w, err, "failed to resolve identity")
+			return
+		}
+
 		order := &deliveryv1alpha1.Order{}
-		if err := deps.reader.Get(r.Context(), types.NamespacedName{Namespace: namespace, Name: name}, order); err != nil {
+		if err := uc.get(r.Context(), types.NamespacedName{Namespace: namespace, Name: name}, order); err != nil {
 			if client.IgnoreNotFound(err) == nil {
 				respondError(w, http.StatusNotFound, fmt.Sprintf("order %s/%s not found", namespace, name))
 				return
 			}
-			deps.logger.Error(err, "Failed to get Order", "namespace", namespace, "name", name)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get order: %s", err))
+			respondForbiddenOrError(w, err, "failed to get order")
 			return
 		}
 
-		if err := deps.apiReader.Delete(r.Context(), order); err != nil {
+		if err := uc.delete(r.Context(), order, "orders"); err != nil {
 			deps.logger.Error(err, "Failed to delete Order", "namespace", namespace, "name", name)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to delete order: %s", err))
+			respondForbiddenOrError(w, err, "failed to delete order")
 			return
 		}
 

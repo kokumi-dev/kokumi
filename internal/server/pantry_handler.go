@@ -31,10 +31,15 @@ func handleListPantries(deps *apiDeps) http.HandlerFunc {
 			listOpts = append(listOpts, client.InNamespace(ns))
 		}
 
+		uc, err := deps.resolveUserClient(r)
+		if err != nil {
+			respondForbiddenOrError(w, err, "failed to resolve identity")
+			return
+		}
+
 		pantryList := &deliveryv1alpha1.PantryList{}
-		if err := deps.reader.List(r.Context(), pantryList, listOpts...); err != nil {
-			deps.logger.Error(err, "Failed to list Pantries")
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to list pantries: %s", err))
+		if err := uc.list(r.Context(), pantryList, listOpts...); err != nil {
+			respondForbiddenOrError(w, err, "failed to list pantries")
 			return
 		}
 
@@ -53,17 +58,21 @@ func handleGetPantry(deps *apiDeps) http.HandlerFunc {
 		namespace := r.PathValue("namespace")
 		name := r.PathValue("name")
 
+		uc, err := deps.resolveUserClient(r)
+		if err != nil {
+			respondForbiddenOrError(w, err, "failed to resolve identity")
+			return
+		}
+
 		pantry := &deliveryv1alpha1.Pantry{}
-		if err := deps.reader.Get(r.Context(), types.NamespacedName{
-			Namespace: namespace,
-			Name:      name,
+		if err := uc.get(r.Context(), types.NamespacedName{Namespace: namespace,
+			Name: name,
 		}, pantry); err != nil {
 			if client.IgnoreNotFound(err) == nil {
 				respondError(w, http.StatusNotFound, fmt.Sprintf("pantry %q not found", name))
 				return
 			}
-			deps.logger.Error(err, "Failed to get Pantry", "name", name)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get pantry: %s", err))
+			respondForbiddenOrError(w, err, "failed to get pantry")
 			return
 		}
 
@@ -100,14 +109,20 @@ func handleCreatePantry(deps *apiDeps) http.HandlerFunc {
 			ns = namespace.Default
 		}
 
+		uc, err := deps.resolveUserClient(r)
+		if err != nil {
+			respondForbiddenOrError(w, err, "failed to resolve identity")
+			return
+		}
+
 		var secretRef *corev1.LocalObjectReference
 
 		switch {
 		case req.Username != "" && req.Password != "":
 			secretName := req.Name + "-registry-creds"
-			if err := createDockerConfigSecret(r.Context(), deps, ns, secretName, req.URL, req.Username, req.Password); err != nil {
+			if err := createDockerConfigSecret(r.Context(), uc, ns, secretName, req.URL, req.Username, req.Password); err != nil {
 				deps.logger.Error(err, "Failed to create registry credential Secret")
-				respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create credential secret: %s", err))
+				respondForbiddenOrError(w, err, "failed to create credential secret")
 				return
 			}
 			secretRef = &corev1.LocalObjectReference{Name: secretName}
@@ -125,13 +140,13 @@ func handleCreatePantry(deps *apiDeps) http.HandlerFunc {
 			},
 		}
 
-		if err := deps.apiReader.Create(r.Context(), pantry); err != nil {
+		if err := uc.create(r.Context(), pantry, "pantries"); err != nil {
 			if apierrors.IsAlreadyExists(err) {
 				respondError(w, http.StatusConflict, fmt.Sprintf("pantry %q already exists", req.Name))
 				return
 			}
 			deps.logger.Error(err, "Failed to create Pantry", "name", req.Name)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create pantry: %s", err))
+			respondForbiddenOrError(w, err, "failed to create pantry")
 			return
 		}
 
@@ -159,17 +174,20 @@ func handleUpdatePantry(deps *apiDeps) http.HandlerFunc {
 			respondError(w, http.StatusBadRequest, "url is required")
 			return
 		}
+		uc, err := deps.resolveUserClient(r)
+		if err != nil {
+			respondForbiddenOrError(w, err, "failed to resolve identity")
+			return
+		}
 		pantry := &deliveryv1alpha1.Pantry{}
-		if err := deps.reader.Get(r.Context(), types.NamespacedName{
-			Namespace: namespace,
-			Name:      name,
+		if err := uc.get(r.Context(), types.NamespacedName{Namespace: namespace,
+			Name: name,
 		}, pantry); err != nil {
 			if client.IgnoreNotFound(err) == nil {
 				respondError(w, http.StatusNotFound, fmt.Sprintf("pantry %q not found", name))
 				return
 			}
-			deps.logger.Error(err, "Failed to get Pantry", "name", name)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get pantry: %s", err))
+			respondForbiddenOrError(w, err, "failed to get pantry")
 			return
 		}
 
@@ -179,9 +197,9 @@ func handleUpdatePantry(deps *apiDeps) http.HandlerFunc {
 		switch {
 		case req.Username != "" && req.Password != "":
 			secretName := name + "-registry-creds"
-			if err := upsertDockerConfigSecret(r.Context(), deps, namespace, secretName, req.URL, req.Username, req.Password); err != nil {
+			if err := upsertDockerConfigSecret(r.Context(), uc, namespace, secretName, req.URL, req.Username, req.Password); err != nil {
 				deps.logger.Error(err, "Failed to upsert registry credential Secret")
-				respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to update credential secret: %s", err))
+				respondForbiddenOrError(w, err, "failed to update credential secret")
 				return
 			}
 			pantry.Spec.SecretRef = &corev1.LocalObjectReference{Name: secretName}
@@ -192,9 +210,9 @@ func handleUpdatePantry(deps *apiDeps) http.HandlerFunc {
 		pantry.Spec.URL = req.URL
 		pantry.Spec.Description = req.Description
 
-		if err := deps.apiReader.Patch(r.Context(), pantry, patch); err != nil {
+		if err := uc.patch(r.Context(), pantry, patch, "pantries"); err != nil {
 			deps.logger.Error(err, "Failed to update Pantry", "name", name)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to update pantry: %s", err))
+			respondForbiddenOrError(w, err, "failed to update pantry")
 			return
 		}
 
@@ -213,23 +231,27 @@ func handleDeletePantry(deps *apiDeps) http.HandlerFunc {
 		namespace := r.PathValue("namespace")
 		name := r.PathValue("name")
 
+		uc, err := deps.resolveUserClient(r)
+		if err != nil {
+			respondForbiddenOrError(w, err, "failed to resolve identity")
+			return
+		}
+
 		pantry := &deliveryv1alpha1.Pantry{}
-		if err := deps.reader.Get(r.Context(), types.NamespacedName{
-			Namespace: namespace,
-			Name:      name,
+		if err := uc.get(r.Context(), types.NamespacedName{Namespace: namespace,
+			Name: name,
 		}, pantry); err != nil {
 			if client.IgnoreNotFound(err) == nil {
 				respondError(w, http.StatusNotFound, fmt.Sprintf("pantry %q not found", name))
 				return
 			}
-			deps.logger.Error(err, "Failed to get Pantry for deletion", "name", name)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get pantry: %s", err))
+			respondForbiddenOrError(w, err, "failed to get pantry")
 			return
 		}
 
-		if err := deps.apiReader.Delete(r.Context(), pantry); err != nil {
+		if err := uc.delete(r.Context(), pantry, "pantries"); err != nil {
 			deps.logger.Error(err, "Failed to delete Pantry", "name", name)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to delete pantry: %s", err))
+			respondForbiddenOrError(w, err, "failed to delete pantry")
 			return
 		}
 
@@ -238,7 +260,7 @@ func handleDeletePantry(deps *apiDeps) http.HandlerFunc {
 }
 
 // createDockerConfigSecret creates a new kubernetes.io/dockerconfigjson Secret.
-func createDockerConfigSecret(ctx context.Context, deps *apiDeps, ns, name, registry, username, password string) error {
+func createDockerConfigSecret(ctx context.Context, uc *userClient, ns, name, registry, username, password string) error {
 	data, err := buildDockerConfigJSON(registry, username, password)
 	if err != nil {
 		return err
@@ -253,20 +275,19 @@ func createDockerConfigSecret(ctx context.Context, deps *apiDeps, ns, name, regi
 		},
 	}
 
-	return deps.apiReader.Create(ctx, secret)
+	return uc.create(ctx, secret, "secrets")
 }
 
 // upsertDockerConfigSecret creates or updates a kubernetes.io/dockerconfigjson Secret.
-func upsertDockerConfigSecret(ctx context.Context, deps *apiDeps, ns, name, registry, username, password string) error {
+func upsertDockerConfigSecret(ctx context.Context, uc *userClient, ns, name, registry, username, password string) error {
 	data, err := buildDockerConfigJSON(registry, username, password)
 	if err != nil {
 		return err
 	}
 
 	var secret corev1.Secret
-	getErr := deps.reader.Get(ctx, types.NamespacedName{
-		Namespace: ns,
-		Name:      name,
+	getErr := uc.get(ctx, types.NamespacedName{Namespace: ns,
+		Name: name,
 	}, &secret)
 
 	if apierrors.IsNotFound(getErr) {
@@ -276,7 +297,7 @@ func upsertDockerConfigSecret(ctx context.Context, deps *apiDeps, ns, name, regi
 			Type:      corev1.SecretTypeDockerConfigJson,
 			Data:      map[string][]byte{corev1.DockerConfigJsonKey: data},
 		}
-		return deps.apiReader.Create(ctx, newSecret)
+		return uc.create(ctx, newSecret, "secrets")
 	}
 	if getErr != nil {
 		return getErr
@@ -284,7 +305,7 @@ func upsertDockerConfigSecret(ctx context.Context, deps *apiDeps, ns, name, regi
 
 	patch := client.MergeFrom(secret.DeepCopy())
 	secret.Data = map[string][]byte{corev1.DockerConfigJsonKey: data}
-	return deps.apiReader.Patch(ctx, &secret, patch)
+	return uc.patch(ctx, &secret, patch, "secrets")
 }
 
 // buildDockerConfigJSON produces a minimal .dockerconfigjson payload for a

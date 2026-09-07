@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -8,9 +9,11 @@ import (
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/namespace"
+	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/resolve"
 	"github.com/kokumi-dev/kokumi/internal/service"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // PreviewOrderRequest is the body for POST /api/v1/orders/preview.
@@ -68,10 +71,20 @@ func handlePreviewOrder(deps *apiDeps) http.HandlerFunc {
 		var spec *resolve.EffectiveSpec
 		var specErr error
 
+		uc, err := deps.resolveUserClient(r)
+		if err != nil {
+			respondForbiddenOrError(w, err, "failed to resolve identity")
+			return
+		}
+
 		if req.MenuRef != nil {
 			menu := &deliveryv1alpha1.Menu{}
-			if err := deps.reader.Get(r.Context(), types.NamespacedName{Name: req.MenuRef.Name}, menu); err != nil {
-				respondError(w, http.StatusNotFound, fmt.Sprintf("menu %q not found", req.MenuRef.Name))
+			if err := uc.get(r.Context(), types.NamespacedName{Name: req.MenuRef.Name}, menu); err != nil {
+				if client.IgnoreNotFound(err) == nil {
+					respondError(w, http.StatusNotFound, fmt.Sprintf("menu %q not found", req.MenuRef.Name))
+					return
+				}
+				respondForbiddenOrError(w, err, "failed to get menu")
 				return
 			}
 			spec, specErr = resolve.ForMenu(menu, order)
@@ -84,9 +97,11 @@ func handlePreviewOrder(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		resolvedSource, sourceClient, err := credential.NewKubeResolver(deps.reader).ResolveSource(r.Context(), spec.Source, ns)
+		// Only resolve Pantry credentials (requires get secrets) when the
+		// source references a Pantry; plain OCI sources need no Secret access.
+		resolvedSource, sourceClient, err := resolvePreviewSource(r.Context(), uc, spec.Source, ns)
 		if err != nil {
-			respondError(w, http.StatusUnprocessableEntity, fmt.Sprintf("failed to resolve source: %s", err))
+			respondForbiddenOrError(w, err, "failed to resolve source")
 			return
 		}
 
@@ -112,6 +127,21 @@ func handlePreviewOrder(deps *apiDeps) http.HandlerFunc {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(manifest)
 	}
+}
+
+// resolvePreviewSource resolves the effective source, fetching Pantry
+// credentials only when the source references a Pantry (which requires
+// get secrets as the user's mapped ServiceAccount). Plain OCI sources pass
+// through untouched so users without Secret access can still preview them.
+func resolvePreviewSource(ctx context.Context, uc *userClient, src deliveryv1alpha1.OCISource, ns string) (deliveryv1alpha1.OCISource, oci.Client, error) {
+	if src.PantryRef == nil {
+		return src, nil, nil
+	}
+	reader, err := uc.readerFor(ctx, "get", "secrets", ns)
+	if err != nil {
+		return deliveryv1alpha1.OCISource{}, nil, err
+	}
+	return credential.NewKubeResolver(reader).ResolveSource(ctx, src, ns)
 }
 
 // handlePreviewOrderFiles handles POST /api/v1/orders/preview/files.
@@ -155,10 +185,20 @@ func handlePreviewOrderFiles(deps *apiDeps) http.HandlerFunc {
 		var spec *resolve.EffectiveSpec
 		var specErr error
 
+		uc, err := deps.resolveUserClient(r)
+		if err != nil {
+			respondForbiddenOrError(w, err, "failed to resolve identity")
+			return
+		}
+
 		if req.MenuRef != nil {
 			menu := &deliveryv1alpha1.Menu{}
-			if err := deps.reader.Get(r.Context(), types.NamespacedName{Name: req.MenuRef.Name}, menu); err != nil {
-				respondError(w, http.StatusNotFound, fmt.Sprintf("menu %q not found", req.MenuRef.Name))
+			if err := uc.get(r.Context(), types.NamespacedName{Name: req.MenuRef.Name}, menu); err != nil {
+				if client.IgnoreNotFound(err) == nil {
+					respondError(w, http.StatusNotFound, fmt.Sprintf("menu %q not found", req.MenuRef.Name))
+					return
+				}
+				respondForbiddenOrError(w, err, "failed to get menu")
 				return
 			}
 			spec, specErr = resolve.ForMenu(menu, order)
@@ -171,9 +211,11 @@ func handlePreviewOrderFiles(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		resolvedSource, sourceClient, err := credential.NewKubeResolver(deps.reader).ResolveSource(r.Context(), spec.Source, ns)
+		// Only resolve Pantry credentials (requires get secrets) when the
+		// source references a Pantry; plain OCI sources need no Secret access.
+		resolvedSource, sourceClient, err := resolvePreviewSource(r.Context(), uc, spec.Source, ns)
 		if err != nil {
-			respondError(w, http.StatusUnprocessableEntity, fmt.Sprintf("failed to resolve source: %s", err))
+			respondForbiddenOrError(w, err, "failed to resolve source")
 			return
 		}
 

@@ -156,8 +156,9 @@ func TestVerifyCredentials(t *testing.T) {
 func TestVerifyCredentialsHtpasswdHash(t *testing.T) {
 	// Produced by: htpasswd -nbB admin admin  (password = "admin")
 	const htpasswdHash = "$2y$05$MG5FZ/WlMewHp8kwaoZixeQ8NCXjhp7ZWwx1N40pQ6oc3VfL9Xu0y"
+	const testAdminUser = "admin"
 	auth := &authenticator{
-		username:     "admin",
+		username:     testAdminUser,
 		passwordHash: []byte(htpasswdHash),
 		signingKey:   []byte("key"),
 		accessTTL:    defaultAccessTokenTTL,
@@ -529,7 +530,7 @@ func TestHandleLogoutClearsCookie(t *testing.T) {
 	assert.Equal(t, -1, cookies[0].MaxAge)
 }
 
-func TestHandleInfoReportsAuthEnabled(t *testing.T) {
+func TestHandleInfoReportsAuthProviders(t *testing.T) {
 	auth := newTestAuthenticator(t)
 	handler := handleInfo(&authManager{auth: auth, adminLogin: true})
 
@@ -541,10 +542,10 @@ func TestHandleInfoReportsAuthEnabled(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	var resp InfoResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.True(t, resp.AuthEnabled)
+	assert.Contains(t, resp.AuthProviders, "admin")
 }
 
-func TestHandleInfoNoAuthReportsDisabled(t *testing.T) {
+func TestHandleInfoNoProvidersMeansLoginPage(t *testing.T) {
 	handler := handleInfo(nil)
 
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/info", nil)
@@ -555,7 +556,7 @@ func TestHandleInfoNoAuthReportsDisabled(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	var resp InfoResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.False(t, resp.AuthEnabled)
+	assert.Empty(t, resp.AuthProviders)
 }
 
 func TestBuildAuthenticatorAppliesTokenTTL(t *testing.T) {
