@@ -47,7 +47,7 @@ func handleListRegistryTags(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		ociClient := ociClientForPantryRef(r.Context(), deps, r.URL.Query().Get("pantryName"), r.URL.Query().Get("pantryNamespace"))
+		ociClient := ociClientForPantryRef(r.Context(), deps, r, r.URL.Query().Get("pantryName"), r.URL.Query().Get("pantryNamespace"))
 
 		tags, err := ociClient.ListTags(r.Context(), ociRef)
 		if err != nil {
@@ -101,7 +101,7 @@ func handleGetChartInfo(deps *apiDeps) http.HandlerFunc {
 		}
 		ociRef.Tag = version
 
-		ociClient := ociClientForPantryRef(r.Context(), deps, r.URL.Query().Get("pantryName"), r.URL.Query().Get("pantryNamespace"))
+		ociClient := ociClientForPantryRef(r.Context(), deps, r, r.URL.Query().Get("pantryName"), r.URL.Query().Get("pantryNamespace"))
 
 		tmpDir, err := afero.TempDir(deps.fs, "", "kokumi-chart-info-*")
 		if err != nil {
@@ -174,7 +174,7 @@ func handleGetRegistryArtifact(deps *apiDeps) http.HandlerFunc {
 		}
 		ociRef.Tag = version
 
-		ociClient := ociClientForPantryRef(r.Context(), deps, r.URL.Query().Get("pantryName"), r.URL.Query().Get("pantryNamespace"))
+		ociClient := ociClientForPantryRef(r.Context(), deps, r, r.URL.Query().Get("pantryName"), r.URL.Query().Get("pantryNamespace"))
 
 		tmpDir, err := afero.TempDir(deps.fs, "", "kokumi-artifact-*")
 		if err != nil {
@@ -241,11 +241,19 @@ func handleGetRegistryArtifact(deps *apiDeps) http.HandlerFunc {
 // ociClientForPantryRef returns an authenticated OCI client for the explicitly
 // named Pantry in the given namespace. When pantryName is empty, or the Pantry
 // cannot be resolved, the shared unauthenticated client on deps is returned.
-func ociClientForPantryRef(ctx context.Context, deps *apiDeps, pantryName, pantryNamespace string) oci.Client {
+func ociClientForPantryRef(ctx context.Context, deps *apiDeps, r *http.Request, pantryName, pantryNamespace string) oci.Client {
 	if pantryName == "" {
 		return deps.ociClient
 	}
-	if authClient, err := credential.NewKubeResolver(deps.reader).ClientForPantry(ctx, pantryNamespace, pantryName); err == nil && authClient != nil {
+	uc, err := deps.resolveUserClient(r)
+	if err != nil {
+		return deps.ociClient
+	}
+	reader, err := uc.readerFor(ctx, "get", "secrets", pantryNamespace)
+	if err != nil {
+		return deps.ociClient
+	}
+	if authClient, err := credential.NewKubeResolver(reader).ClientForPantry(ctx, pantryNamespace, pantryName); err == nil && authClient != nil {
 		return authClient
 	}
 	return deps.ociClient

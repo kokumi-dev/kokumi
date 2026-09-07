@@ -17,11 +17,15 @@ func handleListMenus(deps *apiDeps) http.HandlerFunc {
 			unavailable(w)
 			return
 		}
+		uc, err := deps.resolveUserClient(r)
+		if err != nil {
+			respondForbiddenOrError(w, err, "failed to resolve identity")
+			return
+		}
 
 		menuList := &deliveryv1alpha1.MenuList{}
-		if err := deps.reader.List(r.Context(), menuList); err != nil {
-			deps.logger.Error(err, "Failed to list Menus")
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to list menus: %s", err))
+		if err := uc.list(r.Context(), menuList); err != nil {
+			respondForbiddenOrError(w, err, "failed to list menus")
 			return
 		}
 
@@ -39,14 +43,19 @@ func handleGetMenu(deps *apiDeps) http.HandlerFunc {
 
 		name := r.PathValue("name")
 
+		uc, err := deps.resolveUserClient(r)
+		if err != nil {
+			respondForbiddenOrError(w, err, "failed to resolve identity")
+			return
+		}
+
 		menu := &deliveryv1alpha1.Menu{}
-		if err := deps.reader.Get(r.Context(), types.NamespacedName{Name: name}, menu); err != nil {
+		if err := uc.get(r.Context(), types.NamespacedName{Name: name}, menu); err != nil {
 			if client.IgnoreNotFound(err) == nil {
 				respondError(w, http.StatusNotFound, fmt.Sprintf("menu %s not found", name))
 				return
 			}
-			deps.logger.Error(err, "Failed to get Menu", "name", name)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get menu: %s", err))
+			respondForbiddenOrError(w, err, "failed to get menu")
 			return
 		}
 
@@ -85,9 +94,14 @@ func handleCreateMenu(deps *apiDeps) http.HandlerFunc {
 			},
 		}
 
-		if err := deps.apiReader.Create(r.Context(), menu); err != nil {
+		uc, err := deps.resolveUserClient(r)
+		if err != nil {
+			respondForbiddenOrError(w, err, "failed to resolve identity")
+			return
+		}
+		if err := uc.create(r.Context(), menu, "menus"); err != nil {
 			deps.logger.Error(err, "Failed to create Menu", "name", req.Name)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create menu: %s", err))
+			respondForbiddenOrError(w, err, "failed to create menu")
 			return
 		}
 
@@ -111,14 +125,19 @@ func handleUpdateMenu(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
+		uc, err := deps.resolveUserClient(r)
+		if err != nil {
+			respondForbiddenOrError(w, err, "failed to resolve identity")
+			return
+		}
+
 		menu := &deliveryv1alpha1.Menu{}
-		if err := deps.reader.Get(r.Context(), types.NamespacedName{Name: name}, menu); err != nil {
+		if err := uc.get(r.Context(), types.NamespacedName{Name: name}, menu); err != nil {
 			if client.IgnoreNotFound(err) == nil {
 				respondError(w, http.StatusNotFound, fmt.Sprintf("menu %s not found", name))
 				return
 			}
-			deps.logger.Error(err, "Failed to get Menu", "name", name)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get menu: %s", err))
+			respondForbiddenOrError(w, err, "failed to get menu")
 			return
 		}
 
@@ -128,9 +147,9 @@ func handleUpdateMenu(deps *apiDeps) http.HandlerFunc {
 		menu.Spec.Overrides = overridePolicyFromDTO(req.Overrides)
 		menu.Spec.Defaults = deliveryv1alpha1.MenuDefaults{AutoDeploy: deliveryv1alpha1.AutoDeployPolicy(req.Defaults.AutoDeploy)}
 
-		if err := deps.apiReader.Update(r.Context(), menu); err != nil {
+		if err := uc.update(r.Context(), menu, "menus"); err != nil {
 			deps.logger.Error(err, "Failed to update Menu", "name", name)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to update menu: %s", err))
+			respondForbiddenOrError(w, err, "failed to update menu")
 			return
 		}
 
@@ -148,20 +167,25 @@ func handleDeleteMenu(deps *apiDeps) http.HandlerFunc {
 
 		name := r.PathValue("name")
 
+		uc, err := deps.resolveUserClient(r)
+		if err != nil {
+			respondForbiddenOrError(w, err, "failed to resolve identity")
+			return
+		}
+
 		menu := &deliveryv1alpha1.Menu{}
-		if err := deps.reader.Get(r.Context(), types.NamespacedName{Name: name}, menu); err != nil {
+		if err := uc.get(r.Context(), types.NamespacedName{Name: name}, menu); err != nil {
 			if client.IgnoreNotFound(err) == nil {
 				respondError(w, http.StatusNotFound, fmt.Sprintf("menu %s not found", name))
 				return
 			}
-			deps.logger.Error(err, "Failed to get Menu", "name", name)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get menu: %s", err))
+			respondForbiddenOrError(w, err, "failed to get menu")
 			return
 		}
 
-		if err := deps.apiReader.Delete(r.Context(), menu); err != nil {
+		if err := uc.delete(r.Context(), menu, "menus"); err != nil {
 			deps.logger.Error(err, "Failed to delete Menu", "name", name)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to delete menu: %s", err))
+			respondForbiddenOrError(w, err, "failed to delete menu")
 			return
 		}
 

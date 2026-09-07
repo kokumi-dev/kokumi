@@ -29,10 +29,15 @@ func handleListPreparations(deps *apiDeps) http.HandlerFunc {
 		namespace := r.PathValue("namespace")
 		orderName := r.PathValue("name")
 
+		uc, err := deps.resolveUserClient(r)
+		if err != nil {
+			respondForbiddenOrError(w, err, "failed to resolve identity")
+			return
+		}
+
 		prepList := &deliveryv1alpha1.PreparationList{}
-		if err := deps.reader.List(r.Context(), prepList, client.InNamespace(namespace)); err != nil {
-			deps.logger.Error(err, "Failed to list Preparations", "namespace", namespace, "order", orderName)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to list preparations: %s", err))
+		if err := uc.list(r.Context(), prepList, client.InNamespace(namespace)); err != nil {
+			respondForbiddenOrError(w, err, "failed to list preparations")
 			return
 		}
 
@@ -46,9 +51,8 @@ func handleListPreparations(deps *apiDeps) http.HandlerFunc {
 		prepList.Items = filtered
 
 		servingList := &deliveryv1alpha1.ServingList{}
-		if err := deps.reader.List(r.Context(), servingList, client.InNamespace(namespace)); err != nil {
-			deps.logger.Error(err, "Failed to list Servings", "namespace", namespace)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to list servings: %s", err))
+		if err := uc.list(r.Context(), servingList, client.InNamespace(namespace)); err != nil {
+			respondForbiddenOrError(w, err, "failed to list servings")
 			return
 		}
 
@@ -68,14 +72,19 @@ func handleGetPreparationManifest(deps *apiDeps) http.HandlerFunc {
 		namespace := r.PathValue("namespace")
 		name := r.PathValue("name")
 
+		uc, err := deps.resolveUserClient(r)
+		if err != nil {
+			respondForbiddenOrError(w, err, "failed to resolve identity")
+			return
+		}
+
 		prep := &deliveryv1alpha1.Preparation{}
-		if err := deps.reader.Get(r.Context(), types.NamespacedName{Namespace: namespace, Name: name}, prep); err != nil {
+		if err := uc.get(r.Context(), types.NamespacedName{Namespace: namespace, Name: name}, prep); err != nil {
 			if client.IgnoreNotFound(err) == nil {
 				respondError(w, http.StatusNotFound, fmt.Sprintf("preparation %s/%s not found", namespace, name))
 				return
 			}
-			deps.logger.Error(err, "Failed to get Preparation", "namespace", namespace, "name", name)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get preparation: %s", err))
+			respondForbiddenOrError(w, err, "failed to get preparation")
 			return
 		}
 
@@ -195,14 +204,19 @@ func handleGetPreparationManifestFiles(deps *apiDeps) http.HandlerFunc {
 		namespace := r.PathValue("namespace")
 		name := r.PathValue("name")
 
+		uc, err := deps.resolveUserClient(r)
+		if err != nil {
+			respondForbiddenOrError(w, err, "failed to resolve identity")
+			return
+		}
+
 		prep := &deliveryv1alpha1.Preparation{}
-		if err := deps.reader.Get(r.Context(), types.NamespacedName{Namespace: namespace, Name: name}, prep); err != nil {
+		if err := uc.get(r.Context(), types.NamespacedName{Namespace: namespace, Name: name}, prep); err != nil {
 			if client.IgnoreNotFound(err) == nil {
 				respondError(w, http.StatusNotFound, fmt.Sprintf("preparation %s/%s not found", namespace, name))
 				return
 			}
-			deps.logger.Error(err, "Failed to get Preparation", "namespace", namespace, "name", name)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get preparation: %s", err))
+			respondForbiddenOrError(w, err, "failed to get preparation")
 			return
 		}
 

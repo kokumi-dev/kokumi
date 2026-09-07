@@ -5,14 +5,11 @@ import (
 	"time"
 )
 
-// Session is the pair of tokens returned by an IdentityProvider after a
-// successful login or refresh. The access token is short-lived and presented
-// as a Bearer header (or access_token query param for SSE); the refresh token
-// is delivered to the client as an HttpOnly cookie.
-//
-// Both the admin (username/password) login and a future OIDC provider produce
-// the same Session shape, so the rest of the server and the UI are agnostic to
-// which identity backend issued the tokens.
+// Session is the pair of tokens returned after a successful login or refresh
+// by either the admin (username/password) provider or the OIDC provider. The
+// access token is short-lived and presented as a Bearer header (or
+// access_token query param for SSE); the refresh token is delivered to the
+// client as an HttpOnly cookie.
 type Session struct {
 	AccessToken      string
 	AccessExpiresAt  time.Time
@@ -21,9 +18,8 @@ type Session struct {
 }
 
 // IdentityProvider authenticates users and issues/refreshes Sessions. The
-// admin provider is implemented today; an OIDC provider can be added later
-// behind the same interface and run in parallel with (or instead of) admin
-// login.
+// admin provider and the OIDC provider implement it and can run in parallel
+// (or one can be disabled).
 type IdentityProvider interface {
 	// Login validates the given credentials and returns a fresh Session.
 	Login(r *http.Request) (*Session, error)

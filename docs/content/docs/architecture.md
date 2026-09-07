@@ -13,20 +13,20 @@ Kokumi draws a hard line between three concerns that most delivery systems confl
 3. **Activation** — what is _currently running_ (the Serving)
 
 By keeping these separate and immutable at the artifact layer, Kokumi gives
-you a complete, auditable history of every version ever produced — and the
+you a complete, auditable history of every version ever produced and the
 ability to promote or roll back with a single field change.
 
 ## Key advantages
 
 ### Immutability at the artifact layer
 
-A Preparation is not a live snapshot — it is an OCI artifact identified by a
+A Preparation is not a live snapshot. It is an OCI artifact identified by a
 SHA-256 digest. Once a Preparation reaches `Ready`, it never changes.
 
 - Reproduce exactly what was running at any point in time by re-fetching the
   artifact by digest.
-- Drift is unambiguous — compare the deployed digest to the desired digest;
-  any difference is a concrete, actionable signal.
+- Drift is unambiguous. Compare the deployed digest to the desired digest.
+  Any difference is a concrete, actionable signal.
 - Artifacts can be signed, attested, and audited independently of the cluster.
 
 ### Separation of rendering from deployment
@@ -51,7 +51,7 @@ Because the rendered artifact is stored independently:
 
 Rolling back means promoting any previous Preparation. The artifact already
 exists in the in-cluster registry, so the exact state that previously ran is
-restored instantly — no re-render, no drift.
+restored instantly: No re-render, no drift.
 
 ### Air-gap friendly by design
 
@@ -163,7 +163,7 @@ It contains:
 
 - A reference to the parent Order and the exact source revision used
 - An OCI artifact digest (stored in the in-cluster OCI registry)
-- An immutable status — once `Ready`, a Preparation never changes
+- An immutable status: once `Ready`, a Preparation never changes
 
 Preparations are **never garbage-collected automatically**. You retain full
 history and can promote any old Preparation to active at any time.
@@ -193,7 +193,7 @@ the chain is verifiable from the artifact alone:
 ### Serving
 
 A Serving tracks which Preparation is actively deployed. There is exactly one
-Serving per Order, and it is **managed automatically** — you never create one
+Serving per Order, and it is **managed automatically**, you never create one
 directly. A Serving is created or updated in three ways:
 
 - **Auto-deploy** — set `spec.autoDeploy: Enabled` on the Order; Kokumi
@@ -215,7 +215,7 @@ When a Serving is reconciled, the controller:
    is synced to the desired revision, then transitions the Serving to
    `Deployed`. A degraded Application surfaces as `DeploymentFailed`.
 
-Rollback is promoting any previous Preparation — no re-rendering required.
+Rollback is promoting any previous Preparation. No re-rendering required.
 
 ### Menu and Recipe lifecycle
 
@@ -303,7 +303,7 @@ Available `render.helm` fields:
 | `values` | Inline Helm values merged last (highest priority) | — |
 
 Helm OCI charts are first-class in Kokumi. Any chart published to an OCI
-registry — whether an upstream community chart or an internally-built one —
+registry, whether an upstream community chart or an internally-built one,
 can be used as an Order source.
 
 ## OCI registry
@@ -312,7 +312,7 @@ Kokumi ships an in-cluster OCI-compatible registry (backed by a `PersistentVolum
 that stores rendered manifests as OCI artifacts. This means:
 
 - Zero external registry dependency
-- Rendered manifests are portable — pull them with any OCI client
+- Rendered manifests are portable: pull them with any OCI client
 - Artifact digests are content-addressed; deduplication is automatic
 
 ## Deployment architecture

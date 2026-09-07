@@ -120,6 +120,23 @@ type OIDCConfig struct {
 	// +optional
 	UsernameClaim string `json:"usernameClaim,omitempty"`
 
+	// EmailClaim is the ID-token claim used as the user's email for
+	// ServiceAccount identity mapping (kokumi.dev/identity-email). Supports
+	// dotted paths for nested claims (e.g. "user.email"). Defaults to "email".
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:default=email
+	// +optional
+	EmailClaim string `json:"emailClaim,omitempty"`
+
+	// GroupsClaim is the ID-token claim holding the user's group memberships
+	// (a list of strings) for ServiceAccount identity mapping
+	// (kokumi.dev/identity-groups). Supports dotted paths for nested claims
+	// (e.g. "realm_access.roles" for Keycloak). Defaults to "groups".
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:default=groups
+	// +optional
+	GroupsClaim string `json:"groupsClaim,omitempty"`
+
 	// Scopes is the list of OAuth2 scopes requested at login.
 	// Defaults to ["openid", "profile", "email"].
 	// +kubebuilder:validation:MaxItems=16

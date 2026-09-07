@@ -2,7 +2,6 @@ package server
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -33,7 +32,12 @@ func handleGetSettings(deps *apiDeps, namespace string) http.HandlerFunc {
 		}
 
 		kitchen := &deliveryv1alpha1.Kitchen{}
-		err := deps.reader.Get(r.Context(), types.NamespacedName{
+		uc, err := deps.resolveUserClient(r)
+		if err != nil {
+			respondForbiddenOrError(w, err, "failed to resolve identity")
+			return
+		}
+		err = uc.get(r.Context(), types.NamespacedName{
 			Namespace: namespace,
 			Name:      deliveryv1alpha1.DefaultKitchenName,
 		}, kitchen)
@@ -42,8 +46,7 @@ func handleGetSettings(deps *apiDeps, namespace string) http.HandlerFunc {
 				respondJSON(w, http.StatusOK, settingsResponse{})
 				return
 			}
-			deps.logger.Error(err, "Failed to get Kitchen")
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get settings: %s", err))
+			respondForbiddenOrError(w, err, "failed to get settings")
 			return
 		}
 
@@ -76,23 +79,27 @@ func handlePutSettings(deps *apiDeps, namespace string) http.HandlerFunc {
 		}
 
 		kitchen := &deliveryv1alpha1.Kitchen{}
-		err := deps.apiReader.Get(r.Context(), types.NamespacedName{
+		uc, err := deps.resolveUserClient(r)
+		if err != nil {
+			respondForbiddenOrError(w, err, "failed to resolve identity")
+			return
+		}
+		err = uc.get(r.Context(), types.NamespacedName{
 			Namespace: namespace,
 			Name:      deliveryv1alpha1.DefaultKitchenName,
 		}, kitchen)
 		if err != nil {
 			if !apierrors.IsNotFound(err) {
-				deps.logger.Error(err, "Failed to get Kitchen")
-				respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get settings: %s", err))
+				respondForbiddenOrError(w, err, "failed to get settings")
 				return
 			}
 			kitchen = &deliveryv1alpha1.Kitchen{}
 			kitchen.Name = deliveryv1alpha1.DefaultKitchenName
 			kitchen.Namespace = namespace
 			kitchen.Spec.ArgoCDURL = raw
-			if err := deps.apiReader.Create(r.Context(), kitchen); err != nil {
+			if err := uc.create(r.Context(), kitchen, "kitchens"); err != nil {
 				deps.logger.Error(err, "Failed to create Kitchen")
-				respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to save settings: %s", err))
+				respondForbiddenOrError(w, err, "failed to save settings")
 				return
 			}
 			respondJSON(w, http.StatusOK, settingsResponse{ArgoCDURL: raw})
@@ -104,9 +111,9 @@ func handlePutSettings(deps *apiDeps, namespace string) http.HandlerFunc {
 			return
 		}
 		kitchen.Spec.ArgoCDURL = raw
-		if err := deps.apiReader.Update(r.Context(), kitchen); err != nil {
+		if err := uc.update(r.Context(), kitchen, "kitchens"); err != nil {
 			deps.logger.Error(err, "Failed to update Kitchen")
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to save settings: %s", err))
+			respondForbiddenOrError(w, err, "failed to save settings")
 			return
 		}
 

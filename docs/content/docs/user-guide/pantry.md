@@ -11,7 +11,7 @@ Order, you create a Pantry once and reference it by name.
 When an Order uses `pantryRef` as its source or destination, Kokumi reads the
 Pantry's `spec.url` as the OCI location and uses its credentials for
 authentication. This means `oci` and `pantryRef` are **mutually exclusive** on
-any source or destination — you use one or the other, never both.
+any source or destination. You use one or the other, never both.
 
 `pantryRef` is a live reference. If `spec.url` on the referenced Pantry
 changes, Kokumi re-resolves the Order and creates a new Preparation. Changing
@@ -95,7 +95,7 @@ If the Secret is wrong or the registry is unreachable, the `Ready` column shows
 
 ## Using a Pantry in an Order
 
-A Pantry replaces the OCI URL on an Order's source or destination — it provides
+A Pantry replaces the OCI URL on an Order's source or destination. It provides
 both the URL **and** the credentials. `oci` and `pantryRef` are mutually
 exclusive.
 

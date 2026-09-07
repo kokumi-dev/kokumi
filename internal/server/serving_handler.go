@@ -33,23 +33,27 @@ func handlePromote(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
+		uc, err := deps.resolveUserClient(r)
+		if err != nil {
+			respondForbiddenOrError(w, err, "failed to resolve identity")
+			return
+		}
+
 		// Verify the Order exists.
 		order := &deliveryv1alpha1.Order{}
-		if err := deps.reader.Get(r.Context(), types.NamespacedName{Namespace: namespace, Name: orderName}, order); err != nil {
+		if err := uc.get(r.Context(), types.NamespacedName{Namespace: namespace, Name: orderName}, order); err != nil {
 			if client.IgnoreNotFound(err) == nil {
 				respondError(w, http.StatusNotFound, fmt.Sprintf("order %s/%s not found", namespace, orderName))
 				return
 			}
-			deps.logger.Error(err, "Failed to get Order", "namespace", namespace, "name", orderName)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get order: %s", err))
+			respondForbiddenOrError(w, err, "failed to get order")
 			return
 		}
 
 		// Find an existing Serving for this Order (same namespace, spec.order == orderName).
 		servingList := &deliveryv1alpha1.ServingList{}
-		if err := deps.reader.List(r.Context(), servingList, client.InNamespace(namespace)); err != nil {
-			deps.logger.Error(err, "Failed to list Servings", "namespace", namespace)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to list servings: %s", err))
+		if err := uc.list(r.Context(), servingList, client.InNamespace(namespace)); err != nil {
+			respondForbiddenOrError(w, err, "failed to list servings")
 			return
 		}
 
@@ -64,10 +68,10 @@ func handlePromote(deps *apiDeps) http.HandlerFunc {
 		if existing != nil {
 			// Update the existing Serving's desired preparation.
 			existing.Spec.PreparationName = req.Preparation
-			if err := deps.apiReader.Update(r.Context(), existing); err != nil {
+			if err := uc.update(r.Context(), existing, "servings"); err != nil {
 				deps.logger.Error(err, "Failed to update Serving",
 					"namespace", namespace, "name", existing.Name)
-				respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to update serving: %s", err))
+				respondForbiddenOrError(w, err, "failed to update serving")
 				return
 			}
 
@@ -91,10 +95,10 @@ func handlePromote(deps *apiDeps) http.HandlerFunc {
 			},
 		}
 
-		if err := deps.apiReader.Create(r.Context(), newServing); err != nil {
+		if err := uc.create(r.Context(), newServing, "servings"); err != nil {
 			deps.logger.Error(err, "Failed to create Serving",
 				"namespace", namespace, "name", newServing.Name)
-			respondError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create serving: %s", err))
+			respondForbiddenOrError(w, err, "failed to create serving")
 			return
 		}
 

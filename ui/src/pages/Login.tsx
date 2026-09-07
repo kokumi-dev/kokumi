@@ -17,10 +17,13 @@ export default function Login({ onSuccess, operatorVersion, authProviders }: Pro
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
-  // Render only the providers the server advertises; fall back to admin form if none.
+  // Render only the providers the server advertises. An empty list means no
+  // login method is configured; undefined (no /info response yet) falls back
+  // to the admin form so the page still renders.
   const providers = authProviders ?? ['admin']
   const showAdmin = providers.includes('admin')
   const showOIDC = providers.includes('oidc')
+  const noProvider = providers.length === 0
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -49,6 +52,13 @@ export default function Login({ onSuccess, operatorVersion, authProviders }: Pro
           <div className={styles.title}>Kokumi</div>
           <div className={styles.subtitle}>Operator Console</div>
         </div>
+
+        {noProvider && (
+          <div className={styles.error}>
+            No login method is configured. Contact your administrator to set up
+            authentication.
+          </div>
+        )}
 
         {showOIDC && (
           <button

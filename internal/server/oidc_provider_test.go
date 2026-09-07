@@ -171,13 +171,14 @@ func TestOIDCCallbackMissingState(t *testing.T) {
 }
 
 func TestExtractClaim(t *testing.T) {
+	const testEmailClaim = "email"
 	claims := map[string]any{
-		"email": "a@b.com",
-		"realm_access": map[string]any{
-			"roles": []any{"admin", "user"},
+		testEmailClaim: "a@b.com",
+		testRealm: map[string]any{
+			testRoles: []any{providerAdmin, "user"},
 		},
 	}
-	v, err := extractClaim(claims, "email")
+	v, err := extractClaim(claims, testEmailClaim)
 	require.NoError(t, err)
 	assert.Equal(t, "a@b.com", v)
 
@@ -192,7 +193,8 @@ func TestIssueSessionFromOIDC(t *testing.T) {
 	p, httpSrv := newTestOIDCProvider(t)
 	defer httpSrv.Close()
 
-	session, err := p.issueSession("admin@example.com")
+	const testOIDCUser = "admin@example.com"
+	session, err := p.issueSession(&Identity{Subject: testOIDCUser, Email: testOIDCUser, Provider: providerOIDC})
 	require.NoError(t, err)
 	require.NotEmpty(t, session.AccessToken)
 	require.True(t, session.SetRefreshCookie)
@@ -311,7 +313,8 @@ func TestOIDCMiddlewareAcceptsIssuedToken(t *testing.T) {
 	})
 	handler := mgr.middleware(next)
 
-	session, err := p.issueSession("admin@example.com")
+	const testOIDCUser = "admin@example.com"
+	session, err := p.issueSession(&Identity{Subject: testOIDCUser, Email: testOIDCUser, Provider: providerOIDC})
 	require.NoError(t, err)
 	require.NotEmpty(t, session.AccessToken)
 
@@ -324,17 +327,24 @@ func TestOIDCMiddlewareAcceptsIssuedToken(t *testing.T) {
 	assert.True(t, reached, "a valid OIDC-issued token must pass the middleware")
 }
 
-// TestRefreshPreservesSubject verifies a refresh round-trip keeps the original subject
-// (an OIDC login must not flip to the admin username on refresh).
+// TestRefreshPreservesSubject verifies a refresh round-trip keeps the original
+// identity (an OIDC login must not flip to the admin identity on refresh,
+// which would silently remap the user to the admin ServiceAccount).
 func TestRefreshPreservesSubject(t *testing.T) {
 	auth := newAuthenticator("admin", nil, []byte("test-signing-key-do-not-use-in-prod"))
 	provider := newAdminProvider(auth)
 
-	// Mint an initial session as an OIDC subject.
+	// Mint an initial session as an OIDC identity.
 	now := time.Now()
-	access, _, err := auth.issueAccessTokenFor(now, "admin@example.com")
+	origID := &Identity{
+		Subject:  "admin@example.com",
+		Email:    "admin@example.com",
+		Groups:   []string{"devops"},
+		Provider: providerOIDC,
+	}
+	access, _, err := auth.issueAccessTokenFor(now, origID)
 	require.NoError(t, err)
-	refresh, _, err := auth.issueRefreshToken(now, "admin@example.com")
+	refresh, err := auth.issueRefreshToken(now, origID)
 	require.NoError(t, err)
 
 	// Simulate a refresh request carrying the refresh cookie.
@@ -346,12 +356,12 @@ func TestRefreshPreservesSubject(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "admin@example.com", origClaims.Subject)
 
-	// The refresh handler re-mints using the refresh token's subject.
+	// The refresh handler re-mints using the refresh token's identity.
 	session, err := provider.Refresh(r)
 	require.NoError(t, err)
-	newClaims, err := auth.parseToken(session.AccessToken)
+	newID, err := parseIdentityToken(auth, session.AccessToken)
 	require.NoError(t, err)
-	assert.Equal(t, "admin@example.com", newClaims.Subject, "refresh must preserve the OIDC subject")
+	assert.Equal(t, origID, newID, "refresh must preserve the full OIDC identity")
 }
 
 func mustBcrypt(t *testing.T, pw string) []byte {

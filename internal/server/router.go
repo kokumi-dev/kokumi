@@ -13,7 +13,7 @@ func addRoutes(
 	installNamespace string,
 ) {
 	mux.HandleFunc("GET /api/v1/info", handleInfo(authMgr))
-	mux.HandleFunc("GET /api/v1/events", handleEventsStream(h))
+	mux.HandleFunc("GET /api/v1/events", handleEventsStream(h, deps))
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /readyz", handleReadyz)
 

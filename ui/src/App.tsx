@@ -14,7 +14,6 @@ import { logout, onAuthChange, refresh, getTokenTTL, isAuthed, consumeFragmentTo
 interface Info {
   name: string
   version: string
-  authEnabled: boolean
   authProviders?: string[]
 }
 
@@ -46,8 +45,9 @@ function App() {
 
   useEffect(() => {
     if (!ready) return
-    const authRequired = info?.authEnabled ?? false
-    if (!authRequired || isAuthed()) {
+    // Auth is always required; the provider list only selects the login
+    // methods (an empty list shows the "no login method configured" notice).
+    if (isAuthed()) {
       // No silent refresh needed (auth off, or a valid token already held).
       // Defer to a microtask to avoid a synchronous setState in the effect body.
       void Promise.resolve().then(() => setBootRefreshDone(true))
@@ -86,18 +86,17 @@ function App() {
     }
   }, [])
 
-  // Wait until /api/v1/info resolves. If auth is required and we have no valid
-  // token, hold off showing the login screen until the boot-time silent
-  // refresh attempt has completed (it may authenticate via the shared cookie).
+  // Wait until /api/v1/info resolves. If we have no valid token, hold off
+  // showing the login screen until the boot-time silent refresh attempt has
+  // completed (it may authenticate via the shared cookie).
   if (!ready) return null
 
-  const authRequired = info?.authEnabled ?? false
-  if (authRequired && !authed && !bootRefreshDone) return null
-  if (authRequired && !authed) {
+  if (!authed && !bootRefreshDone) return null
+  if (!authed) {
     return (
       <Login
         operatorVersion={info?.version}
-        authProviders={info?.authProviders}
+        authProviders={info?.authProviders ?? []}
         onSuccess={() => setAuthed(true)}
       />
     )
@@ -128,7 +127,7 @@ function App() {
         activePage={activePage}
         onNavigate={setActivePage}
         operatorVersion={info?.version}
-        onLogout={authRequired ? () => void logout() : undefined}
+        onLogout={() => void logout()}
       />
       <main className={styles.content}>
         {renderPage()}
