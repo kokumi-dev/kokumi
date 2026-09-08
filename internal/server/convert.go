@@ -428,7 +428,8 @@ func menuToDTO(m deliveryv1alpha1.Menu) MenuDTO {
 	}
 
 	dto := MenuDTO{
-		Name: m.Name,
+		Name:      m.Name,
+		Namespace: m.Namespace,
 		Source: OCISourceDTO{
 			OCI:     m.Spec.Source.OCI,
 			Version: m.Spec.Source.Version,

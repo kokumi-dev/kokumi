@@ -211,6 +211,7 @@ type MenuDefaultsDTO struct {
 // MenuDTO is the view of a Menu served to the UI.
 type MenuDTO struct {
 	Name       string            `json:"name"`
+	Namespace  string            `json:"namespace"`
 	Source     OCISourceDTO      `json:"source"`
 	Render     *RenderDTO        `json:"render,omitempty"`
 	Patches    []PatchDTO        `json:"patches,omitempty"`
@@ -224,6 +225,7 @@ type MenuDTO struct {
 // CreateMenuRequest is the body for POST /api/v1/menus.
 type CreateMenuRequest struct {
 	Name      string            `json:"name"`
+	Namespace string            `json:"namespace"`
 	Source    OCISourceDTO      `json:"source"`
 	Render    *RenderDTO        `json:"render,omitempty"`
 	Patches   []PatchDTO        `json:"patches,omitempty"`
@@ -231,7 +233,7 @@ type CreateMenuRequest struct {
 	Defaults  MenuDefaultsDTO   `json:"defaults"`
 }
 
-// UpdateMenuRequest is the body for PUT /api/v1/menus/{name}.
+// UpdateMenuRequest is the body for PUT /api/v1/menus/{namespace}/{name}.
 type UpdateMenuRequest struct {
 	Source    OCISourceDTO      `json:"source"`
 	Render    *RenderDTO        `json:"render,omitempty"`

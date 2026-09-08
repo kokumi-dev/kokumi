@@ -78,7 +78,9 @@ function OrderCard({ order: r, selected, onClick }: CardProps) {
         {r.menuRef && (
           <div className={styles.metaRow}>
             <span className={styles.metaLabel}>Menu</span>
-            <span className={styles.metaValue}>{r.menuRef.name}</span>
+            <span className={styles.metaValue}>
+              {r.menuRef.name} <span style={{ color: 'var(--color-text-muted-light)' }}>(ns: {r.namespace})</span>
+            </span>
           </div>
         )}
         {r.source && (

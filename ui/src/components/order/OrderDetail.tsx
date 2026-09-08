@@ -137,7 +137,9 @@ export default function OrderDetail({ order, editsAllowed, onClose, onEdit, onDe
               {order.menuRef && (
                 <>
                   <span className={styles.specKey}>Menu</span>
-                  <span className={styles.specValue}>{order.menuRef.name}</span>
+                  <span className={styles.specValue}>
+                    {order.menuRef.name} <span style={{ color: 'var(--color-text-muted-light)' }}>(ns: {order.namespace})</span>
+                  </span>
                 </>
               )}
               {order.source && (

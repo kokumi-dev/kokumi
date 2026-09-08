@@ -189,14 +189,15 @@ To roll back, promote any previous Preparation. No re-rendering required.
 
 ## Create a Menu
 
-A **Menu** is a cluster-scoped, reusable template that pins source, version, and
-render type. It defines base values and patches plus an **override policy**
-controlling what consumers may customise.
+A **Menu** is a reusable template that pins source, version, and render type.
+It defines base values and patches plus an **override policy** controlling what
+consumers may customise.
 
 ```yaml
 apiVersion: delivery.kokumi.dev/v1alpha1
 kind: Menu
 metadata:
+  namespace: kokumi
   name: podinfo
 spec:
   source:
@@ -246,6 +247,7 @@ Create an Order that references the Menu instead of specifying a source directly
 apiVersion: delivery.kokumi.dev/v1alpha1
 kind: Order
 metadata:
+  namespace: kokumi
   name: podinfo-from-menu
 spec:
   menuRef:

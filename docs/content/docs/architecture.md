@@ -89,16 +89,16 @@ Serving ──selects────────┘  (mutable pointer to one Prepar
                               │
                               └──syncs──▶ Cluster workloads
 
-Menu (cluster-scoped) ──provides template──▶ Order  (consumed and parameterized)
+Menu ──provides template──▶ Order  (consumed and parameterized)
 Recipe ──provides render profile──▶ Order  (for example Helm options)
 ```
 
 ### Menu
 
-A Menu is a **cluster-scoped**, reusable deployment template. It pins a source
-OCI reference and version, locks the render type, and defines default values and
-patches. Consumers create Orders that reference the Menu by name instead of
-specifying source details directly.
+A Menu is a reusable deployment template. It pins a source OCI reference and
+version, locks the render type, and defines default values and patches.
+Consumers create Orders that reference a Menu instead of specifying source
+details directly.
 
 Each Menu carries an **override policy** that controls what consumers are
 allowed to customise:
@@ -146,8 +146,8 @@ An Order declares:
 - **Source** (standalone mode) — OCI image reference: either a pre-rendered
   manifest bundle (containing `*.yaml` files) or a Helm chart in OCI format
   (add `spec.render.helm` to configure rendering)
-- **MenuRef** (template mode) — reference to a cluster-scoped Menu by name;
-  source and render configuration are inherited
+- **MenuRef** (template mode) — reference to a Menu by name in the Order's
+  namespace; source and render configuration are inherited
 - **Patches** — Patches to apply before producing the artifact
 
 Orders are mutable; every change triggers a new reconciliation cycle and

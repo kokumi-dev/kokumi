@@ -146,7 +146,7 @@ type MenuStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Cluster
+// +kubebuilder:resource:scope=Namespaced
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
 // +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].reason`
 // +kubebuilder:printcolumn:name="Source",type=string,JSONPath=`.spec.source.oci`
@@ -156,9 +156,9 @@ type MenuStatus struct {
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Menu is the Schema for the menus API.
-// A Menu is a cluster-scoped, reusable template that operators define to pin
+// A Menu is a namespace-scoped, reusable template that operators define to pin
 // a source artifact, base configuration, and override constraints.
-// Developers consume Menus by referencing them from Orders.
+// Developers consume Menus by referencing them from Orders in the same namespace.
 type Menu struct {
 	metav1.TypeMeta `json:",inline"`
 

@@ -23,9 +23,13 @@ export default function OrdersPage() {
     ? orders?.find((o) => o.namespace === selectedKey.namespace && o.name === selectedKey.name) ?? null
     : null
 
-  // Resolve the menu linked to the selected order (if any).
+  // Resolve the menu linked to the selected order (if any). Menus are
+  // namespaced and referenced from the Order's own namespace.
   const selectedMenu: Menu | undefined = selected?.menuRef
-    ? menus?.find((m) => m.name === selected.menuRef?.name)
+    ? menus?.find(
+        (m) =>
+          m.namespace === selected.namespace && m.name === selected.menuRef?.name,
+      )
     : undefined
 
   // Edits are allowed unless the menu explicitly forbids them.
@@ -119,7 +123,11 @@ export default function OrdersPage() {
         <OrderFormModal
           order={formModal.order}
           menu={formModal.order.menuRef
-            ? menus?.find((m) => m.name === formModal.order.menuRef?.name)
+            ? menus?.find(
+                (m) =>
+                  m.namespace === formModal.order.namespace &&
+                  m.name === formModal.order.menuRef?.name,
+              )
             : undefined}
           onSubmit={handleUpdate}
           onClose={() => setFormModal(null)}

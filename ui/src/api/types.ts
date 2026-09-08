@@ -147,6 +147,7 @@ export interface MenuDefaults {
 
 export interface Menu {
   name: string
+  namespace: string
   source: OCISource
   render?: Render
   patches?: Patch[]
@@ -267,6 +268,7 @@ export const orderToFormData = (r: Order): OrderFormData => ({
 
 export interface MenuFormData {
   name: string
+  namespace: string
   source: OCISource
   render?: Render
   patches: Patch[]
@@ -276,6 +278,7 @@ export interface MenuFormData {
 
 export const emptyMenuForm = (): MenuFormData => ({
   name: '',
+  namespace: 'kokumi',
   source: { oci: '', version: '' },
   render: undefined,
   patches: [],
@@ -288,6 +291,7 @@ export const emptyMenuForm = (): MenuFormData => ({
 
 export const menuToFormData = (m: Menu): MenuFormData => ({
   name: m.name,
+  namespace: m.namespace,
   source: { ...m.source },
   render: m.render?.helm
     ? {

@@ -184,8 +184,8 @@ export default function OrderFormModal({ order, menuRef, menu, menus, onClose, o
       .catch(() => {})
   }, [])
 
-  function handleMenuSelect(menuName: string) {
-    if (!menuName) {
+  function handleMenuSelect(menuKey: string) {
+    if (!menuKey) {
       setSelectedMenu(null)
       setFormData((prev) => ({
         ...prev,
@@ -194,7 +194,10 @@ export default function OrderFormModal({ order, menuRef, menu, menus, onClose, o
       }))
       return
     }
-    const m = menus?.find((x) => x.name === menuName)
+    // Menus are namespaced and live in the Order's namespace.
+    const m = menus?.find(
+      (x) => `${x.namespace}/${x.name}` === menuKey,
+    )
     if (!m) return
     setSelectedMenu(m)
     setFormData((prev) => ({
@@ -629,9 +632,13 @@ function FormView({
             onChange={(e) => onMenuSelect(e.target.value)}
           >
             <option value="">Standalone (manual source)</option>
-            {menus.map((m) => (
-              <option key={m.name} value={m.name}>Menu: {m.name}</option>
-            ))}
+            {menus
+              .filter((m) => m.namespace === formData.namespace)
+              .map((m) => (
+                <option key={`${m.namespace}/${m.name}`} value={m.name}>
+                  Menu: {m.name}
+                </option>
+              ))}
           </select>
         </div>
       )}

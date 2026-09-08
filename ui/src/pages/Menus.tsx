@@ -27,12 +27,12 @@ export default function MenusPage() {
   async function handleUpdate(data: MenuFormData) {
     if (formModal?.mode !== 'edit') return
     const { menu } = formModal
-    await updateMenu(menu.name, data)
+    await updateMenu(menu.namespace, menu.name, data)
     setFormModal(null)
   }
 
   async function handleDelete(menu: Menu) {
-    await deleteMenu(menu.name)
+    await deleteMenu(menu.namespace, menu.name)
     if (selected?.name === menu.name) {
       setSelected(null)
     }
@@ -68,7 +68,14 @@ export default function MenusPage() {
           {menus === null ? (
             <div className={styles.placeholder}><span className={styles.placeholderText}>Loading…</span></div>
           ) : (
-            <MenuList menus={menus} query={query} onSelect={setSelected} onOrder={openOrder} />
+            <MenuList
+              menus={menus}
+              query={query}
+              selectedName={selected?.name}
+              selectedNamespace={selected?.namespace}
+              onSelect={setSelected}
+              onOrder={openOrder}
+            />
           )}
         </div>
       </div>

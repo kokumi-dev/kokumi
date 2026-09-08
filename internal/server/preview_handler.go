@@ -79,9 +79,9 @@ func handlePreviewOrder(deps *apiDeps) http.HandlerFunc {
 
 		if req.MenuRef != nil {
 			menu := &deliveryv1alpha1.Menu{}
-			if err := uc.get(r.Context(), types.NamespacedName{Name: req.MenuRef.Name}, menu); err != nil {
+			if err := uc.get(r.Context(), types.NamespacedName{Namespace: ns, Name: req.MenuRef.Name}, menu); err != nil {
 				if client.IgnoreNotFound(err) == nil {
-					respondError(w, http.StatusNotFound, fmt.Sprintf("menu %q not found", req.MenuRef.Name))
+					respondError(w, http.StatusNotFound, fmt.Sprintf("menu %q not found in namespace %q", req.MenuRef.Name, ns))
 					return
 				}
 				respondForbiddenOrError(w, err, "failed to get menu")
@@ -193,9 +193,9 @@ func handlePreviewOrderFiles(deps *apiDeps) http.HandlerFunc {
 
 		if req.MenuRef != nil {
 			menu := &deliveryv1alpha1.Menu{}
-			if err := uc.get(r.Context(), types.NamespacedName{Name: req.MenuRef.Name}, menu); err != nil {
+			if err := uc.get(r.Context(), types.NamespacedName{Namespace: ns, Name: req.MenuRef.Name}, menu); err != nil {
 				if client.IgnoreNotFound(err) == nil {
-					respondError(w, http.StatusNotFound, fmt.Sprintf("menu %q not found", req.MenuRef.Name))
+					respondError(w, http.StatusNotFound, fmt.Sprintf("menu %q not found in namespace %q", req.MenuRef.Name, ns))
 					return
 				}
 				respondForbiddenOrError(w, err, "failed to get menu")

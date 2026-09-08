@@ -35,7 +35,8 @@ var _ = Describe("Menu Controller", func() {
 		ctx := context.Background()
 
 		typeNamespacedName := types.NamespacedName{
-			Name: resourceName,
+			Namespace: testNamespace,
+			Name:      resourceName,
 		}
 		menu := &deliveryv1alpha1.Menu{}
 
@@ -44,7 +45,8 @@ var _ = Describe("Menu Controller", func() {
 			err := k8sClient.Get(ctx, typeNamespacedName, menu)
 			if err != nil && errors.IsNotFound(err) {
 				resource := &deliveryv1alpha1.Menu{
-					Name: resourceName,
+					Namespace: testNamespace,
+					Name:      resourceName,
 					Spec: deliveryv1alpha1.MenuSpec{
 						Source: deliveryv1alpha1.OCISource{
 							OCI:     testOCIRef,
