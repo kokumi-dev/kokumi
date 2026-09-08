@@ -5,12 +5,20 @@ import styles from './MenuList.module.css'
 interface Props {
   menus: Menu[]
   selectedName?: string
+  selectedNamespace?: string
   query: string
   onSelect: (menu: Menu) => void
   onOrder?: (menu: Menu) => void
 }
 
-export default function MenuList({ menus, selectedName, query, onSelect, onOrder }: Props) {
+export default function MenuList({
+  menus,
+  selectedName,
+  selectedNamespace,
+  query,
+  onSelect,
+  onOrder,
+}: Props) {
   const filtered = query
     ? menus.filter((m) => m.name.toLowerCase().includes(query.toLowerCase()))
     : menus
@@ -31,9 +39,9 @@ export default function MenuList({ menus, selectedName, query, onSelect, onOrder
         <div className={styles.grid}>
           {filtered.map((m) => (
             <MenuCard
-              key={m.name}
+              key={`${m.namespace}/${m.name}`}
               menu={m}
-              selected={m.name === selectedName}
+              selected={m.namespace === selectedNamespace && m.name === selectedName}
               onClick={() => onSelect(m)}
               onOrder={onOrder ? () => onOrder(m) : undefined}
             />
@@ -64,7 +72,7 @@ function MenuCard({ menu: m, selected, onClick, onOrder }: CardProps) {
       <div className={styles.cardHeader}>
         <div>
           <div className={styles.cardName}>{m.name}</div>
-          <div className={styles.cardNs}>cluster-scoped</div>
+          <div className={styles.cardNs}>{m.namespace}</div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {onOrder && (

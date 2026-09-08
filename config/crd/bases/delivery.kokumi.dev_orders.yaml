@@ -149,13 +149,14 @@ spec:
                 type: array
               menuRef:
                 description: |-
-                  menuRef references a cluster-scoped Menu that provides the source,
-                  base configuration, and override constraints for this Order.
+                  menuRef references a Menu in the Order's namespace that provides the
+                  source, base configuration, and override constraints for this Order.
                   Must not be set when source is used.
                 properties:
                   name:
-                    description: name is the name of the cluster-scoped Menu to use
-                      as a template.
+                    description: |-
+                      name is the name of the Menu to use as a template. The Menu must exist
+                      in the same namespace as the Order.
                     type: string
                 required:
                 - name

@@ -12,7 +12,7 @@ spec:
     listKind: MenuList
     plural: menus
     singular: menu
-  scope: Cluster
+  scope: Namespaced
   versions:
   - additionalPrinterColumns:
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
@@ -43,9 +43,9 @@ spec:
       openAPIV3Schema:
         description: |-
           Menu is the Schema for the menus API.
-          A Menu is a cluster-scoped, reusable template that operators define to pin
+          A Menu is a namespace-scoped, reusable template that operators define to pin
           a source artifact, base configuration, and override constraints.
-          Developers consume Menus by referencing them from Orders.
+          Developers consume Menus by referencing them from Orders in the same namespace.
         properties:
           apiVersion:
             description: |-

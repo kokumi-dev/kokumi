@@ -224,12 +224,14 @@ export function promote(
 
 // ── Menus ─────────────────────────────────────────────────────────────────────
 
-export function listMenus(): Promise<Menu[]> {
-  return request<Menu[]>('/menus')
+export function listMenus(namespace?: string): Promise<Menu[]> {
+  return request<Menu[]>(
+    namespace ? `/menus?namespace=${encodeURIComponent(namespace)}` : '/menus',
+  )
 }
 
-export function getMenu(name: string): Promise<Menu> {
-  return request<Menu>(`/menus/${name}`)
+export function getMenu(namespace: string, name: string): Promise<Menu> {
+  return request<Menu>(`/menus/${namespace}/${name}`)
 }
 
 export function createMenu(data: MenuFormData): Promise<Menu> {
@@ -240,17 +242,18 @@ export function createMenu(data: MenuFormData): Promise<Menu> {
 }
 
 export function updateMenu(
+  namespace: string,
   name: string,
-  data: Omit<MenuFormData, 'name'>,
+  data: Omit<MenuFormData, 'name' | 'namespace'>,
 ): Promise<Menu> {
-  return request<Menu>(`/menus/${name}`, {
+  return request<Menu>(`/menus/${namespace}/${name}`, {
     method: 'PUT',
     body: JSON.stringify(data),
   })
 }
 
-export function deleteMenu(name: string): Promise<void> {
-  return request<void>(`/menus/${name}`, { method: 'DELETE' })
+export function deleteMenu(namespace: string, name: string): Promise<void> {
+  return request<void>(`/menus/${namespace}/${name}`, { method: 'DELETE' })
 }
 
 // ── Pantries ──────────────────────────────────────────────────────────────────

@@ -42,7 +42,7 @@ function formToYaml(data: MenuFormData): string {
   return dump(doc, { lineWidth: 100 })
 }
 
-function yamlToPartialForm(text: string): Omit<MenuFormData, 'name'> {
+function yamlToPartialForm(text: string): Omit<MenuFormData, 'name' | 'namespace'> {
   const doc = load(text) as Record<string, unknown>
   if (!doc || typeof doc !== 'object') throw new Error('YAML must be a mapping')
 
@@ -265,6 +265,18 @@ function MenuFormView({
           onChange={(e) => onFieldChange('name', e.target.value)}
           readOnly={isEdit}
           placeholder="my-menu"
+        />
+      </div>
+
+      {/* Namespace */}
+      <div className={formStyles.fieldGroup}>
+        <label className={formStyles.label}>Namespace</label>
+        <input
+          className={`${formStyles.input} ${isEdit ? formStyles.inputDisabled : ''}`}
+          value={formData.namespace}
+          onChange={(e) => onFieldChange('namespace', e.target.value)}
+          readOnly={isEdit}
+          placeholder="kokumi"
         />
       </div>
 

@@ -164,9 +164,10 @@ type Patch struct {
 	Set map[string]string `json:"set"`
 }
 
-// MenuRef references a cluster-scoped Menu by name.
+// MenuRef references a Menu by name in the Order's namespace.
 type MenuRef struct {
-	// name is the name of the cluster-scoped Menu to use as a template.
+	// name is the name of the Menu to use as a template. The Menu must exist
+	// in the same namespace as the Order.
 	// +kubebuilder:validation:Required
 	Name string `json:"name"`
 }
@@ -180,8 +181,8 @@ type OrderSpec struct {
 	// +optional
 	Source *OCISource `json:"source,omitempty"`
 
-	// menuRef references a cluster-scoped Menu that provides the source,
-	// base configuration, and override constraints for this Order.
+	// menuRef references a Menu in the Order's namespace that provides the
+	// source, base configuration, and override constraints for this Order.
 	// Must not be set when source is used.
 	// +optional
 	MenuRef *MenuRef `json:"menuRef,omitempty"`

@@ -117,9 +117,9 @@ func (r *OrderReconciler) resolveEffectiveSpec(ctx context.Context, order *deliv
 	}
 
 	m := &deliveryv1alpha1.Menu{}
-	if err := r.Get(ctx, client.ObjectKey{Name: order.Spec.MenuRef.Name}, m); err != nil {
+	if err := r.Get(ctx, client.ObjectKey{Namespace: order.Namespace, Name: order.Spec.MenuRef.Name}, m); err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil, fmt.Errorf("referenced Menu %q not found", order.Spec.MenuRef.Name)
+			return nil, fmt.Errorf("referenced Menu %q not found in namespace %q", order.Spec.MenuRef.Name, order.Namespace)
 		}
 		return nil, fmt.Errorf("failed to get Menu %q: %w", order.Spec.MenuRef.Name, err)
 	}

@@ -11,12 +11,20 @@ import (
 )
 
 // handleListMenus handles GET /api/v1/menus.
+// Lists Menus across all namespaces. An optional ?namespace= query param
+// can be used to filter to a specific namespace.
 func handleListMenus(deps *apiDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if deps == nil {
 			unavailable(w)
 			return
 		}
+
+		listOpts := []client.ListOption{}
+		if ns := r.URL.Query().Get("namespace"); ns != "" {
+			listOpts = append(listOpts, client.InNamespace(ns))
+		}
+
 		uc, err := deps.resolveUserClient(r)
 		if err != nil {
 			respondForbiddenOrError(w, err, "failed to resolve identity")
@@ -24,7 +32,7 @@ func handleListMenus(deps *apiDeps) http.HandlerFunc {
 		}
 
 		menuList := &deliveryv1alpha1.MenuList{}
-		if err := uc.list(r.Context(), menuList); err != nil {
+		if err := uc.list(r.Context(), menuList, listOpts...); err != nil {
 			respondForbiddenOrError(w, err, "failed to list menus")
 			return
 		}
@@ -33,7 +41,7 @@ func handleListMenus(deps *apiDeps) http.HandlerFunc {
 	}
 }
 
-// handleGetMenu handles GET /api/v1/menus/{name}.
+// handleGetMenu handles GET /api/v1/menus/{namespace}/{name}.
 func handleGetMenu(deps *apiDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if deps == nil {
@@ -41,6 +49,7 @@ func handleGetMenu(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
+		namespace := r.PathValue("namespace")
 		name := r.PathValue("name")
 
 		uc, err := deps.resolveUserClient(r)
@@ -50,9 +59,9 @@ func handleGetMenu(deps *apiDeps) http.HandlerFunc {
 		}
 
 		menu := &deliveryv1alpha1.Menu{}
-		if err := uc.get(r.Context(), types.NamespacedName{Name: name}, menu); err != nil {
+		if err := uc.get(r.Context(), types.NamespacedName{Namespace: namespace, Name: name}, menu); err != nil {
 			if client.IgnoreNotFound(err) == nil {
-				respondError(w, http.StatusNotFound, fmt.Sprintf("menu %s not found", name))
+				respondError(w, http.StatusNotFound, fmt.Sprintf("menu %s/%s not found", namespace, name))
 				return
 			}
 			respondForbiddenOrError(w, err, "failed to get menu")
@@ -80,9 +89,14 @@ func handleCreateMenu(deps *apiDeps) http.HandlerFunc {
 			respondError(w, http.StatusBadRequest, "name is required")
 			return
 		}
+		if req.Namespace == "" {
+			respondError(w, http.StatusBadRequest, "namespace is required")
+			return
+		}
 
 		menu := &deliveryv1alpha1.Menu{
-			Name: req.Name,
+			Namespace: req.Namespace,
+			Name:      req.Name,
 			Spec: deliveryv1alpha1.MenuSpec{
 				Source:    deliveryv1alpha1.OCISource{OCI: req.Source.OCI, Version: req.Source.Version},
 				Render:    renderFromDTO(req.Render),
@@ -109,7 +123,7 @@ func handleCreateMenu(deps *apiDeps) http.HandlerFunc {
 	}
 }
 
-// handleUpdateMenu handles PUT /api/v1/menus/{name}.
+// handleUpdateMenu handles PUT /api/v1/menus/{namespace}/{name}.
 func handleUpdateMenu(deps *apiDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if deps == nil {
@@ -117,6 +131,7 @@ func handleUpdateMenu(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
+		namespace := r.PathValue("namespace")
 		name := r.PathValue("name")
 
 		var req UpdateMenuRequest
@@ -132,9 +147,9 @@ func handleUpdateMenu(deps *apiDeps) http.HandlerFunc {
 		}
 
 		menu := &deliveryv1alpha1.Menu{}
-		if err := uc.get(r.Context(), types.NamespacedName{Name: name}, menu); err != nil {
+		if err := uc.get(r.Context(), types.NamespacedName{Namespace: namespace, Name: name}, menu); err != nil {
 			if client.IgnoreNotFound(err) == nil {
-				respondError(w, http.StatusNotFound, fmt.Sprintf("menu %s not found", name))
+				respondError(w, http.StatusNotFound, fmt.Sprintf("menu %s/%s not found", namespace, name))
 				return
 			}
 			respondForbiddenOrError(w, err, "failed to get menu")
@@ -157,7 +172,7 @@ func handleUpdateMenu(deps *apiDeps) http.HandlerFunc {
 	}
 }
 
-// handleDeleteMenu handles DELETE /api/v1/menus/{name}.
+// handleDeleteMenu handles DELETE /api/v1/menus/{namespace}/{name}.
 func handleDeleteMenu(deps *apiDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if deps == nil {
@@ -165,6 +180,7 @@ func handleDeleteMenu(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
+		namespace := r.PathValue("namespace")
 		name := r.PathValue("name")
 
 		uc, err := deps.resolveUserClient(r)
@@ -174,9 +190,9 @@ func handleDeleteMenu(deps *apiDeps) http.HandlerFunc {
 		}
 
 		menu := &deliveryv1alpha1.Menu{}
-		if err := uc.get(r.Context(), types.NamespacedName{Name: name}, menu); err != nil {
+		if err := uc.get(r.Context(), types.NamespacedName{Namespace: namespace, Name: name}, menu); err != nil {
 			if client.IgnoreNotFound(err) == nil {
-				respondError(w, http.StatusNotFound, fmt.Sprintf("menu %s not found", name))
+				respondError(w, http.StatusNotFound, fmt.Sprintf("menu %s/%s not found", namespace, name))
 				return
 			}
 			respondForbiddenOrError(w, err, "failed to get menu")
