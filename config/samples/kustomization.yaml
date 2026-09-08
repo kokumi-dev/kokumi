@@ -8,6 +8,7 @@ resources:
 - delivery_v1alpha1_order_kustomize.yaml
 - delivery_v1alpha1_order_manifest.yaml
 - delivery_v1alpha1_order_manifestfiles.yaml
+- delivery_v1alpha1_order_menu.yaml
 - delivery_v1alpha1_menu.yaml
 - delivery_v1alpha1_pantry_ghcr.yaml
 - delivery_v1alpha1_pantry_incluster.yaml
