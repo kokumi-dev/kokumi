@@ -7,3 +7,6 @@ metadata:
   name: default
 spec:
   argoCDURL: "https://localhost:8443"
+  auth:
+    adminUser:
+      enabled: true
