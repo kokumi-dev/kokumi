@@ -40,68 +40,8 @@ func handlePreviewOrder(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		var req PreviewOrderRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %s", err))
-			return
-		}
-
-		name := req.Name
-		ns := req.Namespace
-		if ns == "" {
-			ns = namespace.Default
-		}
-
-		order := &deliveryv1alpha1.Order{
-			Name:      name,
-			Namespace: ns,
-			Spec: deliveryv1alpha1.OrderSpec{
-				Render:  renderFromDTO(req.Render),
-				Patches: patchesFromDTO(req.Patches),
-				Edits:   patchesFromDTO(req.Edits),
-			},
-		}
-
-		order.Spec.Source = sourceFromDTO(req.Source)
-
-		if req.MenuRef != nil {
-			order.Spec.MenuRef = &deliveryv1alpha1.MenuRef{Name: req.MenuRef.Name}
-		}
-
-		var spec *resolve.EffectiveSpec
-		var specErr error
-
-		uc, err := deps.resolveUserClient(r)
-		if err != nil {
-			respondForbiddenOrError(w, err, "failed to resolve identity")
-			return
-		}
-
-		if req.MenuRef != nil {
-			menu := &deliveryv1alpha1.Menu{}
-			if err := uc.get(r.Context(), types.NamespacedName{Namespace: ns, Name: req.MenuRef.Name}, menu); err != nil {
-				if client.IgnoreNotFound(err) == nil {
-					respondError(w, http.StatusNotFound, fmt.Sprintf("menu %q not found in namespace %q", req.MenuRef.Name, ns))
-					return
-				}
-				respondForbiddenOrError(w, err, "failed to get menu")
-				return
-			}
-			spec, specErr = resolve.ForMenu(menu, order)
-		} else {
-			spec, specErr = resolve.FromOrder(order)
-		}
-
-		if specErr != nil {
-			respondError(w, http.StatusUnprocessableEntity, specErr.Error())
-			return
-		}
-
-		// Only resolve Pantry credentials (requires get secrets) when the
-		// source references a Pantry; plain OCI sources need no Secret access.
-		resolvedSource, sourceClient, err := resolvePreviewSource(r.Context(), uc, spec.Source, ns)
-		if err != nil {
-			respondForbiddenOrError(w, err, "failed to resolve source")
+		spec, name, ns, resolvedSource, sourceClient, ok := resolvePreviewRequest(deps, w, r)
+		if !ok {
 			return
 		}
 
@@ -154,68 +94,8 @@ func handlePreviewOrderFiles(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		var req PreviewOrderRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %s", err))
-			return
-		}
-
-		name := req.Name
-		ns := req.Namespace
-		if ns == "" {
-			ns = namespace.Default
-		}
-
-		order := &deliveryv1alpha1.Order{
-			Name:      name,
-			Namespace: ns,
-			Spec: deliveryv1alpha1.OrderSpec{
-				Render:  renderFromDTO(req.Render),
-				Patches: patchesFromDTO(req.Patches),
-				Edits:   patchesFromDTO(req.Edits),
-			},
-		}
-
-		order.Spec.Source = sourceFromDTO(req.Source)
-
-		if req.MenuRef != nil {
-			order.Spec.MenuRef = &deliveryv1alpha1.MenuRef{Name: req.MenuRef.Name}
-		}
-
-		var spec *resolve.EffectiveSpec
-		var specErr error
-
-		uc, err := deps.resolveUserClient(r)
-		if err != nil {
-			respondForbiddenOrError(w, err, "failed to resolve identity")
-			return
-		}
-
-		if req.MenuRef != nil {
-			menu := &deliveryv1alpha1.Menu{}
-			if err := uc.get(r.Context(), types.NamespacedName{Namespace: ns, Name: req.MenuRef.Name}, menu); err != nil {
-				if client.IgnoreNotFound(err) == nil {
-					respondError(w, http.StatusNotFound, fmt.Sprintf("menu %q not found in namespace %q", req.MenuRef.Name, ns))
-					return
-				}
-				respondForbiddenOrError(w, err, "failed to get menu")
-				return
-			}
-			spec, specErr = resolve.ForMenu(menu, order)
-		} else {
-			spec, specErr = resolve.FromOrder(order)
-		}
-
-		if specErr != nil {
-			respondError(w, http.StatusUnprocessableEntity, specErr.Error())
-			return
-		}
-
-		// Only resolve Pantry credentials (requires get secrets) when the
-		// source references a Pantry; plain OCI sources need no Secret access.
-		resolvedSource, sourceClient, err := resolvePreviewSource(r.Context(), uc, spec.Source, ns)
-		if err != nil {
-			respondForbiddenOrError(w, err, "failed to resolve source")
+		spec, name, ns, resolvedSource, sourceClient, ok := resolvePreviewRequest(deps, w, r)
+		if !ok {
 			return
 		}
 
@@ -244,4 +124,77 @@ func handlePreviewOrderFiles(deps *apiDeps) http.HandlerFunc {
 
 		respondJSON(w, http.StatusOK, out)
 	}
+}
+
+// resolvePreviewRequest decodes the request body, builds the Order from the
+// DTOs, resolves the effective spec (Menu-merged or plain), and resolves the
+// source with Pantry credentials when needed. It writes the HTTP error
+// response itself and returns nil when the request should not proceed.
+func resolvePreviewRequest(deps *apiDeps, w http.ResponseWriter, r *http.Request) (*resolve.EffectiveSpec, string, string, deliveryv1alpha1.OCISource, oci.Client, bool) {
+	var req PreviewOrderRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %s", err))
+		return nil, "", "", deliveryv1alpha1.OCISource{}, nil, false
+	}
+
+	name := req.Name
+	ns := req.Namespace
+	if ns == "" {
+		ns = namespace.Default
+	}
+
+	order := &deliveryv1alpha1.Order{
+		Name:      name,
+		Namespace: ns,
+		Spec: deliveryv1alpha1.OrderSpec{
+			Render:  renderFromDTO(req.Render),
+			Patches: patchesFromDTO(req.Patches),
+			Edits:   patchesFromDTO(req.Edits),
+		},
+	}
+
+	order.Spec.Source = sourceFromDTO(req.Source)
+
+	if req.MenuRef != nil {
+		order.Spec.MenuRef = &deliveryv1alpha1.MenuRef{Name: req.MenuRef.Name}
+	}
+
+	uc, err := deps.resolveUserClient(r)
+	if err != nil {
+		respondForbiddenOrError(w, err, "failed to resolve identity")
+		return nil, "", "", deliveryv1alpha1.OCISource{}, nil, false
+	}
+
+	var spec *resolve.EffectiveSpec
+	var specErr error
+
+	if req.MenuRef != nil {
+		menu := &deliveryv1alpha1.Menu{}
+		if err := uc.get(r.Context(), types.NamespacedName{Namespace: ns, Name: req.MenuRef.Name}, menu); err != nil {
+			if client.IgnoreNotFound(err) == nil {
+				respondError(w, http.StatusNotFound, fmt.Sprintf("menu %q not found in namespace %q", req.MenuRef.Name, ns))
+				return nil, "", "", deliveryv1alpha1.OCISource{}, nil, false
+			}
+			respondForbiddenOrError(w, err, "failed to get menu")
+			return nil, "", "", deliveryv1alpha1.OCISource{}, nil, false
+		}
+		spec, specErr = resolve.ForMenu(menu, order)
+	} else {
+		spec, specErr = resolve.FromOrder(order)
+	}
+
+	if specErr != nil {
+		respondError(w, http.StatusUnprocessableEntity, specErr.Error())
+		return nil, "", "", deliveryv1alpha1.OCISource{}, nil, false
+	}
+
+	// Only resolve Pantry credentials (requires get secrets) when the
+	// source references a Pantry; plain OCI sources need no Secret access.
+	resolvedSource, sourceClient, err := resolvePreviewSource(r.Context(), uc, spec.Source, ns)
+	if err != nil {
+		respondForbiddenOrError(w, err, "failed to resolve source")
+		return nil, "", "", deliveryv1alpha1.OCISource{}, nil, false
+	}
+
+	return spec, name, ns, resolvedSource, sourceClient, true
 }
