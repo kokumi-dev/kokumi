@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.16.0](https://github.com/kokumi-dev/kokumi/compare/0.15.1...0.16.0) (2026-09-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* change menu to be namespace-scoped ([#359](https://github.com/kokumi-dev/kokumi/issues/359))
+
+### Features
+
+* change menu to be namespace-scoped ([#359](https://github.com/kokumi-dev/kokumi/issues/359)) ([b3bc2d2](https://github.com/kokumi-dev/kokumi/commit/b3bc2d2e154a1fe4f11e70d6c0b421707782f3cd))
+* implement identity mapping and impersonation for user authorization ([#357](https://github.com/kokumi-dev/kokumi/issues/357)) ([c8e6ba1](https://github.com/kokumi-dev/kokumi/commit/c8e6ba12d334c6e5281b254cc71179141f8e7a5d))
+* report underlying argo cd deployment status and refactor into dedicated deployer ([#344](https://github.com/kokumi-dev/kokumi/issues/344)) ([f8c0cf1](https://github.com/kokumi-dev/kokumi/commit/f8c0cf17f01be0cb5a70caef4242e6f97756d6f2))
+
 ## [0.15.1](https://github.com/kokumi-dev/kokumi/compare/0.15.0...0.15.1) (2026-08-24)
 
 
