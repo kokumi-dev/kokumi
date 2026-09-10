@@ -111,53 +111,9 @@ func (rs *OrderService) ProcessOrder(
 	}
 	sourceRef.Digest = sourceDigest
 
-	manifestPath := filepath.Join(tempDir, "manifest.yaml")
-
-	logger.Info("Pulled source artifact", "digest", sourceDigest, "mediaType", mediaType)
-
 	repo, tag, commitHash := scmlink.Resolve(sourceAnnotations)
 
-	if render != nil && render.Helm != nil {
-		if mediaType != oci.HelmChartLayerMediaType {
-			return nil, fmt.Errorf("source is not a Helm chart (got media type %q)", mediaType)
-		}
-
-		logger.Info("Applying Helm renderer")
-
-		vals, err := jsonToMap(render.Helm.Values)
-		if err != nil {
-			return nil, fmt.Errorf("failed convert values: %w", err)
-		}
-
-		releaseName := render.Helm.ReleaseName
-		if releaseName == "" {
-			releaseName = order.Name
-		}
-		helmNamespace := render.Helm.Namespace
-		if helmNamespace == "" {
-			helmNamespace = order.Namespace
-		}
-
-		chartPath := filepath.Join(tempDir, "chart.tgz")
-
-		manifest, err := renderer.RenderChart(
-			ctx,
-			chartPath,
-			releaseName,
-			helmNamespace,
-			render.Helm.IncludeCRDs,
-			vals,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to render Helm chart: %w", err)
-		}
-
-		if err := afero.WriteFile(rs.fs, manifestPath, []byte(manifest), 0600); err != nil {
-			return nil, fmt.Errorf("failed to write manifest: %w", err)
-		}
-	}
-
-	if err := rs.processManifestFiles(ctx, tempDir, manifestPath, patches, edits); err != nil {
+	if err := rs.renderToDir(ctx, tempDir, render, mediaType, patches, edits, order.Name, order.Namespace); err != nil {
 		return nil, err
 	}
 
@@ -236,39 +192,6 @@ func (rs *OrderService) PreviewOrder(
 	mediaType, _, _, err := rs.pullWithCache(ctx, srcClient, sourceRef, tempDir, layout)
 	if err != nil {
 		return nil, fmt.Errorf("failed to pull artifact: %w", err)
-	}
-
-	manifestPath := filepath.Join(tempDir, "manifest.yaml")
-
-	if render != nil && render.Helm != nil {
-		if mediaType != oci.HelmChartLayerMediaType {
-			return nil, fmt.Errorf("source is not a Helm chart (got media type %q)", mediaType)
-		}
-
-		vals, err := jsonToMap(render.Helm.Values)
-		if err != nil {
-			return nil, fmt.Errorf("failed convert values: %w", err)
-		}
-
-		releaseName := render.Helm.ReleaseName
-		if releaseName == "" {
-			releaseName = name
-		}
-		helmNamespace := render.Helm.Namespace
-		if helmNamespace == "" {
-			helmNamespace = namespace
-		}
-
-		chartPath := filepath.Join(tempDir, "chart.tgz")
-
-		manifest, err := renderer.RenderChart(ctx, chartPath, releaseName, helmNamespace, render.Helm.IncludeCRDs, vals)
-		if err != nil {
-			return nil, fmt.Errorf("failed to render Helm chart: %w", err)
-		}
-
-		if err := afero.WriteFile(rs.fs, manifestPath, []byte(manifest), 0600); err != nil {
-			return nil, fmt.Errorf("failed to write manifest: %w", err)
-		}
 	}
 
 	if err := rs.renderToDir(ctx, tempDir, render, mediaType, patches, edits, name, namespace); err != nil {
