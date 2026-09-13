@@ -110,6 +110,11 @@ type MenuSpec struct {
 	// +kubebuilder:validation:Required
 	Source OCISource `json:"source"`
 
+	// vendor optionally configures copying the source artifact to another OCI
+	// registry. When set, consuming Orders use the vendored copy.
+	// +optional
+	Vendor *VendorSpec `json:"vendor,omitempty"`
+
 	// render defines optional rendering configuration for the source artifact.
 	// When absent the source is treated as a pre-rendered manifest bundle.
 	// Consumers cannot change the render type.
@@ -131,11 +136,64 @@ type MenuSpec struct {
 	Defaults MenuDefaults `json:"defaults,omitempty"`
 }
 
+// VendorSpec configures copying the source artifact to another OCI registry.
+type VendorSpec struct {
+	// destination is the registry the source artifact is copied to.
+	// +kubebuilder:validation:Required
+	Destination VendorDestination `json:"destination"`
+}
+
+// VendorDestination defines where the vendored artifact is pushed.
+// Exactly one of oci or pantryRef must be set.
+// +kubebuilder:validation:XValidation:rule="(has(self.oci) && !has(self.pantryRef)) || (!has(self.oci) && has(self.pantryRef))",message="exactly one of oci or pantryRef must be set"
+type VendorDestination struct {
+	// oci is the full OCI URL the vendored artifact is pushed to.
+	// Mutually exclusive with pantryRef.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="self == '' || (isURL(self) && url(self).getScheme() == 'oci')",message="must be a valid OCI URL"
+	OCI string `json:"oci,omitempty"`
+
+	// pantryRef references a Pantry resource whose URL is used as the
+	// vendored destination. Mutually exclusive with oci.
+	// +optional
+	PantryRef *PantryRef `json:"pantryRef,omitempty"`
+}
+
+// MenuSourceStatus is the consumable source address advertised by the Menu.
+// Orders consume exactly what is published here.
+type MenuSourceStatus struct {
+	// oci is the full OCI URL of the consumable artifact.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() == 'oci'",message="must be a valid OCI URL"
+	OCI string `json:"oci"`
+
+	// version is the tag of the consumable artifact.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Version string `json:"version"`
+
+	// pantryRef references the Pantry providing pull credentials for oci.
+	// Absent when the registry is anonymously accessible.
+	// +optional
+	PantryRef *PantryRef `json:"pantryRef,omitempty"`
+
+	// digest is the resolved digest of the artifact. Empty when resolution
+	// was best-effort and the registry could not be reached.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
+	Digest string `json:"digest,omitempty"`
+}
+
 // MenuStatus defines the observed state of Menu.
 type MenuStatus struct {
 	// observedGeneration is the most recent generation observed by the controller.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// source is the consumable source address for Orders. Absent until the
+	// Menu controller has resolved (and, if configured, vendored) the source.
+	// +optional
+	Source *MenuSourceStatus `json:"source,omitempty"`
 
 	// conditions represent the current state of the Menu resource.
 	// +listType=map

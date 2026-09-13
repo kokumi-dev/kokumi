@@ -123,6 +123,33 @@ When an Order references a Menu:
 4. If the consumer supplies overrides that violate the policy, reconciliation
    fails with a clear status message.
 
+#### Source resolution and vendoring
+
+The Menu controller always publishes the consumable source in the Menu's
+`status.source` (OCI URL, version, optional Pantry reference for pull
+credentials, and the resolved digest). Orders consume exactly what is
+advertised there.
+
+Optionally, a Menu can **vendor** its source: copy the artifact (Helm chart or
+manifest bundle) to another OCI registry. Orders then consume the vendored
+copy:
+
+```yaml
+spec:
+  source:
+    oci: oci://ghcr.io/kokumi-dev/testdata/external-secrets
+    version: "0.1.0"
+  vendor:
+    destination:
+      oci: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/external-secrets  # or a pantryRef
+```
+
+The destination is either a plain `oci://` URL (anonymous) or a `pantryRef`
+(credentials from the referenced Pantry). Upstream credentials come from
+`spec.source.pantryRef` when the upstream registry is private. The vendored
+ref and its pull credentials are advertised in `status.source`, so Orders need
+no knowledge of the vendoring setup.
+
 ### Recipe
 
 Recipe captures rendering configuration, including options like Helm rendering

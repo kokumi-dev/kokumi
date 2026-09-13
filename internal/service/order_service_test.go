@@ -217,6 +217,14 @@ func (c *capturingFakeClient) ListTags(_ context.Context, _ oci.Reference) ([]st
 	return nil, nil
 }
 
+func (c *capturingFakeClient) Resolve(_ context.Context, _ oci.Reference) (string, error) {
+	return fakeDigest, nil
+}
+
+func (c *capturingFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference) error {
+	return nil
+}
+
 func TestOrderService_PullCache(t *testing.T) {
 	const cacheDir = "/cache"
 
@@ -305,6 +313,14 @@ func (c *multiFileFakeClient) ListTags(_ context.Context, _ oci.Reference) ([]st
 	return nil, nil
 }
 
+func (c *multiFileFakeClient) Resolve(_ context.Context, _ oci.Reference) (string, error) {
+	return fakeDigest, nil
+}
+
+func (c *multiFileFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference) error {
+	return nil
+}
+
 // countingFakeClient wraps FakeClient and invokes onPull on every Pull call.
 type countingFakeClient struct {
 	fs     afero.Fs
@@ -324,6 +340,14 @@ func (c *countingFakeClient) Push(ctx context.Context, ref oci.Reference, source
 
 func (c *countingFakeClient) ListTags(_ context.Context, _ oci.Reference) ([]string, error) {
 	return nil, nil
+}
+
+func (c *countingFakeClient) Resolve(_ context.Context, _ oci.Reference) (string, error) {
+	return fakeDigest, nil
+}
+
+func (c *countingFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference) error {
+	return nil
 }
 
 func TestMergeYAMLFiles(t *testing.T) {
@@ -416,6 +440,14 @@ func (c *kustomizeFakeClient) ListTags(_ context.Context, _ oci.Reference) ([]st
 	return nil, nil
 }
 
+func (c *kustomizeFakeClient) Resolve(_ context.Context, _ oci.Reference) (string, error) {
+	return fakeDigest, nil
+}
+
+func (c *kustomizeFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference) error {
+	return nil
+}
+
 // fluxFakeClient simulates a Flux OCI artifact (cncf.flux.content layer): a
 // kustomization plus individual manifest files, no io.deis.oras.content.unpack
 // annotation. The real ORASClient extracts this via extractLayer; the fake
@@ -446,6 +478,14 @@ func (c *fluxFakeClient) Push(_ context.Context, _ oci.Reference, _ string, _ ma
 
 func (c *fluxFakeClient) ListTags(_ context.Context, _ oci.Reference) ([]string, error) {
 	return nil, nil
+}
+
+func (c *fluxFakeClient) Resolve(_ context.Context, _ oci.Reference) (string, error) {
+	return fakeDigest, nil
+}
+
+func (c *fluxFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference) error {
+	return nil
 }
 
 func multiFileOrder(render *deliveryv1alpha1.Render) *deliveryv1alpha1.Order {

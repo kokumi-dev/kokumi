@@ -293,6 +293,46 @@ func (c *ORASClient) ListTags(ctx context.Context, ref Reference) ([]string, err
 	return tags, nil
 }
 
+// Resolve resolves ref (tag or digest) to the manifest digest of the artifact.
+func (c *ORASClient) Resolve(ctx context.Context, ref Reference) (string, error) {
+	repo, err := c.newRepository(ref.RepositoryReference())
+	if err != nil {
+		return "", fmt.Errorf("create repository for %q: %w", ref, err)
+	}
+
+	desc, err := repo.Resolve(ctx, ref.GetReference())
+	if err != nil {
+		return "", fmt.Errorf("resolve %s: %w", ref, err)
+	}
+
+	return desc.Digest.String(), nil
+}
+
+// Copy copies the artifact at srcRef (in this client's registry) to dstRef
+// (in target's registry), preserving the original manifest and media types.
+func (c *ORASClient) Copy(ctx context.Context, target Client, srcRef, dstRef Reference) error {
+	dst, ok := target.(*ORASClient)
+	if !ok {
+		return fmt.Errorf("copy target must be an ORASClient, got %T", target)
+	}
+
+	srcRepo, err := c.newRepository(srcRef.RepositoryReference())
+	if err != nil {
+		return fmt.Errorf("create source repository for %q: %w", srcRef, err)
+	}
+
+	dstRepo, err := dst.newRepository(dstRef.RepositoryReference())
+	if err != nil {
+		return fmt.Errorf("create destination repository for %q: %w", dstRef, err)
+	}
+
+	if _, err := oras.Copy(ctx, srcRepo, srcRef.GetReference(), dstRepo, dstRef.GetReference(), oras.DefaultCopyOptions); err != nil {
+		return fmt.Errorf("copy %s to %s: %w", srcRef, dstRef, err)
+	}
+
+	return nil
+}
+
 // Push packages sourceDir as an OCI artifact and pushes it to ref:tag, returning its digest.
 // annotations are attached as OCI manifest annotations; pass nil for none.
 func (c *ORASClient) Push(ctx context.Context, ref Reference, sourceDir string, annotations map[string]string) (string, error) {

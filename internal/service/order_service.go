@@ -346,7 +346,6 @@ func (rs *OrderService) processManifestFile(ctx context.Context, path string, pa
 }
 
 // yamlFiles returns the sorted top-level YAML file paths in dir.
-// ponytail: top-level only, recurse if real artifacts ship nested dirs.
 func yamlFiles(fs afero.Fs, dir string) ([]string, error) {
 	var files []string
 	for _, pattern := range []string{"*.yaml", "*.yml"} {

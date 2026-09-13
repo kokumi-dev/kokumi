@@ -50,8 +50,13 @@ func FromOrder(order *deliveryv1alpha1.Order) (*EffectiveSpec, error) {
 }
 
 // ForMenu builds an EffectiveSpec for a Menu-based Order.
-// The Menu's base config is merged with validated consumer overrides.
+// The Menu's advertised source (status.source) is used as-is; the Menu's base
+// config is merged with validated consumer overrides.
 func ForMenu(menu *deliveryv1alpha1.Menu, order *deliveryv1alpha1.Order) (*EffectiveSpec, error) {
+	if menu.Status.Source == nil {
+		return nil, fmt.Errorf("menu %q source is not resolved yet", menu.Name)
+	}
+
 	mergedRender, err := mergeRender(menu, order)
 	if err != nil {
 		return nil, fmt.Errorf("helm values override violation: %w", err)
@@ -67,7 +72,11 @@ func ForMenu(menu *deliveryv1alpha1.Menu, order *deliveryv1alpha1.Order) (*Effec
 	}
 
 	return &EffectiveSpec{
-		Source:  menu.Spec.Source,
+		Source: deliveryv1alpha1.OCISource{
+			OCI:       menu.Status.Source.OCI,
+			Version:   menu.Status.Source.Version,
+			PantryRef: menu.Status.Source.PantryRef,
+		},
 		Render:  mergedRender,
 		Patches: mergedPatches,
 		Edits:   order.Spec.Edits,
