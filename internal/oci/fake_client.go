@@ -13,9 +13,16 @@ import (
 type FakeClient struct {
 	fs          afero.Fs
 	Annotations map[string]string
+	Copies      []CopiedRefs
 }
 
 var _ Client = (*FakeClient)(nil)
+
+// CopiedRefs records Copy calls for test assertions.
+type CopiedRefs struct {
+	Source Reference
+	Target Reference
+}
 
 // NewFakeClient returns a FakeClient that uses fs for all file operations.
 // Pass the same afero.Fs instance that is given to the OrderService so that
@@ -51,4 +58,15 @@ func (c *FakeClient) Push(_ context.Context, _ Reference, _ string, _ map[string
 // embed FakeClient in a local struct and override the ListTags method.
 func (c *FakeClient) ListTags(_ context.Context, _ Reference) ([]string, error) {
 	return nil, nil
+}
+
+// Resolve returns a stable fake digest.
+func (c *FakeClient) Resolve(_ context.Context, _ Reference) (string, error) {
+	return "sha256:fdf90e00e76bf3f0d2e5042c4c4e6c42a6d38c1e2b4f5a7d8e9f0a1b2c3d4e5f", nil
+}
+
+// Copy records the copy and returns nil.
+func (c *FakeClient) Copy(_ context.Context, _ Client, srcRef, dstRef Reference) error {
+	c.Copies = append(c.Copies, CopiedRefs{Source: srcRef, Target: dstRef})
+	return nil
 }

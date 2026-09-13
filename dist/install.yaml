@@ -296,7 +296,7 @@ spec:
     listKind: MenuList
     plural: menus
     singular: menu
-  scope: Cluster
+  scope: Namespaced
   versions:
   - additionalPrinterColumns:
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
@@ -327,9 +327,9 @@ spec:
       openAPIV3Schema:
         description: |-
           Menu is the Schema for the menus API.
-          A Menu is a cluster-scoped, reusable template that operators define to pin
+          A Menu is a namespace-scoped, reusable template that operators define to pin
           a source artifact, base configuration, and override constraints.
-          Developers consume Menus by referencing them from Orders.
+          Developers consume Menus by referencing them from Orders in the same namespace.
         properties:
           apiVersion:
             description: |-
@@ -595,6 +595,43 @@ spec:
                 - message: exactly one of oci or pantryRef must be set
                   rule: (has(self.oci) && !has(self.pantryRef)) || (!has(self.oci)
                     && has(self.pantryRef))
+              vendor:
+                description: |-
+                  vendor optionally configures copying the source artifact to another OCI
+                  registry. When set, consuming Orders use the vendored copy.
+                properties:
+                  destination:
+                    description: destination is the registry the source artifact is
+                      copied to.
+                    properties:
+                      oci:
+                        description: |-
+                          oci is the full OCI URL the vendored artifact is pushed to.
+                          Mutually exclusive with pantryRef.
+                        type: string
+                        x-kubernetes-validations:
+                        - message: must be a valid OCI URL
+                          rule: self == '' || (isURL(self) && url(self).getScheme()
+                            == 'oci')
+                      pantryRef:
+                        description: |-
+                          pantryRef references a Pantry resource whose URL is used as the
+                          vendored destination. Mutually exclusive with oci.
+                        properties:
+                          name:
+                            description: name is the name of the Pantry resource.
+                            type: string
+                        required:
+                        - name
+                        type: object
+                    type: object
+                    x-kubernetes-validations:
+                    - message: exactly one of oci or pantryRef must be set
+                      rule: (has(self.oci) && !has(self.pantryRef)) || (!has(self.oci)
+                        && has(self.pantryRef))
+                required:
+                - destination
+                type: object
             required:
             - overrides
             - source
@@ -667,6 +704,42 @@ spec:
                   by the controller.
                 format: int64
                 type: integer
+              source:
+                description: |-
+                  source is the consumable source address for Orders. Absent until the
+                  Menu controller has resolved (and, if configured, vendored) the source.
+                properties:
+                  digest:
+                    description: |-
+                      digest is the resolved digest of the artifact. Empty when resolution
+                      was best-effort and the registry could not be reached.
+                    pattern: ^sha256:[a-f0-9]{64}$
+                    type: string
+                  oci:
+                    description: oci is the full OCI URL of the consumable artifact.
+                    type: string
+                    x-kubernetes-validations:
+                    - message: must be a valid OCI URL
+                      rule: isURL(self) && url(self).getScheme() == 'oci'
+                  pantryRef:
+                    description: |-
+                      pantryRef references the Pantry providing pull credentials for oci.
+                      Absent when the registry is anonymously accessible.
+                    properties:
+                      name:
+                        description: name is the name of the Pantry resource.
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  version:
+                    description: version is the tag of the consumable artifact.
+                    minLength: 1
+                    type: string
+                required:
+                - oci
+                - version
+                type: object
             type: object
         required:
         - spec
@@ -826,13 +899,14 @@ spec:
                 type: array
               menuRef:
                 description: |-
-                  menuRef references a cluster-scoped Menu that provides the source,
-                  base configuration, and override constraints for this Order.
+                  menuRef references a Menu in the Order's namespace that provides the
+                  source, base configuration, and override constraints for this Order.
                   Must not be set when source is used.
                 properties:
                   name:
-                    description: name is the name of the cluster-scoped Menu to use
-                      as a template.
+                    description: |-
+                      name is the name of the Menu to use as a template. The Menu must exist
+                      in the same namespace as the Order.
                     type: string
                 required:
                 - name

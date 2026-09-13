@@ -220,8 +220,10 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.MenuReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:         mgr.GetClient(),
+		Scheme:         mgr.GetScheme(),
+		Service:        service.NewMenuService(oci.NewORASClient()),
+		PantryResolver: credential.NewKubeResolver(mgr.GetClient()),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Menu")
 		os.Exit(1)

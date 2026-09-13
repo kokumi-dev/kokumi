@@ -18,49 +18,108 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/credential"
+	"github.com/kokumi-dev/kokumi/internal/service"
 	"github.com/kokumi-dev/kokumi/internal/status"
 )
 
 // MenuReconciler reconciles a Menu object.
 type MenuReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme         *runtime.Scheme
+	Service        *service.MenuService
+	PantryResolver credential.PantryResolver
 }
 
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=menus,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=menus/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=menus/finalizers,verbs=update
 
-// Reconcile sets the Ready status on the Menu.
-// Structural validation is handled by kubebuilder CRD markers (CEL rules).
+// Reconcile is part of the main kubernetes reconciliation loop which aims to
+// move the current state of the cluster closer to the desired state.
+//
+// For more details, check Reconcile and its Result here:
+// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.23.1/pkg/reconcile
 func (r *MenuReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := logf.FromContext(ctx)
+	logger := log.FromContext(ctx)
+	logger.Info("Reconciling Menu", "namespace", req.Namespace, "name", req.Name)
 
 	menu := &deliveryv1alpha1.Menu{}
+
 	if err := r.Get(ctx, req.NamespacedName, menu); err != nil {
 		if apierrors.IsNotFound(err) {
+			logger.Info("Menu resource not found, ignoring")
 			return ctrl.Result{}, nil
+		}
+
+		logger.Error(err, "Failed to get Menu")
+
+		return ctrl.Result{}, fmt.Errorf("failed to get Menu: %w", err)
+	}
+
+	if !menu.DeletionTimestamp.IsZero() {
+		return r.reconcileDelete(ctx, menu)
+	}
+
+	if !controllerutil.ContainsFinalizer(menu, deliveryv1alpha1.Finalizer) {
+		controllerutil.AddFinalizer(menu, deliveryv1alpha1.Finalizer)
+
+		if err := r.Update(ctx, menu); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	return r.reconcileMenu(ctx, menu)
+}
+
+// reconcileMenu delegates FS/OCI work to the service and then handles CRD concerns:
+// updating status.
+func (r *MenuReconciler) reconcileMenu(ctx context.Context, menu *deliveryv1alpha1.Menu) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	statusUpdater := status.NewMenuUpdater(r.Client)
+
+	source, err := r.Service.ResolveSource(ctx, menu, r.PantryResolver)
+	if err != nil {
+		logger.Error(err, "Failed to resolve Menu source")
+		if uerr := statusUpdater.Failed(ctx, menu, err); uerr != nil {
+			logger.Error(uerr, "Failed to update Menu status")
 		}
 		return ctrl.Result{}, err
 	}
 
-	log.Info("Reconciling Menu", "name", menu.Name)
-
-	updater := status.NewMenuUpdater(r.Client)
-
-	if err := updater.Ready(ctx, menu, "Menu is valid and available"); err != nil {
+	if err := statusUpdater.Ready(ctx, menu, source); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	log.Info("Menu is ready", "name", menu.Name)
+	logger.Info("Menu source published", "name", menu.Name, "source", source.OCI)
+	return ctrl.Result{}, nil
+}
+
+// reconcileDelete removes the finalizer from the Menu, allowing garbage collection.
+func (r *MenuReconciler) reconcileDelete(ctx context.Context, menu *deliveryv1alpha1.Menu) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	logger.Info("Handling deletion of Menu")
+
+	if controllerutil.ContainsFinalizer(menu, deliveryv1alpha1.Finalizer) {
+		logger.Info("Cleaning up Menu resources")
+
+		controllerutil.RemoveFinalizer(menu, deliveryv1alpha1.Finalizer)
+
+		if err := r.Update(ctx, menu); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
 	return ctrl.Result{}, nil
 }
 
