@@ -1,0 +1,55 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dex-config
+  namespace: kokumi
+  labels:
+    app.kubernetes.io/name: kokumi
+    app.kubernetes.io/component: dex
+data:
+  config.yaml: |
+    issuer: http://localhost:5556
+
+    storage:
+      type: sqlite3
+      config:
+        file: /var/dex/dex.db
+
+    web:
+      http: 0.0.0.0:5556
+
+    telemetry:
+      http: 0.0.0.0:5557
+
+    oauth2:
+      skipApprovalScreen: true
+
+    enablePasswordDB: true
+
+    staticPasswords:
+      - email: "admin@kokumi.dev"
+        hash: "$2b$10$i78nzTeaVMKBWDewsujJ6uxUiRVfdFnDUrKUrvrl2ZNQJimZl424W"
+        username: "admin"
+        userID: "BDFCCCA2-1688-40B9-89E8-93DA0D2F2B38"
+        groups:
+        - kokumi-admin
+      - email: "editor@kokumi.dev"
+        hash: "$2b$10$i78nzTeaVMKBWDewsujJ6uxUiRVfdFnDUrKUrvrl2ZNQJimZl424W"
+        username: "editor"
+        userID: "48D82730-91F3-4950-925C-E182C96F5765"
+        groups:
+        - kokumi-editor
+      - email: "viewer@kokumi.dev"
+        hash: "$2b$10$i78nzTeaVMKBWDewsujJ6uxUiRVfdFnDUrKUrvrl2ZNQJimZl424W"
+        username: "viewer"
+        userID: "0E05C386-E31C-4676-A3F3-F815DD19425F"
+        groups:
+        - kokumi-viewer
+
+    staticClients:
+      - id: kokumi
+        redirectURIs:
+          - "http://localhost:8080/api/v1/auth/oidc/callback"
+        name: "Kokumi"
+        secret: "kokumi-local-client-secret"

@@ -1,0 +1,60 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kokumi-server
+  namespace: kokumi
+spec:
+  template:
+    spec:
+      containers:
+        - name: dex
+          image: ghcr.io/dexidp/dex:v2.45.1
+          imagePullPolicy: IfNotPresent
+          command:
+            - /usr/local/bin/dex
+          args:
+            - serve
+            - /etc/dex/cfg/config.yaml
+          ports:
+            - containerPort: 5556
+              name: dex-http
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 5556
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 5556
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            limits:
+              cpu: 100m
+              memory: 64Mi
+            requests:
+              cpu: 10m
+              memory: 32Mi
+          securityContext:
+            runAsUser: 1001
+            runAsGroup: 1001
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: dex-config
+              mountPath: /etc/dex/cfg
+              readOnly: true
+            - name: dex-data
+              mountPath: /var/dex
+      volumes:
+        - name: dex-config
+          configMap:
+            name: dex-config
+        - name: dex-data
+          emptyDir: {}
