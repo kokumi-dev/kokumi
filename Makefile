@@ -149,6 +149,18 @@ kind-load-image: ## Load image into Kind cluster if it exists
 push-artifacts: ## Pushes artifacts to local local registry
 	bash ./hack/push-artifacts.sh
 
+.PHONY: oidc
+oidc: ## Install local Dex OIDC (sidecar in kokumi-server) and wire Kitchen auth. See hack/oidc/README.md
+	"$(KUBECTL)" apply -f hack/oidc/dex-config.yaml
+	"$(KUBECTL)" patch deployment kokumi-server -n kokumi --type=strategic --patch-file hack/oidc/patch-server-deployment.yaml
+	"$(KUBECTL)" -n kokumi rollout status deployment kokumi-server --timeout=180s
+	"$(KUBECTL)" apply -f hack/oidc/dex-service.yaml
+	"$(KUBECTL)" -n kokumi create secret generic kokumi-server-oidc \
+		--from-literal=client-secret=kokumi-local-client-secret \
+		--dry-run=client -o yaml | "$(KUBECTL)" apply -f -
+	"$(KUBECTL)" -n kokumi patch kitchen default --type=merge \
+		-p '{"spec":{"auth":{"adminUser":{"enabled":true},"oidc":{"issuerURL":"http://localhost:5556","clientID":"kokumi","scopes":["openid","profile","email","groups"]}}}}'
+
 .PHONY: argocd
 argocd: ## Installs Argo CD in the cluster
 	"$(KUBECTL)" create namespace argocd --dry-run=client -o yaml | "$(KUBECTL)" apply -f -

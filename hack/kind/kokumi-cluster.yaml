@@ -21,3 +21,7 @@ nodes:
       - containerPort: 31198
         hostPort: 9898
         protocol: TCP
+      # Port for Dex (OIDC issuer, see hack/dex)
+      - containerPort: 30556
+        hostPort: 5556
+        protocol: TCP
