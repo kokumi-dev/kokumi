@@ -52,9 +52,17 @@ func FromOrder(order *deliveryv1alpha1.Order) (*EffectiveSpec, error) {
 // ForMenu builds an EffectiveSpec for a Menu-based Order.
 // The Menu's advertised source (status.source) is used as-is; the Menu's base
 // config is merged with validated consumer overrides.
+// When the Menu's source is pre-rendered (vendor mode Render), the artifact is
+// treated as a plain manifest bundle: rendering config and Menu patches are
+// already baked into the artifact, value overrides are rejected, and only
+// consumer patches and edits are applied on top.
 func ForMenu(menu *deliveryv1alpha1.Menu, order *deliveryv1alpha1.Order) (*EffectiveSpec, error) {
 	if menu.Status.Source == nil {
 		return nil, fmt.Errorf("menu %q source is not resolved yet", menu.Name)
+	}
+
+	if menu.Status.Source.PreRendered {
+		return forPreRenderedMenu(menu, order)
 	}
 
 	mergedRender, err := mergeRender(menu, order)
@@ -79,6 +87,43 @@ func ForMenu(menu *deliveryv1alpha1.Menu, order *deliveryv1alpha1.Order) (*Effec
 		},
 		Render:  mergedRender,
 		Patches: mergedPatches,
+		Edits:   order.Spec.Edits,
+	}, nil
+}
+
+// forPreRenderedMenu builds an EffectiveSpec for an Order consuming a
+// pre-rendered Menu artifact. The artifact already contains the rendered and
+// Menu-patched manifests, so rendering and Menu patches are dropped; consumer
+// Helm value overrides are impossible post-render and rejected; consumer
+// patches and edits still apply.
+func forPreRenderedMenu(menu *deliveryv1alpha1.Menu, order *deliveryv1alpha1.Order) (*EffectiveSpec, error) {
+	if order.Spec.Render != nil && order.Spec.Render.Helm != nil {
+		return nil, fmt.Errorf("helm rendering and values overrides are not allowed on pre-rendered Menu %q", menu.Name)
+	}
+
+	policy := menu.Spec.Overrides.Patches
+	if policy.Policy == deliveryv1alpha1.OverridePolicyRestricted {
+		for _, cp := range order.Spec.Patches {
+			if err := validatePatchAllowed(cp, policy.Allowed); err != nil {
+				return nil, fmt.Errorf("patch override violation: %w", err)
+			}
+		}
+	} else if policy.Policy == deliveryv1alpha1.OverridePolicyNone && len(order.Spec.Patches) > 0 {
+		return nil, fmt.Errorf("patch overrides are not allowed by Menu %q", menu.Name)
+	}
+
+	if err := validateEdits(menu, order); err != nil {
+		return nil, fmt.Errorf("edit override violation: %w", err)
+	}
+
+	return &EffectiveSpec{
+		Source: deliveryv1alpha1.OCISource{
+			OCI:       menu.Status.Source.OCI,
+			Version:   menu.Status.Source.Version,
+			PantryRef: menu.Status.Source.PantryRef,
+		},
+		Render:  nil,
+		Patches: order.Spec.Patches,
 		Edits:   order.Spec.Edits,
 	}, nil
 }

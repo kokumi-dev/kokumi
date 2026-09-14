@@ -601,8 +601,8 @@ spec:
                   registry. When set, consuming Orders use the vendored copy.
                 properties:
                   destination:
-                    description: destination is the registry the source artifact is
-                      copied to.
+                    description: destination is the registry the artifact is published
+                      to.
                     properties:
                       oci:
                         description: |-
@@ -626,12 +626,25 @@ spec:
                         type: object
                     type: object
                     x-kubernetes-validations:
-                    - message: exactly one of oci or pantryRef must be set
-                      rule: (has(self.oci) && !has(self.pantryRef)) || (!has(self.oci)
-                        && has(self.pantryRef))
+                    - message: oci and pantryRef are mutually exclusive
+                      rule: '!(has(self.oci) && has(self.pantryRef))'
+                  mode:
+                    default: Render
+                    description: |-
+                      mode controls what is published to the destination.
+                      Render (default): the source is rendered per spec.render and spec.patches
+                      are applied before pushing the resulting manifests.
+                      Copy: the raw source artifact is pushed unchanged.
+                    enum:
+                    - Render
+                    - Copy
+                    type: string
                 required:
                 - destination
                 type: object
+                x-kubernetes-validations:
+                - message: mode Render requires a destination
+                  rule: '!(has(self.mode) && self.mode == ''Render'' && !has(self.destination))'
             required:
             - overrides
             - source
@@ -699,6 +712,12 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              configHash:
+                description: |-
+                  configHash is a SHA-256 hash of the resolved source and destination OCI
+                  URLs plus version, render, and patches. When it matches the current spec
+                  inputs the previously published artifact is reused without re-rendering.
+                type: string
               observedGeneration:
                 description: observedGeneration is the most recent generation observed
                   by the controller.
@@ -732,6 +751,13 @@ spec:
                     required:
                     - name
                     type: object
+                  preRendered:
+                    description: |-
+                      preRendered reports whether the advertised artifact is a rendered,
+                      patched manifest bundle produced by the Menu (vendor mode Render).
+                      When true, Orders treat the artifact as a plain manifest base and
+                      cannot apply Helm value overrides.
+                    type: boolean
                   version:
                     description: version is the tag of the consumable artifact.
                     minLength: 1

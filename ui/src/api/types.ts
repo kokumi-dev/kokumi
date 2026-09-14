@@ -149,6 +149,7 @@ export interface Menu {
   name: string
   namespace: string
   source: OCISource
+  vendor?: VendorSpec
   render?: Render
   patches?: Patch[]
   overrides: OverridePolicy
@@ -156,6 +157,18 @@ export interface Menu {
   state?: string
   conditions?: Condition[]
   createdAt?: string
+}
+
+export type VendorMode = 'Render' | 'Copy'
+
+export interface VendorDestination {
+  oci?: string
+  pantryRef?: { name: string }
+}
+
+export interface VendorSpec {
+  mode?: VendorMode
+  destination: VendorDestination
 }
 
 // ── Pantry types ──────────────────────────────────────────────────────────────
@@ -270,6 +283,7 @@ export interface MenuFormData {
   name: string
   namespace: string
   source: OCISource
+  vendor?: VendorSpec
   render?: Render
   patches: Patch[]
   overrides: OverridePolicy
@@ -293,6 +307,17 @@ export const menuToFormData = (m: Menu): MenuFormData => ({
   name: m.name,
   namespace: m.namespace,
   source: { ...m.source },
+  vendor: m.vendor
+    ? {
+        mode: m.vendor.mode ?? 'Render',
+        destination: {
+          oci: m.vendor.destination.oci ?? '',
+          pantryRef: m.vendor.destination.pantryRef
+            ? { name: m.vendor.destination.pantryRef.name }
+            : undefined,
+        },
+      }
+    : undefined,
   render: m.render?.helm
     ? {
         helm: {

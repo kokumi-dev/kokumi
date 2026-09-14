@@ -55,3 +55,23 @@ func CalculateSpecHash(spec deliveryv1alpha1.OrderSpec, sourceOCI, destOCI strin
 
 	return fmt.Sprintf("sha256:%x", hash), nil
 }
+
+// CalculateMenuHash computes a stable SHA-256 hash over the Menu spec inputs
+// that determine the content of a published (rendered) artifact: source,
+// vendor mode and destination, render config, and patches.
+func CalculateMenuHash(menu deliveryv1alpha1.MenuSpec) (string, error) {
+	var builder strings.Builder
+
+	encoder := yaml.NewEncoder(&builder)
+	encoder.SetIndent(2)
+
+	if err := encoder.Encode(menu); err != nil {
+		return "", fmt.Errorf("failed to encode menu spec for hashing: %w", err)
+	}
+
+	encoder.Close() //nolint:errcheck
+
+	hash := sha256.Sum256([]byte(builder.String()))
+
+	return fmt.Sprintf("sha256:%x", hash), nil
+}
