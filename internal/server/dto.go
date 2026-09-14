@@ -208,11 +208,24 @@ type MenuDefaultsDTO struct {
 	AutoDeploy string `json:"autoDeploy"`
 }
 
+// VendorDestinationDTO is the data-transfer representation of a VendorDestination.
+type VendorDestinationDTO struct {
+	OCI       string        `json:"oci,omitempty"`
+	PantryRef *PantryRefDTO `json:"pantryRef,omitempty"`
+}
+
+// VendorSpecDTO is the data-transfer representation of a Menu VendorSpec.
+type VendorSpecDTO struct {
+	Mode        string               `json:"mode,omitempty"`
+	Destination VendorDestinationDTO `json:"destination"`
+}
+
 // MenuDTO is the view of a Menu served to the UI.
 type MenuDTO struct {
 	Name       string            `json:"name"`
 	Namespace  string            `json:"namespace"`
 	Source     OCISourceDTO      `json:"source"`
+	Vendor     *VendorSpecDTO    `json:"vendor,omitempty"`
 	Render     *RenderDTO        `json:"render,omitempty"`
 	Patches    []PatchDTO        `json:"patches,omitempty"`
 	Overrides  OverridePolicyDTO `json:"overrides"`
@@ -227,6 +240,7 @@ type CreateMenuRequest struct {
 	Name      string            `json:"name"`
 	Namespace string            `json:"namespace"`
 	Source    OCISourceDTO      `json:"source"`
+	Vendor    *VendorSpecDTO    `json:"vendor,omitempty"`
 	Render    *RenderDTO        `json:"render,omitempty"`
 	Patches   []PatchDTO        `json:"patches,omitempty"`
 	Overrides OverridePolicyDTO `json:"overrides"`
@@ -236,6 +250,7 @@ type CreateMenuRequest struct {
 // UpdateMenuRequest is the body for PUT /api/v1/menus/{namespace}/{name}.
 type UpdateMenuRequest struct {
 	Source    OCISourceDTO      `json:"source"`
+	Vendor    *VendorSpecDTO    `json:"vendor,omitempty"`
 	Render    *RenderDTO        `json:"render,omitempty"`
 	Patches   []PatchDTO        `json:"patches,omitempty"`
 	Overrides OverridePolicyDTO `json:"overrides"`

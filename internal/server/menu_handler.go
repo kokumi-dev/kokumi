@@ -99,6 +99,7 @@ func handleCreateMenu(deps *apiDeps) http.HandlerFunc {
 			Name:      req.Name,
 			Spec: deliveryv1alpha1.MenuSpec{
 				Source:    deliveryv1alpha1.OCISource{OCI: req.Source.OCI, Version: req.Source.Version},
+				Vendor:    vendorSpecFromDTO(req.Vendor),
 				Render:    renderFromDTO(req.Render),
 				Patches:   patchesFromDTO(req.Patches),
 				Overrides: overridePolicyFromDTO(req.Overrides),
@@ -157,6 +158,7 @@ func handleUpdateMenu(deps *apiDeps) http.HandlerFunc {
 		}
 
 		menu.Spec.Source = deliveryv1alpha1.OCISource{OCI: req.Source.OCI, Version: req.Source.Version}
+		menu.Spec.Vendor = vendorSpecFromDTO(req.Vendor)
 		menu.Spec.Render = renderFromDTO(req.Render)
 		menu.Spec.Patches = patchesFromDTO(req.Patches)
 		menu.Spec.Overrides = overridePolicyFromDTO(req.Overrides)

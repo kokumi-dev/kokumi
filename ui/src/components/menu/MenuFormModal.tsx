@@ -6,6 +6,7 @@ import YamlEditor from '../shared/YamlEditor'
 import type { Menu, MenuFormData, Patch, HelmRender, OverridePolicy } from '../../api/types'
 import { emptyMenuForm, menuToFormData } from '../../api/types'
 import { objectToYaml, yamlToValues } from '../../utils/yaml'
+import DestinationEditor from '../shared/DestinationEditor'
 import formStyles from './MenuFormModal.module.css'
 
 interface Props {
@@ -14,11 +15,24 @@ interface Props {
   onSubmit: (data: MenuFormData) => Promise<void>
 }
 
+/** Human-readable summary of a vendor destination for collapsed section headers. */
+function vendorDestinationSummary(dest: NonNullable<MenuFormData['vendor']>['destination']): string {
+  if (dest.oci) return dest.oci
+  if (dest.pantryRef?.name) return `pantry: ${dest.pantryRef.name}`
+  return 'in-cluster registry'
+}
+
 function formToYaml(data: MenuFormData): string {
   const doc: Record<string, unknown> = {
     source: { oci: data.source.oci, version: data.source.version },
     overrides: data.overrides,
     defaults: data.defaults,
+  }
+  if (data.vendor) {
+    const dest: Record<string, unknown> = {}
+    if (data.vendor.destination.oci) dest.oci = data.vendor.destination.oci
+    if (data.vendor.destination.pantryRef) dest.pantryRef = data.vendor.destination.pantryRef
+    doc.vendor = { mode: data.vendor.mode ?? 'Render', destination: dest }
   }
   if (data.render?.helm) {
     const h = data.render.helm
@@ -51,6 +65,20 @@ function yamlToPartialForm(text: string): Omit<MenuFormData, 'name' | 'namespace
   const rawOverrides = doc.overrides as OverridePolicy | undefined
   const rawDefaults = doc.defaults as Record<string, unknown> | undefined
 
+  const rawVendor = doc.vendor as Record<string, unknown> | undefined
+  let vendor: MenuFormData['vendor']
+  if (rawVendor) {
+    const dest = (rawVendor.destination ?? {}) as Record<string, unknown>
+    const pantryRef = dest.pantryRef as { name?: string } | undefined
+    vendor = {
+      mode: (rawVendor.mode as MenuFormData['vendor'] extends never ? never : 'Render' | 'Copy') ?? 'Render',
+      destination: {
+        oci: (dest.oci as string) ?? '',
+        pantryRef: pantryRef?.name ? { name: pantryRef.name } : undefined,
+      },
+    }
+  }
+
   const rawRender = doc.render as Record<string, unknown> | undefined
   let render: MenuFormData['render']
   if (rawRender?.helm) {
@@ -69,6 +97,7 @@ function yamlToPartialForm(text: string): Omit<MenuFormData, 'name' | 'namespace
 
   return {
     source: { oci: src?.oci ?? '', version: src?.version ?? '' },
+    vendor,
     render,
     patches: rawPatches.map((p) => {
       const patch = p as Record<string, unknown>
@@ -254,6 +283,11 @@ function MenuFormView({
   onRemovePatch,
   onUpdatePatch,
 }: MenuFormViewProps) {
+  const [isVendorOpen, setIsVendorOpen] = useState(!!formData.vendor)
+  const [isVendorDestOpen, setIsVendorDestOpen] = useState(
+    !!(formData.vendor?.destination.oci || formData.vendor?.destination.pantryRef?.name),
+  )
+
   return (
     <div className={formStyles.formGrid}>
       {/* Name */}
@@ -314,6 +348,83 @@ function MenuFormView({
         />
         Default Auto Deploy — Orders using this Menu inherit auto-deploy
       </label>
+
+      {/* Publish (Vendor) — collapsible like the Order destination section */}
+      <div>
+        <button
+          type="button"
+          className={formStyles.sectionHeader}
+          onClick={() => setIsVendorOpen((v) => !v)}
+        >
+          <span className={`${formStyles.sectionChevron} ${isVendorOpen ? formStyles.sectionChevronOpen : ''}`}>›</span>
+          Publish Destination (Vendor)
+          {!isVendorOpen && formData.vendor && (
+            <span className={formStyles.sectionSummary}>
+              {formData.vendor.mode ?? 'Render'} → {vendorDestinationSummary(formData.vendor.destination)}
+            </span>
+          )}
+        </button>
+        {isVendorOpen && (
+          <>
+            <label className={formStyles.checkRow}>
+              <input
+                type="checkbox"
+                checked={!!formData.vendor}
+                onChange={(e) =>
+                  onFieldChange(
+                    'vendor',
+                    e.target.checked
+                      ? { mode: 'Render', destination: { oci: '', pantryRef: undefined } }
+                      : undefined,
+                  )
+                }
+              />
+              Publish source to another registry (Render mode renders + patches first)
+            </label>
+            {formData.vendor && (
+              <div className={formStyles.helmSection}>
+                <div className={formStyles.fieldGroup}>
+                  <label className={formStyles.label}>Mode</label>
+                  <select
+                    className={formStyles.input}
+                    value={formData.vendor.mode ?? 'Render'}
+                    onChange={(e) =>
+                      onFieldChange('vendor', { ...formData.vendor!, mode: e.target.value as 'Render' | 'Copy' })
+                    }
+                  >
+                    <option value="Render">Render — render + patch, push manifests</option>
+                    <option value="Copy">Copy — push the raw artifact</option>
+                  </select>
+                </div>
+                <div style={{ marginTop: 12 }}>
+                  <button
+                    type="button"
+                    className={formStyles.sectionHeader}
+                    onClick={() => setIsVendorDestOpen((v) => !v)}
+                  >
+                    <span className={`${formStyles.sectionChevron} ${isVendorDestOpen ? formStyles.sectionChevronOpen : ''}`}>›</span>
+                    Destination
+                    {!isVendorDestOpen && (formData.vendor.destination.oci || formData.vendor.destination.pantryRef?.name) && (
+                      <span className={formStyles.sectionSummary}>
+                        {vendorDestinationSummary(formData.vendor.destination)}
+                      </span>
+                    )}
+                  </button>
+                  {isVendorDestOpen && (
+                    <DestinationEditor
+                      destination={formData.vendor.destination}
+                      onChange={(dest) => onFieldChange('vendor', { ...formData.vendor!, destination: dest })}
+                      namespace={formData.namespace}
+                      name={formData.name}
+                      pathHint="rendered"
+                    />
+                  )}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
 
       {/* Override Policies */}
       <div>

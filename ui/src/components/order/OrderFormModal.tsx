@@ -9,9 +9,10 @@ import DiffTab from './DiffTab'
 import type { Order, OrderFormData, Patch, HelmRender, Menu, ChartInfo, FileLayout } from '../../api/types'
 import { emptyOrderForm, orderToFormData } from '../../api/types'
 import { objectToYaml, yamlToValues } from '../../utils/yaml'
-import { getDefaultRegistry, listOCITags, getChartInfo } from '../../api/client'
+import { listOCITags, getChartInfo } from '../../api/client'
 import { cleanTags } from '../../api/ociTags'
 import { usePantries } from '../../hooks/usePantries'
+import DestinationEditor from '../shared/DestinationEditor'
 import styles from './OrderFormModal.module.css'
 
 interface Props {
@@ -156,7 +157,6 @@ export default function OrderFormModal({ order, menuRef, menu, menus, onClose, o
   const showDiffTab = isEdit && !!order?.activePreparation
   const [tab, setTab] = useState<'form' | 'yaml' | 'preview' | 'diff'>('form')
   const [selectedMenu, setSelectedMenu] = useState<Menu | null>(null)
-  const [defaultRegistry, setDefaultRegistry] = useState('')
   const [formData, setFormData] = useState<OrderFormData>(() => {
     if (order) return orderToFormData(order)
     if (menuRef) {
@@ -177,12 +177,6 @@ export default function OrderFormModal({ order, menuRef, menu, menus, onClose, o
   const [initialYaml] = useState(() => isEdit ? formToYaml(orderToFormData(order!)) : '')
 
   const effectiveMenu = menu ?? selectedMenu
-
-  useEffect(() => {
-    getDefaultRegistry()
-      .then(({ baseURL }) => setDefaultRegistry(baseURL))
-      .catch(() => {})
-  }, [])
 
   function handleMenuSelect(menuKey: string) {
     if (!menuKey) {
@@ -420,7 +414,6 @@ export default function OrderFormModal({ order, menuRef, menu, menus, onClose, o
           <FormView
             formData={formData}
             isEdit={isEdit}
-            defaultRegistry={defaultRegistry}
             menu={effectiveMenu ?? undefined}
             menus={menus}
             hasPresetMenu={!!menuRef || !!menu}
@@ -458,7 +451,6 @@ export default function OrderFormModal({ order, menuRef, menu, menus, onClose, o
 interface FormViewProps {
   formData: OrderFormData
   isEdit: boolean
-  defaultRegistry: string
   menu?: Menu
   menus?: Menu[]
   hasPresetMenu: boolean
@@ -476,7 +468,6 @@ interface FormViewProps {
 function FormView({
   formData,
   isEdit,
-  defaultRegistry,
   menu,
   menus,
   hasPresetMenu,
@@ -505,12 +496,6 @@ function FormView({
   // Source type: 'oci' = direct URL, 'pantry' = named Pantry provides the URL
   const [sourceMode, setSourceMode] = useState<'oci' | 'pantry'>(
     formData.source?.pantryRef?.name ? 'pantry' : 'oci',
-  )
-  // Destination type: 'default' = in-cluster, 'oci' = direct URL, 'pantry' = Pantry provides URL
-  const [destMode, setDestMode] = useState<'default' | 'oci' | 'pantry'>(
-    formData.destination?.pantryRef?.name ? 'pantry'
-      : formData.destination?.oci ? 'oci'
-      : 'default',
   )
 
   const [versionTags, setVersionTags] = useState<string[]>([])
@@ -747,77 +732,12 @@ function FormView({
         </button>
         {isDestOpen && (
           <div className={styles.formGrid} style={{ gap: 10, marginTop: 4 }}>
-            {/* Destination mode tabs */}
-            <div className={styles.tabs} style={{ marginBottom: 0 }}>
-              <button
-                type="button"
-                className={`${styles.tab} ${destMode === 'default' ? styles.tabActive : ''}`}
-                onClick={() => {
-                  setDestMode('default')
-                  onFieldChange('destination', {})
-                }}
-              >
-                In-cluster (default)
-              </button>
-              <button
-                type="button"
-                className={`${styles.tab} ${destMode === 'oci' ? styles.tabActive : ''}`}
-                onClick={() => {
-                  setDestMode('oci')
-                  onFieldChange('destination', { oci: '' })
-                }}
-              >
-                Direct OCI URL
-              </button>
-              <button
-                type="button"
-                className={`${styles.tab} ${destMode === 'pantry' ? styles.tabActive : ''}`}
-                onClick={() => {
-                  setDestMode('pantry')
-                  onFieldChange('destination', { pantryRef: { name: '' } })
-                }}
-              >
-                From Pantry
-              </button>
-            </div>
-            {destMode === 'oci' && (
-              <div className={styles.fieldGroup}>
-                <label className={styles.label}>Destination OCI URL</label>
-                <input
-                  className={styles.input}
-                  value={formData.destination?.oci ?? ''}
-                  onChange={(e) => onFieldChange('destination', { oci: e.target.value })}
-                  placeholder={
-                    defaultRegistry
-                      ? `oci://${defaultRegistry}/${formData.namespace || 'namespace'}/${formData.name || 'name'}`
-                      : 'oci://ghcr.io/my-org/rendered-output'
-                  }
-                />
-              </div>
-            )}
-            {destMode === 'pantry' && (
-              <div className={styles.fieldGroup}>
-                <label className={styles.label}>Pantry</label>
-                <select
-                  className={styles.input}
-                  value={formData.destination?.pantryRef?.name ?? ''}
-                  onChange={(e) => {
-                    const name = e.target.value
-                    onFieldChange('destination', { pantryRef: { name } })
-                  }}
-                >
-                  <option value="">— select a pantry —</option>
-                  {(pantries ?? []).filter((p) => p.namespace === formData.namespace).map((p) => (
-                    <option key={p.name} value={p.name}>{p.name}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-            {destMode === 'default' && defaultRegistry && (
-              <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted-light)' }}>
-                Kokumi will push to the in-cluster registry automatically
-              </span>
-            )}
+            <DestinationEditor
+              destination={formData.destination ?? {}}
+              onChange={(dest) => onFieldChange('destination', dest)}
+              namespace={formData.namespace}
+              name={formData.name}
+            />
           </div>
         )}
       </div>

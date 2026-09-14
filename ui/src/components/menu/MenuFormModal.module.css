@@ -327,3 +327,48 @@ select.input {
   color: var(--color-text-on-light);
   white-space: nowrap;
 }
+
+/* ── Collapsible section header ── */
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 2px 0 6px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted-light);
+  transition: color 0.15s;
+}
+
+.sectionHeader:hover {
+  color: var(--color-text-on-light);
+}
+
+.sectionChevron {
+  display: inline-block;
+  font-size: 1rem;
+  line-height: 1;
+  transition: transform 0.15s;
+  transform: rotate(0deg);
+}
+
+.sectionChevronOpen {
+  transform: rotate(90deg);
+}
+
+.sectionSummary {
+  margin-left: 6px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--color-text-muted-light);
+}

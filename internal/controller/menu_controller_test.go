@@ -115,6 +115,7 @@ var _ = Describe("Menu Controller", func() {
 						Version: testVersion,
 					},
 					Vendor: &deliveryv1alpha1.VendorSpec{
+						Mode: deliveryv1alpha1.VendorModeCopy,
 						Destination: deliveryv1alpha1.VendorDestination{
 							OCI: "oci://registry.kokumi.svc.cluster.local:5000/vendor/test-resource",
 						},
@@ -150,6 +151,122 @@ var _ = Describe("Menu Controller", func() {
 			Expect(vendored.Status.Source.OCI).To(Equal("oci://registry.kokumi.svc.cluster.local:5000/vendor/test-resource"))
 			Expect(vendored.Status.Source.Version).To(Equal(testVersion))
 			Expect(vendored.Status.Source.Digest).NotTo(BeEmpty())
+			Expect(vendored.Status.Source.PreRendered).To(BeFalse())
+		})
+
+		It("should render and publish a pre-rendered artifact when vendor mode is Render", func() {
+			renderName := types.NamespacedName{Namespace: testNamespace, Name: "test-resource-render"}
+			By("Creating the resource with vendor mode Render and a manifest render config")
+			resource := &deliveryv1alpha1.Menu{
+				Namespace: testNamespace,
+				Name:      renderName.Name,
+				Spec: deliveryv1alpha1.MenuSpec{
+					Source: deliveryv1alpha1.OCISource{
+						OCI:     testOCIRef,
+						Version: testVersion,
+					},
+					Vendor: &deliveryv1alpha1.VendorSpec{
+						Mode: deliveryv1alpha1.VendorModeRender,
+						Destination: deliveryv1alpha1.VendorDestination{
+							OCI: "oci://registry.kokumi.svc.cluster.local:5000/rendered/test-resource",
+						},
+					},
+					Render: &deliveryv1alpha1.Render{
+						Manifest: &deliveryv1alpha1.ManifestRender{Layout: deliveryv1alpha1.FileLayoutSingle},
+					},
+					Patches: []deliveryv1alpha1.Patch{
+						{
+							Target: deliveryv1alpha1.PatchTarget{Kind: "Deployment", Name: "test"},
+							Set:    map[string]string{".spec.replicas": "3"},
+						},
+					},
+					Overrides: deliveryv1alpha1.OverridePolicy{
+						Values:  deliveryv1alpha1.ValueOverridePolicy{Policy: deliveryv1alpha1.OverridePolicyNone},
+						Patches: deliveryv1alpha1.PatchOverridePolicy{Policy: deliveryv1alpha1.OverridePolicyAll},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+			DeferCleanup(func() {
+				_ = k8sClient.Delete(ctx, resource)
+			})
+
+			By("Reconciling with a fake OCI client")
+			controllerReconciler := &MenuReconciler{
+				Client:         k8sClient,
+				Scheme:         k8sClient.Scheme(),
+				Service:        service.NewMenuService(oci.NewFakeClient(afero.NewMemMapFs())),
+				PantryResolver: credential.NewKubeResolver(k8sClient),
+			}
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
+				NamespacedName: renderName,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Advertising the rendered ref with preRendered set")
+			rendered := &deliveryv1alpha1.Menu{}
+			Expect(k8sClient.Get(ctx, renderName, rendered)).To(Succeed())
+			Expect(rendered.Status.Source).NotTo(BeNil())
+			Expect(rendered.Status.Source.OCI).To(Equal("oci://registry.kokumi.svc.cluster.local:5000/rendered/test-resource"))
+			Expect(rendered.Status.Source.Digest).NotTo(BeEmpty())
+			Expect(rendered.Status.Source.PreRendered).To(BeTrue())
+			Expect(rendered.Status.ConfigHash).NotTo(BeEmpty())
+		})
+
+		It("should skip re-resolve when the config hash is unchanged", func() {
+			renderName := types.NamespacedName{Namespace: testNamespace, Name: "test-resource-render-hash"}
+			resource := &deliveryv1alpha1.Menu{
+				Namespace: testNamespace,
+				Name:      renderName.Name,
+				Spec: deliveryv1alpha1.MenuSpec{
+					Source: deliveryv1alpha1.OCISource{
+						OCI:     testOCIRef,
+						Version: testVersion,
+					},
+					Vendor: &deliveryv1alpha1.VendorSpec{
+						Mode: deliveryv1alpha1.VendorModeRender,
+						Destination: deliveryv1alpha1.VendorDestination{
+							OCI: "oci://registry.kokumi.svc.cluster.local:5000/rendered/hash-test",
+						},
+					},
+					Render: &deliveryv1alpha1.Render{
+						Manifest: &deliveryv1alpha1.ManifestRender{Layout: deliveryv1alpha1.FileLayoutSingle},
+					},
+					Overrides: deliveryv1alpha1.OverridePolicy{
+						Values:  deliveryv1alpha1.ValueOverridePolicy{Policy: deliveryv1alpha1.OverridePolicyNone},
+						Patches: deliveryv1alpha1.PatchOverridePolicy{Policy: deliveryv1alpha1.OverridePolicyAll},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+			DeferCleanup(func() {
+				_ = k8sClient.Delete(ctx, resource)
+			})
+
+			fake := oci.NewFakeClient(afero.NewMemMapFs())
+			controllerReconciler := &MenuReconciler{
+				Client:         k8sClient,
+				Scheme:         k8sClient.Scheme(),
+				Service:        service.NewMenuService(fake),
+				PantryResolver: credential.NewKubeResolver(k8sClient),
+			}
+
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: renderName})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Recording the config hash in status")
+			first := &deliveryv1alpha1.Menu{}
+			Expect(k8sClient.Get(ctx, renderName, first)).To(Succeed())
+			Expect(first.Status.ConfigHash).NotTo(BeEmpty())
+
+			By("Re-reconciling without changes skips re-resolve")
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: renderName})
+			Expect(err).NotTo(HaveOccurred())
+
+			second := &deliveryv1alpha1.Menu{}
+			Expect(k8sClient.Get(ctx, renderName, second)).To(Succeed())
+			Expect(second.Status.ConfigHash).To(Equal(first.Status.ConfigHash))
 		})
 	})
 })

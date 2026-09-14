@@ -434,6 +434,7 @@ func menuToDTO(m deliveryv1alpha1.Menu) MenuDTO {
 			OCI:     m.Spec.Source.OCI,
 			Version: m.Spec.Source.Version,
 		},
+		Vendor:    vendorSpecToDTO(m.Spec.Vendor),
 		Render:    renderToDTO(m.Spec.Render),
 		Patches:   patches,
 		Overrides: overridePolicyToDTO(m.Spec.Overrides),
@@ -448,6 +449,42 @@ func menuToDTO(m deliveryv1alpha1.Menu) MenuDTO {
 		dto.CreatedAt = &t
 	}
 	return dto
+}
+
+// vendorSpecToDTO converts a Menu VendorSpec into its DTO representation.
+func vendorSpecToDTO(v *deliveryv1alpha1.VendorSpec) *VendorSpecDTO {
+	if v == nil {
+		return nil
+	}
+	dst := VendorDestinationDTO{OCI: v.Destination.OCI}
+	if v.Destination.PantryRef != nil {
+		dst.PantryRef = &PantryRefDTO{Name: v.Destination.PantryRef.Name}
+	}
+	mode := string(v.Mode)
+	if mode == "" {
+		mode = string(deliveryv1alpha1.VendorModeRender)
+	}
+	return &VendorSpecDTO{Mode: mode, Destination: dst}
+}
+
+// vendorSpecFromDTO converts a VendorSpecDTO into a Menu VendorSpec.
+// Returns nil when the DTO is nil. An empty destination is valid — the
+// controller resolves it to the in-cluster default registry.
+func vendorSpecFromDTO(dto *VendorSpecDTO) *deliveryv1alpha1.VendorSpec {
+	if dto == nil {
+		return nil
+	}
+	v := &deliveryv1alpha1.VendorSpec{
+		Mode: deliveryv1alpha1.VendorModeRender,
+	}
+	if dto.Mode != "" {
+		v.Mode = deliveryv1alpha1.VendorMode(dto.Mode)
+	}
+	v.Destination.OCI = dto.Destination.OCI
+	if dto.Destination.PantryRef != nil {
+		v.Destination.PantryRef = &deliveryv1alpha1.PantryRef{Name: dto.Destination.PantryRef.Name}
+	}
+	return v
 }
 
 // overridePolicyToDTO converts an OverridePolicy to its DTO representation.

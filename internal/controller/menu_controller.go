@@ -29,6 +29,7 @@ import (
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/credential"
+	"github.com/kokumi-dev/kokumi/internal/renderer"
 	"github.com/kokumi-dev/kokumi/internal/service"
 	"github.com/kokumi-dev/kokumi/internal/status"
 )
@@ -88,6 +89,16 @@ func (r *MenuReconciler) reconcileMenu(ctx context.Context, menu *deliveryv1alph
 	logger := log.FromContext(ctx)
 	statusUpdater := status.NewMenuUpdater(r.Client)
 
+	configHash, err := renderer.CalculateMenuHash(menu.Spec)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to compute Menu config hash: %w", err)
+	}
+
+	if menu.Status.Source != nil && menu.Status.ConfigHash == configHash {
+		logger.V(4).Info("Menu config unchanged, skipping re-resolve", "name", menu.Name)
+		return ctrl.Result{}, nil
+	}
+
 	source, err := r.Service.ResolveSource(ctx, menu, r.PantryResolver)
 	if err != nil {
 		logger.Error(err, "Failed to resolve Menu source")
@@ -97,7 +108,7 @@ func (r *MenuReconciler) reconcileMenu(ctx context.Context, menu *deliveryv1alph
 		return ctrl.Result{}, err
 	}
 
-	if err := statusUpdater.Ready(ctx, menu, source); err != nil {
+	if err := statusUpdater.Ready(ctx, menu, configHash, source); err != nil {
 		return ctrl.Result{}, err
 	}
 

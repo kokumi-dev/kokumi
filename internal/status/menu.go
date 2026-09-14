@@ -21,13 +21,19 @@ func NewMenuUpdater(c client.Client) *MenuUpdater {
 }
 
 // Ready marks the Menu as valid and available for use.
-func (u *MenuUpdater) Ready(ctx context.Context, menu *deliveryv1alpha1.Menu, source *deliveryv1alpha1.MenuSourceStatus) error {
+// configHash records the spec inputs that produced the published artifact;
+// pass an empty string when the source is resolved without rendering.
+func (u *MenuUpdater) Ready(ctx context.Context, menu *deliveryv1alpha1.Menu, configHash string, source *deliveryv1alpha1.MenuSourceStatus) error {
 	return SetCondition(ctx, u.client, menu, func(latest *deliveryv1alpha1.Menu) {
 		latest.Status.ObservedGeneration = latest.Generation
 		latest.Status.Source = source
+		latest.Status.ConfigHash = configHash
 		reason := "Resolved"
-		if menu.Spec.Vendor != nil {
+		if latest.Spec.Vendor != nil {
 			reason = "Vendored"
+			if source.PreRendered {
+				reason = "Rendered"
+			}
 		}
 		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(latest.Generation, metav1.ConditionTrue, reason, "Source published"))
 	})

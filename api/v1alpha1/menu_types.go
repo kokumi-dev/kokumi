@@ -136,16 +136,41 @@ type MenuSpec struct {
 	Defaults MenuDefaults `json:"defaults,omitempty"`
 }
 
-// VendorSpec configures copying the source artifact to another OCI registry.
+// VendorMode controls what the Menu controller publishes to the vendor
+// destination: the raw source artifact (Copy) or the rendered, patched
+// manifests (Render).
+// +kubebuilder:validation:Enum=Render;Copy
+type VendorMode string
+
+const (
+	// VendorModeRender renders the source (per spec.render) and applies
+	// spec.patches before pushing the resulting manifests to the destination.
+	VendorModeRender VendorMode = "Render"
+	// VendorModeCopy pushes the raw source artifact to the destination unchanged.
+	VendorModeCopy VendorMode = "Copy"
+)
+
+// VendorSpec configures publishing the source artifact to another OCI registry.
+// Exactly one of oci or pantryRef must be set on the destination.
+// +kubebuilder:validation:XValidation:rule="!(has(self.mode) && self.mode == 'Render' && !has(self.destination))",message="mode Render requires a destination"
 type VendorSpec struct {
-	// destination is the registry the source artifact is copied to.
+	// mode controls what is published to the destination.
+	// Render (default): the source is rendered per spec.render and spec.patches
+	// are applied before pushing the resulting manifests.
+	// Copy: the raw source artifact is pushed unchanged.
+	// +optional
+	// +kubebuilder:default=Render
+	Mode VendorMode `json:"mode,omitempty"`
+
+	// destination is the registry the artifact is published to.
 	// +kubebuilder:validation:Required
 	Destination VendorDestination `json:"destination"`
 }
 
 // VendorDestination defines where the vendored artifact is pushed.
-// Exactly one of oci or pantryRef must be set.
-// +kubebuilder:validation:XValidation:rule="(has(self.oci) && !has(self.pantryRef)) || (!has(self.oci) && has(self.pantryRef))",message="exactly one of oci or pantryRef must be set"
+// At most one of oci or pantryRef must be set; when both are empty the
+// in-cluster default registry is used (oci://<host>/<namespace>/<menu-name>).
+// +kubebuilder:validation:XValidation:rule="!(has(self.oci) && has(self.pantryRef))",message="oci and pantryRef are mutually exclusive"
 type VendorDestination struct {
 	// oci is the full OCI URL the vendored artifact is pushed to.
 	// Mutually exclusive with pantryRef.
@@ -182,6 +207,13 @@ type MenuSourceStatus struct {
 	// +optional
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	Digest string `json:"digest,omitempty"`
+
+	// preRendered reports whether the advertised artifact is a rendered,
+	// patched manifest bundle produced by the Menu (vendor mode Render).
+	// When true, Orders treat the artifact as a plain manifest base and
+	// cannot apply Helm value overrides.
+	// +optional
+	PreRendered bool `json:"preRendered,omitempty"`
 }
 
 // MenuStatus defines the observed state of Menu.
@@ -189,6 +221,12 @@ type MenuStatus struct {
 	// observedGeneration is the most recent generation observed by the controller.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// configHash is a SHA-256 hash of the resolved source and destination OCI
+	// URLs plus version, render, and patches. When it matches the current spec
+	// inputs the previously published artifact is reused without re-rendering.
+	// +optional
+	ConfigHash string `json:"configHash,omitempty"`
 
 	// source is the consumable source address for Orders. Absent until the
 	// Menu controller has resolved (and, if configured, vendored) the source.
