@@ -236,8 +236,10 @@ func TestAuthManagerReloadWithKitchenOIDC(t *testing.T) {
 		Data: map[string][]byte{
 			secretKeyUsername:     []byte(testUsername),
 			secretKeyPasswordHash: mustBcrypt(t, testPassword),
-			secretKeySigningKey:   []byte("test-signing-key-do-not-use-in-prod"),
 		},
+	}, &corev1.Secret{
+		Name: deliveryv1alpha1.DefaultTokenSigningKeySecretName, Namespace: testNS,
+		Data: map[string][]byte{secretKeySigningKey: []byte("test-signing-key-do-not-use-in-prod")},
 	}, &corev1.Secret{
 		Name: testOIDCSecret, Namespace: testNS,
 		Data: map[string][]byte{secretKeyClientSecret: []byte(testClientSec)},
@@ -375,9 +377,10 @@ func mustBcrypt(t *testing.T, pw string) []byte {
 func TestHandleLoginForbiddenWhenAdminDisabled(t *testing.T) {
 	client := fake.NewClientBuilder().WithObjects(&corev1.Secret{
 		Name: testSecret, Namespace: testNS,
-		Data: map[string][]byte{
-			secretKeySigningKey: []byte("test-signing-key-do-not-use-in-prod"),
-		},
+		Data: map[string][]byte{},
+	}, &corev1.Secret{
+		Name: deliveryv1alpha1.DefaultTokenSigningKeySecretName, Namespace: testNS,
+		Data: map[string][]byte{secretKeySigningKey: []byte("test-signing-key-do-not-use-in-prod")},
 	}, &corev1.Secret{
 		Name: testOIDCSecret, Namespace: testNS,
 		Data: map[string][]byte{secretKeyClientSecret: []byte(testClientSec)},

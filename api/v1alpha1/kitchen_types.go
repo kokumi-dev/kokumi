@@ -24,6 +24,11 @@ import (
 
 const (
 	DefaultKitchenName = "default"
+
+	// DefaultTokenSigningKeySecretName is the default name of the Secret holding
+	// the HMAC signing key for session tokens. The Kitchen controller creates
+	// this Secret with a generated key when it does not exist.
+	DefaultTokenSigningKeySecretName = "kokumi-server-tokens"
 )
 
 // KitchenSpec defines the desired state of Kitchen
@@ -54,6 +59,16 @@ type KitchenAuth struct {
 	// enabled.
 	// +optional
 	OIDC *OIDCConfig `json:"oidc,omitempty"`
+
+	// TokenSigningKeySecretRef points to the Secret holding the HMAC signing
+	// key (key "signing-key") used to sign all session tokens, for both admin
+	// and OIDC sessions. The Secret must reside in the same namespace as the
+	// Kitchen. When the referenced Secret does not exist, the controller
+	// creates it with a generated random key.
+	// Defaults to "kokumi-server-tokens".
+	// +kubebuilder:default={name:"kokumi-server-tokens"}
+	// +optional
+	TokenSigningKeySecretRef *corev1.LocalObjectReference `json:"tokenSigningKeySecretRef,omitempty"`
 }
 
 // AdminUserConfig configures the built-in admin account used for UI login.
@@ -76,9 +91,9 @@ type AdminUserConfig struct {
 	Username string `json:"username,omitempty"`
 
 	// SecretRef points to the Secret holding the admin credentials. The Secret
-	// must reside in the same namespace as the Kitchen. Recognized keys are
-	// "password-hash" (bcrypt hash) and "signing-key" (HMAC key for JWTs).
-	// Defaults to "kokumi-server-auth".
+	// must reside in the same namespace as the Kitchen. The recognized key is
+	// "password-hash" (bcrypt hash); "username" may optionally override the
+	// configured username. Defaults to "kokumi-server-auth".
 	// +kubebuilder:default={name:"kokumi-server-auth"}
 	// +optional
 	SecretRef *corev1.LocalObjectReference `json:"secretRef,omitempty"`

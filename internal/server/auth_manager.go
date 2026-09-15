@@ -22,18 +22,19 @@ const (
 // intentionally off only when no provider is configured; any other failure
 // keeps last-known-good state so the API fails closed.
 type authManager struct {
-	mu         sync.RWMutex
-	auth       *authenticator // admin account; nil when disabled or not yet resolved
-	oidc       *oidcProvider  // OIDC provider; nil when not configured or not yet resolved
-	disabled   bool           // true only when auth is intentionally off (no providers)
-	adminLogin bool           // true when admin credential login is available
-	secret     string         // name of the admin Secret last resolved from
-	oidcSecret string         // name of the OIDC Secret last resolved from
-	reader     client.Reader  // informer cache, used for the Kitchen singleton
-	apiReader  client.Reader  // direct API client, used for live Secret reads
-	ns         string
-	tokenTTL   time.Duration
-	logger     logr.Logger
+	mu          sync.RWMutex
+	auth        *authenticator // admin account; nil when disabled or not yet resolved
+	oidc        *oidcProvider  // OIDC provider; nil when not configured or not yet resolved
+	disabled    bool           // true only when auth is intentionally off (no providers)
+	adminLogin  bool           // true when admin credential login is available
+	secret      string         // name of the admin Secret last resolved from
+	oidcSecret  string         // name of the OIDC Secret last resolved from
+	tokenSecret string         // name of the token signing-key Secret last resolved from
+	reader      client.Reader  // informer cache, used for the Kitchen singleton
+	apiReader   client.Reader  // direct API client, used for live Secret reads
+	ns          string
+	tokenTTL    time.Duration
+	logger      logr.Logger
 }
 
 // newAuthManager builds an authManager and performs the initial resolution.
@@ -114,9 +115,29 @@ func (m *authManager) oidcSecretName() string {
 	return m.oidcSecret
 }
 
+// tokenSecretName returns the token signing-key Secret last resolved, used to
+// filter Secret events.
+func (m *authManager) tokenSecretName() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.tokenSecret
+}
+
+// tokenSigningKeySecretName returns the configured token signing-key Secret
+// name (default when unset).
+func tokenSigningKeySecretName(kitchen *deliveryv1alpha1.Kitchen) string {
+	if kitchen != nil && kitchen.Spec.Auth != nil &&
+		kitchen.Spec.Auth.TokenSigningKeySecretRef != nil &&
+		kitchen.Spec.Auth.TokenSigningKeySecretRef.Name != "" {
+		return kitchen.Spec.Auth.TokenSigningKeySecretRef.Name
+	}
+	return deliveryv1alpha1.DefaultTokenSigningKeySecretName
+}
+
 // reload resolves the admin-user and OIDC config from the Kitchen singleton and
-// rebuilds both providers. A nil kitchen or nil auth block leaves them
-// unconfigured (no default Secret fallback). The two providers are resolved
+// rebuilds both providers. The shared authenticator (signing key) is built from
+// the dedicated token signing-key Secret, independent of adminUser, so OIDC-only
+// setups work without an admin account. The two providers are resolved
 // independently so a broken OIDC config never disables admin login, and vice versa.
 func (m *authManager) reload(ctx context.Context, kitchen *deliveryv1alpha1.Kitchen) {
 	var adminCfg *deliveryv1alpha1.AdminUserConfig
@@ -125,21 +146,27 @@ func (m *authManager) reload(ctx context.Context, kitchen *deliveryv1alpha1.Kitc
 		adminCfg = kitchen.Spec.Auth.AdminUser
 		oidcCfg = kitchen.Spec.Auth.OIDC
 	}
+	tokenSecretName := tokenSigningKeySecretName(kitchen)
 
-	// Admin: absent adminUser or unset SecretRef -> unconfigured (fail closed,
-	// no default-name fallback). Disabled admin still builds a token-only
-	// authenticator so OIDC sessions share the signing key. Errors keep
-	// last-known-good state.
-	var auth *authenticator
-	var authErr error
+	// Shared trust root: signing key from the dedicated token Secret. Errors
+	// keep last-known-good state.
+	auth, authErr := buildTokenAuthenticator(ctx, m.apiReader, m.ns, tokenSecretName, m.tokenTTL)
+	if authErr != nil {
+		m.logger.Info("Token signing key not available", "reason", authErr.Error())
+	}
+
+	// Admin credentials layer on top of the shared authenticator: absent
+	// adminUser or unset SecretRef -> no password login (fail closed, no
+	// default-name fallback). Errors keep last-known-good state.
+	var adminErr error
 	if adminCfg == nil {
 		m.logger.Info("Admin authentication not configured", "reason", "adminUser not set")
 	} else if adminCfg.SecretRef == nil {
 		m.logger.Info("Admin authentication not configured", "reason", "admin secretRef not set")
-	} else {
-		auth, authErr = buildAuthenticator(ctx, m.apiReader, m.ns, adminCfg, m.tokenTTL)
-		if authErr != nil {
-			m.logger.Info("Admin authentication not configured", "reason", authErr.Error())
+	} else if auth != nil {
+		auth, adminErr = applyAdminCredentials(ctx, m.apiReader, m.ns, adminCfg, auth)
+		if adminErr != nil {
+			m.logger.Info("Admin authentication not configured", "reason", adminErr.Error())
 		}
 	}
 
@@ -161,11 +188,55 @@ func (m *authManager) reload(ctx context.Context, kitchen *deliveryv1alpha1.Kitc
 	// A provider that fails to (re)build keeps last-known-good state so the API
 	// fails closed; an intentionally disabled provider (nil, nil) is applied as-is.
 	m.mu.Lock()
-	if auth != nil || authErr == nil {
-		m.auth = auth
-		if adminCfg != nil && adminCfg.SecretRef != nil {
-			m.secret = adminCfg.SecretRef.Name
+	m.apply(auth, adminCfg, adminErr, oidc, oidcCfg, oidcErr, tokenSecretName)
+	m.mu.Unlock()
+
+	switch {
+	case m.disabled:
+		m.logger.Info("Authentication disabled", "reason", "no identity providers configured")
+	case m.adminLogin && adminCfg != nil:
+		m.logger.Info("Admin authentication enabled", "namespace", m.ns, "secret", adminCfg.SecretRef.Name, "username", adminCfg.Username)
+	case m.adminLogin:
+		m.logger.Info("Admin authentication enabled (last known good)", "namespace", m.ns)
+	case oidc != nil:
+		m.logger.Info("OIDC authentication enabled", "issuer", oidcCfg.IssuerURL, "secret", oidcCfg.ClientSecretRef.Name)
+	}
+}
+
+// apply swaps the freshly built providers into the manager state. Callers must
+// hold m.mu. A provider that fails to (re)build keeps last-known-good state so
+// the API fails closed; an intentionally disabled provider (nil, nil) is
+// applied as-is.
+func (m *authManager) apply(
+	auth *authenticator,
+	adminCfg *deliveryv1alpha1.AdminUserConfig,
+	adminErr error,
+	oidc *oidcProvider,
+	oidcCfg *deliveryv1alpha1.OIDCConfig,
+	oidcErr error,
+	tokenSecretName string,
+) {
+	prevAuth := m.auth
+	if auth != nil {
+		// A transient admin-credentials error must not wipe the last-known-good
+		// credentials, but only when the credentials source is unchanged and
+		// the admin is still enabled; a changed SecretRef or a disabled admin
+		// must take effect immediately, not resurrect stale credentials.
+		if adminErr != nil && prevAuth != nil && prevAuth.passwordHash != nil &&
+			adminCfg != nil && adminCfg.SecretRef != nil &&
+			adminCfg.SecretRef.Name == m.secret && adminCfg.IsEnabled() {
+			auth.username = prevAuth.username
+			auth.passwordHash = prevAuth.passwordHash
 		}
+		m.auth = auth
+	}
+	// Track the configured token Secret name even when the build failed, so
+	// Secret events for the new name are not filtered out while it is missing.
+	m.tokenSecret = tokenSecretName
+	if adminCfg != nil && adminCfg.SecretRef != nil {
+		m.secret = adminCfg.SecretRef.Name
+	} else {
+		m.secret = ""
 	}
 	if oidc != nil || oidcErr == nil {
 		m.oidc = oidc
@@ -180,16 +251,6 @@ func (m *authManager) reload(ctx context.Context, kitchen *deliveryv1alpha1.Kitc
 	// or last-known-good authenticator keeps auth enabled so a transient error
 	// fails closed rather than opening the API.
 	m.disabled = !m.adminLogin && m.oidc == nil
-	m.mu.Unlock()
-
-	switch {
-	case m.disabled:
-		m.logger.Info("Authentication disabled", "reason", "no identity providers configured")
-	case auth != nil:
-		m.logger.Info("Admin authentication enabled", "namespace", m.ns, "secret", adminCfg.SecretRef.Name, "username", adminCfg.Username)
-	case oidc != nil:
-		m.logger.Info("OIDC authentication enabled", "issuer", oidcCfg.IssuerURL, "secret", oidcCfg.ClientSecretRef.Name)
-	}
 }
 
 // refresh reads the latest Kitchen singleton and rebuilds the providers.
