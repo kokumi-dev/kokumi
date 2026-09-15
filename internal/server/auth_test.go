@@ -78,26 +78,33 @@ func TestMiddlewareFailClosed(t *testing.T) {
 	})
 }
 
-func TestBuildAuthenticator(t *testing.T) {
+func TestApplyAdminCredentials(t *testing.T) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(testPassword), bcrypt.MinCost)
 	require.NoError(t, err)
 	secret := newAuthSecret(map[string][]byte{
 		secretKeyUsername:     []byte(testUsername),
 		secretKeyPasswordHash: hash,
-		secretKeySigningKey:   []byte("a-signing-key"),
 	})
 	c := fake.NewClientBuilder().WithObjects(secret).Build()
 
-	t.Run("disabled builds a token-only authenticator", func(t *testing.T) {
-		// Disabled admin still builds a token-only authenticator (signing key only) so OIDC sessions work.
-		signingOnly := newAuthSecret(map[string][]byte{
-			secretKeySigningKey: []byte("a-signing-key"),
-		})
-		cr := fake.NewClientBuilder().WithObjects(signingOnly).Build()
-		auth, err := buildAuthenticator(context.Background(), cr, testNS, &deliveryv1alpha1.AdminUserConfig{
+	t.Run("disabled leaves the authenticator token-only", func(t *testing.T) {
+		auth, err := applyAdminCredentials(context.Background(), c, testNS, &deliveryv1alpha1.AdminUserConfig{
 			Enabled:   new(false),
 			SecretRef: &corev1.LocalObjectReference{Name: testSecret},
-		}, 0)
+		}, newAuthenticator("", nil, []byte("test-signing-key-at-least-32-bytes-long!!")))
+		require.NoError(t, err)
+		assert.Empty(t, auth.username)
+		assert.Empty(t, auth.passwordHash)
+		assert.NotEmpty(t, auth.signingKey)
+	})
+
+	t.Run("token-only authenticator from signing-key Secret", func(t *testing.T) {
+		signingOnly := &corev1.Secret{
+			Name: deliveryv1alpha1.DefaultTokenSigningKeySecretName, Namespace: testNS,
+			Data: map[string][]byte{secretKeySigningKey: []byte("test-signing-key-at-least-32-bytes-long!!")},
+		}
+		cr := fake.NewClientBuilder().WithObjects(signingOnly).Build()
+		auth, err := buildTokenAuthenticator(context.Background(), cr, testNS, deliveryv1alpha1.DefaultTokenSigningKeySecretName, 0)
 		require.NoError(t, err)
 		require.NotNil(t, auth)
 		assert.Empty(t, auth.username)
@@ -105,23 +112,39 @@ func TestBuildAuthenticator(t *testing.T) {
 		assert.NotEmpty(t, auth.signingKey)
 	})
 
+	t.Run("missing signing-key Secret errors", func(t *testing.T) {
+		cr := fake.NewClientBuilder().Build()
+		_, err := buildTokenAuthenticator(context.Background(), cr, testNS, deliveryv1alpha1.DefaultTokenSigningKeySecretName, 0)
+		require.Error(t, err)
+	})
+
+	t.Run("signing-key Secret without key errors", func(t *testing.T) {
+		incomplete := &corev1.Secret{
+			Name: deliveryv1alpha1.DefaultTokenSigningKeySecretName, Namespace: testNS,
+			Data: map[string][]byte{"other": []byte("x")},
+		}
+		cr := fake.NewClientBuilder().WithObjects(incomplete).Build()
+		_, err := buildTokenAuthenticator(context.Background(), cr, testNS, deliveryv1alpha1.DefaultTokenSigningKeySecretName, 0)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), secretKeySigningKey)
+	})
+
 	t.Run("enabled with custom username uses config username", func(t *testing.T) {
-		auth, err := buildAuthenticator(context.Background(), c, testNS, &deliveryv1alpha1.AdminUserConfig{
+		auth, err := applyAdminCredentials(context.Background(), c, testNS, &deliveryv1alpha1.AdminUserConfig{
 			Enabled:   new(true),
 			Username:  testRootUser,
 			SecretRef: &corev1.LocalObjectReference{Name: testSecret},
-		}, 0)
+		}, newAuthenticator("", nil, []byte("test-signing-key-at-least-32-bytes-long!!")))
 		require.NoError(t, err)
-		require.NotNil(t, auth)
 		assert.Equal(t, testRootUser, auth.username)
 		assert.True(t, auth.verifyCredentials(testRootUser, testPassword))
 	})
 
 	t.Run("missing secret errors", func(t *testing.T) {
-		_, err := buildAuthenticator(context.Background(), c, testNS, &deliveryv1alpha1.AdminUserConfig{
+		_, err := applyAdminCredentials(context.Background(), c, testNS, &deliveryv1alpha1.AdminUserConfig{
 			Enabled:   new(true),
 			SecretRef: &corev1.LocalObjectReference{Name: "absent"},
-		}, 0)
+		}, newAuthenticator("", nil, []byte("test-signing-key-at-least-32-bytes-long!!")))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "absent")
 	})
@@ -559,33 +582,22 @@ func TestHandleInfoNoProvidersMeansLoginPage(t *testing.T) {
 	assert.Empty(t, resp.AuthProviders)
 }
 
-func TestBuildAuthenticatorAppliesTokenTTL(t *testing.T) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(testPassword), bcrypt.MinCost)
-	require.NoError(t, err)
-	secret := newAuthSecret(map[string][]byte{
-		secretKeyUsername:     []byte(testUsername),
-		secretKeyPasswordHash: hash,
-		secretKeySigningKey:   []byte("a-signing-key"),
-	})
-	reader := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(secret).Build()
+func TestBuildTokenAuthenticatorAppliesTokenTTL(t *testing.T) {
+	tokenSecret := &corev1.Secret{
+		Name: deliveryv1alpha1.DefaultTokenSigningKeySecretName, Namespace: testNS,
+		Data: map[string][]byte{secretKeySigningKey: []byte("test-signing-key-at-least-32-bytes-long!!")},
+	}
+	reader := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(tokenSecret).Build()
 
 	t.Run("KOKUMI_TOKEN_TTL overrides the access token lifetime", func(t *testing.T) {
-		auth, err := buildAuthenticator(context.Background(), reader, testNS, &deliveryv1alpha1.AdminUserConfig{
-			Enabled:   new(true),
-			Username:  testUsername,
-			SecretRef: &corev1.LocalObjectReference{Name: testSecret},
-		}, 30*time.Minute)
+		auth, err := buildTokenAuthenticator(context.Background(), reader, testNS, deliveryv1alpha1.DefaultTokenSigningKeySecretName, 30*time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, auth)
 		assert.Equal(t, 30*time.Minute, auth.accessTTL)
 	})
 
 	t.Run("default TTL when env unset", func(t *testing.T) {
-		auth, err := buildAuthenticator(context.Background(), reader, testNS, &deliveryv1alpha1.AdminUserConfig{
-			Enabled:   new(true),
-			Username:  testUsername,
-			SecretRef: &corev1.LocalObjectReference{Name: testSecret},
-		}, 0)
+		auth, err := buildTokenAuthenticator(context.Background(), reader, testNS, deliveryv1alpha1.DefaultTokenSigningKeySecretName, 0)
 		require.NoError(t, err)
 		require.NotNil(t, auth)
 		assert.Equal(t, defaultAccessTokenTTL, auth.accessTTL)
@@ -598,9 +610,12 @@ func TestAuthManagerFailClosed(t *testing.T) {
 	secret := newAuthSecret(map[string][]byte{
 		secretKeyUsername:     []byte(testUsername),
 		secretKeyPasswordHash: hash,
-		secretKeySigningKey:   []byte("a-signing-key"),
 	})
-	reader := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(secret).Build()
+	tokenSecret := &corev1.Secret{
+		Name: deliveryv1alpha1.DefaultTokenSigningKeySecretName, Namespace: testNS,
+		Data: map[string][]byte{secretKeySigningKey: []byte("test-signing-key-at-least-32-bytes-long!!")},
+	}
+	reader := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(secret, tokenSecret).Build()
 
 	logger := logr.Discard()
 

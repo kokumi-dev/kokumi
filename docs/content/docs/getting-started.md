@@ -290,7 +290,8 @@ The UI requires authentication. The default credentials are:
 
 Change the password before any non-development use. See the
 [Operator Guide — Authentication](../operator-guide/authentication/) for how to
-rotate the credentials Secret and configure the admin account via the `Kitchen`
+rotate the credentials Secret, manage the token signing key
+(`kokumi-server-tokens`), and configure the admin account via the `Kitchen`
 resource. The server picks up changes to the Secret and the `Kitchen` resource
 automatically; no restart is needed.
 

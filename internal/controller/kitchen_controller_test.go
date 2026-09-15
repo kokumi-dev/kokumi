@@ -37,6 +37,8 @@ const (
 	secretKeyUsername     = "username"
 	secretKeyPasswordHash = "password-hash"
 	secretKeySigningKey   = "signing-key"
+	tokenSecretName       = deliveryv1alpha1.DefaultTokenSigningKeySecretName
+	userTokenSecretName   = "my-gitops-key"
 )
 
 var _ = Describe("Kitchen Controller", func() {
@@ -137,6 +139,9 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 		_ = k8sClient.Delete(ctx, &corev1.Secret{
 			Name: secretName, Namespace: testNamespace,
 		})
+		_ = k8sClient.Delete(ctx, &corev1.Secret{
+			Name: tokenSecretName, Namespace: testNamespace,
+		})
 	})
 
 	It("reports Ready=False when the admin credentials Secret is missing", func() {
@@ -183,7 +188,6 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 			Data: map[string][]byte{
 				secretKeyUsername:     []byte("admin"),
 				secretKeyPasswordHash: hash,
-				secretKeySigningKey:   []byte("a-signing-key"),
 			},
 		}
 		Expect(k8sClient.Create(ctx, secret)).To(Succeed())
@@ -198,7 +202,7 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 	})
 
 	It("reports Ready=False when the Secret is incomplete", func() {
-		By("creating the Kitchen and an incomplete Secret (missing signing-key)")
+		By("creating the Kitchen and an incomplete Secret (missing password-hash)")
 		kitchen := &deliveryv1alpha1.Kitchen{
 			Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace,
 			Spec: deliveryv1alpha1.KitchenSpec{
@@ -208,13 +212,10 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 			},
 		}
 		Expect(k8sClient.Create(ctx, kitchen)).To(Succeed())
-		hash, err := bcrypt.GenerateFromPassword([]byte("s3cret-passw0rd"), bcrypt.MinCost)
-		Expect(err).NotTo(HaveOccurred())
 		secret := &corev1.Secret{
 			Name: secretName, Namespace: testNamespace,
 			Data: map[string][]byte{
-				secretKeyUsername:     []byte("admin"),
-				secretKeyPasswordHash: hash,
+				secretKeyUsername: []byte("admin"),
 			},
 		}
 		Expect(k8sClient.Create(ctx, secret)).To(Succeed())
@@ -227,5 +228,123 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Message).To(ContainSubstring(secretName))
+	})
+
+	It("creates the token signing-key Secret and reports Ready=True for OIDC-only auth", func() {
+		By("creating a Kitchen with OIDC only (no adminUser)")
+		kitchen := &deliveryv1alpha1.Kitchen{
+			Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace,
+			Spec: deliveryv1alpha1.KitchenSpec{
+				Auth: &deliveryv1alpha1.KitchenAuth{
+					OIDC: &deliveryv1alpha1.OIDCConfig{
+						IssuerURL: "https://sso.example.com",
+						ClientID:  "kokumi",
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, kitchen)).To(Succeed())
+
+		By("creating the OIDC client Secret")
+		oidcSecret := &corev1.Secret{
+			Name: "kokumi-server-oidc", Namespace: testNamespace,
+			Data: map[string][]byte{"client-secret": []byte("s3cret")},
+		}
+		Expect(k8sClient.Create(ctx, oidcSecret)).To(Succeed())
+		DeferCleanup(func() {
+			_ = k8sClient.Delete(ctx, oidcSecret)
+		})
+
+		By("reconciling")
+		reconcileSingleton(ctx)
+
+		By("checking the token signing-key Secret was created with a signing-key")
+		tokenSecret := &corev1.Secret{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: tokenSecretName, Namespace: testNamespace}, tokenSecret)).To(Succeed())
+		Expect(tokenSecret.Data[secretKeySigningKey]).NotTo(BeEmpty())
+
+		By("checking the Ready condition is True")
+		cond := readyCondition(getKitchen(ctx))
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+	})
+
+	It("does not rotate the token signing-key Secret on re-reconcile", func() {
+		By("creating a Kitchen with auth and reconciling twice")
+		kitchen := &deliveryv1alpha1.Kitchen{
+			Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace,
+			Spec: deliveryv1alpha1.KitchenSpec{
+				Auth: &deliveryv1alpha1.KitchenAuth{},
+			},
+		}
+		Expect(k8sClient.Create(ctx, kitchen)).To(Succeed())
+		reconcileSingleton(ctx)
+
+		tokenSecret := &corev1.Secret{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: tokenSecretName, Namespace: testNamespace}, tokenSecret)).To(Succeed())
+		firstKey := string(tokenSecret.Data[secretKeySigningKey])
+		Expect(firstKey).NotTo(BeEmpty())
+
+		reconcileSingleton(ctx)
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: tokenSecretName, Namespace: testNamespace}, tokenSecret)).To(Succeed())
+		Expect(string(tokenSecret.Data[secretKeySigningKey])).To(Equal(firstKey))
+	})
+
+	It("uses a user-supplied token signing-key Secret read-only", func() {
+		By("creating a user-managed signing-key Secret and pointing the Kitchen at it")
+		userSecret := &corev1.Secret{
+			Name: userTokenSecretName, Namespace: testNamespace,
+			Data: map[string][]byte{secretKeySigningKey: []byte("user-provided-key")},
+		}
+		Expect(k8sClient.Create(ctx, userSecret)).To(Succeed())
+		DeferCleanup(func() {
+			_ = k8sClient.Delete(ctx, userSecret)
+		})
+		kitchen := &deliveryv1alpha1.Kitchen{
+			Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace,
+			Spec: deliveryv1alpha1.KitchenSpec{
+				Auth: &deliveryv1alpha1.KitchenAuth{
+					TokenSigningKeySecretRef: &corev1.LocalObjectReference{Name: userTokenSecretName},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, kitchen)).To(Succeed())
+		reconcileSingleton(ctx)
+
+		By("checking the user Secret was not modified")
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: userTokenSecretName, Namespace: testNamespace}, userSecret)).To(Succeed())
+		Expect(string(userSecret.Data[secretKeySigningKey])).To(Equal("user-provided-key"))
+
+		By("checking the default token Secret was not created")
+		err := k8sClient.Get(ctx, types.NamespacedName{Name: tokenSecretName, Namespace: testNamespace}, &corev1.Secret{})
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+	})
+
+	It("reports Ready=False when the user-supplied token Secret lacks signing-key", func() {
+		By("creating an incomplete user-managed signing-key Secret")
+		userSecret := &corev1.Secret{
+			Name: userTokenSecretName, Namespace: testNamespace,
+			Data: map[string][]byte{"other": []byte("value")},
+		}
+		Expect(k8sClient.Create(ctx, userSecret)).To(Succeed())
+		DeferCleanup(func() {
+			_ = k8sClient.Delete(ctx, userSecret)
+		})
+		kitchen := &deliveryv1alpha1.Kitchen{
+			Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace,
+			Spec: deliveryv1alpha1.KitchenSpec{
+				Auth: &deliveryv1alpha1.KitchenAuth{
+					TokenSigningKeySecretRef: &corev1.LocalObjectReference{Name: userTokenSecretName},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, kitchen)).To(Succeed())
+		reconcileSingleton(ctx)
+
+		By("checking the Ready condition is False with a clear message")
+		cond := readyCondition(getKitchen(ctx))
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Message).To(ContainSubstring(userTokenSecretName))
 	})
 })

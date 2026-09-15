@@ -56,7 +56,7 @@ func buildOIDCProvider(
 		return nil, nil
 	}
 	if auth == nil {
-		return nil, fmt.Errorf("oidc requires a shared authenticator (signing key) to be configured")
+		return nil, fmt.Errorf("oidc requires a shared authenticator (token signing key) to be configured")
 	}
 	if cfg.ClientSecretRef == nil {
 		return nil, fmt.Errorf("oidc clientSecretRef not set")

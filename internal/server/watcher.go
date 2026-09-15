@@ -205,37 +205,21 @@ func startK8sWatcher(
 
 	// Kitchen changes reload the authenticator (plus SSE refresh). Auth Secrets only
 	// affect authentication, so they get a dedicated handler that reloads without a
-	// full SSE broadcast; filter to the resolved admin/OIDC Secret names to skip unrelated Secrets.
+	// full SSE broadcast; filter to the resolved admin/OIDC/token Secret names to skip unrelated Secrets.
 	isAuthSecret := func(obj any) bool {
 		o, ok := obj.(client.Object)
 		if !ok || o.GetNamespace() != installNamespace {
 			return false
 		}
 		name := o.GetName()
-		return name == deps.authMgr.secretName() || name == deps.authMgr.oidcSecretName()
+		return name == deps.authMgr.secretName() || name == deps.authMgr.oidcSecretName() || name == deps.authMgr.tokenSecretName()
 	}
 	kitchenHandler := toolscache.ResourceEventHandlerFuncs{
 		AddFunc:    func(_ any) { refreshAll(); deps.authMgr.refresh(ctx) },
 		UpdateFunc: func(_, _ any) { refreshAll(); deps.authMgr.refresh(ctx) },
 		DeleteFunc: func(_ any) { refreshAll(); deps.authMgr.refresh(ctx) },
 	}
-	secretHandler := toolscache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj any) {
-			if isAuthSecret(obj) {
-				deps.authMgr.refresh(ctx)
-			}
-		},
-		UpdateFunc: func(_, newObj any) {
-			if isAuthSecret(newObj) {
-				deps.authMgr.refresh(ctx)
-			}
-		},
-		DeleteFunc: func(obj any) {
-			if isAuthSecret(obj) {
-				deps.authMgr.refresh(ctx)
-			}
-		},
-	}
+	secretHandler := newAuthSecretHandler(deps.authMgr, ctx, isAuthSecret)
 
 	if err := registerWatchers(
 		orderInformer, prepInformer, servingInformer, menuInformer, pantryInformer,
@@ -261,6 +245,28 @@ func startK8sWatcher(
 	}()
 
 	return deps, nil
+}
+
+// newAuthSecretHandler builds the Secret event handler that reloads auth
+// without a full SSE broadcast when an auth-relevant Secret changes.
+func newAuthSecretHandler(mgr *authManager, ctx context.Context, isAuthSecret func(any) bool) toolscache.ResourceEventHandlerFuncs {
+	return toolscache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj any) {
+			if isAuthSecret(obj) {
+				mgr.refresh(ctx)
+			}
+		},
+		UpdateFunc: func(_, newObj any) {
+			if isAuthSecret(newObj) {
+				mgr.refresh(ctx)
+			}
+		},
+		DeleteFunc: func(obj any) {
+			if isAuthSecret(obj) {
+				mgr.refresh(ctx)
+			}
+		},
+	}
 }
 
 // registerWatchers wires the SSE-refresh handler onto resource informers and the

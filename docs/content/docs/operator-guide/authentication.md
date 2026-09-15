@@ -31,13 +31,36 @@ kubectl -n kokumi patch secret kokumi-server-auth \
 You can also change the username from the default `admin` by setting
 `stringData.username` in the same Secret.
 
-The Secret must carry three keys:
+The Secret must carry these keys:
 
 | Key | Purpose |
 | --- | ------- |
-| `username` | Login name for the admin account. |
+| `username` | Login name for the admin account (optional, overrides `spec.auth.adminUser.username`). |
 | `password-hash` | bcrypt hash of the password. |
-| `signing-key` | HMAC key used to sign issued JWTs. |
+
+## Token signing key
+
+All session tokens (admin and OIDC alike) are signed with a single HMAC key
+stored in the `kokumi-server-tokens` Secret under the `signing-key` key.
+
+- If the Secret does not exist, the Kitchen controller creates it with a
+  generated random key. It is never rotated automatically.
+- If the Secret already exists, the controller uses it as-is and never modifies
+  it:
+
+  ```bash
+  kubectl -n kokumi create secret generic kokumi-server-tokens \
+    --from-literal=signing-key="$(openssl rand -base64 32)"
+  ```
+
+- To use a differently named Secret, set `spec.auth.tokenSigningKeySecretRef`:
+
+  ```yaml
+  spec:
+    auth:
+      tokenSigningKeySecretRef:
+        name: my-gitops-managed-key
+  ```
 
 ## Configuring the admin user
 
@@ -49,7 +72,7 @@ supported under `spec.auth.adminUser`:
 | ----- | ---- | ------- | ----------- |
 | `enabled` | `*bool` | `true` | Toggle the admin account. Set to `false` to disable UI login (e.g. once an external identity provider is wired up). |
 | `username` | `string` | `admin` | Login username. Must not contain whitespace or `/`. |
-| `secretRef` | `LocalObjectReference` | `kokumi-server-auth` | Name of the `Secret` holding the credentials (`username`, `password-hash`, `signing-key`) in the same namespace. |
+| `secretRef` | `LocalObjectReference` | `kokumi-server-auth` | Name of the `Secret` holding the credentials (`username`, `password-hash`) in the same namespace. |
 
 When `secretRef` is omitted, the server uses the default Secret name
 `kokumi-server-auth`.
@@ -89,6 +112,29 @@ spec:
     adminUser:
       enabled: false
 ```
+
+## OIDC-only (no admin account)
+
+You can run OIDC as the sole identity provider by omitting the `adminUser`
+block entirely. The login page then shows only the SSO button:
+
+```yaml
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Kitchen
+metadata:
+  name: default
+  namespace: kokumi
+spec:
+  auth:
+    oidc:
+      issuerURL: https://dex.example.com
+      clientID: kokumi
+      clientSecretRef:
+        name: kokumi-server-oidc
+```
+
+No admin credentials Secret is needed in this mode; only the OIDC client
+secret and the token signing key (see above) are required.
 
 ## OIDC single sign-on
 

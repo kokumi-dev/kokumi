@@ -36,6 +36,9 @@ const (
 	secretKeyPasswordHash = "password-hash"
 	secretKeySigningKey   = "signing-key"
 
+	// minSigningKeyLen is the minimum accepted HMAC signing-key length (bytes).
+	minSigningKeyLen = 32
+
 	// signingMethod is the only accepted JWT signing algorithm.
 	signingMethod = "HS256"
 
@@ -76,17 +79,48 @@ func newAuthenticator(username string, passwordHash, signingKey []byte) *authent
 	}
 }
 
-// buildAuthenticator reads the credentials Secret to build an authenticator. A
-// disabled admin still builds a token-only authenticator (signing key only) so
-// OIDC sessions share the trust root; a missing/incomplete Secret fails closed.
-func buildAuthenticator(
+// buildTokenAuthenticator reads the token signing-key Secret and builds a
+// token-only authenticator (no credentials). The signing key is the trust root
+// for all session tokens, admin and OIDC alike; a missing/incomplete Secret
+// fails closed.
+func buildTokenAuthenticator(
+	ctx context.Context,
+	reader client.Reader,
+	namespace string,
+	secretName string,
+	tokenTTL time.Duration,
+) (*authenticator, error) {
+	if secretName == "" {
+		return nil, fmt.Errorf("token signing-key secretRef not set")
+	}
+	secret := &corev1.Secret{}
+	key := types.NamespacedName{Namespace: namespace, Name: secretName}
+	if err := reader.Get(ctx, key, secret); err != nil {
+		return nil, fmt.Errorf("reading token signing-key secret %s/%s: %w", namespace, secretName, err)
+	}
+	signingKey := secret.Data[secretKeySigningKey]
+	if len(signingKey) < minSigningKeyLen {
+		return nil, fmt.Errorf("token signing-key secret %s/%s must contain a %q of at least %d bytes", namespace, secretName, secretKeySigningKey, minSigningKeyLen)
+	}
+	auth := newAuthenticator("", nil, signingKey)
+	if tokenTTL > 0 {
+		auth.accessTTL = tokenTTL
+	}
+	return auth, nil
+}
+
+// applyAdminCredentials reads the admin credentials Secret and returns a copy
+// of the shared authenticator (which carries the signing key) with the admin
+// username/password hash applied. A disabled admin yields a token-only copy so
+// login is impossible; a missing/incomplete Secret fails closed. The input is
+// never mutated: authenticators are immutable once published.
+func applyAdminCredentials(
 	ctx context.Context,
 	reader client.Reader,
 	namespace string,
 	cfg *v1alpha1.AdminUserConfig,
-	tokenTTL time.Duration,
+	auth *authenticator,
 ) (*authenticator, error) {
-
 	if cfg == nil || cfg.SecretRef == nil {
 		return nil, fmt.Errorf("admin secretRef not set")
 	}
@@ -96,24 +130,13 @@ func buildAuthenticator(
 		return nil, fmt.Errorf("reading auth secret %s/%s: %w", namespace, cfg.SecretRef.Name, err)
 	}
 
-	passwordHash := secret.Data[secretKeyPasswordHash]
-	signingKey := secret.Data[secretKeySigningKey]
-
-	// The signing key is the trust root for all session tokens; required regardless of mode.
-	if len(signingKey) == 0 {
-		return nil, fmt.Errorf("auth secret %s/%s missing %q", namespace, cfg.SecretRef.Name, secretKeySigningKey)
-	}
-
-	// Disabled admin: only the signing key is needed; credential keys are ignored so login is impossible.
+	// Disabled admin: no credentials; login is impossible.
 	if !cfg.IsEnabled() {
-		auth := newAuthenticator("", nil, signingKey)
-		if tokenTTL > 0 {
-			auth.accessTTL = tokenTTL
-		}
-		return auth, nil
+		return newAuthenticator("", nil, auth.signingKey), nil
 	}
 
 	// Enabled admin: password hash is mandatory so credentials can be verified.
+	passwordHash := secret.Data[secretKeyPasswordHash]
 	if len(passwordHash) == 0 {
 		return nil, fmt.Errorf("auth secret %s/%s missing %q", namespace, cfg.SecretRef.Name, secretKeyPasswordHash)
 	}
@@ -127,11 +150,7 @@ func buildAuthenticator(
 		username = "admin"
 	}
 
-	auth := newAuthenticator(username, passwordHash, signingKey)
-	if tokenTTL > 0 {
-		auth.accessTTL = tokenTTL
-	}
-	return auth, nil
+	return newAuthenticator(username, passwordHash, auth.signingKey), nil
 }
 
 // verifyCredentials checks username/password; bcrypt runs even on username

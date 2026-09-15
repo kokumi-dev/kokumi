@@ -92,9 +92,9 @@ spec:
                           name: kokumi-server-auth
                         description: |-
                           SecretRef points to the Secret holding the admin credentials. The Secret
-                          must reside in the same namespace as the Kitchen. Recognized keys are
-                          "password-hash" (bcrypt hash) and "signing-key" (HMAC key for JWTs).
-                          Defaults to "kokumi-server-auth".
+                          must reside in the same namespace as the Kitchen. The recognized key is
+                          "password-hash" (bcrypt hash); "username" may optionally override the
+                          configured username. Defaults to "kokumi-server-auth".
                         properties:
                           name:
                             default: ""
@@ -195,6 +195,28 @@ spec:
                     - clientID
                     - issuerURL
                     type: object
+                  tokenSigningKeySecretRef:
+                    default:
+                      name: kokumi-server-tokens
+                    description: |-
+                      TokenSigningKeySecretRef points to the Secret holding the HMAC signing
+                      key (key "signing-key") used to sign all session tokens, for both admin
+                      and OIDC sessions. The Secret must reside in the same namespace as the
+                      Kitchen. When the referenced Secret does not exist, the controller
+                      creates it with a generated random key.
+                      Defaults to "kokumi-server-tokens".
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
                 type: object
             type: object
           status:
@@ -2107,6 +2129,7 @@ rules:
   resources:
   - secrets
   verbs:
+  - create
   - get
   - list
   - watch
@@ -2883,7 +2906,6 @@ metadata:
   namespace: kokumi
 stringData:
   password-hash: $2y$05$MG5FZ/WlMewHp8kwaoZixeQ8NCXjhp7ZWwx1N40pQ6oc3VfL9Xu0y
-  signing-key: CHANGEME-replace-with-openssl-rand-base64-32
   username: admin
 type: Opaque
 ---

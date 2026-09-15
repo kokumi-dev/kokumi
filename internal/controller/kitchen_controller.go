@@ -18,6 +18,8 @@ package controller
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
@@ -42,10 +44,13 @@ type KitchenReconciler struct {
 	Namespace string
 }
 
+// minTokenSigningKeyLen is the minimum accepted HMAC signing-key length (bytes).
+const minTokenSigningKeyLen = 32
+
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=kitchens,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=kitchens/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=kitchens/finalizers,verbs=update
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -78,6 +83,16 @@ func (r *KitchenReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	updater := status.NewKitchenUpdater(r.Client)
 
+	// Ensure the token signing-key Secret exists before validating auth config
+	if kitchen.Spec.Auth != nil {
+		if err := r.ensureTokenSigningKeySecret(ctx, kitchen); err != nil {
+			if uerr := updater.Failed(ctx, kitchen, fmt.Errorf("ensuring token signing-key Secret: %w", err)); uerr != nil {
+				return ctrl.Result{}, uerr
+			}
+			return ctrl.Result{}, nil
+		}
+	}
+
 	if authCfg := kitchen.Spec.Auth; authCfg != nil {
 		// When admin is enabled, the credentials Secret must exist with the required keys;
 		// report non-Ready (not silent disable) so the misconfig is visible. secretRef is
@@ -94,7 +109,7 @@ func (r *KitchenReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			secretName := adminUser.SecretRef.Name
 			secret := &corev1.Secret{}
 			err := r.Get(ctx, client.ObjectKey{Namespace: kitchen.Namespace, Name: secretName}, secret)
-			if err != nil || secret.Data["password-hash"] == nil || secret.Data["signing-key"] == nil {
+			if err != nil || secret.Data["password-hash"] == nil {
 				if uerr := updater.Failed(ctx, kitchen, fmt.Errorf("admin credentials Secret %q missing or incomplete", secretName)); uerr != nil {
 					return ctrl.Result{}, uerr
 				}
@@ -158,6 +173,65 @@ func (r *KitchenReconciler) ensureDefaultRunner(mgr manager.Manager) manager.Run
 		}
 		return nil
 	}
+}
+
+// ensureTokenSigningKeySecret makes sure the token signing-key Secret exists.
+func (r *KitchenReconciler) ensureTokenSigningKeySecret(ctx context.Context, kitchen *deliveryv1alpha1.Kitchen) error {
+	name := deliveryv1alpha1.DefaultTokenSigningKeySecretName
+	if auth := kitchen.Spec.Auth; auth != nil && auth.TokenSigningKeySecretRef != nil && auth.TokenSigningKeySecretRef.Name != "" {
+		name = auth.TokenSigningKeySecretRef.Name
+	}
+
+	secret := &corev1.Secret{}
+	key := client.ObjectKey{Namespace: kitchen.Namespace, Name: name}
+	if err := r.Get(ctx, key, secret); err == nil {
+		if len(secret.Data["signing-key"]) < minTokenSigningKeyLen {
+			return fmt.Errorf("token signing-key Secret %q must contain a %q of at least %d bytes", name, "signing-key", minTokenSigningKeyLen)
+		}
+		return nil
+	} else if !apierrors.IsNotFound(err) {
+		return err
+	}
+
+	generated, err := generateSigningKey()
+	if err != nil {
+		return fmt.Errorf("generating token signing key: %w", err)
+	}
+	secret = &corev1.Secret{
+		Name:      name,
+		Namespace: kitchen.Namespace,
+		Labels: map[string]string{
+			"app.kubernetes.io/name":       "kokumi",
+			"app.kubernetes.io/component":  "server",
+			"app.kubernetes.io/managed-by": "kokumi",
+		},
+		Data: map[string][]byte{
+			"signing-key": generated,
+		},
+	}
+	if err := r.Create(ctx, secret); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return err
+		}
+		if rerr := r.Get(ctx, key, secret); rerr != nil {
+			return rerr
+		}
+		if len(secret.Data["signing-key"]) < minTokenSigningKeyLen {
+			return fmt.Errorf("token signing-key Secret %q created concurrently but lacks a valid %q", name, "signing-key")
+		}
+	}
+	return nil
+}
+
+// generateSigningKey returns a random 32-byte base64-encoded signing key.
+func generateSigningKey() ([]byte, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return nil, err
+	}
+	out := make([]byte, base64.StdEncoding.EncodedLen(len(buf)))
+	base64.StdEncoding.Encode(out, buf)
+	return out, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
