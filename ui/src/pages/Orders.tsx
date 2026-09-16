@@ -11,12 +11,32 @@ import styles from './pages.module.css'
 
 type FormModalState = null | { mode: 'add' } | { mode: 'edit'; order: Order }
 
-export default function OrdersPage() {
+interface Props {
+  /** Order pre-selected from another page (e.g. Menu relation graph). */
+  pendingSelectedKey?: { namespace: string; name: string } | null
+  onConsumePendingSelectedKey?: () => void
+}
+
+export default function OrdersPage({ pendingSelectedKey, onConsumePendingSelectedKey }: Props) {
   const orders = useOrders()
   const menus = useMenus()
   const [selectedKey, setSelectedKey] = useState<{ namespace: string; name: string } | null>(null)
   const [formModal, setFormModal] = useState<FormModalState>(null)
   const [query, setQuery] = useState('')
+
+  // Adopt a pre-selection coming from another page. Derived during render
+  // (adjust-state-during-render pattern) instead of an effect to avoid
+  // cascading renders.
+  const [adoptedKey, setAdoptedKey] = useState<{ namespace: string; name: string } | null>(null)
+  if (
+    pendingSelectedKey &&
+    (adoptedKey?.namespace !== pendingSelectedKey.namespace ||
+      adoptedKey?.name !== pendingSelectedKey.name)
+  ) {
+    setAdoptedKey(pendingSelectedKey)
+    setSelectedKey(pendingSelectedKey)
+    onConsumePendingSelectedKey?.()
+  }
 
   // Derive selected order from the live SSE-backed list so it stays fresh.
   const selected = selectedKey

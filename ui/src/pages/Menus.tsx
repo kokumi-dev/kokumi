@@ -1,9 +1,8 @@
 import { useState } from 'react'
 import type { Menu, MenuFormData, OrderFormData } from '../api/types'
-import { createMenu, updateMenu, deleteMenu, createOrder } from '../api/client'
+import { createMenu, updateMenu, createOrder } from '../api/client'
 import { useMenus } from '../hooks/useMenus'
 import MenuList from '../components/menu/MenuList'
-import MenuDetail from '../components/menu/MenuDetail'
 import MenuFormModal from '../components/menu/MenuFormModal'
 import OrderFormModal from '../components/order/OrderFormModal'
 import Btn from '../components/shared/Btn'
@@ -12,9 +11,12 @@ import styles from './pages.module.css'
 type FormModalState = null | { mode: 'add' } | { mode: 'edit'; menu: Menu }
 type OrderModalState = null | { menu: Menu }
 
-export default function MenusPage() {
+interface Props {
+  onOpenMenuDetail: (key: { namespace: string; name: string }) => void
+}
+
+export default function MenusPage({ onOpenMenuDetail }: Props) {
   const menus = useMenus()
-  const [selected, setSelected] = useState<Menu | null>(null)
   const [formModal, setFormModal] = useState<FormModalState>(null)
   const [orderModal, setOrderModal] = useState<OrderModalState>(null)
   const [query, setQuery] = useState('')
@@ -29,17 +31,6 @@ export default function MenusPage() {
     const { menu } = formModal
     await updateMenu(menu.namespace, menu.name, data)
     setFormModal(null)
-  }
-
-  async function handleDelete(menu: Menu) {
-    await deleteMenu(menu.namespace, menu.name)
-    if (selected?.name === menu.name) {
-      setSelected(null)
-    }
-  }
-
-  function openEdit(menu: Menu) {
-    setFormModal({ mode: 'edit', menu })
   }
 
   function openOrder(m: Menu) {
@@ -71,16 +62,13 @@ export default function MenusPage() {
             <MenuList
               menus={menus}
               query={query}
-              selectedName={selected?.name}
-              selectedNamespace={selected?.namespace}
-              onSelect={setSelected}
+              onSelect={onOpenMenuDetail}
               onOrder={openOrder}
             />
           )}
         </div>
       </div>
 
-      {selected && <MenuDetail menu={selected} onClose={() => setSelected(null)} onEdit={openEdit} onDelete={handleDelete} onOrder={openOrder} />}
       {formModal?.mode === 'add' && <MenuFormModal onSubmit={handleCreate} onClose={() => setFormModal(null)} />}
       {formModal?.mode === 'edit' && <MenuFormModal menu={formModal.menu} onSubmit={handleUpdate} onClose={() => setFormModal(null)} />}
       {orderModal && <OrderFormModal menuRef={{ name: orderModal.menu.name }} menu={orderModal.menu} onSubmit={handleOrder} onClose={() => setOrderModal(null)} />}
