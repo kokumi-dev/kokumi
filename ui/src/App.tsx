@@ -4,6 +4,7 @@ import Sidebar, { type Page } from './components/Sidebar'
 import Dashboard from './pages/Dashboard'
 import Orders from './pages/Orders'
 import Menus from './pages/Menus'
+import MenuDetailPage from './pages/MenuDetailPage'
 import Pantries from './pages/Pantries'
 import Preparations from './pages/Preparations'
 import Servings from './pages/Servings'
@@ -19,6 +20,8 @@ interface Info {
 
 function App() {
   const [activePage, setActivePage] = useState<Page>('dashboard')
+  const [menuDetail, setMenuDetail] = useState<{ namespace: string; name: string } | null>(null)
+  const [pendingOrderKey, setPendingOrderKey] = useState<{ namespace: string; name: string } | null>(null)
   const [info, setInfo] = useState<Info | null>(null)
   const [ready, setReady] = useState(false)
   const [authed, setAuthed] = useState(() => isAuthed())
@@ -107,9 +110,27 @@ function App() {
       case 'dashboard':
         return <Dashboard operatorName={info?.name} operatorVersion={info?.version} />
       case 'orders':
-        return <Orders />
+        return (
+          <Orders
+            pendingSelectedKey={pendingOrderKey}
+            onConsumePendingSelectedKey={() => setPendingOrderKey(null)}
+          />
+        )
       case 'menus':
-        return <Menus />
+        return menuDetail ? (
+          <MenuDetailPage
+            namespace={menuDetail.namespace}
+            name={menuDetail.name}
+            onBack={() => setMenuDetail(null)}
+            onOpenOrder={(order) => {
+              setPendingOrderKey({ namespace: order.namespace, name: order.name })
+              setMenuDetail(null)
+              setActivePage('orders')
+            }}
+          />
+        ) : (
+          <Menus onOpenMenuDetail={setMenuDetail} />
+        )
       case 'pantries':
         return <Pantries />
       case 'preparations':
@@ -125,7 +146,10 @@ function App() {
     <div className={styles.layout}>
       <Sidebar
         activePage={activePage}
-        onNavigate={setActivePage}
+        onNavigate={(page) => {
+          setMenuDetail(null)
+          setActivePage(page)
+        }}
         operatorVersion={info?.version}
         onLogout={() => void logout()}
       />

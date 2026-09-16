@@ -1,0 +1,140 @@
+.graph {
+  height: 420px;
+  width: 100%;
+  border: 1px solid rgba(49, 54, 56, 0.12);
+  border-radius: 10px;
+  background: var(--color-bg-card);
+  overflow: hidden;
+}
+
+.empty {
+  height: 420px;
+  width: 100%;
+  border: 1px dashed rgba(49, 54, 56, 0.25);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--color-bg-card);
+}
+
+.emptyTitle {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--color-text-on-light);
+}
+
+.emptyHint {
+  font-size: 0.82rem;
+  color: var(--color-text-muted-light);
+}
+
+/* ── Nodes ── */
+.menuNode {
+  border: 2px solid var(--color-accent, #4a7fb5);
+  border-radius: 10px;
+  background: var(--color-bg-card);
+  padding: 10px 14px;
+  width: 240px;
+  height: 96px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  box-shadow: 0 2px 8px rgba(49, 54, 56, 0.12);
+}
+
+.menuNodeLabel {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--color-text-muted-light);
+}
+
+.menuNodeName {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--color-text-on-light);
+  word-break: break-all;
+}
+
+.menuNodeSource {
+  font-size: 0.75rem;
+  color: var(--color-text-muted-light);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+.orderNode {
+  border: 2px solid rgba(49, 54, 56, 0.2);
+  border-radius: 10px;
+  background: var(--color-bg-card);
+  padding: 8px 12px;
+  width: 220px;
+  height: 96px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  cursor: pointer;
+  transition: box-shadow 0.15s, border-color 0.15s;
+  box-shadow: 0 1px 4px rgba(49, 54, 56, 0.1);
+}
+
+.orderNode:hover {
+  box-shadow: 0 3px 10px rgba(49, 54, 56, 0.2);
+}
+
+.orderNodeReady {
+  border-color: #2e9e5b;
+}
+
+.orderNodeNotReady {
+  border-color: #c94f4f;
+}
+
+.orderNodeUnknown {
+  border-color: rgba(49, 54, 56, 0.25);
+}
+
+.orderNodeLabel {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--color-text-muted-light);
+}
+
+.orderNodeName {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--color-text-on-light);
+  word-break: break-all;
+}
+
+.orderNodeState {
+  font-size: 0.72rem;
+  color: var(--color-text-muted-light);
+  margin-top: 2px;
+}
+
+/* Status dot */
+.dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+
+.dotReady { background: #2e9e5b; }
+.dotNotReady { background: #c94f4f; }
+.dotUnknown { background: rgba(49, 54, 56, 0.35); }
