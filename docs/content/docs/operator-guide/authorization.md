@@ -79,15 +79,18 @@ subjects:
 
 The installation ships three identity ServiceAccounts in the install namespace:
 
-| ServiceAccount | Default binding | Purpose |
-| -------------- | ---------------- | ------- |
-| `kokumi-admin` | `kokumi-server-role` (full CRUD incl. `kitchens`) | Used by the built-in admin login; OIDC users can be mapped via annotations |
-| `kokumi-editor` | `kokumi-server-editor-role` (CRUD, no `kitchens`) | Editors |
-| `kokumi-viewer` | `kokumi-server-viewer-role` (read-only) | Read-only users; cannot read Secrets |
+| ServiceAccount | Default binding | Default identity mapping | Purpose |
+| -------------- | ---------------- | ------------------------ | ------- |
+| `kokumi-admin` | `kokumi-server-role` (full CRUD incl. `kitchens`) | `kokumi.dev/identity-groups: "kokumi-admin"` | Full access; also used by the built-in admin login |
+| `kokumi-editor` | `kokumi-server-editor-role` (CRUD, no `kitchens`) | `kokumi.dev/identity-groups: "kokumi-editor"` | Editors |
+| `kokumi-viewer` | `kokumi-server-viewer-role` (read-only) | `kokumi.dev/identity-groups: "kokumi-viewer"` | Read-only users; cannot read Secrets |
 
-The built-in admin login always acts as `kokumi-admin`. It needs no identity
-annotations and cannot be reached by OIDC users unless an operator explicitly
-annotates the ServiceAccount.
+The built-in admin login always acts as `kokumi-admin`, regardless of the
+annotations. Additionally, OIDC users are matched against the default
+`kokumi.dev/identity-groups` values: with the defaults, an OIDC identity whose
+token carries the `kokumi-admin` group gets full access, `kokumi-editor`
+editor access, and `kokumi-viewer` read-only access (multiple matches are
+merged as described above).
 
 To grant the `devops` OIDC group editor access:
 
