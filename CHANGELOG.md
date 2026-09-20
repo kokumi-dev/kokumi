@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.16.0](https://github.com/kokumi-dev/kokumi/compare/0.15.1...0.16.0) (2026-09-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* change menu to be namespace-scoped ([#359](https://github.com/kokumi-dev/kokumi/issues/359))
+
+### Features
+
+* add menu detail page and order reference graph ([#375](https://github.com/kokumi-dev/kokumi/issues/375)) ([9eed575](https://github.com/kokumi-dev/kokumi/commit/9eed575c35df68b61e5e9e074bd241ddee385296))
+* add option to pre-render Menu ([#369](https://github.com/kokumi-dev/kokumi/issues/369)) ([52e9056](https://github.com/kokumi-dev/kokumi/commit/52e9056fba39c8678c5e6ab7aef9d541c7137fcc))
+* add vendor support for Menu to copy source artifacts to another OCI registry ([#368](https://github.com/kokumi-dev/kokumi/issues/368)) ([c5653e5](https://github.com/kokumi-dev/kokumi/commit/c5653e5f58538daa5678edaa78eb63c9a520a924))
+* change menu to be namespace-scoped ([#359](https://github.com/kokumi-dev/kokumi/issues/359)) ([b3bc2d2](https://github.com/kokumi-dev/kokumi/commit/b3bc2d2e154a1fe4f11e70d6c0b421707782f3cd))
+* enhance authentication with token signing key management ([#371](https://github.com/kokumi-dev/kokumi/issues/371)) ([3cfbaf8](https://github.com/kokumi-dev/kokumi/commit/3cfbaf899265e524e785ce9900352f97edde1a40))
+* implement identity mapping and impersonation for user authorization ([#357](https://github.com/kokumi-dev/kokumi/issues/357)) ([c8e6ba1](https://github.com/kokumi-dev/kokumi/commit/c8e6ba12d334c6e5281b254cc71179141f8e7a5d))
+* report underlying argo cd deployment status and refactor into dedicated deployer ([#344](https://github.com/kokumi-dev/kokumi/issues/344)) ([f8c0cf1](https://github.com/kokumi-dev/kokumi/commit/f8c0cf17f01be0cb5a70caef4242e6f97756d6f2))
+* set default groups in service account annotations ([#379](https://github.com/kokumi-dev/kokumi/issues/379)) ([ffc4090](https://github.com/kokumi-dev/kokumi/commit/ffc4090f25ddc9743fb0b73a2cfef5546608cf61))
+
 ## [0.15.1](https://github.com/kokumi-dev/kokumi/compare/0.15.0...0.15.1) (2026-08-24)
 
 
