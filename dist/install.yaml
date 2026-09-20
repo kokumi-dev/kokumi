@@ -1923,6 +1923,7 @@ kind: ServiceAccount
 metadata:
   annotations:
     kokumi.dev/description: Full access; used by the built-in admin login
+    kokumi.dev/identity-groups: kokumi-admin
   labels:
     app.kubernetes.io/component: server
     app.kubernetes.io/name: kokumi
@@ -1942,8 +1943,8 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   annotations:
-    kokumi.dev/description: Create/update/delete kokumi resources; map users via kokumi.dev/identity-*
-      annotations
+    kokumi.dev/description: Create/update/delete kokumi resources
+    kokumi.dev/identity-groups: kokumi-editor
   labels:
     app.kubernetes.io/component: server
     app.kubernetes.io/name: kokumi
@@ -1963,8 +1964,8 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   annotations:
-    kokumi.dev/description: Read-only access; map users via kokumi.dev/identity-*
-      annotations
+    kokumi.dev/description: Read-only access
+    kokumi.dev/identity-groups: kokumi-viewer
   labels:
     app.kubernetes.io/component: server
     app.kubernetes.io/name: kokumi
