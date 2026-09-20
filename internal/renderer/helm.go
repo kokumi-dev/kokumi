@@ -1,6 +1,7 @@
 package renderer
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"slices"
@@ -36,10 +37,11 @@ type ChartInfo struct {
 	HasSchema bool
 }
 
-// InspectChart loads the Helm chart tarball at chartPath and returns its
-// metadata, default values, optional README, and whether a JSON schema is present.
-func InspectChart(chartPath string) (*ChartInfo, error) {
-	chrt, err := loader.Load(chartPath)
+// InspectChart loads the Helm chart from its .tgz archive bytes and returns
+// its metadata, default values, optional README, and whether a JSON schema is
+// present.
+func InspectChart(chartTgz []byte) (*ChartInfo, error) {
+	chrt, err := loader.LoadArchive(bytes.NewReader(chartTgz))
 	if err != nil {
 		return nil, fmt.Errorf("load chart: %w", err)
 	}
@@ -79,9 +81,10 @@ func InspectChart(chartPath string) (*ChartInfo, error) {
 	}, nil
 }
 
-// RenderChart renders a Helm chart from a local chart tarball and returns the rendered manifest.
-// chartPath must point to a .tgz file previously fetched from the OCI registry.
-func RenderChart(ctx context.Context, chartPath, releaseName, namespace string, includeCRDs bool, vals map[string]any) (string, error) {
+// RenderChart renders a Helm chart and returns the rendered manifest.
+// chartTgz must be the bytes of a chart archive (.tgz) as previously fetched
+// from the OCI registry.
+func RenderChart(ctx context.Context, chartTgz []byte, releaseName, namespace string, includeCRDs bool, vals map[string]any) (string, error) {
 	var renderedManifest strings.Builder
 
 	cfg := action.NewConfiguration()
@@ -94,7 +97,7 @@ func RenderChart(ctx context.Context, chartPath, releaseName, namespace string, 
 	client.Replace = true
 	client.IncludeCRDs = includeCRDs
 
-	chrt, err := loader.Load(chartPath)
+	chrt, err := loader.LoadArchive(bytes.NewReader(chartTgz))
 	if err != nil {
 		return "", fmt.Errorf("load chart: %w", err)
 	}

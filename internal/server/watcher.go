@@ -7,6 +7,7 @@ import (
 	"time"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/namespace"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/spf13/afero"
@@ -94,9 +95,10 @@ func startK8sWatcher(
 
 	deps := &apiDeps{
 		ociClient: oci.NewORASClient(),
-		fs:        afero.NewOsFs(),
+		store:     artifact.NewStore(oci.NewORASClient(), afero.NewOsFs(), "/tmp/kokumi-pull-cache"),
 		logger:    logger,
 	}
+	deps.pipeline = artifact.NewPipeline(deps.store)
 
 	// Impersonation layer: all user-facing operations execute as the mapped
 	// ServiceAccount so Kubernetes RBAC is the single source of truth.

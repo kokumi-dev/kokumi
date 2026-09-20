@@ -7,11 +7,11 @@ import (
 	"net/http"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/namespace"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/resolve"
-	"github.com/kokumi-dev/kokumi/internal/service"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -45,18 +45,7 @@ func handlePreviewOrder(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		svc := service.NewOrderService(deps.ociClient, deps.fs, "")
-
-		manifest, err := svc.PreviewOrder(
-			r.Context(),
-			resolvedSource,
-			spec.Render,
-			spec.Patches,
-			spec.Edits,
-			name,
-			ns,
-			sourceClient,
-		)
+		manifest, err := deps.pipeline.PreviewManifest(r.Context(), previewRequest(spec, resolvedSource, name, ns, sourceClient))
 		if err != nil {
 			deps.logger.Error(err, "Failed to preview Order")
 			respondError(w, http.StatusBadGateway, fmt.Sprintf("failed to render preview: %s", err))
@@ -66,6 +55,22 @@ func handlePreviewOrder(deps *apiDeps) http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(manifest)
+	}
+}
+
+// previewRequest converts the resolved effective spec and source into a
+// pipeline preview request.
+func previewRequest(spec *resolve.EffectiveSpec, source deliveryv1alpha1.OCISource, name, ns string, sourceClient oci.Client) artifact.PreviewRequest {
+	converted, _ := spec.ToArtifactSpec()
+
+	return artifact.PreviewRequest{
+		Source:       artifact.Source{OCI: source.OCI, Version: source.Version},
+		SourceClient: sourceClient,
+		Render:       converted.Render,
+		Patches:      converted.Patches,
+		Edits:        converted.Edits,
+		Name:         name,
+		Namespace:    ns,
 	}
 }
 
@@ -99,18 +104,7 @@ func handlePreviewOrderFiles(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		svc := service.NewOrderService(deps.ociClient, deps.fs, "")
-
-		files, err := svc.PreviewFiles(
-			r.Context(),
-			resolvedSource,
-			spec.Render,
-			spec.Patches,
-			spec.Edits,
-			name,
-			ns,
-			sourceClient,
-		)
+		files, err := deps.pipeline.Preview(r.Context(), previewRequest(spec, resolvedSource, name, ns, sourceClient))
 		if err != nil {
 			deps.logger.Error(err, "Failed to preview Order files")
 			respondError(w, http.StatusBadGateway, fmt.Sprintf("failed to render preview: %s", err))

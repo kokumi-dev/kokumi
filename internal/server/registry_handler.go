@@ -3,14 +3,10 @@ package server
 import (
 	"context"
 	"net/http"
-	"path/filepath"
-	"strings"
 
+	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/oci"
-	"github.com/kokumi-dev/kokumi/internal/renderer"
-	"github.com/kokumi-dev/kokumi/internal/service"
-	"github.com/spf13/afero"
 )
 
 // handleGetDefaultRegistry handles GET /api/v1/registry/default.
@@ -18,7 +14,7 @@ import (
 // compute placeholder destination paths without hardcoding the host.
 func handleGetDefaultRegistry() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		respondJSON(w, http.StatusOK, map[string]string{"baseURL": service.DefaultRegistryHost})
+		respondJSON(w, http.StatusOK, map[string]string{"baseURL": artifact.DefaultRegistryHost})
 	}
 }
 
@@ -83,61 +79,33 @@ func handleGetChartInfo(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		ref := r.URL.Query().Get("ref")
-		if ref == "" {
-			respondError(w, http.StatusBadRequest, "ref query parameter is required")
+		ociRef, ok := parseRefVersionQuery(w, r)
+		if !ok {
 			return
 		}
-		version := r.URL.Query().Get("version")
-		if version == "" {
-			respondError(w, http.StatusBadRequest, "version query parameter is required")
-			return
-		}
-
-		ociRef, err := oci.Parse(ref)
-		if err != nil {
-			respondError(w, http.StatusBadRequest, "unexpected format for ref")
-			return
-		}
-		ociRef.Tag = version
 
 		ociClient := ociClientForPantryRef(r.Context(), deps, r, r.URL.Query().Get("pantryName"), r.URL.Query().Get("pantryNamespace"))
 
-		tmpDir, err := afero.TempDir(deps.fs, "", "kokumi-chart-info-*")
+		result, err := deps.store.Inspect(r.Context(), ociRef, ociClient)
 		if err != nil {
-			deps.logger.Error(err, "Failed to create temp directory")
-			respondError(w, http.StatusInternalServerError, "could not create temp directory")
-			return
-		}
-		defer deps.fs.RemoveAll(tmpDir) //nolint:errcheck
-
-		mediaType, _, _, err := ociClient.Pull(r.Context(), ociRef, tmpDir)
-		if err != nil {
-			deps.logger.Error(err, "Failed to pull OCI artifact", "ref", ref, "version", version)
+			deps.logger.Error(err, "Failed to inspect artifact", "ref", ociRef)
 			respondError(w, http.StatusBadGateway, "could not pull artifact: "+err.Error())
 			return
 		}
 
-		if mediaType != oci.HelmChartLayerMediaType {
+		if !result.IsHelm {
 			respondJSON(w, http.StatusOK, chartInfoResponse{IsHelm: false})
-			return
-		}
-
-		info, err := renderer.InspectChart(filepath.Join(tmpDir, "chart.tgz"))
-		if err != nil {
-			deps.logger.Error(err, "Failed to inspect Helm chart", "ref", ref, "version", version)
-			respondError(w, http.StatusBadGateway, "could not inspect chart: "+err.Error())
 			return
 		}
 
 		respondJSON(w, http.StatusOK, chartInfoResponse{
 			IsHelm:        true,
-			Name:          info.Name,
-			Description:   info.Description,
-			ChartVersion:  info.ChartVersion,
-			DefaultValues: info.DefaultValues,
-			Readme:        info.Readme,
-			HasSchema:     info.HasSchema,
+			Name:          result.ChartInfo.Name,
+			Description:   result.ChartInfo.Description,
+			ChartVersion:  result.ChartInfo.ChartVersion,
+			DefaultValues: result.ChartInfo.DefaultValues,
+			Readme:        result.ChartInfo.Readme,
+			HasSchema:     result.ChartInfo.HasSchema,
 		})
 	}
 }
@@ -156,86 +124,76 @@ func handleGetRegistryArtifact(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		ref := r.URL.Query().Get("ref")
-		if ref == "" {
-			respondError(w, http.StatusBadRequest, "ref query parameter is required")
+		ociRef, ok := parseRefVersionQuery(w, r)
+		if !ok {
 			return
 		}
-		version := r.URL.Query().Get("version")
-		if version == "" {
-			respondError(w, http.StatusBadRequest, "version query parameter is required")
-			return
-		}
-
-		ociRef, err := oci.Parse(ref)
-		if err != nil {
-			respondError(w, http.StatusBadRequest, "unexpected format for ref")
-			return
-		}
-		ociRef.Tag = version
 
 		ociClient := ociClientForPantryRef(r.Context(), deps, r, r.URL.Query().Get("pantryName"), r.URL.Query().Get("pantryNamespace"))
 
-		tmpDir, err := afero.TempDir(deps.fs, "", "kokumi-artifact-*")
+		result, err := deps.store.Inspect(r.Context(), ociRef, ociClient)
 		if err != nil {
-			deps.logger.Error(err, "Failed to create temp directory")
-			respondError(w, http.StatusInternalServerError, "could not create temp directory")
-			return
-		}
-		defer deps.fs.RemoveAll(tmpDir) //nolint:errcheck
-
-		mediaType, digest, _, err := ociClient.Pull(r.Context(), ociRef, tmpDir)
-		if err != nil {
-			deps.logger.Error(err, "Failed to pull OCI artifact", "ref", ref, "version", version)
+			deps.logger.Error(err, "Failed to inspect artifact", "ref", ociRef)
 			respondError(w, http.StatusBadGateway, "could not pull artifact: "+err.Error())
 			return
 		}
 
-		if mediaType == oci.HelmChartLayerMediaType {
-			info, err := renderer.InspectChart(filepath.Join(tmpDir, "chart.tgz"))
-			if err != nil {
-				deps.logger.Error(err, "Failed to inspect Helm chart", "ref", ref, "version", version)
-				respondError(w, http.StatusBadGateway, "could not inspect chart: "+err.Error())
-				return
-			}
-
+		if result.IsHelm {
 			respondJSON(w, http.StatusOK, ArtifactInfoDTO{
 				IsHelm:     true,
 				IsManifest: false,
-				Digest:     digest,
+				Digest:     result.Digest,
 				ChartInfo: &ChartInfoDTO{
-					Name:          info.Name,
-					Version:       info.ChartVersion,
-					AppVersion:    info.AppVersion,
-					Description:   info.Description,
-					DefaultValues: info.RawValues,
-					Readme:        info.Readme,
-					HasSchema:     info.HasSchema,
+					Name:          result.ChartInfo.Name,
+					Version:       result.ChartInfo.ChartVersion,
+					AppVersion:    result.ChartInfo.AppVersion,
+					Description:   result.ChartInfo.Description,
+					DefaultValues: result.ChartInfo.RawValues,
+					Readme:        result.ChartInfo.Readme,
+					HasSchema:     result.ChartInfo.HasSchema,
 				},
 			})
 			return
 		}
 
-		files, err := listArtifactFiles(deps.fs, tmpDir)
-		if err != nil {
-			deps.logger.Error(err, "Failed to read manifest files", "ref", ref, "version", version)
-			respondError(w, http.StatusBadGateway, "could not read manifest: "+err.Error())
-			return
-		}
-
-		parts := make([]string, 0, len(files))
-		for _, f := range files {
-			parts = append(parts, f.Content)
+		files := make([]ArtifactFileDTO, 0, len(result.Files))
+		for _, f := range result.Files {
+			files = append(files, ArtifactFileDTO{Path: f.Path, Content: f.Content})
 		}
 
 		respondJSON(w, http.StatusOK, ArtifactInfoDTO{
 			IsHelm:     false,
 			IsManifest: true,
-			Digest:     digest,
-			Manifest:   strings.Join(parts, "\n---\n"),
+			Digest:     result.Digest,
+			Manifest:   result.Manifest,
 			Files:      files,
 		})
 	}
+}
+
+// parseRefVersionQuery extracts and validates the ref and version query
+// parameters and returns the tagged OCI reference. It writes the HTTP error
+// response itself and reports false when the request should not proceed.
+func parseRefVersionQuery(w http.ResponseWriter, r *http.Request) (string, bool) {
+	ref := r.URL.Query().Get("ref")
+	if ref == "" {
+		respondError(w, http.StatusBadRequest, "ref query parameter is required")
+		return "", false
+	}
+	version := r.URL.Query().Get("version")
+	if version == "" {
+		respondError(w, http.StatusBadRequest, "version query parameter is required")
+		return "", false
+	}
+
+	ociRef, err := oci.Parse(ref)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "unexpected format for ref")
+		return "", false
+	}
+	ociRef.Tag = version
+
+	return ociRef.OCIString(), true
 }
 
 // ociClientForPantryRef returns an authenticated OCI client for the explicitly

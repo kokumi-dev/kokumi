@@ -33,9 +33,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/oci"
-	"github.com/kokumi-dev/kokumi/internal/service"
 )
 
 var _ = Describe("Order Controller", func() {
@@ -85,13 +85,9 @@ var _ = Describe("Order Controller", func() {
 			By("Reconciling the created resource")
 			fs := afero.NewMemMapFs()
 			controllerReconciler := &OrderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-				Service: *service.NewOrderService(
-					oci.NewFakeClient(fs),
-					fs,
-					"",
-				),
+				Client:         k8sClient,
+				Scheme:         k8sClient.Scheme(),
+				Pipeline:       artifact.NewPipeline(artifact.NewStore(oci.NewFakeClient(fs), fs, "")),
 				PantryResolver: credential.NewKubeResolver(k8sClient),
 			}
 
@@ -117,13 +113,9 @@ var _ = Describe("Order Controller", func() {
 		newReconciler := func() *OrderReconciler {
 			fs := afero.NewMemMapFs()
 			return &OrderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-				Service: *service.NewOrderService(
-					oci.NewFakeClient(fs),
-					fs,
-					"",
-				),
+				Client:         k8sClient,
+				Scheme:         k8sClient.Scheme(),
+				Pipeline:       artifact.NewPipeline(artifact.NewStore(oci.NewFakeClient(fs), fs, "")),
 				PantryResolver: credential.NewKubeResolver(k8sClient),
 			}
 		}
@@ -391,13 +383,9 @@ var _ = Describe("Order Controller", func() {
 		newReconciler := func() *OrderReconciler {
 			fs := afero.NewMemMapFs()
 			return &OrderReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
-				Service: *service.NewOrderService(
-					oci.NewFakeClient(fs),
-					fs,
-					"",
-				),
+				Client:         k8sClient,
+				Scheme:         k8sClient.Scheme(),
+				Pipeline:       artifact.NewPipeline(artifact.NewStore(oci.NewFakeClient(fs), fs, "")),
 				PantryResolver: credential.NewKubeResolver(k8sClient),
 			}
 		}

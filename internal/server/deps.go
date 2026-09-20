@@ -2,8 +2,8 @@ package server
 
 import (
 	"github.com/go-logr/logr"
+	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/oci"
-	"github.com/spf13/afero"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -12,7 +12,8 @@ import (
 // return 503 Service Unavailable in that case.
 type apiDeps struct {
 	ociClient oci.Client
-	fs        afero.Fs
+	store     *artifact.Store
+	pipeline  *artifact.Pipeline
 	logger    logr.Logger
 	authMgr   *authManager
 
