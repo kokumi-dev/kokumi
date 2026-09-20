@@ -8,8 +8,8 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/scmlink"
-	"github.com/kokumi-dev/kokumi/internal/service"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -114,7 +114,7 @@ func orderToDTO(r deliveryv1alpha1.Order, activePreparation string) OrderDTO {
 		}(),
 		EffectiveDestination: func() string {
 			if r.Spec.Destination == nil {
-				return service.DefaultDestination(r.Namespace, r.Name)
+				return artifact.DefaultDestination(r.Namespace, r.Name)
 			}
 			if r.Spec.Destination.OCI != "" {
 				return r.Spec.Destination.OCI
@@ -123,7 +123,7 @@ func orderToDTO(r deliveryv1alpha1.Order, activePreparation string) OrderDTO {
 				// URL is resolved at runtime from the Pantry; omit from DTO.
 				return ""
 			}
-			return service.DefaultDestination(r.Namespace, r.Name)
+			return artifact.DefaultDestination(r.Namespace, r.Name)
 		}(),
 		Render:            renderToDTO(r.Spec.Render),
 		Patches:           patches,

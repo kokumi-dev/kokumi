@@ -27,9 +27,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/oci"
-	"github.com/kokumi-dev/kokumi/internal/service"
 )
 
 var _ = Describe("Menu Controller", func() {
@@ -80,7 +80,8 @@ var _ = Describe("Menu Controller", func() {
 			controllerReconciler := &MenuReconciler{
 				Client:         k8sClient,
 				Scheme:         k8sClient.Scheme(),
-				Service:        service.NewMenuService(nil),
+				Store:          artifact.NewStore(nil, afero.NewOsFs(), ""),
+				Pipeline:       artifact.NewPipeline(artifact.NewStore(nil, afero.NewOsFs(), "")),
 				PantryResolver: credential.NewKubeResolver(k8sClient),
 			}
 
@@ -135,7 +136,8 @@ var _ = Describe("Menu Controller", func() {
 			controllerReconciler := &MenuReconciler{
 				Client:         k8sClient,
 				Scheme:         k8sClient.Scheme(),
-				Service:        service.NewMenuService(oci.NewFakeClient(afero.NewMemMapFs())),
+				Store:          artifact.NewStore(oci.NewFakeClient(afero.NewMemMapFs()), afero.NewMemMapFs(), ""),
+				Pipeline:       artifact.NewPipeline(artifact.NewStore(oci.NewFakeClient(afero.NewMemMapFs()), afero.NewMemMapFs(), "")),
 				PantryResolver: credential.NewKubeResolver(k8sClient),
 			}
 
@@ -195,7 +197,8 @@ var _ = Describe("Menu Controller", func() {
 			controllerReconciler := &MenuReconciler{
 				Client:         k8sClient,
 				Scheme:         k8sClient.Scheme(),
-				Service:        service.NewMenuService(oci.NewFakeClient(afero.NewMemMapFs())),
+				Store:          artifact.NewStore(oci.NewFakeClient(afero.NewMemMapFs()), afero.NewMemMapFs(), ""),
+				Pipeline:       artifact.NewPipeline(artifact.NewStore(oci.NewFakeClient(afero.NewMemMapFs()), afero.NewMemMapFs(), "")),
 				PantryResolver: credential.NewKubeResolver(k8sClient),
 			}
 
@@ -244,11 +247,13 @@ var _ = Describe("Menu Controller", func() {
 				_ = k8sClient.Delete(ctx, resource)
 			})
 
-			fake := oci.NewFakeClient(afero.NewMemMapFs())
+			memfs := afero.NewMemMapFs()
+			fake := oci.NewFakeClient(memfs)
 			controllerReconciler := &MenuReconciler{
 				Client:         k8sClient,
 				Scheme:         k8sClient.Scheme(),
-				Service:        service.NewMenuService(fake),
+				Store:          artifact.NewStore(fake, memfs, ""),
+				Pipeline:       artifact.NewPipeline(artifact.NewStore(fake, memfs, "")),
 				PantryResolver: credential.NewKubeResolver(k8sClient),
 			}
 

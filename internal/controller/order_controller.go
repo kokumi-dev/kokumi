@@ -30,15 +30,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/oci"
-	"github.com/kokumi-dev/kokumi/internal/renderer"
 	"github.com/kokumi-dev/kokumi/internal/resolve"
-	"github.com/kokumi-dev/kokumi/internal/service"
 	"github.com/kokumi-dev/kokumi/internal/status"
 )
 
 const (
+	initialCommitMessage   = "Initial commit"
+	automatedCommitMessage = "Automatically generated"
+
 	orderSourcePantryRefIndex = "spec.source.pantryRef.name"
 	orderDestPantryRefIndex   = "spec.destination.pantryRef.name"
 )
@@ -47,7 +49,7 @@ const (
 type OrderReconciler struct {
 	client.Client
 	Scheme         *runtime.Scheme
-	Service        service.OrderService
+	Pipeline       *artifact.Pipeline
 	PantryResolver credential.PantryResolver
 }
 
@@ -129,13 +131,12 @@ func (r *OrderReconciler) resolveEffectiveSpec(ctx context.Context, order *deliv
 	return resolve.ForMenu(m, order)
 }
 
-// reconcileRender delegates FS/OCI work to the service and then handles CRD concerns:
-// updating status and creating the Preparation resource.
+// reconcileRender delegates artifact work to the pipeline and then handles CRD
 func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1alpha1.Order, effective *resolve.EffectiveSpec) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	statusUpdater := status.NewOrderUpdater(r.Client)
 
-	effectiveDest := service.DefaultDestination(order.Namespace, order.Name)
+	effectiveDest := artifact.DefaultDestination(order.Namespace, order.Name)
 	if order.Spec.Destination != nil && order.Spec.Destination.OCI != "" {
 		effectiveDest = order.Spec.Destination.OCI
 	}
@@ -158,12 +159,12 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 		return ctrl.Result{}, err
 	}
 
-	specHash, err := renderer.CalculateSpecHash(order.Spec, resolvedSource.OCI, resolvedDest)
+	specHash, err := resolve.CalculateSpecHash(order.Spec, resolvedSource.OCI, resolvedDest)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to calculate spec hash: %w", err)
 	}
 
-	if order.Status.LatestConfigHash == specHash {
+	if order.Status.LatestConfigHash == specHash && order.Status.LatestPreparationName != "" {
 		logger.Info("Configuration is up-to-date, skipping reconciliation")
 		return ctrl.Result{}, nil
 	}
@@ -175,9 +176,26 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 	parentDigest := order.Status.LatestArtifactDigest
 
 	userMessage, messageProvided := order.Annotations[deliveryv1alpha1.AnnotationCommitMessage]
-	commitMessage := service.DefaultCommitMessage(userMessage, messageProvided, parentDigest == "")
+	commitMessage := defaultCommitMessage(userMessage, messageProvided, parentDigest == "")
 
-	result, err := r.Service.ProcessOrder(ctx, order, resolvedSource, effective.Render, effective.Patches, effective.Edits, resolvedDest, commitMessage, parentDigest, sourceClient, destClient)
+	spec, err := effective.ToArtifactSpec()
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to convert effective spec: %w", err)
+	}
+
+	result, err := r.Pipeline.Render(ctx, artifact.RenderRequest{
+		Source:       artifact.Source{OCI: resolvedSource.OCI, Version: spec.Source.Version},
+		SourceClient: sourceClient,
+		Destination:  artifact.Destination{OCI: resolvedDest},
+		DestClient:   destClient,
+		Render:       spec.Render,
+		Patches:      spec.Patches,
+		Edits:        spec.Edits,
+		Name:         order.Name,
+		Namespace:    order.Namespace,
+		Description:  commitMessage,
+		ParentDigest: parentDigest,
+	})
 	if err != nil {
 		logger.Error(err, "Failed to process Order")
 		if uerr := statusUpdater.Failed(ctx, order, err); uerr != nil {
@@ -187,7 +205,7 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 		return ctrl.Result{}, err
 	}
 
-	preparation, err := r.createPreparation(ctx, order, result.SourceRef, result.DestRef, commitMessage, parentDigest, specHash, deliveryv1alpha1.GitSource{Repo: result.GitRepo, Tag: result.GitTag, CommitHash: result.GitCommitHash})
+	preparation, err := r.createPreparation(ctx, order, result.SourceRef, result.DestRef, commitMessage, parentDigest, specHash, deliveryv1alpha1.GitSource{Repo: result.SCM.Repo, Tag: result.SCM.Tag, CommitHash: result.SCM.CommitHash})
 	if err != nil {
 		logger.Error(err, "Failed to create Preparation")
 		if uerr := statusUpdater.Failed(ctx, order, fmt.Errorf("failed to create revision: %w", err)); uerr != nil {
@@ -213,6 +231,17 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// defaultCommitMessage returns the effective commit message for a Preparation.
+func defaultCommitMessage(message string, messageProvided bool, isInitial bool) string {
+	if messageProvided {
+		return message
+	}
+	if isInitial {
+		return initialCommitMessage
+	}
+	return automatedCommitMessage
 }
 
 // reconcileDelete removes the finalizer from the Order, allowing garbage collection.

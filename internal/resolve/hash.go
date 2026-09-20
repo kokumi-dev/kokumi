@@ -1,4 +1,4 @@
-package renderer
+package resolve
 
 import (
 	"crypto/sha256"

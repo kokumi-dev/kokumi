@@ -37,12 +37,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/controller"
 	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/deployer"
 	"github.com/kokumi-dev/kokumi/internal/namespace"
 	"github.com/kokumi-dev/kokumi/internal/oci"
-	"github.com/kokumi-dev/kokumi/internal/service"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -206,14 +206,13 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "Serving")
 		os.Exit(1)
 	}
+	artifactStore := artifact.NewStore(oci.NewORASClient(), afero.NewOsFs(), "/tmp/kokumi-pull-cache")
+	artifactPipeline := artifact.NewPipeline(artifactStore)
+
 	if err := (&controller.OrderReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		Service: *service.NewOrderService(
-			oci.NewORASClient(),
-			afero.NewOsFs(),
-			"/tmp/kokumi-pull-cache",
-		),
+		Client:         mgr.GetClient(),
+		Scheme:         mgr.GetScheme(),
+		Pipeline:       artifactPipeline,
 		PantryResolver: credential.NewKubeResolver(mgr.GetClient()),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Order")
@@ -222,7 +221,8 @@ func main() {
 	if err := (&controller.MenuReconciler{
 		Client:         mgr.GetClient(),
 		Scheme:         mgr.GetScheme(),
-		Service:        service.NewMenuService(oci.NewORASClient()),
+		Store:          artifactStore,
+		Pipeline:       artifactPipeline,
 		PantryResolver: credential.NewKubeResolver(mgr.GetClient()),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Menu")

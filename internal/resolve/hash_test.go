@@ -1,4 +1,4 @@
-package renderer_test
+package resolve_test
 
 import (
 	"testing"
@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
-	"github.com/kokumi-dev/kokumi/internal/renderer"
+	"github.com/kokumi-dev/kokumi/internal/resolve"
 )
 
 func TestCalculateSpecHash(t *testing.T) {
@@ -20,23 +20,23 @@ func TestCalculateSpecHash(t *testing.T) {
 	source := "oci://ghcr.io/org/charts/app"
 	dest := "oci://registry.kokumi.svc.cluster.local:5000/ns/app"
 
-	base, err := renderer.CalculateSpecHash(spec, source, dest)
+	base, err := resolve.CalculateSpecHash(spec, source, dest)
 	require.NoError(t, err)
 
 	t.Run("same inputs produce same hash", func(t *testing.T) {
-		again, err := renderer.CalculateSpecHash(spec, source, dest)
+		again, err := resolve.CalculateSpecHash(spec, source, dest)
 		require.NoError(t, err)
 		require.Equal(t, base, again)
 	})
 
 	t.Run("source URL change produces different hash", func(t *testing.T) {
-		got, err := renderer.CalculateSpecHash(spec, source+"-v2", dest)
+		got, err := resolve.CalculateSpecHash(spec, source+"-v2", dest)
 		require.NoError(t, err)
 		require.NotEqual(t, base, got)
 	})
 
 	t.Run("dest URL change produces different hash", func(t *testing.T) {
-		got, err := renderer.CalculateSpecHash(spec, source, dest+"-v2")
+		got, err := resolve.CalculateSpecHash(spec, source, dest+"-v2")
 		require.NoError(t, err)
 		require.NotEqual(t, base, got)
 	})
@@ -47,7 +47,7 @@ func TestCalculateSpecHash(t *testing.T) {
 			PantryRef: &deliveryv1alpha1.PantryRef{Name: "other-charts"},
 			Version:   spec.Source.Version,
 		}
-		got, err := renderer.CalculateSpecHash(renamed, source, dest)
+		got, err := resolve.CalculateSpecHash(renamed, source, dest)
 		require.NoError(t, err)
 		require.Equal(t, base, got)
 	})

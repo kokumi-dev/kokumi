@@ -1,7 +1,11 @@
 package renderer_test
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"flag"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,6 +16,50 @@ import (
 )
 
 var update = flag.Bool("update", false, "update expected files")
+
+// packChartDir tars+gzips the unpacked chart directory into a .tgz archive,
+// matching the shape the artifact pipeline hands to RenderChart.
+func packChartDir(t *testing.T, srcRoot string) []byte {
+	t.Helper()
+
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+
+	require.NoError(t, filepath.Walk(srcRoot, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+
+		file, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = file.Close() }()
+
+		rel, err := filepath.Rel(srcRoot, path)
+		if err != nil {
+			return err
+		}
+
+		hdr, err := tar.FileInfoHeader(info, "")
+		if err != nil {
+			return err
+		}
+		hdr.Name = "sample-chart/" + filepath.ToSlash(rel)
+
+		require.NoError(t, tw.WriteHeader(hdr))
+		_, err = io.Copy(tw, file)
+		return err
+	}))
+	require.NoError(t, tw.Close())
+	require.NoError(t, gz.Close())
+
+	return buf.Bytes()
+}
 
 func Test_RenderChart(t *testing.T) {
 	tests := []struct {
@@ -32,9 +80,11 @@ func Test_RenderChart(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			chartTgz := packChartDir(t, tt.path)
+
 			renderedManifest, err := renderer.RenderChart(
 				t.Context(),
-				tt.path,
+				chartTgz,
 				tt.releaseName,
 				tt.namespace,
 				tt.includeCRDs,

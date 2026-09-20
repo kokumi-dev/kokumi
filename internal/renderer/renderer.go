@@ -8,14 +8,31 @@ import (
 
 	"gopkg.in/yaml.v3"
 	ctrl "sigs.k8s.io/controller-runtime"
-
-	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 )
+
+// PatchTarget identifies which resource to patch.
+type PatchTarget struct {
+	// Kind specifies the Kubernetes resource kind to patch.
+	Kind string
+	// Name specifies the name of the resource to patch.
+	Name string
+	// Namespace optionally narrows the match to a single namespace.
+	Namespace string
+}
+
+// Patch defines a modification to apply to a resource.
+type Patch struct {
+	// Target identifies which resource to patch.
+	Target PatchTarget
+	// Set contains JSONPath expressions and their values to set.
+	// Keys are JSONPath expressions (e.g., ".spec.replicas").
+	Set map[string]string
+}
 
 // ApplyPatches applies patches to YAML content, preserving document order, comments,
 // and formatting. Returns the modified content, or the original content unchanged if
 // no patches matched.
-func ApplyPatches(ctx context.Context, content []byte, patches []deliveryv1alpha1.Patch) ([]byte, error) {
+func ApplyPatches(ctx context.Context, content []byte, patches []Patch) ([]byte, error) {
 	log := ctrl.LoggerFrom(ctx)
 
 	decoder := yaml.NewDecoder(strings.NewReader(string(content)))
@@ -66,7 +83,7 @@ func NormalizeYAML(content []byte) ([]byte, error) {
 
 // applyPatchesToNode applies patches to a single YAML document node.
 // Returns true if any patch was applied.
-func applyPatchesToNode(ctx context.Context, docNode *yaml.Node, patches []deliveryv1alpha1.Patch) bool {
+func applyPatchesToNode(ctx context.Context, docNode *yaml.Node, patches []Patch) bool {
 	log := ctrl.LoggerFrom(ctx)
 
 	if docNode.Kind != yaml.DocumentNode || len(docNode.Content) == 0 {
