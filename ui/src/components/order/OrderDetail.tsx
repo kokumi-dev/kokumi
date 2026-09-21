@@ -165,8 +165,8 @@ export default function OrderDetail({ order, editsAllowed, onClose, onEdit, onDe
                     </>
                   )}
               </span>
-              <span className={styles.specKey}>Auto Deploy</span>
-              <span className={styles.specValue}>{order.autoDeploy}</span>
+              <span className={styles.specKey}>Promotion</span>
+              <span className={styles.specValue}>{order.mode}</span>
               {order.render?.helm && (
                 <>
                   <span className={styles.specKey}>Renderer</span>

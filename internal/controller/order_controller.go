@@ -300,7 +300,7 @@ func (r *OrderReconciler) createPreparation(
 		Labels: map[string]string{
 			deliveryv1alpha1.LabelOrder:      order.Name,
 			deliveryv1alpha1.LabelVersion:    sourceRef.Tag,
-			deliveryv1alpha1.LabelAutoDeploy: string(order.Spec.AutoDeploy),
+			deliveryv1alpha1.LabelAutoDeploy: string(order.Spec.Promotion.Mode),
 		},
 		Spec: deliveryv1alpha1.PreparationSpec{
 			OrderName: order.Name,

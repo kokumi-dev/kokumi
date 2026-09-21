@@ -99,8 +99,8 @@ export default function MenuDetailPage({ namespace, name, onBack, onOpenOrder }:
           </span>
           <span className={styles.specKey}>Version</span>
           <span className={styles.specValue}>{menu.source.version}</span>
-          <span className={styles.specKey}>Auto Deploy Default</span>
-          <span className={styles.specValue}>{menu.defaults.autoDeploy}</span>
+          <span className={styles.specKey}>Promotion Default</span>
+          <span className={styles.specValue}>{menu.defaults.mode}</span>
           {menu.render?.helm && (
             <>
               <span className={styles.specKey}>Renderer</span>

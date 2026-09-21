@@ -99,7 +99,7 @@ type OrderDTO struct {
 	Render               *RenderDTO        `json:"render,omitempty"`
 	Patches              []PatchDTO        `json:"patches,omitempty"`
 	Edits                []PatchDTO        `json:"edits,omitempty"`
-	AutoDeploy           string            `json:"autoDeploy"`
+	Mode                 string            `json:"mode"`
 	State                string            `json:"state"`
 	LatestRevision       string            `json:"latestRevision,omitempty"`
 	ActivePreparation    string            `json:"activePreparation,omitempty"`
@@ -142,7 +142,7 @@ type CreateOrderRequest struct {
 	Render        *RenderDTO         `json:"render,omitempty"`
 	Patches       []PatchDTO         `json:"patches,omitempty"`
 	Edits         []PatchDTO         `json:"edits,omitempty"`
-	AutoDeploy    string             `json:"autoDeploy"`
+	Mode          string             `json:"mode"`
 	CommitMessage *string            `json:"commitMessage,omitempty"`
 }
 
@@ -154,7 +154,7 @@ type UpdateOrderRequest struct {
 	Render        *RenderDTO         `json:"render,omitempty"`
 	Patches       []PatchDTO         `json:"patches,omitempty"`
 	Edits         []PatchDTO         `json:"edits,omitempty"`
-	AutoDeploy    string             `json:"autoDeploy"`
+	Mode          string             `json:"mode"`
 	CommitMessage *string            `json:"commitMessage,omitempty"`
 }
 
@@ -205,7 +205,7 @@ type OverridePolicyDTO struct {
 
 // MenuDefaultsDTO is the data-transfer representation of MenuDefaults.
 type MenuDefaultsDTO struct {
-	AutoDeploy string `json:"autoDeploy"`
+	Mode string `json:"mode"`
 }
 
 // VendorDestinationDTO is the data-transfer representation of a VendorDestination.

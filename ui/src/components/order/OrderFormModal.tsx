@@ -32,7 +32,7 @@ interface Props {
 
 function formToYaml(data: OrderFormData): string {
   const doc: Record<string, unknown> = {
-    autoDeploy: data.autoDeploy,
+    promotion: { mode: data.mode },
   }
   if (data.destination?.pantryRef?.name) {
     doc.destination = { pantryRef: { name: data.destination.pantryRef.name } }
@@ -132,7 +132,7 @@ function yamlToPartialForm(text: string): Omit<OrderFormData, 'name' | 'namespac
     source,
     destination,
     render,
-    autoDeploy: doc.autoDeploy === 'Enabled' ? 'Enabled' : 'Disabled',
+    mode: (doc.promotion as Record<string, unknown> | undefined)?.mode === 'Automatic' ? 'Automatic' : 'Manual',
     edits: [],
     patches: rawPatches.map((p) => {
       const patch = p as Record<string, unknown>
@@ -742,14 +742,14 @@ function FormView({
         )}
       </div>
 
-      {/* AutoDeploy */}
+      {/* Promotion */}
       <label className={styles.checkRow}>
         <input
           type="checkbox"
-          checked={formData.autoDeploy === 'Enabled'}
-          onChange={(e) => onFieldChange('autoDeploy', e.target.checked ? 'Enabled' : 'Disabled')}
+          checked={formData.mode === 'Automatic'}
+          onChange={(e) => onFieldChange('mode', e.target.checked ? 'Automatic' : 'Manual')}
         />
-        Auto Deploy — automatically promote newly created Preparations
+        Automatic promotion — promote newly created Preparations without approval
       </label>
 
       {/* Advanced: Renderer + Patches (collapsible) */}

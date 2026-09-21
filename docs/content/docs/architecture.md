@@ -42,7 +42,7 @@ Order ──▶ Preparation ─────────────────�
 
 Because the rendered artifact is stored independently:
 
-- **Approval gates** — set `spec.autoDeploy: Disabled` to hold the
+- **Approval gates** — set `spec.promotion.mode: Manual` to hold the
   Serving until a human explicitly promotes the Preparation.
 - **Pre-flight validation** — inspect the full rendered manifest in the UI
   before it touches any cluster.
@@ -223,7 +223,7 @@ A Serving tracks which Preparation is actively deployed. There is exactly one
 Serving per Order, and it is **managed automatically**, you never create one
 directly. A Serving is created or updated in three ways:
 
-- **Auto-deploy** — set `spec.autoDeploy: Enabled` on the Order; Kokumi
+- **Auto-deploy** — set `spec.promotion.mode: Automatic` on the Order; Kokumi
   updates the Serving automatically every time a new Preparation becomes `Ready`.
 - **Label promotion** — label a Preparation with
   `delivery.kokumi.dev/approve-deploy: "true"`.

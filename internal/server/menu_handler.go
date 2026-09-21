@@ -104,7 +104,7 @@ func handleCreateMenu(deps *apiDeps) http.HandlerFunc {
 				Patches:   patchesFromDTO(req.Patches),
 				Overrides: overridePolicyFromDTO(req.Overrides),
 				Defaults: deliveryv1alpha1.MenuDefaults{
-					AutoDeploy: deliveryv1alpha1.AutoDeployPolicy(req.Defaults.AutoDeploy),
+					Mode: deliveryv1alpha1.PromotionMode(req.Defaults.Mode),
 				},
 			},
 		}
@@ -162,7 +162,7 @@ func handleUpdateMenu(deps *apiDeps) http.HandlerFunc {
 		menu.Spec.Render = renderFromDTO(req.Render)
 		menu.Spec.Patches = patchesFromDTO(req.Patches)
 		menu.Spec.Overrides = overridePolicyFromDTO(req.Overrides)
-		menu.Spec.Defaults = deliveryv1alpha1.MenuDefaults{AutoDeploy: deliveryv1alpha1.AutoDeployPolicy(req.Defaults.AutoDeploy)}
+		menu.Spec.Defaults = deliveryv1alpha1.MenuDefaults{Mode: deliveryv1alpha1.PromotionMode(req.Defaults.Mode)}
 
 		if err := uc.update(r.Context(), menu, "menus"); err != nil {
 			deps.logger.Error(err, "Failed to update Menu", "name", name)

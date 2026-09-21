@@ -107,7 +107,7 @@ function MenuCard({ menu: m, selected, onClick, onOrder }: CardProps) {
         </div>
       </div>
 
-      {m.defaults.autoDeploy === 'Enabled' && <span className={styles.autoDeployPill}>AUTO DEPLOY</span>}
+      {m.defaults.mode === 'Automatic' && <span className={styles.autoDeployPill}>AUTO</span>}
     </div>
   )
 }

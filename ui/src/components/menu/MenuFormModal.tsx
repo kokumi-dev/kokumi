@@ -113,7 +113,7 @@ function yamlToPartialForm(text: string): Omit<MenuFormData, 'name' | 'namespace
       } satisfies Patch
     }),
     overrides: rawOverrides ?? { values: { policy: 'None' }, patches: { policy: 'None' } },
-    defaults: { autoDeploy: rawDefaults?.autoDeploy === 'Enabled' ? 'Enabled' : 'Disabled' },
+    defaults: { mode: rawDefaults?.mode === 'Automatic' ? 'Automatic' : 'Manual' },
   }
 }
 
@@ -343,10 +343,10 @@ function MenuFormView({
       <label className={formStyles.checkRow}>
         <input
           type="checkbox"
-          checked={formData.defaults.autoDeploy === 'Enabled'}
-          onChange={(e) => onFieldChange('defaults', { ...formData.defaults, autoDeploy: e.target.checked ? 'Enabled' : 'Disabled' })}
+          checked={formData.defaults.mode === 'Automatic'}
+          onChange={(e) => onFieldChange('defaults', { ...formData.defaults, mode: e.target.checked ? 'Automatic' : 'Manual' })}
         />
-        Default Auto Deploy — Orders using this Menu inherit auto-deploy
+        Default automatic promotion — Orders without their own promotion setting inherit this
       </label>
 
       {/* Publish (Vendor) — collapsible like the Order destination section */}

@@ -67,7 +67,7 @@ export interface Order {
   render?: Render
   patches?: Patch[]
   edits?: Patch[]
-  autoDeploy: AutoDeployPolicy
+  mode: PromotionMode
   state: string
   latestRevision?: string
   activePreparation?: string
@@ -139,10 +139,10 @@ export interface OverridePolicy {
   patches: PatchOverridePolicy
 }
 
-export type AutoDeployPolicy = 'Enabled' | 'Disabled'
+export type PromotionMode = 'Automatic' | 'Manual'
 
 export interface MenuDefaults {
-  autoDeploy: AutoDeployPolicy
+  mode: PromotionMode
 }
 
 export interface Menu {
@@ -231,7 +231,7 @@ export interface OrderFormData {
   render?: Render
   patches: Patch[]
   edits: Patch[]
-  autoDeploy: AutoDeployPolicy
+  mode: PromotionMode
 }
 
 export const emptyOrderForm = (): OrderFormData => ({
@@ -242,7 +242,7 @@ export const emptyOrderForm = (): OrderFormData => ({
   render: undefined,
   patches: [],
   edits: [],
-  autoDeploy: 'Disabled',
+  mode: 'Manual',
 })
 
 export const orderToFormData = (r: Order): OrderFormData => ({
@@ -276,7 +276,7 @@ export const orderToFormData = (r: Order): OrderFormData => ({
     target: { ...p.target },
     set: { ...p.set },
   })),
-  autoDeploy: r.autoDeploy,
+  mode: r.mode,
 })
 
 export interface MenuFormData {
@@ -300,7 +300,7 @@ export const emptyMenuForm = (): MenuFormData => ({
     values: { policy: 'None' },
     patches: { policy: 'None' },
   },
-  defaults: { autoDeploy: 'Disabled' },
+  defaults: { mode: 'Manual' },
 })
 
 export const menuToFormData = (m: Menu): MenuFormData => ({
