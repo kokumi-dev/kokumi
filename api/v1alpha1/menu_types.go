@@ -94,11 +94,12 @@ type OverridePolicy struct {
 
 // MenuDefaults defines default values that consuming Orders inherit.
 type MenuDefaults struct {
-	// autoDeploy is the default autoDeploy value for Orders using this Menu.
-	// Orders may override this.
+	// mode is the default promotion mode for Orders using this Menu.
+	// The Order's own spec.promotion.mode takes precedence when set;
+	// inheritance applies when the Order omits spec.promotion entirely.
 	// +optional
-	// +kubebuilder:default=Disabled
-	AutoDeploy AutoDeployPolicy `json:"autoDeploy,omitempty"`
+	// +kubebuilder:default=Manual
+	Mode PromotionMode `json:"mode,omitempty"`
 }
 
 // MenuSpec defines the desired state of Menu.

@@ -74,23 +74,23 @@ func (r *PreparationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, nil
 	}
 
-	autoDeploy := deliveryv1alpha1.AutoDeployPolicy(preparation.Labels[deliveryv1alpha1.LabelAutoDeploy])
+	promotionMode := deliveryv1alpha1.PromotionMode(preparation.Labels[deliveryv1alpha1.LabelAutoDeploy])
 	approveLabel := preparation.Labels[deliveryv1alpha1.LabelApproveDeploy]
 
-	if autoDeploy == deliveryv1alpha1.AutoDeployEnabled {
-		logger.Info("AutoDeploy enabled, reconciling Serving")
+	if promotionMode == deliveryv1alpha1.PromotionModeAutomatic {
+		logger.Info("Promotion mode Automatic, reconciling Serving")
 		if err := r.reconcileServing(ctx, preparation, true); err != nil {
 			logger.Error(err, "Failed to reconcile Serving")
 			return ctrl.Result{}, err
 		}
 	} else if approveLabel == "true" {
-		logger.Info("Manual serving approved, reconciling Serving")
+		logger.Info("Manual promotion approved, reconciling Serving")
 		if err := r.reconcileServing(ctx, preparation, false); err != nil {
 			logger.Error(err, "Failed to reconcile Serving")
 			return ctrl.Result{}, err
 		}
 	} else {
-		logger.Info("AutoDeploy disabled and no approval label, skipping serving")
+		logger.Info("Promotion mode Manual and no approval label, skipping serving")
 	}
 
 	return ctrl.Result{}, nil

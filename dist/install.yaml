@@ -377,14 +377,15 @@ spec:
                 description: defaults defines default values inherited by consuming
                   Orders.
                 properties:
-                  autoDeploy:
-                    default: Disabled
+                  mode:
+                    default: Manual
                     description: |-
-                      autoDeploy is the default autoDeploy value for Orders using this Menu.
-                      Orders may override this.
+                      mode is the default promotion mode for Orders using this Menu.
+                      The Order's own spec.promotion.mode takes precedence when set;
+                      inheritance applies when the Order omits spec.promotion entirely.
                     enum:
-                    - Enabled
-                    - Disabled
+                    - Automatic
+                    - Manual
                     type: string
                 type: object
               overrides:
@@ -834,8 +835,8 @@ spec:
       name: Version
       priority: 1
       type: string
-    - jsonPath: .spec.autoDeploy
-      name: Auto Deploy
+    - jsonPath: .spec.promotion.mode
+      name: Promotion
       priority: 1
       type: string
     - jsonPath: .metadata.creationTimestamp
@@ -866,16 +867,6 @@ spec:
           spec:
             description: spec defines the desired state of Order
             properties:
-              autoDeploy:
-                default: Disabled
-                description: |-
-                  autoDeploy controls whether a newly created Preparation
-                  should automatically become the active Serving.
-                  If Disabled, activation must be performed explicitly.
-                enum:
-                - Enabled
-                - Disabled
-                type: string
               destination:
                 description: |-
                   destination defines where the rendered Preparation artifact will be pushed.
@@ -999,6 +990,20 @@ spec:
                   - target
                   type: object
                 type: array
+              promotion:
+                description: promotion configures how new Preparations become active
+                  Servings.
+                properties:
+                  mode:
+                    default: Manual
+                    description: |-
+                      mode controls how a newly created Preparation becomes the active Serving.
+                      Automatic promotes it immediately; Manual requires explicit promotion.
+                    enum:
+                    - Automatic
+                    - Manual
+                    type: string
+                type: object
               render:
                 description: |-
                   render defines optional rendering configuration for the source artifact.

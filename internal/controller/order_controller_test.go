@@ -58,7 +58,9 @@ var _ = Describe("Order Controller", func() {
 					Name:      resourceName,
 					Namespace: testNamespace,
 					Spec: deliveryv1alpha1.OrderSpec{
-						AutoDeploy: deliveryv1alpha1.AutoDeployDisabled,
+						Promotion: &deliveryv1alpha1.PromotionSpec{
+							Mode: deliveryv1alpha1.PromotionModeManual,
+						},
 						Source: &deliveryv1alpha1.OCISource{
 							OCI:     testOCIRef,
 							Version: testVersion,
@@ -156,7 +158,9 @@ var _ = Describe("Order Controller", func() {
 			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Order{
 				Name: name, Namespace: ns,
 				Spec: deliveryv1alpha1.OrderSpec{
-					AutoDeploy:  deliveryv1alpha1.AutoDeployDisabled,
+					Promotion: &deliveryv1alpha1.PromotionSpec{
+						Mode: deliveryv1alpha1.PromotionModeManual,
+					},
 					Source:      source,
 					Destination: dest,
 				},
@@ -404,7 +408,9 @@ var _ = Describe("Order Controller", func() {
 			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Order{
 				Name: orderName, Namespace: ns,
 				Spec: deliveryv1alpha1.OrderSpec{
-					AutoDeploy: deliveryv1alpha1.AutoDeployDisabled,
+					Promotion: &deliveryv1alpha1.PromotionSpec{
+						Mode: deliveryv1alpha1.PromotionModeManual,
+					},
 					Source: &deliveryv1alpha1.OCISource{
 						OCI:     "oci://registry.kokumi.svc.cluster.local:5000/order/edit-revert",
 						Version: "0.1.0",

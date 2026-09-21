@@ -24,4 +24,5 @@ spec:
   destination:
     oci: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/external-dns
 
-  autoDeploy: Disabled
+  promotion:
+    mode: Manual

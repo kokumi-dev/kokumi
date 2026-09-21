@@ -71,14 +71,15 @@ spec:
                 description: defaults defines default values inherited by consuming
                   Orders.
                 properties:
-                  autoDeploy:
-                    default: Disabled
+                  mode:
+                    default: Manual
                     description: |-
-                      autoDeploy is the default autoDeploy value for Orders using this Menu.
-                      Orders may override this.
+                      mode is the default promotion mode for Orders using this Menu.
+                      The Order's own spec.promotion.mode takes precedence when set;
+                      inheritance applies when the Order omits spec.promotion entirely.
                     enum:
-                    - Enabled
-                    - Disabled
+                    - Automatic
+                    - Manual
                     type: string
                 type: object
               overrides:

@@ -127,7 +127,8 @@ spec:
   destination:
     oci: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/podinfo
 
-  autoDeploy: Disabled
+  promotion:
+    mode: Manual
 ```
 
 Apply it:
@@ -158,7 +159,7 @@ Three ways to activate or change a Serving:
 
 | Method | How |
 |---|---|
-| **Auto-deploy** | Set `spec.autoDeploy: Enabled` on the Order. Kokumi updates the Serving on every new Preparation |
+| **Auto-deploy** | Set `spec.promotion.mode: Automatic` on the Order. Kokumi updates the Serving on every new Preparation |
 | **Label promotion** | Label a Preparation with `delivery.kokumi.dev/approve-deploy: "true"` |
 | **UI** | Click **Promote** on any Preparation in the Kokumi UI |
 
@@ -222,7 +223,7 @@ spec:
       policy: None
 
   defaults:
-    autoDeploy: Disabled
+    mode: Manual
 
 ```
 
@@ -262,7 +263,8 @@ spec:
   destination:
     oci: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/podinfo-from-menu
 
-  autoDeploy: Disabled
+  promotion:
+    mode: Manual
 
 ```
 

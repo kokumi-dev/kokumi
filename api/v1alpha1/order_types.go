@@ -22,15 +22,16 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// AutoDeployPolicy controls whether newly created Preparations are automatically promoted to active.
-// +kubebuilder:validation:Enum=Enabled;Disabled
-type AutoDeployPolicy string
+// PromotionMode controls how new Preparations become active Servings.
+// +kubebuilder:validation:Enum=Automatic;Manual
+type PromotionMode string
 
 const (
-	// AutoDeployEnabled automatically promotes new Preparations to active.
-	AutoDeployEnabled AutoDeployPolicy = "Enabled"
-	// AutoDeployDisabled requires explicit promotion of Preparations.
-	AutoDeployDisabled AutoDeployPolicy = "Disabled"
+	// PromotionModeAutomatic automatically promotes new Preparations to active
+	// Servings when all preconditions are satisfied.
+	PromotionModeAutomatic PromotionMode = "Automatic"
+	// PromotionModeManual requires explicit promotion of Preparations.
+	PromotionModeManual PromotionMode = "Manual"
 )
 
 // OCISource defines the OCI location of the base manifest artifact
@@ -213,12 +214,18 @@ type OrderSpec struct {
 	// +optional
 	Edits []Patch `json:"edits,omitempty"`
 
-	// autoDeploy controls whether a newly created Preparation
-	// should automatically become the active Serving.
-	// If Disabled, activation must be performed explicitly.
+	// promotion configures how new Preparations become active Servings.
 	// +optional
-	// +kubebuilder:default=Disabled
-	AutoDeploy AutoDeployPolicy `json:"autoDeploy,omitempty"`
+	Promotion *PromotionSpec `json:"promotion,omitempty"`
+}
+
+// PromotionSpec defines how new Preparations are promoted to active Servings.
+type PromotionSpec struct {
+	// mode controls how a newly created Preparation becomes the active Serving.
+	// Automatic promotes it immediately; Manual requires explicit promotion.
+	// +optional
+	// +kubebuilder:default=Manual
+	Mode PromotionMode `json:"mode,omitempty"`
 }
 
 // OrderStatus defines the observed state of Order.
@@ -259,7 +266,7 @@ type OrderStatus struct {
 // +kubebuilder:printcolumn:name="Menu",type=string,JSONPath=`.spec.menuRef.name`,priority=1
 // +kubebuilder:printcolumn:name="Source",type=string,JSONPath=`.spec.source.oci`,priority=1
 // +kubebuilder:printcolumn:name="Version",type=string,JSONPath=`.spec.source.version`,priority=1
-// +kubebuilder:printcolumn:name="Auto Deploy",type=string,JSONPath=`.spec.autoDeploy`,priority=1
+// +kubebuilder:printcolumn:name="Promotion",type=string,JSONPath=`.spec.promotion.mode`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Order is the Schema for the orders API

@@ -105,10 +105,12 @@ func handleCreateOrder(deps *apiDeps) http.HandlerFunc {
 			Name:      req.Name,
 			Namespace: req.Namespace,
 			Spec: deliveryv1alpha1.OrderSpec{
-				Render:     renderFromDTO(req.Render),
-				Patches:    patchesFromDTO(req.Patches),
-				Edits:      patchesFromDTO(req.Edits),
-				AutoDeploy: deliveryv1alpha1.AutoDeployPolicy(req.AutoDeploy),
+				Render:  renderFromDTO(req.Render),
+				Patches: patchesFromDTO(req.Patches),
+				Edits:   patchesFromDTO(req.Edits),
+				Promotion: &deliveryv1alpha1.PromotionSpec{
+					Mode: deliveryv1alpha1.PromotionMode(req.Mode),
+				},
 			},
 		}
 
@@ -178,7 +180,9 @@ func handleUpdateOrder(deps *apiDeps) http.HandlerFunc {
 		order.Spec.Render = renderFromDTO(req.Render)
 		order.Spec.Patches = patchesFromDTO(req.Patches)
 		order.Spec.Edits = patchesFromDTO(req.Edits)
-		order.Spec.AutoDeploy = deliveryv1alpha1.AutoDeployPolicy(req.AutoDeploy)
+		order.Spec.Promotion = &deliveryv1alpha1.PromotionSpec{
+			Mode: deliveryv1alpha1.PromotionMode(req.Mode),
+		}
 
 		order.Spec.Destination = destinationFromDTO(req.Destination)
 
