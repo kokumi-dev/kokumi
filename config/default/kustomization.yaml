@@ -42,6 +42,7 @@ resources:
 # [REGISTRY] To deploy an unauthenticated OCI registry for the operator, uncomment the following line.
 # The registry will be available at registry.kokumi.svc.cluster.local:5000
 - ../registry
+- ../admission
 
 # Uncomment the patches line if you enable Metrics
 patches:

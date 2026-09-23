@@ -1,0 +1,20 @@
+---
+# This file is for teaching kustomize how to substitute policyName in bindings
+nameReference:
+- kind: MutatingAdmissionPolicy
+  version: v1
+  group: admissionregistration.k8s.io
+  fieldSpecs:
+  - kind: MutatingAdmissionPolicyBinding
+    version: v1
+    group: admissionregistration.k8s.io
+    path: spec/policyName
+
+- kind: ValidatingAdmissionPolicy
+  version: v1
+  group: admissionregistration.k8s.io
+  fieldSpecs:
+  - kind: ValidatingAdmissionPolicyBinding
+    version: v1
+    group: admissionregistration.k8s.io
+    path: spec/policyName

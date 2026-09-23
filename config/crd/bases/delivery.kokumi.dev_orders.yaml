@@ -195,6 +195,34 @@ spec:
                 description: promotion configures how new Preparations become active
                   Servings.
                 properties:
+                  approvals:
+                    description: |-
+                      approvals configures an approval gate on the promoted artifact. When
+                      set, the Preparation is blocked from being served until enough
+                      distinct approvers from the listed groups have approved it, in both
+                      Automatic and Manual mode. When omitted, no approval gate applies.
+                    properties:
+                      allowedGroups:
+                        description: allowedGroups lists the groups whose members
+                          are eligible to approve.
+                        items:
+                          maxLength: 253
+                          type: string
+                        maxItems: 16
+                        minItems: 1
+                        type: array
+                        x-kubernetes-list-type: set
+                      requiredApprovals:
+                        description: requiredApprovals is the minimum number of distinct
+                          eligible approvers.
+                        format: int32
+                        maximum: 32
+                        minimum: 1
+                        type: integer
+                    required:
+                    - allowedGroups
+                    - requiredApprovals
+                    type: object
                   mode:
                     default: Manual
                     description: |-

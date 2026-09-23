@@ -1,0 +1,9 @@
+---
+resources:
+- approval_mutating_policy_binding.yaml
+- approval_mutating_policy.yaml
+- approval_validating_policy_binding.yaml
+- approval_validating_policy.yaml
+
+configurations:
+- kustomizeconfig.yaml

@@ -1,0 +1,39 @@
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingAdmissionPolicy
+metadata:
+  name: approval-identity-inject-policy
+spec:
+  failurePolicy: Fail
+  reinvocationPolicy: Never
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["delivery.kokumi.dev"]
+      apiVersions: ["v1alpha1"]
+      operations: ["CREATE"]
+      resources: ["approvals"]
+  variables:
+    - name: isKokumiServer
+      expression: 'request.userInfo.username == "system:serviceaccount:kokumi:kokumi-server"'
+  mutations:
+    - patchType: JSONPatch
+      jsonPatch:
+        expression: >-
+          variables.isKokumiServer
+            ? [
+                JSONPatch{
+                  op: "add",
+                  path: "/spec/approver",
+                  value: object.spec.approver
+                }
+              ]
+            : [
+                JSONPatch{
+                  op: "add",
+                  path: "/spec/approver",
+                  value: Object{
+                    username: request.userInfo.username,
+                    groups: request.userInfo.groups
+                  }
+                }
+              ]

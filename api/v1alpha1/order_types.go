@@ -226,6 +226,30 @@ type PromotionSpec struct {
 	// +optional
 	// +kubebuilder:default=Manual
 	Mode PromotionMode `json:"mode,omitempty"`
+
+	// approvals configures an approval gate on the promoted artifact. When
+	// set, the Preparation is blocked from being served until enough
+	// distinct approvers from the listed groups have approved it, in both
+	// Automatic and Manual mode. When omitted, no approval gate applies.
+	// +optional
+	Approvals *ApprovalPolicy `json:"approvals,omitempty"`
+}
+
+// ApprovalPolicy defines the approval quorum required before a Preparation can be served.
+type ApprovalPolicy struct {
+	// requiredApprovals is the minimum number of distinct eligible approvers.
+	// +required
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=32
+	RequiredApprovals int32 `json:"requiredApprovals"`
+
+	// allowedGroups lists the groups whose members are eligible to approve.
+	// +required
+	// +listType=set
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:items:MaxLength=253
+	AllowedGroups []string `json:"allowedGroups"`
 }
 
 // OrderStatus defines the observed state of Order.
