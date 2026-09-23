@@ -13,4 +13,5 @@ resources:
 - delivery_v1alpha1_pantry_ghcr.yaml
 - delivery_v1alpha1_pantry_incluster.yaml
 - delivery_v1alpha1_kitchen.yaml
+- delivery_v1alpha1_approval.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples
