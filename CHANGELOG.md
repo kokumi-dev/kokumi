@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.17.0](https://github.com/kokumi-dev/kokumi/compare/0.16.0...0.17.0) (2026-09-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* replace AutoDeploy with Promotion mode in Menu and Order specs ([#389](https://github.com/kokumi-dev/kokumi/issues/389))
+
+### Features
+
+* add approval crd and policies ([#391](https://github.com/kokumi-dev/kokumi/issues/391)) ([8c73fe1](https://github.com/kokumi-dev/kokumi/commit/8c73fe1dc191245a98a7d155a5cb0c15999ab197))
+
+
+### Code Refactoring
+
+* replace AutoDeploy with Promotion mode in Menu and Order specs ([#389](https://github.com/kokumi-dev/kokumi/issues/389)) ([4badf2d](https://github.com/kokumi-dev/kokumi/commit/4badf2d551faa9e1b2e88de382a2c39fe2edbd53))
+
 ## [0.16.0](https://github.com/kokumi-dev/kokumi/compare/0.15.1...0.16.0) (2026-09-20)
 
 
