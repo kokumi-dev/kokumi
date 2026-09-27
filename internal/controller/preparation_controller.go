@@ -28,6 +28,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -80,6 +81,25 @@ func (r *PreparationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, fmt.Errorf("failed to get Preparation: %w", err)
 	}
 
+	if !preparation.DeletionTimestamp.IsZero() {
+		return r.reconcileDelete(ctx, preparation)
+	}
+
+	if !controllerutil.ContainsFinalizer(preparation, deliveryv1alpha1.Finalizer) {
+		controllerutil.AddFinalizer(preparation, deliveryv1alpha1.Finalizer)
+
+		if err := r.Update(ctx, preparation); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	return r.reconcilePreparation(ctx, preparation)
+}
+
+// reconcilePreparation aggregates the Preparation's Approvals and seals them
+// into an OCI attestation once a Serving targets the approved Preparation.
+func (r *PreparationReconciler) reconcilePreparation(ctx context.Context, preparation *deliveryv1alpha1.Preparation) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
 	if !apimeta.IsStatusConditionTrue(preparation.Status.Conditions, deliveryv1alpha1.ConditionTypeReady) {
 		logger.Info("Preparation not ready, skipping")
 
@@ -186,6 +206,24 @@ func (r *PreparationReconciler) archive(ctx context.Context, prep *deliveryv1alp
 	}
 	log.FromContext(ctx).Info("Recorded approval attestation", "preparation", prep.Name, "attestation", attestation.OCIRef)
 	return nil
+}
+
+// reconcileDelete removes the finalizer from the Preparation, allowing garbage collection.
+func (r *PreparationReconciler) reconcileDelete(ctx context.Context, preparation *deliveryv1alpha1.Preparation) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	logger.Info("Handling deletion of Preparation")
+
+	if controllerutil.ContainsFinalizer(preparation, deliveryv1alpha1.Finalizer) {
+		logger.Info("Cleaning up Preparation resources")
+
+		controllerutil.RemoveFinalizer(preparation, deliveryv1alpha1.Finalizer)
+
+		if err := r.Update(ctx, preparation); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	return ctrl.Result{}, nil
 }
 
 func enqueuePreparationForApproval(_ context.Context, obj client.Object) []ctrl.Request {

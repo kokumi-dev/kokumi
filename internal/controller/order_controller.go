@@ -96,6 +96,14 @@ func (r *OrderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	}
 
+	return r.reconcileOrder(ctx, order)
+}
+
+// reconcileOrder resolves the Order's effective spec and delegates artifact
+// work to the render pipeline.
+func (r *OrderReconciler) reconcileOrder(ctx context.Context, order *deliveryv1alpha1.Order) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
 	effective, err := r.resolveEffectiveSpec(ctx, order)
 	if err != nil {
 		statusUpdater := status.NewOrderUpdater(r.Client)
