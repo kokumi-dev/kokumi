@@ -109,7 +109,8 @@ func handleCreateOrder(deps *apiDeps) http.HandlerFunc {
 				Patches: patchesFromDTO(req.Patches),
 				Edits:   patchesFromDTO(req.Edits),
 				Promotion: &deliveryv1alpha1.PromotionSpec{
-					Mode: deliveryv1alpha1.PromotionMode(req.Mode),
+					Mode:      deliveryv1alpha1.PromotionMode(req.Mode),
+					Approvals: approvalPolicyFromDTO(req.Approvals),
 				},
 			},
 		}
@@ -181,7 +182,8 @@ func handleUpdateOrder(deps *apiDeps) http.HandlerFunc {
 		order.Spec.Patches = patchesFromDTO(req.Patches)
 		order.Spec.Edits = patchesFromDTO(req.Edits)
 		order.Spec.Promotion = &deliveryv1alpha1.PromotionSpec{
-			Mode: deliveryv1alpha1.PromotionMode(req.Mode),
+			Mode:      deliveryv1alpha1.PromotionMode(req.Mode),
+			Approvals: approvalPolicyFromDTO(req.Approvals),
 		}
 
 		order.Spec.Destination = destinationFromDTO(req.Destination)

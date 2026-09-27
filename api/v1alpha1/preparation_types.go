@@ -157,15 +157,131 @@ type PreparationSpec struct {
 	// this Preparation. Empty when the base artifact carries no git provenance.
 	// +optional
 	GitSource GitSource `json:"gitSource,omitempty"` //nolint:lll
+
+	// approvalPolicy is the approval gate copied from the Order when this
+	// Preparation was created. When set, the Preparation is only served once
+	// the policy is satisfied. It is also recorded on the OCI artifact.
+	// +optional
+	ApprovalPolicy *ApprovalPolicy `json:"approvalPolicy,omitempty"`
+}
+
+// VoteResult describes how the latest vote of an approver is evaluated.
+// +kubebuilder:validation:Enum=Counted;NotEligible
+type VoteResult string
+
+const (
+	// VoteResultCounted means the vote contributes to the approval gate.
+	VoteResultCounted VoteResult = "Counted"
+	// VoteResultNotEligible means the approver is not in any allowed group.
+	VoteResultNotEligible VoteResult = "NotEligible"
+)
+
+// ApprovalVote is the latest vote of a single approver on a Preparation.
+type ApprovalVote struct {
+	// approvalName is the name of the Approval carrying this vote.
+	// +required
+	// +kubebuilder:validation:MaxLength=253
+	ApprovalName string `json:"approvalName"`
+
+	// issuer is the OIDC issuer of the approver.
+	// +required
+	// +kubebuilder:validation:MaxLength=2048
+	Issuer string `json:"issuer"`
+
+	// subject is the OIDC subject of the approver.
+	// +required
+	// +kubebuilder:validation:MaxLength=255
+	Subject string `json:"subject"`
+
+	// username is the human-readable name of the approver.
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	Username string `json:"username,omitempty"`
+
+	// decision is the verdict of the vote.
+	// +required
+	Decision ApprovalDecision `json:"decision"`
+
+	// result reports whether the vote counts towards the gate.
+	// +required
+	Result VoteResult `json:"result"`
+
+	// submittedTime is when the vote was submitted.
+	// +required
+	SubmittedTime metav1.MicroTime `json:"submittedTime"`
+}
+
+// ApprovalAttestation references the OCI referrer artifact that records the
+// sealed approvals of a Preparation.
+type ApprovalAttestation struct {
+	// ociRef is the full OCI reference of the attestation including digest.
+	// +required
+	// +kubebuilder:validation:MaxLength=2048
+	OCIRef string `json:"ociRef"`
+
+	// digest is the manifest digest of the attestation.
+	// +required
+	// +kubebuilder:validation:MaxLength=71
+	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
+	Digest string `json:"digest"`
+}
+
+// PreparationApprovalStatus aggregates the Approvals of a Preparation.
+type PreparationApprovalStatus struct {
+	// requiredApprovals is the number of approvals required by the policy.
+	// +optional
+	RequiredApprovals int32 `json:"requiredApprovals"`
+
+	// approvedCount is the number of eligible approvers whose latest vote is Approve.
+	// +optional
+	ApprovedCount int32 `json:"approvedCount"`
+
+	// rejectedCount is the number of eligible approvers whose latest vote is Reject.
+	// +optional
+	RejectedCount int32 `json:"rejectedCount"`
+
+	// ineligibleCount is the number of approvers not in any allowed group.
+	// +optional
+	IneligibleCount int32 `json:"ineligibleCount"`
+
+	// submissionCount is the total number of Approvals for this Preparation,
+	// including superseded ones.
+	// +optional
+	SubmissionCount int32 `json:"submissionCount"`
+
+	// votes lists the latest vote of each approver. Once sealed, only these
+	// votes are considered.
+	// +optional
+	// +listType=atomic
+	// +kubebuilder:validation:MaxItems=64
+	Votes []ApprovalVote `json:"votes,omitempty"`
+
+	// sealedTime is when the votes were locked because the Preparation was
+	// promoted. Votes submitted afterwards are ignored.
+	// +optional
+	SealedTime *metav1.Time `json:"sealedTime,omitempty"`
+
+	// attestation references the OCI artifact recording the sealed votes.
+	// +optional
+	Attestation *ApprovalAttestation `json:"attestation,omitempty"`
 }
 
 // PreparationStatus defines the observed state of Preparation.
 type PreparationStatus struct {
+	// observedGeneration is the most recent generation observed by the controller.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
 	// conditions represent the current state of the Preparation resource.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// approval aggregates the Approvals of this Preparation. Only set when
+	// spec.approvalPolicy is set.
+	// +optional
+	Approval *PreparationApprovalStatus `json:"approval,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -173,10 +289,12 @@ type PreparationStatus struct {
 // +kubebuilder:printcolumn:name="Order",type=string,JSONPath=`.spec.orderName`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
 // +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].reason`
+// +kubebuilder:printcolumn:name="Approved",type=string,JSONPath=`.status.conditions[?(@.type=='Approved')].reason`
 // +kubebuilder:printcolumn:name="Digest",type=string,JSONPath=`.spec.artifact.digest`,priority=1
 // +kubebuilder:printcolumn:name="Signed",type=boolean,JSONPath=`.spec.artifact.signed`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 // +kubebuilder:resource:shortName=prep
+// +kubebuilder:selectablefield:JSONPath=`.spec.orderName`
 
 // Preparation is the Schema for the preparations API
 type Preparation struct {

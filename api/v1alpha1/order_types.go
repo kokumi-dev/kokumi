@@ -231,6 +231,8 @@ type PromotionSpec struct {
 	// set, the Preparation is blocked from being served until enough
 	// distinct approvers from the listed groups have approved it, in both
 	// Automatic and Manual mode. When omitted, no approval gate applies.
+	// The policy is copied into each Preparation when it is created, so a
+	// change produces a new Preparation that needs fresh approvals.
 	// +optional
 	Approvals *ApprovalPolicy `json:"approvals,omitempty"`
 }
@@ -308,6 +310,22 @@ type Order struct {
 	// status defines the observed state of Order
 	// +optional
 	Status OrderStatus `json:"status,omitzero"`
+}
+
+// EffectivePromotionMode returns spec.promotion.mode, defaulting to Manual.
+func (o *Order) EffectivePromotionMode() PromotionMode {
+	if o.Spec.Promotion == nil || o.Spec.Promotion.Mode == "" {
+		return PromotionModeManual
+	}
+	return o.Spec.Promotion.Mode
+}
+
+// ApprovalPolicy returns spec.promotion.approvals, or nil when no gate applies.
+func (o *Order) ApprovalPolicy() *ApprovalPolicy {
+	if o.Spec.Promotion == nil {
+		return nil
+	}
+	return o.Spec.Promotion.Approvals
 }
 
 // +kubebuilder:object:root=true

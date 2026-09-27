@@ -478,6 +478,10 @@ func (c *capturingFakeClient) Resolve(_ context.Context, _ oci.Reference) (strin
 	return fakeDigest, nil
 }
 
+func (c *capturingFakeClient) PushReferrer(_ context.Context, _ oci.Reference, _ oci.ReferrerArtifact) (string, error) {
+	return "", nil
+}
+
 func (c *capturingFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference) error {
 	return nil
 }
@@ -513,6 +517,10 @@ func (c *multiFileFakeClient) Resolve(_ context.Context, _ oci.Reference) (strin
 	return fakeDigest, nil
 }
 
+func (c *multiFileFakeClient) PushReferrer(_ context.Context, _ oci.Reference, _ oci.ReferrerArtifact) (string, error) {
+	return "", nil
+}
+
 func (c *multiFileFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference) error {
 	return nil
 }
@@ -546,6 +554,10 @@ func (c *kustomizeFakeClient) ListTags(_ context.Context, _ oci.Reference) ([]st
 
 func (c *kustomizeFakeClient) Resolve(_ context.Context, _ oci.Reference) (string, error) {
 	return fakeDigest, nil
+}
+
+func (c *kustomizeFakeClient) PushReferrer(_ context.Context, _ oci.Reference, _ oci.ReferrerArtifact) (string, error) {
+	return "", nil
 }
 
 func (c *kustomizeFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference) error {
@@ -584,6 +596,10 @@ func (c *fluxFakeClient) Resolve(_ context.Context, _ oci.Reference) (string, er
 	return fakeDigest, nil
 }
 
+func (c *fluxFakeClient) PushReferrer(_ context.Context, _ oci.Reference, _ oci.ReferrerArtifact) (string, error) {
+	return "", nil
+}
+
 func (c *fluxFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference) error {
 	return nil
 }
@@ -612,6 +628,10 @@ func (c *countingFakeClient) Resolve(_ context.Context, _ oci.Reference) (string
 	return fakeDigest, nil
 }
 
+func (c *countingFakeClient) PushReferrer(_ context.Context, _ oci.Reference, _ oci.ReferrerArtifact) (string, error) {
+	return "", nil
+}
+
 func (c *countingFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference) error {
 	return nil
 }
@@ -638,6 +658,10 @@ func (c *copyFakeClient) ListTags(_ context.Context, _ oci.Reference) ([]string,
 
 func (c *copyFakeClient) Resolve(_ context.Context, _ oci.Reference) (string, error) {
 	return fakeDigest, nil
+}
+
+func (c *copyFakeClient) PushReferrer(_ context.Context, _ oci.Reference, _ oci.ReferrerArtifact) (string, error) {
+	return "", nil
 }
 
 func (c *copyFakeClient) Copy(_ context.Context, _ oci.Client, src, dst oci.Reference) error {

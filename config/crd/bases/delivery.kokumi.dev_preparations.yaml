@@ -26,6 +26,9 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Ready')].reason
       name: Reason
       type: string
+    - jsonPath: .status.conditions[?(@.type=='Approved')].reason
+      name: Approved
+      type: string
     - jsonPath: .spec.artifact.digest
       name: Digest
       priority: 1
@@ -62,6 +65,33 @@ spec:
           spec:
             description: spec defines the desired state of Preparation
             properties:
+              approvalPolicy:
+                description: |-
+                  approvalPolicy is the approval gate copied from the Order when this
+                  Preparation was created. When set, the Preparation is only served once
+                  the policy is satisfied. It is also recorded on the OCI artifact.
+                properties:
+                  allowedGroups:
+                    description: allowedGroups lists the groups whose members are
+                      eligible to approve.
+                    items:
+                      maxLength: 253
+                      type: string
+                    maxItems: 16
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-type: set
+                  requiredApprovals:
+                    description: requiredApprovals is the minimum number of distinct
+                      eligible approvers.
+                    format: int32
+                    maximum: 32
+                    minimum: 1
+                    type: integer
+                required:
+                - allowedGroups
+                - requiredApprovals
+                type: object
               artifact:
                 description: artifact defines the output artifact information
                 properties:
@@ -194,6 +224,116 @@ spec:
           status:
             description: status defines the observed state of Preparation
             properties:
+              approval:
+                description: |-
+                  approval aggregates the Approvals of this Preparation. Only set when
+                  spec.approvalPolicy is set.
+                properties:
+                  approvedCount:
+                    description: approvedCount is the number of eligible approvers
+                      whose latest vote is Approve.
+                    format: int32
+                    type: integer
+                  attestation:
+                    description: attestation references the OCI artifact recording
+                      the sealed votes.
+                    properties:
+                      digest:
+                        description: digest is the manifest digest of the attestation.
+                        maxLength: 71
+                        pattern: ^sha256:[a-f0-9]{64}$
+                        type: string
+                      ociRef:
+                        description: ociRef is the full OCI reference of the attestation
+                          including digest.
+                        maxLength: 2048
+                        type: string
+                    required:
+                    - digest
+                    - ociRef
+                    type: object
+                  ineligibleCount:
+                    description: ineligibleCount is the number of approvers not in
+                      any allowed group.
+                    format: int32
+                    type: integer
+                  rejectedCount:
+                    description: rejectedCount is the number of eligible approvers
+                      whose latest vote is Reject.
+                    format: int32
+                    type: integer
+                  requiredApprovals:
+                    description: requiredApprovals is the number of approvals required
+                      by the policy.
+                    format: int32
+                    type: integer
+                  sealedTime:
+                    description: |-
+                      sealedTime is when the votes were locked because the Preparation was
+                      promoted. Votes submitted afterwards are ignored.
+                    format: date-time
+                    type: string
+                  submissionCount:
+                    description: |-
+                      submissionCount is the total number of Approvals for this Preparation,
+                      including superseded ones.
+                    format: int32
+                    type: integer
+                  votes:
+                    description: |-
+                      votes lists the latest vote of each approver. Once sealed, only these
+                      votes are considered.
+                    items:
+                      description: ApprovalVote is the latest vote of a single approver
+                        on a Preparation.
+                      properties:
+                        approvalName:
+                          description: approvalName is the name of the Approval carrying
+                            this vote.
+                          maxLength: 253
+                          type: string
+                        decision:
+                          description: decision is the verdict of the vote.
+                          enum:
+                          - Approve
+                          - Reject
+                          type: string
+                        issuer:
+                          description: issuer is the OIDC issuer of the approver.
+                          maxLength: 2048
+                          type: string
+                        result:
+                          description: result reports whether the vote counts towards
+                            the gate.
+                          enum:
+                          - Counted
+                          - NotEligible
+                          type: string
+                        subject:
+                          description: subject is the OIDC subject of the approver.
+                          maxLength: 255
+                          type: string
+                        submittedTime:
+                          description: submittedTime is when the vote was submitted.
+                          format: date-time
+                          type: string
+                        username:
+                          description: username is the human-readable name of the
+                            approver.
+                          maxLength: 253
+                          type: string
+                      required:
+                      - approvalName
+                      - decision
+                      - issuer
+                      - result
+                      - subject
+                      - submittedTime
+                      type: object
+                    maxItems: 64
+                    type: array
+                    x-kubernetes-list-type: atomic
+                type: object
               conditions:
                 description: conditions represent the current state of the Preparation
                   resource.
@@ -255,10 +395,17 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              observedGeneration:
+                description: observedGeneration is the most recent generation observed
+                  by the controller.
+                format: int64
+                type: integer
             type: object
         required:
         - spec
         type: object
+    selectableFields:
+    - jsonPath: .spec.orderName
     served: true
     storage: true
     subresources:

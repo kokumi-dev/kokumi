@@ -7,6 +7,7 @@ import Btn from '../shared/Btn'
 import PreparationList from '../preparation/PreparationList'
 import ManifestModal from '../preparation/ManifestModal'
 import DiffModal from '../preparation/DiffModal'
+import ApprovalModal from '../preparation/ApprovalModal'
 import CommitMessageModal from '../shared/CommitMessageModal'
 import styles from './OrderDetail.module.css'
 
@@ -43,6 +44,7 @@ type ModalState =
   | { kind: 'manifest'; prep: Preparation }
   | { kind: 'diff'; prep: Preparation; activePrep: Preparation }
   | { kind: 'commit'; edits: Patch[] }
+  | { kind: 'approvals'; prepName: string }
 
 /**
  * OrderDetail is a slide-in right panel that displays the full Order spec,
@@ -54,6 +56,8 @@ export default function OrderDetail({ order, editsAllowed, onClose, onEdit, onDe
   const [commitLoading, setCommitLoading] = useState(false)
 
   const activePrep = preparations.find((p) => p.isActive)
+  // Looked up live so SSE updates to the approval summary reach the open modal.
+  const approvalPrep = modal?.kind === 'approvals' ? preparations.find((p) => p.name === modal.prepName) : undefined
 
   async function handlePromote(prep: Preparation) {
     await promote(order.namespace, order.name, prep.name)
@@ -167,6 +171,14 @@ export default function OrderDetail({ order, editsAllowed, onClose, onEdit, onDe
               </span>
               <span className={styles.specKey}>Promotion</span>
               <span className={styles.specValue}>{order.mode}</span>
+              {order.approvals && (
+                <>
+                  <span className={styles.specKey}>Approvals</span>
+                  <span className={styles.specValue}>
+                    {order.approvals.requiredApprovals} required from {order.approvals.allowedGroups.join(', ')}
+                  </span>
+                </>
+              )}
               {order.render?.helm && (
                 <>
                   <span className={styles.specKey}>Renderer</span>
@@ -310,9 +322,11 @@ export default function OrderDetail({ order, editsAllowed, onClose, onEdit, onDe
             </span>
             <PreparationList
               preparations={preparations}
+              mode={order.mode}
               onPromote={handlePromote}
               onManifest={handleOpenManifest}
               onDiff={handleOpenDiff}
+              onApprovals={(prep) => setModal({ kind: 'approvals', prepName: prep.name })}
             />
           </div>
         </div>
@@ -341,6 +355,10 @@ export default function OrderDetail({ order, editsAllowed, onClose, onEdit, onDe
           onCommit={handleCommitEdits}
           loading={commitLoading}
         />
+      )}
+
+      {modal?.kind === 'approvals' && approvalPrep && (
+        <ApprovalModal preparation={approvalPrep} onClose={() => setModal(null)} />
       )}
     </>
   )

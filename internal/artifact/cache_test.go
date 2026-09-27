@@ -53,6 +53,10 @@ func (c *countingFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Refe
 	return nil
 }
 
+func (c *countingFakeClient) PushReferrer(_ context.Context, _ oci.Reference, _ oci.ReferrerArtifact) (string, error) {
+	return fakeDigest, nil
+}
+
 // pullInto runs a single pull via a fresh store and returns the number of
 // registry Pull calls that single operation made (0 = served from cache).
 func pullInto(t *testing.T, fs afero.Fs, cacheDir string, layout Layout) int {

@@ -18,7 +18,9 @@ rules:
   resources:
   - approvals
   verbs:
-  - '*'
+  - get
+  - list
+  - watch
 - apiGroups:
   - delivery.kokumi.dev
   resources:

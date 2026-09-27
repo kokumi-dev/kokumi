@@ -22,17 +22,20 @@ func NewKitchenUpdater(c client.Client) *KitchenUpdater {
 
 // Ready marks the Kitchen as valid and available for use.
 func (u *KitchenUpdater) Ready(ctx context.Context, kitchen *deliveryv1alpha1.Kitchen, msg string) error {
-	return u.set(ctx, kitchen, metav1.ConditionTrue, "Ready", msg)
+	return u.set(ctx, kitchen, func(latest *deliveryv1alpha1.Kitchen) {
+		latest.Status.ObservedGeneration = latest.Generation
+		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(latest.Generation, metav1.ConditionTrue, "Ready", msg))
+	})
 }
 
 // Failed marks the Kitchen as having a configuration error.
 func (u *KitchenUpdater) Failed(ctx context.Context, kitchen *deliveryv1alpha1.Kitchen, err error) error {
-	return u.set(ctx, kitchen, metav1.ConditionFalse, "Failed", err.Error())
+	return u.set(ctx, kitchen, func(latest *deliveryv1alpha1.Kitchen) {
+		latest.Status.ObservedGeneration = latest.Generation
+		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(latest.Generation, metav1.ConditionFalse, "Failed", err.Error()))
+	})
 }
 
-func (u *KitchenUpdater) set(ctx context.Context, kitchen *deliveryv1alpha1.Kitchen, condStatus metav1.ConditionStatus, reason, msg string) error {
-	return SetCondition(ctx, u.client, kitchen, func(latest *deliveryv1alpha1.Kitchen) {
-		latest.Status.ObservedGeneration = latest.Generation
-		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(latest.Generation, condStatus, reason, msg))
-	})
+func (u *KitchenUpdater) set(ctx context.Context, kitchen *deliveryv1alpha1.Kitchen, mutate func(*deliveryv1alpha1.Kitchen)) error {
+	return setCondition(ctx, u.client, kitchen, mutate)
 }

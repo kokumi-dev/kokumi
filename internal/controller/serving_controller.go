@@ -31,9 +31,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/approval"
 	"github.com/kokumi-dev/kokumi/internal/deployer"
+	"github.com/kokumi-dev/kokumi/internal/index"
 	"github.com/kokumi-dev/kokumi/internal/status"
 )
 
@@ -48,6 +51,8 @@ type ServingReconciler struct {
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=servings/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=servings/finalizers,verbs=update
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=preparations,verbs=get;list;watch
+// +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=orders,verbs=get;list;watch
+// +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=approvals,verbs=get;list;watch
 // +kubebuilder:rbac:groups=argoproj.io,resources=applications,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -90,7 +95,7 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 
 	statusUpdater := status.NewServingUpdater(r.Client)
 
-	preparationName, result, err := r.resolvePreparationName(ctx, serving, statusUpdater)
+	preparationName, result, err := r.resolveTarget(ctx, serving, statusUpdater)
 	if result != nil || err != nil {
 		return *result, err
 	}
@@ -102,6 +107,11 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 		if uerr := statusUpdater.Failed(ctx, serving, fmt.Errorf("preparation not found: %w", err)); uerr != nil {
 			logger.Error(uerr, "Failed to update Serving status")
 		}
+		return ctrl.Result{}, err
+	}
+
+	blocked, err := r.gate(ctx, serving, preparation, statusUpdater)
+	if blocked || err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -181,24 +191,55 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 	return ctrl.Result{}, nil
 }
 
-// resolvePreparationName determines the Preparation the Serving should
-// deploy. Under the Manual policy this is simply spec.preparationName. Under
-// the Automatic policy it is the newest Ready Preparation of the Serving's
-// Order.
-func (r *ServingReconciler) resolvePreparationName(ctx context.Context, serving *deliveryv1alpha1.Serving, statusUpdater *status.ServingUpdater) (string, *ctrl.Result, error) {
+// gate enforces the approval gate of the target Preparation for both
+// promotion modes. It returns true when deployment must not proceed; the
+// currently deployed Preparation is left untouched.
+func (r *ServingReconciler) gate(ctx context.Context, serving *deliveryv1alpha1.Serving, preparation *deliveryv1alpha1.Preparation, statusUpdater *status.ServingUpdater) (bool, error) {
+	approvals, err := index.ApprovalsForPreparation(ctx, r.Client, preparation)
+	if err != nil {
+		return true, fmt.Errorf("failed to list Approvals: %w", err)
+	}
+
+	gate := approval.Gate(preparation, approvals)
+	if gate.Blocked {
+		log.FromContext(ctx).V(4).Info("Approval gate blocks deployment", "preparation", preparation.Name, "reason", gate.Reason)
+	}
+	if err := statusUpdater.Gate(ctx, serving, preparation.Name, gate.Status, gate.Reason, gate.Message); err != nil {
+		return true, fmt.Errorf("failed to update Serving approval status: %w", err)
+	}
+	return gate.Blocked, nil
+}
+
+// resolveTarget determines the Preparation the Serving converges to. The
+// promotion mode is read from the Order: Manual uses spec.preparationName,
+// Automatic uses the newest Ready Preparation of the Order. The Serving spec
+// is never modified.
+func (r *ServingReconciler) resolveTarget(ctx context.Context, serving *deliveryv1alpha1.Serving, statusUpdater *status.ServingUpdater) (string, *ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	if serving.Spec.PreparationPolicy.Type != deliveryv1alpha1.PreparationPolicyAutomatic {
+	order := &deliveryv1alpha1.Order{}
+	if err := r.Get(ctx, client.ObjectKey{Namespace: serving.Namespace, Name: serving.Spec.OrderName}, order); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return "", &ctrl.Result{}, fmt.Errorf("failed to get Order: %w", err)
+		}
+		if uerr := statusUpdater.Pending(ctx, serving, fmt.Sprintf("Waiting for Order %q", serving.Spec.OrderName)); uerr != nil {
+			logger.Error(uerr, "Failed to update Serving status")
+		}
+		return "", &ctrl.Result{}, nil
+	}
+
+	if order.EffectivePromotionMode() != deliveryv1alpha1.PromotionModeAutomatic {
+		if serving.Spec.PreparationName == "" {
+			if uerr := statusUpdater.Pending(ctx, serving, "Waiting for a Preparation to be promoted"); uerr != nil {
+				logger.Error(uerr, "Failed to update Serving status")
+			}
+			return "", &ctrl.Result{}, nil
+		}
 		return serving.Spec.PreparationName, nil, nil
 	}
 
-	logger.Info("Automatic preparation policy, finding latest preparation", "order", serving.Spec.OrderName)
-
-	preparationList := &deliveryv1alpha1.PreparationList{}
-	if err := r.List(ctx, preparationList,
-		client.InNamespace(serving.Namespace),
-		client.MatchingLabels{deliveryv1alpha1.LabelOrder: serving.Spec.OrderName},
-	); err != nil {
+	preparations, err := index.PreparationsForOrder(ctx, r.Client, serving.Namespace, serving.Spec.OrderName)
+	if err != nil {
 		logger.Error(err, "Failed to list Preparations")
 		if uerr := statusUpdater.Failed(ctx, serving, fmt.Errorf("failed to list preparations: %w", err)); uerr != nil {
 			logger.Error(uerr, "Failed to update Serving status")
@@ -206,7 +247,7 @@ func (r *ServingReconciler) resolvePreparationName(ctx context.Context, serving 
 		return "", &ctrl.Result{}, err
 	}
 
-	if len(preparationList.Items) == 0 {
+	if len(preparations) == 0 {
 		logger.Info("No preparations found for order", "order", serving.Spec.OrderName)
 		if uerr := statusUpdater.Pending(ctx, serving, "Waiting for preparations"); uerr != nil {
 			logger.Error(uerr, "Failed to update Serving status")
@@ -216,8 +257,8 @@ func (r *ServingReconciler) resolvePreparationName(ctx context.Context, serving 
 	}
 
 	var latestPreparation *deliveryv1alpha1.Preparation
-	for i := range preparationList.Items {
-		prep := &preparationList.Items[i]
+	for i := range preparations {
+		prep := &preparations[i]
 		if !apimeta.IsStatusConditionTrue(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeReady) {
 			continue
 		}
@@ -237,15 +278,6 @@ func (r *ServingReconciler) resolvePreparationName(ctx context.Context, serving 
 
 	preparationName := latestPreparation.Name
 	logger.Info("Selected latest preparation", "preparation", preparationName)
-
-	if serving.Spec.PreparationName != preparationName {
-		serving.Spec.PreparationName = preparationName
-		if err := r.Update(ctx, serving); err != nil {
-			return "", &ctrl.Result{}, err
-		}
-		result := ctrl.Result{RequeueAfter: 0}
-		return "", &result, nil
-	}
 
 	return preparationName, nil, nil
 }
@@ -270,46 +302,29 @@ func (r *ServingReconciler) reconcileDelete(ctx context.Context, serving *delive
 	return ctrl.Result{}, nil
 }
 
-// enqueueServingForPreparation triggers reconciliation for Servings that
-// reference or are associated with the Preparation.
-func (r *ServingReconciler) enqueueServingForPreparation() handler.EventHandler {
-	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []ctrl.Request {
-		logger := log.FromContext(ctx)
-		preparation := obj.(*deliveryv1alpha1.Preparation)
-
-		servings := &deliveryv1alpha1.ServingList{}
-		if err := r.List(ctx, servings, client.InNamespace(preparation.Namespace)); err != nil {
-			logger.Error(err, "Failed to list Servings")
-			return []ctrl.Request{}
-		}
-
-		requests := []ctrl.Request{}
-		for _, serving := range servings.Items {
-			if serving.Spec.PreparationName == preparation.Name {
-				requests = append(requests, ctrl.Request{
-					Namespace: serving.Namespace,
-					Name:      serving.Name,
-				})
-			} else if serving.Spec.PreparationPolicy.Type == deliveryv1alpha1.PreparationPolicyAutomatic {
-				if preparation.Labels[deliveryv1alpha1.LabelOrder] == serving.Spec.OrderName {
-					requests = append(requests, ctrl.Request{
-						Namespace: serving.Namespace,
-						Name:      serving.Name,
-					})
-				}
-			}
-		}
-
-		logger.Info("Enqueuing Servings for preparation", "preparation", preparation.Name, "count", len(requests))
-		return requests
-	})
+// enqueueServingForOrderName maps an Order or Preparation to the Order's
+// Serving, which always carries the Order's name.
+func enqueueServingForOrderName(_ context.Context, obj client.Object) []ctrl.Request {
+	var orderName string
+	switch o := obj.(type) {
+	case *deliveryv1alpha1.Order:
+		orderName = o.Name
+	case *deliveryv1alpha1.Preparation:
+		orderName = o.Spec.OrderName
+	default:
+		return nil
+	}
+	return []ctrl.Request{{Namespace: obj.GetNamespace(), Name: orderName}}
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *ServingReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&deliveryv1alpha1.Serving{}).
-		Watches(&deliveryv1alpha1.Preparation{}, r.enqueueServingForPreparation()).
+		Watches(&deliveryv1alpha1.Preparation{}, handler.EnqueueRequestsFromMapFunc(enqueueServingForOrderName)).
+		Watches(&deliveryv1alpha1.Order{},
+			handler.EnqueueRequestsFromMapFunc(enqueueServingForOrderName),
+			builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(r.Deployer.WatchObject(),
 			handler.EnqueueRequestsFromMapFunc(r.Deployer.EnqueueRequests),
 			builder.WithPredicates(r.Deployer.WatchPredicate())).

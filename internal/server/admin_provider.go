@@ -40,12 +40,7 @@ func (p *adminProvider) Refresh(r *http.Request) (*Session, error) {
 	// Re-mint with the refresh token's full identity so an OIDC session
 	// stays an OIDC session (provider/email/groups preserved; it must not
 	// silently become an admin-identity session).
-	return p.issue(&Identity{
-		Subject:  claims.Subject,
-		Email:    claims.Email,
-		Groups:   claims.Groups,
-		Provider: claims.Provider,
-	})
+	return p.issue(claims)
 }
 
 // issue mints an access + refresh token pair for the given identity. When the

@@ -9,3 +9,5 @@ Dex runs as a sidecar in the kokumi-server pod. Issuer `http://localhost:5556` i
 | `admin@kokumi.dev` | `password` | `kokumi-admin` | `kokumi-admin` | Full |
 | `editor@kokumi.dev` | `password` | `kokumi-editor` | `kokumi-editor` | Write |
 | `viewer@kokumi.dev` | `password` | `kokumi-viewer` | `kokumi-viewer` | Read |
+| `approver1@kokumi.dev` | `password` | `kokumi-editor`, `release-approvers` | `kokumi-editor` | Write, eligible approver |
+| `approver2@kokumi.dev` | `password` | `kokumi-editor`, `release-approvers` | `kokumi-editor` | Write, eligible approver |

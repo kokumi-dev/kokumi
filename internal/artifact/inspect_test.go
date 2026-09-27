@@ -121,6 +121,10 @@ func (c *helmFakeClient) Resolve(_ context.Context, _ oci.Reference) (string, er
 	return fakeDigest, nil
 }
 
+func (c *helmFakeClient) PushReferrer(_ context.Context, _ oci.Reference, _ oci.ReferrerArtifact) (string, error) {
+	return "", nil
+}
+
 func (c *helmFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference) error {
 	return nil
 }
@@ -157,6 +161,10 @@ func (c *nestedFilesFakeClient) ListTags(_ context.Context, _ oci.Reference) ([]
 
 func (c *nestedFilesFakeClient) Resolve(_ context.Context, _ oci.Reference) (string, error) {
 	return fakeDigest, nil
+}
+
+func (c *nestedFilesFakeClient) PushReferrer(_ context.Context, _ oci.Reference, _ oci.ReferrerArtifact) (string, error) {
+	return "", nil
 }
 
 func (c *nestedFilesFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference) error {

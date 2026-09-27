@@ -87,6 +87,21 @@ func (imp *impersonator) authorizedFor(ctx context.Context, saName, verb, resour
 	}
 	imp.mu.Unlock()
 
+	allowed, err := imp.checkAccess(ctx, saName, verb, resource, namespace, "")
+	if err != nil {
+		return false, err
+	}
+
+	imp.mu.Lock()
+	imp.ssar[key] = ssarEntry{allowed: allowed, checkedAt: time.Now()}
+	imp.mu.Unlock()
+	return allowed, nil
+}
+
+// checkAccess performs an uncached SelfSubjectAccessReview as the
+// ServiceAccount for verb on the named object (empty name = any object).
+// Used where the answer itself is the authorization decision.
+func (imp *impersonator) checkAccess(ctx context.Context, saName, verb, resource, namespace, name string) (bool, error) {
 	c, err := imp.clientFor(saName)
 	if err != nil {
 		return false, err
@@ -98,18 +113,14 @@ func (imp *impersonator) authorizedFor(ctx context.Context, saName, verb, resour
 				Resource:  resource,
 				Verb:      verb,
 				Namespace: namespace,
+				Name:      name,
 			},
 		},
 	}
 	if err := c.Create(ctx, review); err != nil {
 		return false, fmt.Errorf("SelfSubjectAccessReview as %s: %w", saName, err)
 	}
-	allowed := review.Status.Allowed
-
-	imp.mu.Lock()
-	imp.ssar[key] = ssarEntry{allowed: allowed, checkedAt: time.Now()}
-	imp.mu.Unlock()
-	return allowed, nil
+	return review.Status.Allowed, nil
 }
 
 // errNotAuthorized is returned when no mapped ServiceAccount is permitted the

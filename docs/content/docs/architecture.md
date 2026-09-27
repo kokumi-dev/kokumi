@@ -42,7 +42,10 @@ Order ──▶ Preparation ─────────────────�
 
 Because the rendered artifact is stored independently:
 
-- **Approval gates** — set `spec.promotion.mode: Manual` to hold the
+- **Approval gates** — set `spec.promotion.approvals` to require votes from
+  named reviewers before a Preparation can be served, in both Manual and
+  Automatic mode. See [Approvals](#approvals).
+- **Manual promotion** — set `spec.promotion.mode: Manual` to hold the
   Serving until a human explicitly promotes the Preparation.
 - **Pre-flight validation** — inspect the full rendered manifest in the UI
   before it touches any cluster.
@@ -220,29 +223,89 @@ the chain is verifiable from the artifact alone:
 ### Serving
 
 A Serving tracks which Preparation is actively deployed. There is exactly one
-Serving per Order, and it is **managed automatically**, you never create one
-directly. A Serving is created or updated in three ways:
+Serving per Order, named after the Order, and it is **managed automatically**;
+you never create one directly. The promotion mode is always read from the
+Order's `spec.promotion.mode`:
 
-- **Auto-deploy** — set `spec.promotion.mode: Automatic` on the Order; Kokumi
-  updates the Serving automatically every time a new Preparation becomes `Ready`.
-- **Label promotion** — label a Preparation with
-  `delivery.kokumi.dev/approve-deploy: "true"`.
-- **UI** — click **Promote** on any Preparation in the Kokumi UI.
+- **Automatic** — Kokumi creates the Serving and always targets the newest
+  `Ready` Preparation of the Order (`status.targetPreparationName`).
+- **Manual** — click **Promote** on a Preparation in the Kokumi UI (or set the
+  Serving's `spec.preparationName`). Rolling back is promoting an older
+  Preparation.
 
 When a Serving is reconciled, the controller:
 
-1. Resolves the referenced Preparation and its immutable OCI artifact digest.
-2. Verifies the opt-in on any pre-existing Argo CD `Application` and
+1. Resolves the target Preparation and its immutable OCI artifact digest.
+2. Enforces the approval gate of the target Preparation. If it is not
+   approved, or its approvals are not sealed yet, the currently deployed
+   Preparation stays active and the Serving's `Approved` condition explains
+   why.
+3. Verifies the opt-in on any pre-existing Argo CD `Application` and
    transitions the Serving to `Deploying`, recording the preparation as the
    observed (active) one.
-3. Creates or updates the Argo CD `Application` in the `argocd` namespace,
+4. Creates or updates the Argo CD `Application` in the `argocd` namespace,
    pointing `spec.source.repoURL` at the Preparation's OCI artifact and
    `spec.source.targetRevision` at its exact digest.
-4. Keeps the `Deploying` status until the Application reports `Healthy` and
+5. Keeps the `Deploying` status until the Application reports `Healthy` and
    is synced to the desired revision, then transitions the Serving to
    `Deployed`. A degraded Application surfaces as `DeploymentFailed`.
 
 Rollback is promoting any previous Preparation. No re-rendering required.
+
+### Approvals
+
+An Order can require reviews before any of its Preparations is served,
+similar to required reviews on a pull request:
+
+```yaml
+spec:
+  promotion:
+    mode: Manual            # or Automatic
+    approvals:
+      requiredApprovals: 2
+      allowedGroups: [release-approvers]
+```
+
+- The policy is **copied into each Preparation** (`spec.approvalPolicy`) and
+  recorded on its OCI artifact. Changing the policy produces a new
+  Preparation that needs fresh approvals.
+- Reviewers vote in the UI with **Approve** or **Request changes**. Each vote
+  is an immutable `Approval` resource. Only the **latest vote per reviewer**
+  counts, only reviewers in one of `allowedGroups` are eligible, and a single
+  eligible "Request changes" blocks the Preparation.
+- Both promotion modes are gated. In Automatic mode the newest Preparation is
+  deployed as soon as it is approved; an older approved Preparation is never
+  deployed in its place. In Manual mode a human still has to press Promote.
+- When an approved Preparation is promoted, its votes are **sealed**: they are
+  locked in `status.approval` and pushed as an in-toto attestation
+  (`application/vnd.kokumi.approvals.v1+json`) that references the
+  Preparation's artifact as an OCI referrer. Votes submitted later are ignored.
+  List the attestation with `oras discover <artifact>`.
+
+#### Who may vote and how identity is protected
+
+- Votes are submitted **only through the kokumi server**, which takes the
+  reviewer's identity (OIDC issuer, subject, username, email, groups) from the
+  verified login session. The shared built-in admin account cannot vote.
+- Whether a user may vote at all is plain Kubernetes RBAC: the custom verb
+  `approve` on `preparations`, checked for the user's mapped ServiceAccount.
+- The `approval-integrity` ValidatingAdmissionPolicy accepts new Approvals
+  only from the `kokumi-server` ServiceAccount, rejects every update, and
+  rejects deletes except by the namespace controller. The `status-integrity`
+  policy lets only the kokumi controller write Approval, Preparation and
+  Serving status (the Serving's target Preparation triggers sealing).
+- Approvals are kept even when their Preparation or Order is deleted, so the
+  history stays visible:
+
+```bash
+kubectl get approvals --field-selector spec.orderName=shop
+kubectl get approvals --field-selector spec.preparationRef.name=shop-3f9a1c2d4e5f
+```
+
+The admission policies protect against everyone except cluster administrators
+who can change the policies themselves, impersonate the `kokumi-server`
+ServiceAccount, or write to etcd directly. Restrict those permissions and keep
+an audit policy on `approvals` and `admissionregistration.k8s.io` resources.
 
 ### Menu and Recipe lifecycle
 

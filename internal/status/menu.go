@@ -24,7 +24,7 @@ func NewMenuUpdater(c client.Client) *MenuUpdater {
 // configHash records the spec inputs that produced the published artifact;
 // pass an empty string when the source is resolved without rendering.
 func (u *MenuUpdater) Ready(ctx context.Context, menu *deliveryv1alpha1.Menu, configHash string, source *deliveryv1alpha1.MenuSourceStatus) error {
-	return SetCondition(ctx, u.client, menu, func(latest *deliveryv1alpha1.Menu) {
+	return u.set(ctx, menu, func(latest *deliveryv1alpha1.Menu) {
 		latest.Status.ObservedGeneration = latest.Generation
 		latest.Status.Source = source
 		latest.Status.ConfigHash = configHash
@@ -41,12 +41,12 @@ func (u *MenuUpdater) Ready(ctx context.Context, menu *deliveryv1alpha1.Menu, co
 
 // Failed marks the Menu as having a configuration error.
 func (u *MenuUpdater) Failed(ctx context.Context, menu *deliveryv1alpha1.Menu, err error) error {
-	return u.set(ctx, menu, metav1.ConditionFalse, "Failed", err.Error())
+	return u.set(ctx, menu, func(latest *deliveryv1alpha1.Menu) {
+		latest.Status.ObservedGeneration = latest.Generation
+		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(latest.Generation, metav1.ConditionFalse, "Failed", err.Error()))
+	})
 }
 
-func (u *MenuUpdater) set(ctx context.Context, menu *deliveryv1alpha1.Menu, condStatus metav1.ConditionStatus, reason, msg string) error {
-	return SetCondition(ctx, u.client, menu, func(latest *deliveryv1alpha1.Menu) {
-		latest.Status.ObservedGeneration = latest.Generation
-		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(latest.Generation, condStatus, reason, msg))
-	})
+func (u *MenuUpdater) set(ctx context.Context, menu *deliveryv1alpha1.Menu, mutate func(*deliveryv1alpha1.Menu)) error {
+	return setCondition(ctx, u.client, menu, mutate)
 }

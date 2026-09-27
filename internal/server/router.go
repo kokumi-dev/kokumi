@@ -60,6 +60,11 @@ func addRoutes(
 
 	// Preparations scoped to a Order
 	mux.HandleFunc("GET /api/v1/orders/{namespace}/{name}/preparations", handleListPreparations(deps))
+	mux.HandleFunc("GET /api/v1/orders/{namespace}/{name}/approvals", handleListOrderApprovals(deps))
+
+	// Approvals (votes) on a Preparation
+	mux.HandleFunc("GET /api/v1/preparations/{namespace}/{name}/approvals", handleListPreparationApprovals(deps))
+	mux.HandleFunc("POST /api/v1/preparations/{namespace}/{name}/approvals", handleSubmitApproval(deps))
 
 	// Promote / rollback a Preparation
 	mux.HandleFunc("POST /api/v1/orders/{namespace}/{name}/promote", handlePromote(deps))

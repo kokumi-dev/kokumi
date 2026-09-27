@@ -15,6 +15,10 @@ const FluxContentMediaType = "application/vnd.cncf.flux.content.v1.tar+gzip"
 // Its presence on a manifest makes the revision chain explicit and tamper-evident.
 const AnnotationParentDigest = "kokumi.dev/parent"
 
+// AnnotationApprovalPolicy is the OCI manifest annotation key that records the
+// JSON-encoded approval policy the artifact was rendered under.
+const AnnotationApprovalPolicy = "kokumi.dev/approval-policy"
+
 // Client defines the interface for interacting with an OCI registry.
 type Client interface {
 	// Pull fetches an OCI artifact from a registry into targetDir.
@@ -41,4 +45,8 @@ type Client interface {
 	// Copy copies the artifact at srcRef (in this client's registry) to dstRef
 	// (in target's registry), preserving the original manifest and media types.
 	Copy(ctx context.Context, target Client, srcRef, dstRef Reference) error
+
+	// PushReferrer pushes artifact as an OCI 1.1 referrer of the manifest at
+	// subject (which must carry a digest) and returns the referrer's digest.
+	PushReferrer(ctx context.Context, subject Reference, artifact ReferrerArtifact) (digest string, err error)
 }

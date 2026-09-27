@@ -86,7 +86,12 @@ func resolvePreviewSource(ctx context.Context, uc *userClient, src deliveryv1alp
 	if err != nil {
 		return deliveryv1alpha1.OCISource{}, nil, err
 	}
-	return credential.NewKubeResolver(reader).ResolveSource(ctx, src, ns)
+	url, ociClient, err := credential.NewKubeResolver(reader).ResolveSource(ctx, src, ns)
+	if err != nil {
+		return deliveryv1alpha1.OCISource{}, nil, err
+	}
+	src.OCI = url
+	return src, ociClient, nil
 }
 
 // handlePreviewOrderFiles handles POST /api/v1/orders/preview/files.

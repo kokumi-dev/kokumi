@@ -99,3 +99,31 @@
   font-size: 0.875rem;
   color: var(--color-text-muted-light);
 }
+
+.approvalPill {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 12px;
+  letter-spacing: 0.02em;
+}
+
+.approvalApproved {
+  background: rgba(52, 168, 83, 0.15);
+  color: #1e7e34;
+}
+
+.approvalPending {
+  background: rgba(251, 188, 5, 0.18);
+  color: #8a6100;
+}
+
+.approvalRejected {
+  background: rgba(234, 67, 53, 0.14);
+  color: #b3261e;
+}
+
+.error {
+  font-size: 0.75rem;
+  color: #b3261e;
+}

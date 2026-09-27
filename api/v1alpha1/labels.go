@@ -24,12 +24,6 @@ const (
 	// LabelVersion is the source version tag/digest used when the Preparation was built.
 	LabelVersion = "delivery.kokumi.dev/version"
 
-	// LabelAutoDeploy indicates whether automatic deployment is enabled.
-	LabelAutoDeploy = "delivery.kokumi.dev/auto-deploy"
-
-	// LabelApproveDeploy is set to "true" on a Preparation to trigger a manual serving deployment.
-	LabelApproveDeploy = "delivery.kokumi.dev/approve-deploy"
-
 	// LabelServing is the name of the Serving that owns an Argo CD Application.
 	LabelServing = "delivery.kokumi.dev/serving"
 

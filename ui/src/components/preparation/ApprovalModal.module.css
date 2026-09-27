@@ -1,0 +1,161 @@
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 4px 0;
+}
+
+.summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.summaryText {
+  font-size: 0.85rem;
+  color: var(--color-text-on-light);
+}
+
+.state {
+  align-self: flex-start;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 12px;
+  letter-spacing: 0.04em;
+}
+
+.stateApproved {
+  background: rgba(52, 168, 83, 0.15);
+  color: #1e7e34;
+}
+
+.statePending {
+  background: rgba(251, 188, 5, 0.18);
+  color: #8a6100;
+}
+
+.stateRejected {
+  background: rgba(234, 67, 53, 0.14);
+  color: #b3261e;
+}
+
+.sealed {
+  font-size: 0.8rem;
+  color: var(--color-text-muted-light);
+}
+
+.mono {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.72rem;
+  word-break: break-all;
+}
+
+.sectionTitle {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-muted-light);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.vote {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(49, 54, 56, 0.07);
+}
+
+.vote:last-child {
+  border-bottom: none;
+}
+
+.voteMuted {
+  opacity: 0.55;
+}
+
+.voteHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.approver {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--color-text-on-light);
+}
+
+.decision {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 12px;
+}
+
+.approve {
+  background: rgba(52, 168, 83, 0.15);
+  color: #1e7e34;
+}
+
+.reject {
+  background: rgba(234, 67, 53, 0.14);
+  color: #b3261e;
+}
+
+.time,
+.reason {
+  font-size: 0.75rem;
+  color: var(--color-text-muted-light);
+}
+
+.comment {
+  margin: 0;
+  font-size: 0.83rem;
+  color: var(--color-text-on-light);
+  white-space: pre-wrap;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.textarea {
+  padding: 8px 11px;
+  border-radius: 7px;
+  border: 1px solid rgba(49, 54, 56, 0.15);
+  background: var(--color-bg-main);
+  font-family: inherit;
+  font-size: 0.875rem;
+  color: var(--color-text-on-light);
+  outline: none;
+  resize: none;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.textarea:focus {
+  border-color: var(--color-accent);
+}
+
+.empty {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-text-muted-light);
+}
+
+.error {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #b3261e;
+}

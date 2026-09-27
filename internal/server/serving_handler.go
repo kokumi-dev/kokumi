@@ -6,13 +6,15 @@ import (
 	"net/http"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/approval"
+	"github.com/kokumi-dev/kokumi/internal/index"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // handlePromote handles POST /api/v1/orders/{namespace}/{name}/promote.
-// It upserts a Serving for the Order: if one already exists it patches
-// spec.preparation; otherwise a new Serving is created.
+// It points the Order's Serving at the requested Preparation (Manual
+// promotion only). Unapproved Preparations are rejected up front.
 func handlePromote(deps *apiDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if deps == nil {
@@ -49,23 +51,48 @@ func handlePromote(deps *apiDeps) http.HandlerFunc {
 			respondForbiddenOrError(w, err, "failed to get order")
 			return
 		}
-
-		// Find an existing Serving for this Order (same namespace, spec.order == orderName).
-		servingList := &deliveryv1alpha1.ServingList{}
-		if err := uc.list(r.Context(), servingList, client.InNamespace(namespace)); err != nil {
-			respondForbiddenOrError(w, err, "failed to list servings")
+		if order.EffectivePromotionMode() == deliveryv1alpha1.PromotionModeAutomatic {
+			respondError(w, http.StatusConflict, "order uses Automatic promotion; switch it to Manual to promote a specific preparation")
 			return
 		}
 
-		var existing *deliveryv1alpha1.Serving
-		for i := range servingList.Items {
-			if servingList.Items[i].Spec.OrderName == orderName {
-				existing = &servingList.Items[i]
-				break
+		prep := &deliveryv1alpha1.Preparation{}
+		if err := uc.get(r.Context(), types.NamespacedName{Namespace: namespace, Name: req.Preparation}, prep); err != nil {
+			if client.IgnoreNotFound(err) == nil {
+				respondError(w, http.StatusNotFound, fmt.Sprintf("preparation %s/%s not found", namespace, req.Preparation))
+				return
 			}
+			respondForbiddenOrError(w, err, "failed to get preparation")
+			return
+		}
+		if prep.Spec.OrderName != orderName {
+			respondError(w, http.StatusBadRequest, fmt.Sprintf("preparation %s does not belong to order %s", prep.Name, orderName))
+			return
 		}
 
-		if existing != nil {
+		// Early feedback only: the Serving controller enforces the gate.
+		approvals := &deliveryv1alpha1.ApprovalList{}
+		if err := uc.list(r.Context(), approvals,
+			client.InNamespace(namespace),
+			client.MatchingFields{index.FieldPreparationRefName: prep.Name},
+		); err != nil {
+			respondForbiddenOrError(w, err, "failed to list approvals")
+			return
+		}
+		if res := approval.Evaluate(prep, approvals.Items); !res.Approved {
+			respondError(w, http.StatusConflict, "preparation is not approved: "+res.Message)
+			return
+		}
+
+		// The Serving of an Order always carries the Order's name.
+		existing := &deliveryv1alpha1.Serving{}
+		err = uc.get(r.Context(), types.NamespacedName{Namespace: namespace, Name: orderName}, existing)
+		if err != nil && client.IgnoreNotFound(err) != nil {
+			respondForbiddenOrError(w, err, "failed to get serving")
+			return
+		}
+
+		if err == nil {
 			// Update the existing Serving's desired preparation.
 			existing.Spec.PreparationName = req.Preparation
 			if err := uc.update(r.Context(), existing, "servings"); err != nil {
@@ -86,12 +113,10 @@ func handlePromote(deps *apiDeps) http.HandlerFunc {
 		newServing := &deliveryv1alpha1.Serving{
 			Name:      orderName,
 			Namespace: namespace,
+			Labels:    map[string]string{deliveryv1alpha1.LabelOrder: orderName},
 			Spec: deliveryv1alpha1.ServingSpec{
 				OrderName:       orderName,
 				PreparationName: req.Preparation,
-				PreparationPolicy: deliveryv1alpha1.PreparationPolicy{
-					Type: deliveryv1alpha1.PreparationPolicyManual,
-				},
 			},
 		}
 

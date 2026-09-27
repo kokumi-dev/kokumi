@@ -35,6 +35,7 @@ import (
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/credential"
+	"github.com/kokumi-dev/kokumi/internal/index"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 )
 
@@ -494,4 +495,67 @@ var _ = Describe("Order Controller", func() {
 			Expect(listPreps()).To(HaveLen(3))
 		})
 	})
+
+	Context("When the Order has an approval policy", func() {
+		const orderName = "order-gated-auto"
+
+		ctx := context.Background()
+
+		It("snapshots the policy into the Preparation and creates the Automatic Serving", func() {
+			policy := &deliveryv1alpha1.ApprovalPolicy{RequiredApprovals: 2, AllowedGroups: []string{testApproverGroup}}
+			createTestOrder(ctx, orderName, deliveryv1alpha1.PromotionModeAutomatic, policy)
+			DeferCleanup(func() {
+				_ = k8sClient.DeleteAllOf(ctx, &deliveryv1alpha1.Preparation{},
+					client.InNamespace(testNamespace), client.MatchingFields{index.FieldOrderName: orderName})
+				order := &deliveryv1alpha1.Order{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: orderName}, order); err == nil {
+					order.SetFinalizers(nil)
+					_ = k8sClient.Update(ctx, order)
+					_ = k8sClient.Delete(ctx, order)
+				}
+				_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Serving{Name: orderName, Namespace: testNamespace})
+			})
+
+			fs := afero.NewMemMapFs()
+			r := &OrderReconciler{
+				Client:         k8sClient,
+				Scheme:         k8sClient.Scheme(),
+				Pipeline:       artifact.NewPipeline(artifact.NewStore(oci.NewFakeClient(fs), fs, "")),
+				PantryResolver: credential.NewKubeResolver(k8sClient),
+			}
+			_, err := r.Reconcile(ctx, reconcile.Request{Namespace: testNamespace, Name: orderName})
+			Expect(err).NotTo(HaveOccurred())
+
+			preps := &deliveryv1alpha1.PreparationList{}
+			Expect(k8sClient.List(ctx, preps, client.InNamespace(testNamespace),
+				client.MatchingFields{index.FieldOrderName: orderName})).To(Succeed())
+			Expect(preps.Items).To(HaveLen(1))
+			Expect(preps.Items[0].Spec.ApprovalPolicy).To(Equal(policy))
+			Expect(preps.Items[0].Labels).NotTo(HaveKey("delivery.kokumi.dev/auto-deploy"))
+
+			serving := &deliveryv1alpha1.Serving{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: orderName}, serving)).To(Succeed())
+			Expect(serving.Spec.OrderName).To(Equal(orderName))
+			Expect(serving.Spec.PreparationName).To(BeEmpty())
+		})
+	})
 })
+
+// createTestOrder creates an Order with the given promotion mode and optional
+// approval policy; an existing Order is left as is.
+func createTestOrder(ctx context.Context, name string, mode deliveryv1alpha1.PromotionMode, policy ...*deliveryv1alpha1.ApprovalPolicy) {
+	order := &deliveryv1alpha1.Order{
+		Name:      name,
+		Namespace: testNamespace,
+		Spec: deliveryv1alpha1.OrderSpec{
+			Source:    &deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion},
+			Promotion: &deliveryv1alpha1.PromotionSpec{Mode: mode},
+		},
+	}
+	if len(policy) > 0 {
+		order.Spec.Promotion.Approvals = policy[0]
+	}
+	if err := k8sClient.Create(ctx, order); err != nil && !errors.IsAlreadyExists(err) {
+		Expect(err).NotTo(HaveOccurred())
+	}
+}

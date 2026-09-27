@@ -259,6 +259,7 @@ func handleOIDCCallback(m *authManager) http.HandlerFunc {
 			respondError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		id.Issuer = idToken.Issuer
 		session, err := p.issueSession(id)
 		if err != nil {
 			log := logr.FromContextOrDiscard(r.Context())

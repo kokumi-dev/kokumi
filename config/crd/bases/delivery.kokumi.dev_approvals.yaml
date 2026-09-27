@@ -17,11 +17,25 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
+    - jsonPath: .spec.orderName
+      name: Order
+      priority: 1
+      type: string
     - jsonPath: .spec.preparationRef.name
       name: Preparation
       type: string
     - jsonPath: .spec.approver.username
       name: Approver
+      type: string
+    - jsonPath: .spec.decision
+      name: Decision
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Counted')].status
+      name: Counted
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Counted')].reason
+      name: Reason
+      priority: 1
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -52,63 +66,106 @@ spec:
             description: spec defines the desired state of Approval
             properties:
               approver:
-                description: |-
-                  approver is populated by admission from the authenticated request or by
-                  the server.
+                description: approver identifies who submitted this vote.
                 properties:
                   email:
-                    description: email is an optional email address.
+                    description: email is the verified email address of the approver.
+                    maxLength: 254
                     type: string
                   groups:
-                    description: groups contains the authenticated Kubernetes groups
-                      or verified OIDC groups.
+                    description: groups are the verified OIDC groups of the approver
+                      at submission time.
                     items:
+                      maxLength: 253
                       type: string
+                    maxItems: 64
                     type: array
                     x-kubernetes-list-type: set
-                  uid:
-                    description: uid is the authenticated Kubernetes user ID when
-                      available.
-                    type: string
-                  username:
-                    description: username is the authenticated users username.
+                  issuer:
+                    description: issuer is the OIDC issuer URL that authenticated
+                      the approver.
+                    maxLength: 2048
                     minLength: 1
                     type: string
+                  subject:
+                    description: |-
+                      subject is the OIDC subject (sub claim). Together with issuer it is the
+                      stable identity key: only the latest vote per issuer and subject counts.
+                    maxLength: 255
+                    minLength: 1
+                    type: string
+                  username:
+                    description: username is the human-readable name of the approver.
+                    maxLength: 253
+                    type: string
                 required:
-                - username
+                - issuer
+                - subject
                 type: object
+              comment:
+                description: comment is an optional review comment.
+                maxLength: 1024
+                type: string
               decision:
-                allOf:
-                - enum:
-                  - Approve
-                - enum:
-                  - Approve
-                default: Approve
-                description: decision is the verdict of this Approval.
+                description: decision is the verdict of this vote.
+                enum:
+                - Approve
+                - Reject
+                type: string
+              orderName:
+                description: orderName is the name of the Order the reviewed Preparation
+                  belongs to.
+                maxLength: 253
+                minLength: 1
                 type: string
               preparationRef:
-                description: preparationRef references a Preparation in the same namespace.
+                description: preparationRef references the reviewed Preparation.
                 properties:
-                  name:
-                    default: ""
-                    description: |-
-                      Name of the referent.
-                      This field is effectively required, but due to backwards compatibility is
-                      allowed to be empty. Instances of this type with an empty value here are
-                      almost certainly wrong.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                  artifactDigest:
+                    description: artifactDigest is the digest of the reviewed Preparation
+                      artifact.
+                    maxLength: 71
+                    pattern: ^sha256:[a-f0-9]{64}$
                     type: string
+                  name:
+                    description: name is the name of the Preparation in the same namespace.
+                    maxLength: 253
+                    minLength: 1
+                    type: string
+                  uid:
+                    description: |-
+                      uid is the UID of the Preparation. A recreated Preparation with the
+                      same name does not inherit votes.
+                    type: string
+                required:
+                - artifactDigest
+                - name
+                - uid
                 type: object
-                x-kubernetes-map-type: atomic
+              submittedTime:
+                description: |-
+                  submittedTime is when the kokumi server accepted the vote. It orders
+                  votes of the same approver submitted within the same second.
+                format: date-time
+                type: string
             required:
+            - approver
+            - decision
+            - orderName
             - preparationRef
+            - submittedTime
             type: object
+            x-kubernetes-validations:
+            - message: Approval spec is immutable
+              rule: self == oldSelf
           status:
             description: status defines the observed state of Approval
             properties:
               conditions:
-                description: conditions represent the current state of the Approval
-                  resource.
+                description: |-
+                  conditions represent the current state of the Approval resource.
+                  The Counted condition reports whether this vote contributes to the
+                  approval gate of its Preparation.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -167,10 +224,18 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              observedGeneration:
+                description: observedGeneration is the most recent generation observed
+                  by the controller.
+                format: int64
+                type: integer
             type: object
         required:
         - spec
         type: object
+    selectableFields:
+    - jsonPath: .spec.orderName
+    - jsonPath: .spec.preparationRef.name
     served: true
     storage: true
     subresources:

@@ -1,0 +1,53 @@
+---
+# Approvals are an append-only audit record. Only the kokumi server may
+# submit them (it fills the approver from the verified OIDC session), nobody
+# may change them, and only the namespace controller may remove them when the
+# whole namespace is deleted. The usernames assume the default install
+# (namespace "kokumi", name prefix "kokumi-").
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: approval-integrity
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["delivery.kokumi.dev"]
+      apiVersions: ["*"]
+      operations: ["CREATE", "UPDATE", "DELETE"]
+      resources: ["approvals"]
+  variables:
+  - name: serverSA
+    expression: "'system:serviceaccount:kokumi:kokumi-server'"
+  - name: namespaceController
+    expression: "'system:serviceaccount:kube-system:namespace-controller'"
+  validations:
+  - expression: "request.operation != 'CREATE' || request.userInfo.username == variables.serverSA"
+    message: "Approvals can only be submitted through the kokumi server"
+    reason: Forbidden
+  - expression: "request.operation != 'UPDATE'"
+    message: "Approvals are immutable"
+    reason: Forbidden
+  - expression: "request.operation != 'DELETE' || request.userInfo.username == variables.namespaceController"
+    message: "Approvals are append-only and cannot be deleted"
+    reason: Forbidden
+---
+# The approval gate state of Approvals and Preparations, and the promotion
+# target recorded on Servings (which triggers sealing), is owned by the kokumi
+# controller; nobody else may forge it.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: status-integrity
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["delivery.kokumi.dev"]
+      apiVersions: ["*"]
+      operations: ["UPDATE"]
+      resources: ["approvals/status", "preparations/status", "servings/status"]
+  validations:
+  - expression: "request.userInfo.username == 'system:serviceaccount:kokumi:kokumi-controller-manager'"
+    message: "Approval, Preparation and Serving status is owned by the kokumi controller"
+    reason: Forbidden

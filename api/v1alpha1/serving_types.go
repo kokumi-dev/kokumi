@@ -21,40 +21,17 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// PreparationPolicyType defines how updates to the Preparations are handled
-// +kubebuilder:validation:Enum=Automatic;Manual
-type PreparationPolicyType string
-
-const (
-	// PreparationPolicyAutomatic automatically deploys new preparations
-	PreparationPolicyAutomatic PreparationPolicyType = "Automatic"
-	// PreparationPolicyManual requires manual approval for preparation updates
-	PreparationPolicyManual PreparationPolicyType = "Manual"
-)
-
-// PreparationPolicy defines how updates to the Preparation artifact are handled
-// when a new version is available for deployment. It determines whether updates
-// are automatically deployed or require manual approval. By default, updates are manual.
-type PreparationPolicy struct {
-	// type specifies whether preparation updates are automatic or manual
-	// +kubebuilder:validation:Required
-	// +kubebuilder:default=Manual
-	Type PreparationPolicyType `json:"type"`
-}
-
-// ServingSpec defines the desired state of Serving
+// ServingSpec defines the desired state of Serving. The promotion mode is
+// taken from the Order's spec.promotion.mode.
 type ServingSpec struct {
 	// orderName is the name of the Order to serve
 	// +kubebuilder:validation:Required
 	OrderName string `json:"orderName"`
 
-	// preparationName is the name of the desired Preparation to serve
-	// +kubebuilder:validation:Required
-	PreparationName string `json:"preparationName"`
-
-	// preparationPolicy defines how preparation updates are handled
+	// preparationName is the Preparation promoted for Manual promotion.
+	// It is ignored when the Order uses Automatic promotion.
 	// +optional
-	PreparationPolicy PreparationPolicy `json:"preparationPolicy,omitempty"`
+	PreparationName string `json:"preparationName,omitempty"`
 }
 
 // ServingStatus defines the observed state of Serving.
@@ -62,6 +39,12 @@ type ServingStatus struct {
 	// observedGeneration is the most recent generation observed by the controller
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// targetPreparationName is the Preparation the Serving is converging to:
+	// spec.preparationName for Manual promotion, or the newest Ready
+	// Preparation of the Order for Automatic promotion.
+	// +optional
+	TargetPreparationName string `json:"targetPreparationName,omitempty"`
 
 	// observedPreparationName is the name of the Preparation that was last observed by the controller
 	// +optional
@@ -82,10 +65,11 @@ type ServingStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Order",type=string,JSONPath=`.spec.orderName`
-// +kubebuilder:printcolumn:name="Preparation",type=string,JSONPath=`.spec.preparationName`
+// +kubebuilder:printcolumn:name="Preparation",type=string,JSONPath=`.spec.preparationName`,priority=1
+// +kubebuilder:printcolumn:name="Target",type=string,JSONPath=`.status.targetPreparationName`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
 // +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].reason`
-// +kubebuilder:printcolumn:name="Policy",type=string,JSONPath=`.spec.preparationPolicy.type`,priority=1
+// +kubebuilder:printcolumn:name="Approved",type=string,JSONPath=`.status.conditions[?(@.type=='Approved')].reason`
 // +kubebuilder:printcolumn:name="Observed",type=string,JSONPath=`.status.observedPreparationName`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 

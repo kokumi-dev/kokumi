@@ -21,6 +21,10 @@ type Identity struct {
 	Groups []string
 	// Provider is "admin" or "oidc".
 	Provider string
+	// Issuer is the verified OIDC issuer URL; empty for admin logins.
+	Issuer string
+	// Username is the display name from the configured username claim.
+	Username string
 }
 
 // identityClaims extends the session JWT with identity fields used for
@@ -32,6 +36,8 @@ type identityClaims struct {
 	Email     string   `json:"email,omitempty"`
 	Groups    []string `json:"groups,omitempty"`
 	Provider  string   `json:"provider,omitempty"`
+	IDPIssuer string   `json:"idp_iss,omitempty"`
+	Username  string   `json:"name,omitempty"`
 }
 
 // identityContextKey is the context key for the resolved Identity.
@@ -70,12 +76,32 @@ func parseIdentityToken(a *authenticator, token string) (*Identity, error) {
 	if claims.Subject == "" {
 		return nil, fmt.Errorf("token missing subject")
 	}
+	return claims.identity(), nil
+}
+
+// identity returns the Identity carried by the session claims.
+func (c *identityClaims) identity() *Identity {
 	return &Identity{
-		Subject:  claims.Subject,
-		Email:    claims.Email,
-		Groups:   claims.Groups,
-		Provider: claims.Provider,
-	}, nil
+		Subject:  c.Subject,
+		Email:    c.Email,
+		Groups:   c.Groups,
+		Provider: c.Provider,
+		Issuer:   c.IDPIssuer,
+		Username: c.Username,
+	}
+}
+
+// newIdentityClaims builds session claims for id.
+func newIdentityClaims(registered jwt.RegisteredClaims, tokenType string, id *Identity) identityClaims {
+	return identityClaims{
+		RegisteredClaims: registered,
+		TokenType:        tokenType,
+		Email:            id.Email,
+		Groups:           id.Groups,
+		Provider:         id.Provider,
+		IDPIssuer:        id.Issuer,
+		Username:         id.Username,
+	}
 }
 
 // claimAtPath resolves a claim by name, supporting dotted paths for nested
@@ -112,6 +138,9 @@ func identityFromClaims(claims map[string]any, usernameClaim, emailClaim, groups
 		}
 	}
 	id := &Identity{Subject: sub, Provider: providerOIDC}
+	if username, err := extractClaim(claims, defaultString(usernameClaim, "email")); err == nil {
+		id.Username = username
+	}
 	if email, err := extractClaim(claims, emailClaim); err == nil {
 		id.Email = email
 	}

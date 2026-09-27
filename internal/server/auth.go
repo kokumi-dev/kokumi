@@ -178,13 +178,7 @@ func (a *authenticator) issueAccessTokenFor(now time.Time, id *Identity) (string
 		ExpiresAt: jwt.NewNumericDate(expires),
 		ID:        randomTokenID(),
 	}
-	claims := identityClaims{
-		RegisteredClaims: registered,
-		TokenType:        accessTokenType,
-		Email:            id.Email,
-		Groups:           id.Groups,
-		Provider:         id.Provider,
-	}
+	claims := newIdentityClaims(registered, accessTokenType, id)
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, err := token.SignedString(a.signingKey)
 	if err != nil {
@@ -208,13 +202,7 @@ func (a *authenticator) issueRefreshToken(now time.Time, id *Identity) (string, 
 		ExpiresAt: jwt.NewNumericDate(expires),
 		ID:        randomTokenID(),
 	}
-	claims := identityClaims{
-		RegisteredClaims: registered,
-		TokenType:        refreshTokenType,
-		Email:            id.Email,
-		Groups:           id.Groups,
-		Provider:         id.Provider,
-	}
+	claims := newIdentityClaims(registered, refreshTokenType, id)
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, err := token.SignedString(a.signingKey)
 	if err != nil {
@@ -244,12 +232,7 @@ func (a *authenticator) parseRefresh(tokenString string) (*Identity, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", errInvalidRefresh, err)
 	}
-	return &Identity{
-		Subject:  claims.Subject,
-		Email:    claims.Email,
-		Groups:   claims.Groups,
-		Provider: claims.Provider,
-	}, nil
+	return claims.identity(), nil
 }
 
 // parseTypedToken verifies signature, algorithm, issuer, expiry, and type;
