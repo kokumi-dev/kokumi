@@ -16,6 +16,12 @@ updates:
       interval: "daily"
     cooldown:
       default-days: 1
+  - package-ecosystem: "docker"
+    directory: "/config/registry"
+    schedule:
+      interval: "daily"
+    cooldown:
+      default-days: 1
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
