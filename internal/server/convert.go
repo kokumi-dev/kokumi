@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
@@ -128,7 +129,8 @@ func orderToDTO(r deliveryv1alpha1.Order, activePreparation string) OrderDTO {
 		Render:            renderToDTO(r.Spec.Render),
 		Patches:           patches,
 		Edits:             edits,
-		Mode:              string(r.Spec.Promotion.Mode),
+		Mode:              string(r.EffectivePromotionMode()),
+		Approvals:         approvalPolicyToDTO(r.ApprovalPolicy()),
 		State:             stateFromConditions(r.Status.Conditions),
 		LatestRevision:    r.Status.LatestPreparationName,
 		ActivePreparation: activePreparation,
@@ -255,10 +257,98 @@ func preparationToDTO(p deliveryv1alpha1.Preparation, isActive bool) Preparation
 			SourceLink: toSourceLinkDTO(scmlink.Build(p.Spec.GitSource.Repo, p.Spec.GitSource.Tag, p.Spec.GitSource.CommitHash)),
 		},
 		Conditions: conditionsToDTO(p.Status.Conditions),
+		Approval:   preparationApprovalToDTO(p),
 	}
 	if !p.CreationTimestamp.IsZero() {
 		t := p.CreationTimestamp.UTC()
 		dto.CreatedAt = &t
+	}
+	return dto
+}
+
+// approvalPolicyToDTO converts an ApprovalPolicy; nil stays nil.
+func approvalPolicyToDTO(p *deliveryv1alpha1.ApprovalPolicy) *ApprovalPolicyDTO {
+	if p == nil {
+		return nil
+	}
+	return &ApprovalPolicyDTO{RequiredApprovals: p.RequiredApprovals, AllowedGroups: p.AllowedGroups}
+}
+
+// approvalPolicyFromDTO converts a request policy; nil disables the gate.
+func approvalPolicyFromDTO(dto *ApprovalPolicyDTO) *deliveryv1alpha1.ApprovalPolicy {
+	if dto == nil {
+		return nil
+	}
+	return &deliveryv1alpha1.ApprovalPolicy{RequiredApprovals: dto.RequiredApprovals, AllowedGroups: dto.AllowedGroups}
+}
+
+// preparationApprovalToDTO summarizes the approval gate from the
+// controller-owned Preparation status.
+func preparationApprovalToDTO(p deliveryv1alpha1.Preparation) *PreparationApprovalDTO {
+	if p.Spec.ApprovalPolicy == nil {
+		return nil
+	}
+	dto := &PreparationApprovalDTO{
+		Policy:            *approvalPolicyToDTO(p.Spec.ApprovalPolicy),
+		State:             deliveryv1alpha1.ReasonAwaitingApprovals,
+		RequiredApprovals: p.Spec.ApprovalPolicy.RequiredApprovals,
+	}
+	if c := apimeta.FindStatusCondition(p.Status.Conditions, deliveryv1alpha1.ConditionTypeApproved); c != nil {
+		dto.Approved = c.Status == metav1.ConditionTrue
+		dto.State = c.Reason
+		dto.Message = c.Message
+	}
+	s := p.Status.Approval
+	if s == nil {
+		return dto
+	}
+	dto.ApprovedCount = s.ApprovedCount
+	dto.RejectedCount = s.RejectedCount
+	dto.IneligibleCount = s.IneligibleCount
+	dto.SubmissionCount = s.SubmissionCount
+	for _, v := range s.Votes {
+		dto.Votes = append(dto.Votes, ApprovalVoteDTO{
+			ApprovalName: v.ApprovalName,
+			Username:     v.Username,
+			Subject:      v.Subject,
+			Decision:     string(v.Decision),
+			Result:       string(v.Result),
+			SubmittedAt:  v.SubmittedTime.UTC(),
+		})
+	}
+	if s.SealedTime != nil {
+		t := s.SealedTime.UTC()
+		dto.SealedAt = &t
+	}
+	if s.Attestation != nil {
+		dto.Attestation = s.Attestation.OCIRef
+	}
+	return dto
+}
+
+// approvalToDTO converts an Approval CRD object into an ApprovalDTO.
+func approvalToDTO(a deliveryv1alpha1.Approval) ApprovalDTO {
+	dto := ApprovalDTO{
+		Name:           a.Name,
+		Namespace:      a.Namespace,
+		Order:          a.Spec.OrderName,
+		Preparation:    a.Spec.PreparationRef.Name,
+		ArtifactDigest: a.Spec.PreparationRef.ArtifactDigest,
+		Approver: ApproverDTO{
+			Issuer:   a.Spec.Approver.Issuer,
+			Subject:  a.Spec.Approver.Subject,
+			Username: a.Spec.Approver.Username,
+			Email:    a.Spec.Approver.Email,
+			Groups:   a.Spec.Approver.Groups,
+		},
+		Decision:    string(a.Spec.Decision),
+		Comment:     a.Spec.Comment,
+		SubmittedAt: a.Spec.SubmittedTime.UTC(),
+	}
+	if c := apimeta.FindStatusCondition(a.Status.Conditions, deliveryv1alpha1.ConditionTypeCounted); c != nil {
+		dto.Counted = c.Status == metav1.ConditionTrue
+		dto.Reason = c.Reason
+		dto.Message = c.Message
 	}
 	return dto
 }
@@ -389,9 +479,9 @@ func servingToDTO(s deliveryv1alpha1.Serving) ServingDTO {
 		Namespace:           s.Namespace,
 		Order:               s.Spec.OrderName,
 		DesiredPreparation:  s.Spec.PreparationName,
+		TargetPreparation:   s.Status.TargetPreparationName,
 		ObservedPreparation: s.Status.ObservedPreparationName,
 		DeployedDigest:      s.Status.DeployedDigest,
-		PreparationPolicy:   string(s.Spec.PreparationPolicy.Type),
 		State:               stateFromConditions(s.Status.Conditions),
 		Conditions:          conditionsToDTO(s.Status.Conditions),
 	}

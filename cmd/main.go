@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"os"
@@ -41,6 +42,7 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/controller"
 	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/deployer"
+	"github.com/kokumi-dev/kokumi/internal/index"
 	"github.com/kokumi-dev/kokumi/internal/namespace"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	// +kubebuilder:scaffold:imports
@@ -184,6 +186,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := index.Setup(context.Background(), mgr.GetFieldIndexer()); err != nil {
+		setupLog.Error(err, "Failed to set up field indexes")
+		os.Exit(1)
+	}
+
 	if err := (&controller.RecipeReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
@@ -192,8 +199,11 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.PreparationReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:         mgr.GetClient(),
+		Scheme:         mgr.GetScheme(),
+		APIReader:      mgr.GetAPIReader(),
+		OCIClient:      oci.NewORASClient(),
+		PantryResolver: credential.NewKubeResolver(mgr.GetClient()),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Preparation")
 		os.Exit(1)

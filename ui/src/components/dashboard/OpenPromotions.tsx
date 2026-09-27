@@ -29,6 +29,7 @@ export default function OpenPromotions() {
   const [manifestPrep, setManifestPrep] = useState<Preparation | null>(null)
   const [diffTarget, setDiffTarget] = useState<DiffTarget | null>(null)
   const [promotingKeys, setPromotingKeys] = useState<Set<string>>(new Set())
+  const [promoteErrors, setPromoteErrors] = useState<Map<string, string>>(new Map())
 
   if (orders === null || preparations === null) {
     return <p className={styles.loading}>Loading…</p>
@@ -78,8 +79,15 @@ export default function OpenPromotions() {
   async function handlePromote(order: PromotableOrder) {
     const key = `${order.namespace}/${order.name}`
     setPromotingKeys((prev) => new Set(prev).add(key))
+    setPromoteErrors((prev) => {
+      const next = new Map(prev)
+      next.delete(key)
+      return next
+    })
     try {
       await promote(order.namespace, order.name, order.latestRevision)
+    } catch (e) {
+      setPromoteErrors((prev) => new Map(prev).set(key, (e as Error).message))
     } finally {
       setPromotingKeys((prev) => {
         const next = new Set(prev)
@@ -114,6 +122,9 @@ export default function OpenPromotions() {
             const canDiff = !!activePrep && !!latestPrep
             const key = `${order.namespace}/${order.name}`
             const promoting = promotingKeys.has(key)
+            const promoteError = promoteErrors.get(key)
+            const approval = latestPrep?.approval
+            const blockedByApproval = !!approval && !approval.approved
 
             return (
               <tr key={key} className={pageStyles.tableRow}>
@@ -156,15 +167,19 @@ export default function OpenPromotions() {
                     >
                       Manifest
                     </Btn>
-                    <Btn
-                      variant="promote"
-                      size="sm"
-                      onClick={() => handlePromote(order)}
-                      disabled={promoting}
-                    >
-                      {promoting ? '…' : 'Promote'}
-                    </Btn>
+                    {order.mode === 'Manual' && (
+                      <Btn
+                        variant="promote"
+                        size="sm"
+                        onClick={() => handlePromote(order)}
+                        disabled={promoting || blockedByApproval}
+                        title={blockedByApproval ? approval?.message ?? 'Approval required' : undefined}
+                      >
+                        {promoting ? '…' : 'Promote'}
+                      </Btn>
+                    )}
                   </div>
+                  {promoteError && <span className={styles.error}>{promoteError}</span>}
                 </td>
               </tr>
             )

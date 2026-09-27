@@ -30,9 +30,13 @@ interface Props {
 
 // ── YAML serialisation helpers ────────────────────────────────────────────────
 
+function parseGroups(text: string): string[] {
+  return [...new Set(text.split(',').map((g) => g.trim()).filter(Boolean))]
+}
+
 function formToYaml(data: OrderFormData): string {
   const doc: Record<string, unknown> = {
-    promotion: { mode: data.mode },
+    promotion: data.approvals ? { mode: data.mode, approvals: data.approvals } : { mode: data.mode },
   }
   if (data.destination?.pantryRef?.name) {
     doc.destination = { pantryRef: { name: data.destination.pantryRef.name } }
@@ -73,9 +77,18 @@ function formToYaml(data: OrderFormData): string {
   return dump(doc, { lineWidth: 100 })
 }
 
+function assertKnownKeys(obj: Record<string, unknown> | undefined, allowed: string[], path: string) {
+  if (!obj) return
+  const unknown = Object.keys(obj).filter((k) => !allowed.includes(k))
+  if (unknown.length > 0) {
+    throw new Error(`unknown field ${unknown.map((k) => (path ? `${path}.${k}` : k)).join(', ')}`)
+  }
+}
+
 function yamlToPartialForm(text: string): Omit<OrderFormData, 'name' | 'namespace'> {
   const doc = load(text) as Record<string, unknown>
   if (!doc || typeof doc !== 'object') throw new Error('YAML must be a mapping')
+  assertKnownKeys(doc, ['source', 'destination', 'menuRef', 'render', 'patches', 'promotion'], '')
 
   const src = doc.source as Record<string, unknown> | undefined
   const dst = doc.destination as Record<string, unknown> | undefined
@@ -127,12 +140,34 @@ function yamlToPartialForm(text: string): Omit<OrderFormData, 'name' | 'namespac
     }
   }
 
+  const promotion = doc.promotion as Record<string, unknown> | undefined
+  const rawApprovals = promotion?.approvals as Record<string, unknown> | undefined
+  assertKnownKeys(promotion, ['mode', 'approvals'], 'promotion')
+  assertKnownKeys(rawApprovals, ['requiredApprovals', 'allowedGroups'], 'promotion.approvals')
+  if (promotion?.mode !== undefined && promotion.mode !== 'Manual' && promotion.mode !== 'Automatic') {
+    throw new Error('promotion.mode must be Manual or Automatic')
+  }
+  if (rawApprovals) {
+    const n = rawApprovals.requiredApprovals
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > 32) {
+      throw new Error('promotion.approvals.requiredApprovals must be an integer between 1 and 32')
+    }
+  }
+
   return {
     menuRef: rawMenuRef?.name ? { name: rawMenuRef.name } : undefined,
     source,
     destination,
     render,
-    mode: (doc.promotion as Record<string, unknown> | undefined)?.mode === 'Automatic' ? 'Automatic' : 'Manual',
+    mode: promotion?.mode === 'Automatic' ? 'Automatic' : 'Manual',
+    approvals: rawApprovals
+      ? {
+          requiredApprovals: rawApprovals.requiredApprovals as number,
+          allowedGroups: Array.isArray(rawApprovals.allowedGroups)
+            ? (rawApprovals.allowedGroups as unknown[]).map(String)
+            : [],
+        }
+      : undefined,
     edits: [],
     patches: rawPatches.map((p) => {
       const patch = p as Record<string, unknown>
@@ -379,8 +414,9 @@ export default function OrderFormModal({ order, menuRef, menu, menus, onClose, o
                 const partial = yamlToPartialForm(yamlText)
                 setFormData((prev) => ({ ...prev, ...partial }))
                 setYamlError(null)
-              } catch {
-                // keep current formData
+              } catch (e) {
+                setYamlError(e instanceof Error ? e.message : String(e))
+                return
               }
             }
             setTab('preview')
@@ -397,8 +433,9 @@ export default function OrderFormModal({ order, menuRef, menu, menus, onClose, o
                   const partial = yamlToPartialForm(yamlText)
                   setFormData((prev) => ({ ...prev, ...partial }))
                   setYamlError(null)
-                } catch {
-                  // keep current formData
+                } catch (e) {
+                  setYamlError(e instanceof Error ? e.message : String(e))
+                  return
                 }
               }
               setTab('diff')
@@ -489,6 +526,7 @@ function FormView({
   const [isDestOpen, setIsDestOpen] = useState(
     !!(formData.destination?.oci || formData.destination?.pantryRef?.name),
   )
+  const [groupsText, setGroupsText] = useState(formData.approvals?.allowedGroups.join(', ') ?? '')
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(
     !!(formData.render?.helm || (formData.patches?.length ?? 0) > 0),
   )
@@ -749,8 +787,56 @@ function FormView({
           checked={formData.mode === 'Automatic'}
           onChange={(e) => onFieldChange('mode', e.target.checked ? 'Automatic' : 'Manual')}
         />
-        Automatic promotion — promote newly created Preparations without approval
+        Automatic promotion — promote new Preparations as soon as they are ready and approved
       </label>
+
+      {/* Approval gate */}
+      <label className={styles.checkRow}>
+        <input
+          type="checkbox"
+          checked={!!formData.approvals}
+          onChange={(e) => {
+            onFieldChange('approvals', e.target.checked ? { requiredApprovals: 1, allowedGroups: [] } : undefined)
+            setGroupsText('')
+          }}
+        />
+        Require approvals — block promotion until enough eligible reviewers approve
+      </label>
+      {formData.approvals && (
+        <div className={styles.row2}>
+          <div className={styles.fieldGroup}>
+            <label className={styles.label}>Required approvals</label>
+            <input
+              className={styles.input}
+              type="number"
+              min={1}
+              max={32}
+              value={formData.approvals.requiredApprovals}
+              onChange={(e) =>
+                onFieldChange('approvals', {
+                  ...formData.approvals!,
+                  requiredApprovals: Math.max(1, Math.min(32, Number(e.target.value) || 1)),
+                })
+              }
+            />
+          </div>
+          <div className={styles.fieldGroup}>
+            <label className={styles.label}>Allowed groups</label>
+            <input
+              className={styles.input}
+              value={groupsText}
+              onChange={(e) => {
+                setGroupsText(e.target.value)
+                onFieldChange('approvals', {
+                  ...formData.approvals!,
+                  allowedGroups: parseGroups(e.target.value),
+                })
+              }}
+              placeholder="release-approvers, security"
+            />
+          </div>
+        </div>
+      )}
 
       {/* Advanced: Renderer + Patches (collapsible) */}
       <div>

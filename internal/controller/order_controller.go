@@ -30,8 +30,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/approval"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/credential"
+	"github.com/kokumi-dev/kokumi/internal/index"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/resolve"
 	"github.com/kokumi-dev/kokumi/internal/status"
@@ -40,9 +42,6 @@ import (
 const (
 	initialCommitMessage   = "Initial commit"
 	automatedCommitMessage = "Automatically generated"
-
-	orderSourcePantryRefIndex = "spec.source.pantryRef.name"
-	orderDestPantryRefIndex   = "spec.destination.pantryRef.name"
 )
 
 // OrderReconciler reconciles an Order object.
@@ -60,6 +59,7 @@ type OrderReconciler struct {
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=preparations/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=menus,verbs=get;list;watch
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=pantries,verbs=get;list;watch
+// +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=servings,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -108,6 +108,33 @@ func (r *OrderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	return r.reconcileRender(ctx, order, effective)
 }
 
+// ensureServing creates the Order's Serving under Automatic promotion so the
+// Serving controller can pick up new Preparations. It never changes an
+// existing Serving; the promotion mode is read from the Order directly.
+func (r *OrderReconciler) ensureServing(ctx context.Context, order *deliveryv1alpha1.Order) error {
+	if order.EffectivePromotionMode() != deliveryv1alpha1.PromotionModeAutomatic {
+		return nil
+	}
+
+	serving := &deliveryv1alpha1.Serving{}
+	err := r.Get(ctx, client.ObjectKey{Namespace: order.Namespace, Name: order.Name}, serving)
+	if err == nil || !apierrors.IsNotFound(err) {
+		return client.IgnoreNotFound(err)
+	}
+
+	serving = &deliveryv1alpha1.Serving{
+		Name:      order.Name,
+		Namespace: order.Namespace,
+		Labels:    map[string]string{deliveryv1alpha1.LabelOrder: order.Name},
+		Spec:      deliveryv1alpha1.ServingSpec{OrderName: order.Name},
+	}
+	if err := r.Create(ctx, serving); err != nil && !apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("failed to create Serving: %w", err)
+	}
+	log.FromContext(ctx).Info("Created Serving", "name", serving.Name)
+	return nil
+}
+
 // resolveEffectiveSpec computes the effective source, render, and patches.
 // For plain Orders (no menuRef), the Order's own fields are used directly.
 // For Menu-based Orders, the Menu's base config is merged with validated consumer overrides.
@@ -143,7 +170,7 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 
 	// Resolve Pantry references into plain OCI URLs before hashing so a live
 	// Pantry URL change is part of artifact identity.
-	resolvedSource, sourceClient, err := r.PantryResolver.ResolveSource(ctx, effective.Source, order.Namespace)
+	sourceURL, sourceClient, err := r.PantryResolver.ResolveSource(ctx, effective.Source, order.Namespace)
 	if err != nil {
 		if uerr := statusUpdater.Failed(ctx, order, fmt.Errorf("failed to resolve source Pantry: %w", err)); uerr != nil {
 			logger.Error(uerr, "Failed to update Order status")
@@ -151,7 +178,7 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 		return ctrl.Result{}, err
 	}
 
-	resolvedDest, destClient, err := r.PantryResolver.ResolveDestination(ctx, order.Spec.Destination, effectiveDest, order.Namespace, order.Namespace, order.Name)
+	resolvedDest, destClient, err := r.PantryResolver.ResolveDestination(ctx, order.Spec.Destination, effectiveDest, order.Namespace)
 	if err != nil {
 		if uerr := statusUpdater.Failed(ctx, order, fmt.Errorf("failed to resolve destination Pantry: %w", err)); uerr != nil {
 			logger.Error(uerr, "Failed to update Order status")
@@ -159,14 +186,14 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 		return ctrl.Result{}, err
 	}
 
-	specHash, err := resolve.CalculateSpecHash(order.Spec, resolvedSource.OCI, resolvedDest)
+	specHash, err := resolve.CalculateSpecHash(order.Spec, sourceURL, resolvedDest)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to calculate spec hash: %w", err)
 	}
 
 	if order.Status.LatestConfigHash == specHash && order.Status.LatestPreparationName != "" {
 		logger.Info("Configuration is up-to-date, skipping reconciliation")
-		return ctrl.Result{}, nil
+		return ctrl.Result{}, r.ensureServing(ctx, order)
 	}
 
 	if err := statusUpdater.Processing(ctx, order, specHash); err != nil {
@@ -183,18 +210,24 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 		return ctrl.Result{}, fmt.Errorf("failed to convert effective spec: %w", err)
 	}
 
+	extraAnnotations, err := approval.PolicyAnnotations(order.ApprovalPolicy())
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
 	result, err := r.Pipeline.Render(ctx, artifact.RenderRequest{
-		Source:       artifact.Source{OCI: resolvedSource.OCI, Version: spec.Source.Version},
-		SourceClient: sourceClient,
-		Destination:  artifact.Destination{OCI: resolvedDest},
-		DestClient:   destClient,
-		Render:       spec.Render,
-		Patches:      spec.Patches,
-		Edits:        spec.Edits,
-		Name:         order.Name,
-		Namespace:    order.Namespace,
-		Description:  commitMessage,
-		ParentDigest: parentDigest,
+		Source:           artifact.Source{OCI: sourceURL, Version: spec.Source.Version},
+		SourceClient:     sourceClient,
+		Destination:      artifact.Destination{OCI: resolvedDest},
+		DestClient:       destClient,
+		Render:           spec.Render,
+		Patches:          spec.Patches,
+		Edits:            spec.Edits,
+		Name:             order.Name,
+		Namespace:        order.Namespace,
+		Description:      commitMessage,
+		ParentDigest:     parentDigest,
+		ExtraAnnotations: extraAnnotations,
 	})
 	if err != nil {
 		logger.Error(err, "Failed to process Order")
@@ -218,6 +251,10 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 	logger.Info("Created Preparation", "revision", preparation.Name)
 
 	if err := statusUpdater.Ready(ctx, order, specHash, preparation.Name, result.DestRef.Digest, fmt.Sprintf("Successfully pushed to %s", result.DestRef)); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if err := r.ensureServing(ctx, order); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -298,9 +335,8 @@ func (r *OrderReconciler) createPreparation(
 		Name:      revisionName,
 		Namespace: order.Namespace,
 		Labels: map[string]string{
-			deliveryv1alpha1.LabelOrder:      order.Name,
-			deliveryv1alpha1.LabelVersion:    sourceRef.Tag,
-			deliveryv1alpha1.LabelAutoDeploy: string(order.Spec.Promotion.Mode),
+			deliveryv1alpha1.LabelOrder:   order.Name,
+			deliveryv1alpha1.LabelVersion: sourceRef.Tag,
 		},
 		Spec: deliveryv1alpha1.PreparationSpec{
 			OrderName: order.Name,
@@ -319,9 +355,10 @@ func (r *OrderReconciler) createPreparation(
 				Digest: destRef.Digest,
 				Signed: false,
 			},
-			CommitMessage: commitMessage,
-			ParentDigest:  parentDigest,
-			GitSource:     gitSource,
+			CommitMessage:  commitMessage,
+			ParentDigest:   parentDigest,
+			GitSource:      gitSource,
+			ApprovalPolicy: order.ApprovalPolicy().DeepCopy(),
 		},
 	}
 
@@ -336,45 +373,6 @@ func (r *OrderReconciler) createPreparation(
 	return preparation, nil
 }
 
-// SetupWithManager sets up the controller with the Manager.
-func (r *OrderReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	ctx := context.Background()
-	indexer := mgr.GetFieldIndexer()
-
-	if err := indexer.IndexField(ctx, &deliveryv1alpha1.Order{}, orderSourcePantryRefIndex, indexOrderSourcePantryRef); err != nil {
-		return err
-	}
-
-	if err := indexer.IndexField(ctx, &deliveryv1alpha1.Order{}, orderDestPantryRefIndex, indexOrderDestPantryRef); err != nil {
-		return err
-	}
-
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&deliveryv1alpha1.Order{}).
-		Owns(&deliveryv1alpha1.Preparation{}).
-		Watches(&deliveryv1alpha1.Pantry{}, r.enqueueOrdersForPantry()).
-		Named("order").
-		Complete(r)
-}
-
-func indexOrderSourcePantryRef(obj client.Object) []string {
-	order, ok := obj.(*deliveryv1alpha1.Order)
-	if !ok || order.Spec.Source == nil || order.Spec.Source.PantryRef == nil {
-		return nil
-	}
-
-	return []string{order.Spec.Source.PantryRef.Name}
-}
-
-func indexOrderDestPantryRef(obj client.Object) []string {
-	order, ok := obj.(*deliveryv1alpha1.Order)
-	if !ok || order.Spec.Destination == nil || order.Spec.Destination.PantryRef == nil {
-		return nil
-	}
-
-	return []string{order.Spec.Destination.PantryRef.Name}
-}
-
 func (r *OrderReconciler) enqueueOrdersForPantry() handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
 		pantry, ok := obj.(*deliveryv1alpha1.Pantry)
@@ -382,21 +380,25 @@ func (r *OrderReconciler) enqueueOrdersForPantry() handler.EventHandler {
 			return nil
 		}
 
-		var reqs []reconcile.Request
-		for _, field := range []string{orderSourcePantryRefIndex, orderDestPantryRefIndex} {
-			var list deliveryv1alpha1.OrderList
-			if err := r.List(ctx, &list, client.InNamespace(pantry.Namespace), client.MatchingFields{field: pantry.Name}); err != nil {
-				return nil
-			}
-
-			for _, order := range list.Items {
-				reqs = append(reqs, reconcile.Request{
-					Namespace: order.Namespace,
-					Name:      order.Name,
-				})
-			}
+		orders, err := index.OrdersForPantry(ctx, r.Client, pantry.Namespace, pantry.Name)
+		if err != nil {
+			return nil
 		}
 
+		reqs := make([]reconcile.Request, 0, len(orders))
+		for _, order := range orders {
+			reqs = append(reqs, reconcile.Request{Namespace: order.Namespace, Name: order.Name})
+		}
 		return reqs
 	})
+}
+
+// SetupWithManager sets up the controller with the Manager.
+func (r *OrderReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&deliveryv1alpha1.Order{}).
+		Owns(&deliveryv1alpha1.Preparation{}).
+		Watches(&deliveryv1alpha1.Pantry{}, r.enqueueOrdersForPantry()).
+		Named("order").
+		Complete(r)
 }

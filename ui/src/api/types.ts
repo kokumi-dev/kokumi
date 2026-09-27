@@ -68,11 +68,67 @@ export interface Order {
   patches?: Patch[]
   edits?: Patch[]
   mode: PromotionMode
+  approvals?: ApprovalPolicy
   state: string
   latestRevision?: string
   activePreparation?: string
   conditions?: Condition[]
   createdAt?: string
+}
+
+export interface ApprovalPolicy {
+  requiredApprovals: number
+  allowedGroups: string[]
+}
+
+export type ApprovalDecision = 'Approve' | 'Reject'
+
+export interface ApprovalVote {
+  approvalName: string
+  username?: string
+  subject: string
+  decision: ApprovalDecision
+  result: 'Counted' | 'NotEligible'
+  submittedAt: string
+}
+
+/** Approval gate summary; state is the reason of the Approved condition. */
+export interface PreparationApproval {
+  policy: ApprovalPolicy
+  approved: boolean
+  state: string
+  message?: string
+  requiredApprovals: number
+  approvedCount: number
+  rejectedCount: number
+  ineligibleCount: number
+  submissionCount: number
+  votes?: ApprovalVote[]
+  sealedAt?: string
+  attestation?: string
+}
+
+export interface Approver {
+  issuer: string
+  subject: string
+  username?: string
+  email?: string
+  groups?: string[]
+}
+
+export interface Approval {
+  name: string
+  namespace: string
+  order: string
+  preparation: string
+  artifactDigest: string
+  approver: Approver
+  decision: ApprovalDecision
+  comment?: string
+  submittedAt: string
+  counted: boolean
+  reason?: string
+  message?: string
 }
 
 export interface Artifact {
@@ -102,16 +158,17 @@ export interface Preparation {
     }
   }
   conditions?: Condition[]
+  approval?: PreparationApproval
 }
 
 export interface Serving {
   name: string
   namespace: string
   order: string
-  desiredPreparation: string
+  desiredPreparation?: string
+  targetPreparation?: string
   observedPreparation?: string
   deployedDigest?: string
-  preparationPolicy: string
   state: string
   conditions?: Condition[]
   createdAt?: string
@@ -232,6 +289,7 @@ export interface OrderFormData {
   patches: Patch[]
   edits: Patch[]
   mode: PromotionMode
+  approvals?: ApprovalPolicy
 }
 
 export const emptyOrderForm = (): OrderFormData => ({
@@ -277,6 +335,9 @@ export const orderToFormData = (r: Order): OrderFormData => ({
     set: { ...p.set },
   })),
   mode: r.mode,
+  approvals: r.approvals
+    ? { requiredApprovals: r.approvals.requiredApprovals, allowedGroups: [...r.approvals.allowedGroups] }
+    : undefined,
 })
 
 export interface MenuFormData {

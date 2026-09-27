@@ -5,6 +5,7 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // apiDeps groups the runtime dependencies used by HTTP handlers.
@@ -24,4 +25,9 @@ type apiDeps struct {
 	// saList returns the ServiceAccounts in the install namespace (from the
 	// informer cache) used to resolve identity -> ServiceAccount mappings.
 	saList func() []*corev1.ServiceAccount
+
+	// approvalWriter uses the server's own ServiceAccount. It is used only to
+	// submit Approvals (the admission policy accepts them from no other
+	// identity) and to read Approvals fresh from the API server.
+	approvalWriter client.Client
 }

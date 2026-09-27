@@ -94,9 +94,10 @@ func startK8sWatcher(
 	}
 
 	deps := &apiDeps{
-		ociClient: oci.NewORASClient(),
-		store:     artifact.NewStore(oci.NewORASClient(), afero.NewOsFs(), "/tmp/kokumi-pull-cache"),
-		logger:    logger,
+		ociClient:      oci.NewORASClient(),
+		store:          artifact.NewStore(oci.NewORASClient(), afero.NewOsFs(), "/tmp/kokumi-pull-cache"),
+		logger:         logger,
+		approvalWriter: writer,
 	}
 	deps.pipeline = artifact.NewPipeline(deps.store)
 

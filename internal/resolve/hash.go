@@ -30,21 +30,23 @@ func CalculateSpecHash(spec deliveryv1alpha1.OrderSpec, sourceOCI, destOCI strin
 	}
 
 	if err := encoder.Encode(struct {
-		OCI     string                   `yaml:"oci,omitempty"`
-		Version string                   `yaml:"version,omitempty"`
-		MenuRef string                   `yaml:"menuRef,omitempty"`
-		DestOCI string                   `yaml:"destOCI,omitempty"`
-		Render  *deliveryv1alpha1.Render `yaml:"render,omitempty"`
-		Patches []deliveryv1alpha1.Patch `yaml:"patches,omitempty"`
-		Edits   []deliveryv1alpha1.Patch `yaml:"edits,omitempty"`
+		OCI       string                           `yaml:"oci,omitempty"`
+		Version   string                           `yaml:"version,omitempty"`
+		MenuRef   string                           `yaml:"menuRef,omitempty"`
+		DestOCI   string                           `yaml:"destOCI,omitempty"`
+		Render    *deliveryv1alpha1.Render         `yaml:"render,omitempty"`
+		Patches   []deliveryv1alpha1.Patch         `yaml:"patches,omitempty"`
+		Edits     []deliveryv1alpha1.Patch         `yaml:"edits,omitempty"`
+		Approvals *deliveryv1alpha1.ApprovalPolicy `yaml:"approvals,omitempty"`
 	}{
-		OCI:     sourceOCI,
-		Version: version,
-		MenuRef: menuRef,
-		DestOCI: destOCI,
-		Render:  spec.Render,
-		Patches: spec.Patches,
-		Edits:   spec.Edits,
+		OCI:       sourceOCI,
+		Version:   version,
+		MenuRef:   menuRef,
+		DestOCI:   destOCI,
+		Render:    spec.Render,
+		Patches:   spec.Patches,
+		Edits:     spec.Edits,
+		Approvals: approvalPolicy(spec),
 	}); err != nil {
 		return "", fmt.Errorf("failed to encode spec for hashing: %w", err)
 	}
@@ -54,6 +56,13 @@ func CalculateSpecHash(spec deliveryv1alpha1.OrderSpec, sourceOCI, destOCI strin
 	hash := sha256.Sum256([]byte(builder.String()))
 
 	return fmt.Sprintf("sha256:%x", hash), nil
+}
+
+func approvalPolicy(spec deliveryv1alpha1.OrderSpec) *deliveryv1alpha1.ApprovalPolicy {
+	if spec.Promotion == nil {
+		return nil
+	}
+	return spec.Promotion.Approvals
 }
 
 // CalculateMenuHash computes a stable SHA-256 hash over the Menu spec inputs

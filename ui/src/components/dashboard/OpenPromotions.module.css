@@ -39,6 +39,14 @@
   color: var(--color-text-muted-light);
 }
 
+.error {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.75rem;
+  color: #b3261e;
+  text-align: right;
+}
+
 .hashChip {
   font-family: 'SF Mono', 'Fira Code', monospace;
   font-size: 0.72rem;

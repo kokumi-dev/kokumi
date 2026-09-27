@@ -1,0 +1,18 @@
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: approval-integrity
+spec:
+  policyName: approval-integrity
+  validationActions:
+  - Deny
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: status-integrity
+spec:
+  policyName: status-integrity
+  validationActions:
+  - Deny

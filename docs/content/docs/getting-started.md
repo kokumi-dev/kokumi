@@ -155,13 +155,16 @@ A **Serving** points Argo CD at the selected Preparation's immutable OCI artifac
 There is exactly one Serving per Order, and it is **created and managed
 automatically** — you never write a Serving manifest yourself.
 
-Three ways to activate or change a Serving:
+Two ways to activate or change a Serving:
 
 | Method | How |
 |---|---|
-| **Auto-deploy** | Set `spec.promotion.mode: Automatic` on the Order. Kokumi updates the Serving on every new Preparation |
-| **Label promotion** | Label a Preparation with `delivery.kokumi.dev/approve-deploy: "true"` |
-| **UI** | Click **Promote** on any Preparation in the Kokumi UI |
+| **Auto-deploy** | Set `spec.promotion.mode: Automatic` on the Order. Kokumi deploys every new Preparation once it is ready (and approved, if the Order requires approvals) |
+| **UI** | Set `spec.promotion.mode: Manual` and click **Promote** on any Preparation in the Kokumi UI |
+
+To require reviews before anything is deployed, add
+`spec.promotion.approvals` to the Order. Reviewers vote in the UI; see
+[Approvals](../architecture/#approvals).
 
 Once activated, Kokumi creates a matching Argo CD `Application` in the `argocd`
 namespace and Argo CD syncs the manifests into the cluster.

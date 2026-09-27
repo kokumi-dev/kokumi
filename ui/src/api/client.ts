@@ -1,5 +1,5 @@
 import { authHeaders, refresh } from './auth'
-import type { Order, Preparation, OrderFormData, Menu, MenuFormData, Patch, ChartInfo, Pantry, PantryFormData, ArtifactInfo, ArtifactFile } from './types'
+import type { Order, Preparation, OrderFormData, Menu, MenuFormData, Patch, ChartInfo, Pantry, PantryFormData, ArtifactInfo, ArtifactFile, Approval, ApprovalDecision } from './types'
 
 // All API calls are relative so they work both in dev (proxied by Vite) and
 // in production (served from the same Go binary).
@@ -204,6 +204,24 @@ export function getManifestFiles(
   return request<ArtifactFile[]>(
     `/preparations/${namespace}/${prepName}/manifest/files`,
   )
+}
+
+// ── Approvals ─────────────────────────────────────────────────────────────────
+
+export function listApprovals(namespace: string, prepName: string): Promise<Approval[]> {
+  return request<Approval[]>(`/preparations/${namespace}/${prepName}/approvals`)
+}
+
+export function submitApproval(
+  namespace: string,
+  prepName: string,
+  decision: ApprovalDecision,
+  comment?: string,
+): Promise<Approval> {
+  return request<Approval>(`/preparations/${namespace}/${prepName}/approvals`, {
+    method: 'POST',
+    body: JSON.stringify({ decision, comment: comment ?? '' }),
+  })
 }
 
 // ── Promote ───────────────────────────────────────────────────────────────────

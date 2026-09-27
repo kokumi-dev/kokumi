@@ -188,6 +188,7 @@ func TestIdentityFromClaims(t *testing.T) {
 				Email:    testEmail,
 				Groups:   []string{testGroup, testGroup2},
 				Provider: providerOIDC,
+				Username: testEmail,
 			},
 		},
 		{
@@ -200,6 +201,7 @@ func TestIdentityFromClaims(t *testing.T) {
 				Subject:  testEmail,
 				Email:    testEmail,
 				Provider: providerOIDC,
+				Username: testEmail,
 			},
 		},
 		{

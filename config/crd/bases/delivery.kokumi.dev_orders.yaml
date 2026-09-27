@@ -201,6 +201,8 @@ spec:
                       set, the Preparation is blocked from being served until enough
                       distinct approvers from the listed groups have approved it, in both
                       Automatic and Manual mode. When omitted, no approval gate applies.
+                      The policy is copied into each Preparation when it is created, so a
+                      change produces a new Preparation that needs fresh approvals.
                     properties:
                       allowedGroups:
                         description: allowedGroups lists the groups whose members

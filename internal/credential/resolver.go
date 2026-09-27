@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,9 +13,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-
-// Package credential resolves Pantry CRD references into OCI URLs and
-// authenticated clients.
 package credential
 
 import (
@@ -33,8 +30,16 @@ import (
 // PantryResolver resolves Pantry CRD references into plain OCI URLs and
 // optional authenticated clients.
 type PantryResolver interface {
-	ResolveSource(ctx context.Context, src deliveryv1alpha1.OCISource, defaultNamespace string) (deliveryv1alpha1.OCISource, oci.Client, error)
-	ResolveDestination(ctx context.Context, dest *deliveryv1alpha1.OCIDestination, defaultDest, defaultNamespace, orderNamespace, orderName string) (string, oci.Client, error)
+	// ResolveSource returns the effective source URL and an authenticated
+	// client for given source.
+	ResolveSource(ctx context.Context, src deliveryv1alpha1.OCISource, namespace string) (string, oci.Client, error)
+
+	// ResolveDestination returns the effective destination URL and an
+	// authenticated client for given destination.
+	ResolveDestination(ctx context.Context, dest *deliveryv1alpha1.OCIDestination, defaultURL, namespace string) (string, oci.Client, error)
+
+	// ClientForPantry returns an authenticated client for given pantry.
+	ClientForPantry(ctx context.Context, namespace, pantryName string) (oci.Client, error)
 }
 
 // KubeResolver resolves Pantry CRD references into OCI URLs and authenticated
@@ -50,33 +55,28 @@ func NewKubeResolver(r client.Reader) *KubeResolver {
 	return &KubeResolver{Reader: r}
 }
 
-// ResolveSource implements Resolver.
-func (kr *KubeResolver) ResolveSource(ctx context.Context, src deliveryv1alpha1.OCISource, defaultNamespace string) (deliveryv1alpha1.OCISource, oci.Client, error) {
+// ResolveSource implements PantryResolver.
+func (kr *KubeResolver) ResolveSource(ctx context.Context, src deliveryv1alpha1.OCISource, namespace string) (string, oci.Client, error) {
 	if src.PantryRef == nil {
-		return src, nil, nil
+		return src.OCI, nil, nil
 	}
 
-	ref := src.PantryRef
-
-	pantry, ociClient, err := kr.resolveForPantry(ctx, defaultNamespace, ref.Name)
+	pantry, ociClient, err := kr.resolveForPantry(ctx, namespace, src.PantryRef.Name)
 	if err != nil {
-		return deliveryv1alpha1.OCISource{}, nil, err
+		return "", nil, err
 	}
-
-	src.OCI = pantry.Spec.URL
-
-	return src, ociClient, nil
+	return pantry.Spec.URL, ociClient, nil
 }
 
-// ResolveDestination implements Resolver.
-func (kr *KubeResolver) ResolveDestination(ctx context.Context, dest *deliveryv1alpha1.OCIDestination, defaultDest, defaultNamespace, orderNamespace, orderName string) (string, oci.Client, error) {
+// ResolveDestination implements PantryResolver.
+func (kr *KubeResolver) ResolveDestination(ctx context.Context, dest *deliveryv1alpha1.OCIDestination, defaultURL, namespace string) (string, oci.Client, error) {
 	if dest == nil {
 		// No explicit destination — use in-cluster default.
-		return defaultDest, nil, nil
+		return defaultURL, nil, nil
 	}
 
 	if dest.PantryRef != nil {
-		pantry, ociClient, err := kr.resolveForPantry(ctx, defaultNamespace, dest.PantryRef.Name)
+		pantry, ociClient, err := kr.resolveForPantry(ctx, namespace, dest.PantryRef.Name)
 		if err != nil {
 			return "", nil, err
 		}
@@ -88,7 +88,7 @@ func (kr *KubeResolver) ResolveDestination(ctx context.Context, dest *deliveryv1
 	}
 
 	// Neither OCI nor PantryRef — use in-cluster default.
-	return defaultDest, nil, nil
+	return defaultURL, nil, nil
 }
 
 // ClientForPantry returns an authenticated OCI client for the named Pantry.

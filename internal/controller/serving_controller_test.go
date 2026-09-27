@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -31,7 +32,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/approval"
 	"github.com/kokumi-dev/kokumi/internal/deployer"
+	"github.com/kokumi-dev/kokumi/internal/index"
 )
 
 var argoAppGVK = schema.GroupVersionKind{
@@ -130,16 +133,19 @@ var _ = Describe("Serving Controller", func() {
 					Spec: deliveryv1alpha1.ServingSpec{
 						OrderName:       orderName,
 						PreparationName: preparationName,
-						PreparationPolicy: deliveryv1alpha1.PreparationPolicy{
-							Type: deliveryv1alpha1.PreparationPolicyManual,
-						},
 					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
+
+			By("creating the Manual Order the Serving belongs to")
+			createTestOrder(ctx, orderName, deliveryv1alpha1.PromotionModeManual)
 		})
 
 		AfterEach(func() {
+			By("Cleanup the Order")
+			_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Order{Name: orderName, Namespace: testNamespace})
+
 			By("Cleanup the Serving")
 			resource := &deliveryv1alpha1.Serving{}
 			if err := k8sClient.Get(ctx, typeNamespacedName, resource); err == nil {
@@ -434,6 +440,159 @@ var _ = Describe("Serving Controller", func() {
 
 			s := getServing()
 			Expect(apimeta.IsStatusConditionTrue(s.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)).To(BeTrue())
+		})
+	})
+
+	Context("When the target Preparation has an approval policy", func() {
+		const (
+			orderName         = "serving-gated"
+			prepOlder         = "serving-gated-p1"
+			prepNewer         = "serving-gated-p2"
+			digestOlder       = "sha256:8888888888888888888888888888888888888888888888888888888888888888"
+			digestNewer       = "sha256:9999999999999999999999999999999999999999999999999999999999999999"
+			digestAttestation = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		)
+		release := []string{testApproverGroup}
+		policy := &deliveryv1alpha1.ApprovalPolicy{RequiredApprovals: 1, AllowedGroups: release}
+		key := types.NamespacedName{Namespace: testNamespace, Name: orderName}
+
+		reconcileServing := func() {
+			r := &ServingReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Deployer: deployer.NewArgoCD(k8sClient)}
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+		}
+		getServing := func() *deliveryv1alpha1.Serving {
+			s := &deliveryv1alpha1.Serving{}
+			Expect(k8sClient.Get(ctx, key, s)).To(Succeed())
+			return s
+		}
+		approvedReason := func() string {
+			if c := apimeta.FindStatusCondition(getServing().Status.Conditions, deliveryv1alpha1.ConditionTypeApproved); c != nil {
+				return c.Reason
+			}
+			return ""
+		}
+		appExists := func() bool {
+			app := &unstructured.Unstructured{}
+			app.SetGroupVersionKind(argoAppGVK)
+			return k8sClient.Get(ctx, client.ObjectKey{Namespace: argoNamespace, Name: orderName}, app) == nil
+		}
+		readyPreparation := func(name, digest string) *deliveryv1alpha1.Preparation {
+			p := createTestPreparation(ctx, name, orderName, digest, policy)
+			apimeta.SetStatusCondition(&p.Status.Conditions, metav1.Condition{
+				Type: deliveryv1alpha1.ConditionTypeReady, Status: metav1.ConditionTrue, Reason: "Ready",
+			})
+			Expect(k8sClient.Status().Update(ctx, p)).To(Succeed())
+			return p
+		}
+		// sealPreparation stands in for the Preparation controller sealing and archiving the votes.
+		sealPreparation := func(p *deliveryv1alpha1.Preparation) {
+			approvals, err := index.ApprovalsForPreparation(ctx, k8sClient, p)
+			Expect(err).NotTo(HaveOccurred())
+			res := approval.Evaluate(p, approvals)
+			Expect(res.Approved).To(BeTrue())
+
+			sealedTime := approval.NewSealTime(time.Now())
+			p.Status.Approval = res.Status
+			p.Status.Approval.SealedTime = &sealedTime
+			p.Status.Approval.Attestation = &deliveryv1alpha1.ApprovalAttestation{
+				OCIRef: "oci://registry.kokumi.svc.cluster.local:5000/" + orderName + "@" + digestAttestation,
+				Digest: digestAttestation,
+			}
+			apimeta.SetStatusCondition(&p.Status.Conditions, metav1.Condition{
+				Type: deliveryv1alpha1.ConditionTypeApprovalsSealed, Status: metav1.ConditionTrue, Reason: deliveryv1alpha1.ReasonSealed,
+			})
+			Expect(k8sClient.Status().Update(ctx, p)).To(Succeed())
+		}
+
+		BeforeEach(func() {
+			ns := &unstructured.Unstructured{}
+			ns.SetGroupVersionKind(schema.GroupVersionKind{Version: "v1", Kind: "Namespace"})
+			ns.SetName(argoNamespace)
+			_ = k8sClient.Create(ctx, ns)
+
+			createTestOrder(ctx, orderName, deliveryv1alpha1.PromotionModeManual, policy)
+			DeferCleanup(func() {
+				deleteApprovalsOfOrder(ctx, orderName)
+				s := &deliveryv1alpha1.Serving{}
+				if err := k8sClient.Get(ctx, key, s); err == nil {
+					s.SetFinalizers(nil)
+					_ = k8sClient.Update(ctx, s)
+					_ = k8sClient.Delete(ctx, s)
+				}
+				for _, name := range []string{prepOlder, prepNewer} {
+					_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Preparation{Name: name, Namespace: testNamespace})
+				}
+				_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Order{Name: orderName, Namespace: testNamespace})
+				app := &unstructured.Unstructured{}
+				app.SetGroupVersionKind(argoAppGVK)
+				app.SetNamespace(argoNamespace)
+				app.SetName(orderName)
+				_ = k8sClient.Delete(ctx, app)
+			})
+		})
+
+		It("keeps a Manual promotion blocked until the Preparation is approved and sealed", func() {
+			p := readyPreparation(prepOlder, digestOlder)
+			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Serving{
+				Name:      orderName,
+				Namespace: testNamespace,
+				Spec:      deliveryv1alpha1.ServingSpec{OrderName: orderName, PreparationName: prepOlder},
+			})).To(Succeed())
+
+			reconcileServing()
+			Expect(getServing().Status.TargetPreparationName).To(Equal(prepOlder))
+			Expect(approvedReason()).To(Equal(deliveryv1alpha1.ReasonAwaitingApprovals))
+			Expect(appExists()).To(BeFalse(), "an unapproved Preparation must never be deployed")
+
+			createTestApproval(ctx, p, "alice", release, deliveryv1alpha1.ApprovalDecisionReject)
+			reconcileServing()
+			Expect(approvedReason()).To(Equal(deliveryv1alpha1.ReasonChangesRequested))
+			Expect(appExists()).To(BeFalse())
+
+			createTestApproval(ctx, p, "alice", release, deliveryv1alpha1.ApprovalDecisionApprove)
+			reconcileServing()
+			Expect(approvedReason()).To(Equal(deliveryv1alpha1.ReasonSealingApprovals))
+			Expect(appExists()).To(BeFalse(), "approvals must be sealed before deployment")
+
+			sealPreparation(p)
+			reconcileServing()
+			Expect(approvedReason()).To(Equal(deliveryv1alpha1.ReasonApproved))
+			Expect(appExists()).To(BeTrue())
+			Expect(getServing().Spec.PreparationName).To(Equal(prepOlder), "the controller never writes the Serving spec")
+		})
+
+		It("keeps Automatic promotion waiting on the newest Preparation", func() {
+			order := &deliveryv1alpha1.Order{}
+			Expect(k8sClient.Get(ctx, key, order)).To(Succeed())
+			order.Spec.Promotion.Mode = deliveryv1alpha1.PromotionModeAutomatic
+			Expect(k8sClient.Update(ctx, order)).To(Succeed())
+
+			older := readyPreparation(prepOlder, digestOlder)
+			createTestApproval(ctx, older, "alice", release, deliveryv1alpha1.ApprovalDecisionApprove)
+			sealPreparation(older)
+
+			// CreationTimestamp has second precision.
+			time.Sleep(1100 * time.Millisecond)
+			newer := readyPreparation(prepNewer, digestNewer)
+
+			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Serving{
+				Name:      orderName,
+				Namespace: testNamespace,
+				Spec:      deliveryv1alpha1.ServingSpec{OrderName: orderName},
+			})).To(Succeed())
+			reconcileServing()
+
+			s := getServing()
+			Expect(s.Spec.PreparationName).To(BeEmpty(), "the controller never writes the Serving spec")
+			Expect(s.Status.TargetPreparationName).To(Equal(prepNewer))
+			Expect(approvedReason()).To(Equal(deliveryv1alpha1.ReasonAwaitingApprovals))
+			Expect(appExists()).To(BeFalse(), "a superseded Preparation must not be deployed instead")
+
+			createTestApproval(ctx, newer, "alice", release, deliveryv1alpha1.ApprovalDecisionApprove)
+			sealPreparation(newer)
+			reconcileServing()
+			Expect(appExists()).To(BeTrue())
 		})
 	})
 })

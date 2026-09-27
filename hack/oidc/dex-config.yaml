@@ -46,6 +46,21 @@ data:
         userID: "0E05C386-E31C-4676-A3F3-F815DD19425F"
         groups:
         - kokumi-viewer
+      # Approvers for testing the approval gate (group release-approvers).
+      - email: "approver1@kokumi.dev"
+        hash: "$2b$10$i78nzTeaVMKBWDewsujJ6uxUiRVfdFnDUrKUrvrl2ZNQJimZl424W"
+        username: "approver1"
+        userID: "117FE7A0-4ADD-477D-AFAE-887087F2C794"
+        groups:
+        - kokumi-editor
+        - release-approvers
+      - email: "approver2@kokumi.dev"
+        hash: "$2b$10$i78nzTeaVMKBWDewsujJ6uxUiRVfdFnDUrKUrvrl2ZNQJimZl424W"
+        username: "approver2"
+        userID: "38A4FFA6-2B9A-4BE1-8B90-B8EF245A23A4"
+        groups:
+        - kokumi-editor
+        - release-approvers
 
     staticClients:
       - id: kokumi

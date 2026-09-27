@@ -97,7 +97,7 @@ func (r *MenuReconciler) reconcileMenu(ctx context.Context, menu *deliveryv1alph
 	}
 
 	if menu.Status.Source != nil && menu.Status.ConfigHash == configHash {
-		logger.V(4).Info("Menu config unchanged, skipping re-resolve", "name", menu.Name)
+		logger.Info("Menu config unchanged, skipping re-resolve", "name", menu.Name)
 		return ctrl.Result{}, nil
 	}
 
@@ -120,13 +120,13 @@ func (r *MenuReconciler) reconcileMenu(ctx context.Context, menu *deliveryv1alph
 
 // resolveSource resolves the Menu's consumable source
 func (r *MenuReconciler) resolveSource(ctx context.Context, menu *deliveryv1alpha1.Menu) (*deliveryv1alpha1.MenuSourceStatus, error) {
-	resolved, srcClient, err := r.PantryResolver.ResolveSource(ctx, menu.Spec.Source, menu.Namespace)
+	sourceURL, srcClient, err := r.PantryResolver.ResolveSource(ctx, menu.Spec.Source, menu.Namespace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve source Pantry: %w", err)
 	}
 
 	if menu.Spec.Vendor == nil {
-		return r.advertiseUpstream(ctx, menu, resolved, srcClient)
+		return r.advertiseUpstream(ctx, menu, sourceURL, srcClient)
 	}
 
 	destURL, destClient, err := r.resolveDestination(ctx, menu)
@@ -135,19 +135,19 @@ func (r *MenuReconciler) resolveSource(ctx context.Context, menu *deliveryv1alph
 	}
 
 	if effectiveVendorMode(menu) == deliveryv1alpha1.VendorModeRender {
-		return r.publishRendered(ctx, menu, resolved, srcClient, destURL, destClient)
+		return r.publishRendered(ctx, menu, sourceURL, srcClient, destURL, destClient)
 	}
 
-	return r.vendorCopy(ctx, menu, resolved, srcClient, destURL, destClient)
+	return r.vendorCopy(ctx, menu, sourceURL, srcClient, destURL, destClient)
 }
 
 // advertiseUpstream advertises the upstream source without vendoring,
 // resolving the current digest best-effort.
-func (r *MenuReconciler) advertiseUpstream(ctx context.Context, menu *deliveryv1alpha1.Menu, resolved deliveryv1alpha1.OCISource, srcClient oci.Client) (*deliveryv1alpha1.MenuSourceStatus, error) {
-	digest, _ := r.Store.ResolveDigest(ctx, artifact.Source{OCI: resolved.OCI, Version: menu.Spec.Source.Version}, srcClient)
+func (r *MenuReconciler) advertiseUpstream(ctx context.Context, menu *deliveryv1alpha1.Menu, sourceURL string, srcClient oci.Client) (*deliveryv1alpha1.MenuSourceStatus, error) {
+	digest, _ := r.Store.ResolveDigest(ctx, artifact.Source{OCI: sourceURL, Version: menu.Spec.Source.Version}, srcClient)
 
 	return &deliveryv1alpha1.MenuSourceStatus{
-		OCI:       resolved.OCI,
+		OCI:       sourceURL,
 		Version:   menu.Spec.Source.Version,
 		PantryRef: menu.Spec.Source.PantryRef,
 		Digest:    digest,
@@ -156,7 +156,7 @@ func (r *MenuReconciler) advertiseUpstream(ctx context.Context, menu *deliveryv1
 
 // publishRendered renders the Menu artifact per spec.render, applies the
 // Menu's patches, and pushes it to the destination with a prerendered marker.
-func (r *MenuReconciler) publishRendered(ctx context.Context, menu *deliveryv1alpha1.Menu, resolved deliveryv1alpha1.OCISource, srcClient oci.Client, destURL string, destClient oci.Client) (*deliveryv1alpha1.MenuSourceStatus, error) {
+func (r *MenuReconciler) publishRendered(ctx context.Context, menu *deliveryv1alpha1.Menu, sourceURL string, srcClient oci.Client, destURL string, destClient oci.Client) (*deliveryv1alpha1.MenuSourceStatus, error) {
 	if menu.Spec.Render == nil {
 		return nil, fmt.Errorf("vendor mode Render requires spec.render to be set")
 	}
@@ -167,7 +167,7 @@ func (r *MenuReconciler) publishRendered(ctx context.Context, menu *deliveryv1al
 	}
 
 	result, err := r.Pipeline.Render(ctx, artifact.RenderRequest{
-		Source:       artifact.Source{OCI: resolved.OCI, Version: menu.Spec.Source.Version},
+		Source:       artifact.Source{OCI: sourceURL, Version: menu.Spec.Source.Version},
 		SourceClient: srcClient,
 		Destination:  artifact.Destination{OCI: destURL},
 		DestClient:   destClient,
@@ -194,9 +194,9 @@ func (r *MenuReconciler) publishRendered(ctx context.Context, menu *deliveryv1al
 }
 
 // vendorCopy copies the upstream artifact to the destination registry unchanged.
-func (r *MenuReconciler) vendorCopy(ctx context.Context, menu *deliveryv1alpha1.Menu, resolved deliveryv1alpha1.OCISource, srcClient oci.Client, destURL string, destClient oci.Client) (*deliveryv1alpha1.MenuSourceStatus, error) {
+func (r *MenuReconciler) vendorCopy(ctx context.Context, menu *deliveryv1alpha1.Menu, sourceURL string, srcClient oci.Client, destURL string, destClient oci.Client) (*deliveryv1alpha1.MenuSourceStatus, error) {
 	digest, err := r.Store.Copy(ctx,
-		artifact.Source{OCI: resolved.OCI, Version: menu.Spec.Source.Version}, srcClient,
+		artifact.Source{OCI: sourceURL, Version: menu.Spec.Source.Version}, srcClient,
 		artifact.Destination{OCI: destURL}, destClient,
 	)
 	if err != nil {
@@ -213,21 +213,11 @@ func (r *MenuReconciler) vendorCopy(ctx context.Context, menu *deliveryv1alpha1.
 
 // resolveDestination resolves the vendor destination into a plain OCI URL and client.
 func (r *MenuReconciler) resolveDestination(ctx context.Context, menu *deliveryv1alpha1.Menu) (string, oci.Client, error) {
-	if menu.Spec.Vendor.Destination.PantryRef != nil {
-		resolved, c, err := r.PantryResolver.ResolveSource(ctx, deliveryv1alpha1.OCISource{
-			PantryRef: menu.Spec.Vendor.Destination.PantryRef,
-		}, menu.Namespace)
-		if err != nil {
-			return "", nil, err
-		}
-		return resolved.OCI, c, nil
+	dest := &deliveryv1alpha1.OCIDestination{
+		OCI:       menu.Spec.Vendor.Destination.OCI,
+		PantryRef: menu.Spec.Vendor.Destination.PantryRef,
 	}
-
-	if menu.Spec.Vendor.Destination.OCI != "" {
-		return menu.Spec.Vendor.Destination.OCI, nil, nil
-	}
-
-	return artifact.DefaultDestination(menu.Namespace, menu.Name), nil, nil
+	return r.PantryResolver.ResolveDestination(ctx, dest, artifact.DefaultDestination(menu.Namespace, menu.Name), menu.Namespace)
 }
 
 // effectiveVendorMode returns the Menu's vendor mode, defaulting to Render.

@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/index"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -29,27 +30,24 @@ func handleListPreparations(deps *apiDeps) http.HandlerFunc {
 		}
 
 		prepList := &deliveryv1alpha1.PreparationList{}
-		if err := uc.list(r.Context(), prepList, client.InNamespace(namespace)); err != nil {
+		if err := uc.list(r.Context(), prepList,
+			client.InNamespace(namespace),
+			client.MatchingFields{index.FieldOrderName: orderName},
+		); err != nil {
 			respondForbiddenOrError(w, err, "failed to list preparations")
 			return
 		}
 
-		// Client-side filter by order name.
-		filtered := prepList.Items[:0]
-		for _, p := range prepList.Items {
-			if p.Spec.OrderName == orderName {
-				filtered = append(filtered, p)
-			}
-		}
-		prepList.Items = filtered
-
-		servingList := &deliveryv1alpha1.ServingList{}
-		if err := uc.list(r.Context(), servingList, client.InNamespace(namespace)); err != nil {
-			respondForbiddenOrError(w, err, "failed to list servings")
+		var servings []deliveryv1alpha1.Serving
+		serving := &deliveryv1alpha1.Serving{}
+		if err := uc.get(r.Context(), types.NamespacedName{Namespace: namespace, Name: orderName}, serving); err == nil {
+			servings = append(servings, *serving)
+		} else if client.IgnoreNotFound(err) != nil {
+			respondForbiddenOrError(w, err, "failed to get serving")
 			return
 		}
 
-		respondJSON(w, http.StatusOK, enrichPreparations(prepList.Items, servingList.Items))
+		respondJSON(w, http.StatusOK, enrichPreparations(prepList.Items, servings))
 	}
 }
 

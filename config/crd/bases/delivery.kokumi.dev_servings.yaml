@@ -20,6 +20,10 @@ spec:
       type: string
     - jsonPath: .spec.preparationName
       name: Preparation
+      priority: 1
+      type: string
+    - jsonPath: .status.targetPreparationName
+      name: Target
       type: string
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
       name: Ready
@@ -27,9 +31,8 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Ready')].reason
       name: Reason
       type: string
-    - jsonPath: .spec.preparationPolicy.type
-      name: Policy
-      priority: 1
+    - jsonPath: .status.conditions[?(@.type=='Approved')].reason
+      name: Approved
       type: string
     - jsonPath: .status.observedPreparationName
       name: Observed
@@ -67,27 +70,12 @@ spec:
                 description: orderName is the name of the Order to serve
                 type: string
               preparationName:
-                description: preparationName is the name of the desired Preparation
-                  to serve
+                description: |-
+                  preparationName is the Preparation promoted for Manual promotion.
+                  It is ignored when the Order uses Automatic promotion.
                 type: string
-              preparationPolicy:
-                description: preparationPolicy defines how preparation updates are
-                  handled
-                properties:
-                  type:
-                    default: Manual
-                    description: type specifies whether preparation updates are automatic
-                      or manual
-                    enum:
-                    - Automatic
-                    - Manual
-                    type: string
-                required:
-                - type
-                type: object
             required:
             - orderName
-            - preparationName
             type: object
           status:
             description: status defines the observed state of Serving
@@ -166,6 +154,12 @@ spec:
               observedPreparationName:
                 description: observedPreparationName is the name of the Preparation
                   that was last observed by the controller
+                type: string
+              targetPreparationName:
+                description: |-
+                  targetPreparationName is the Preparation the Serving is converging to:
+                  spec.preparationName for Manual promotion, or the newest Ready
+                  Preparation of the Order for Automatic promotion.
                 type: string
             type: object
         required:

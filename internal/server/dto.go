@@ -89,22 +89,86 @@ type MenuRefDTO struct {
 // OrderDTO is the enriched view of a Order served to the UI.
 // ActivePreparation is derived from the linked Serving's status.observedPreparation.
 type OrderDTO struct {
-	Name                 string            `json:"name"`
-	Namespace            string            `json:"namespace"`
-	Labels               map[string]string `json:"labels,omitempty"`
-	Source               *OCISourceDTO     `json:"source,omitempty"`
-	MenuRef              *MenuRefDTO       `json:"menuRef,omitempty"`
-	Destination          OCIDestinationDTO `json:"destination"`
-	EffectiveDestination string            `json:"effectiveDestination,omitempty"`
-	Render               *RenderDTO        `json:"render,omitempty"`
-	Patches              []PatchDTO        `json:"patches,omitempty"`
-	Edits                []PatchDTO        `json:"edits,omitempty"`
-	Mode                 string            `json:"mode"`
-	State                string            `json:"state"`
-	LatestRevision       string            `json:"latestRevision,omitempty"`
-	ActivePreparation    string            `json:"activePreparation,omitempty"`
-	Conditions           []ConditionDTO    `json:"conditions,omitempty"`
-	CreatedAt            *time.Time        `json:"createdAt,omitempty"`
+	Name                 string             `json:"name"`
+	Namespace            string             `json:"namespace"`
+	Labels               map[string]string  `json:"labels,omitempty"`
+	Source               *OCISourceDTO      `json:"source,omitempty"`
+	MenuRef              *MenuRefDTO        `json:"menuRef,omitempty"`
+	Destination          OCIDestinationDTO  `json:"destination"`
+	EffectiveDestination string             `json:"effectiveDestination,omitempty"`
+	Render               *RenderDTO         `json:"render,omitempty"`
+	Patches              []PatchDTO         `json:"patches,omitempty"`
+	Edits                []PatchDTO         `json:"edits,omitempty"`
+	Mode                 string             `json:"mode"`
+	Approvals            *ApprovalPolicyDTO `json:"approvals,omitempty"`
+	State                string             `json:"state"`
+	LatestRevision       string             `json:"latestRevision,omitempty"`
+	ActivePreparation    string             `json:"activePreparation,omitempty"`
+	Conditions           []ConditionDTO     `json:"conditions,omitempty"`
+	CreatedAt            *time.Time         `json:"createdAt,omitempty"`
+}
+
+// ApprovalPolicyDTO is the data-transfer representation of an ApprovalPolicy.
+type ApprovalPolicyDTO struct {
+	RequiredApprovals int32    `json:"requiredApprovals"`
+	AllowedGroups     []string `json:"allowedGroups"`
+}
+
+// ApprovalVoteDTO is the latest vote of one approver on a Preparation.
+type ApprovalVoteDTO struct {
+	ApprovalName string    `json:"approvalName"`
+	Username     string    `json:"username,omitempty"`
+	Subject      string    `json:"subject"`
+	Decision     string    `json:"decision"`
+	Result       string    `json:"result"`
+	SubmittedAt  time.Time `json:"submittedAt"`
+}
+
+// PreparationApprovalDTO summarizes the approval gate of a Preparation.
+type PreparationApprovalDTO struct {
+	Policy            ApprovalPolicyDTO `json:"policy"`
+	Approved          bool              `json:"approved"`
+	State             string            `json:"state"`
+	Message           string            `json:"message,omitempty"`
+	RequiredApprovals int32             `json:"requiredApprovals"`
+	ApprovedCount     int32             `json:"approvedCount"`
+	RejectedCount     int32             `json:"rejectedCount"`
+	IneligibleCount   int32             `json:"ineligibleCount"`
+	SubmissionCount   int32             `json:"submissionCount"`
+	Votes             []ApprovalVoteDTO `json:"votes,omitempty"`
+	SealedAt          *time.Time        `json:"sealedAt,omitempty"`
+	Attestation       string            `json:"attestation,omitempty"`
+}
+
+// ApproverDTO identifies who submitted an Approval.
+type ApproverDTO struct {
+	Issuer   string   `json:"issuer"`
+	Subject  string   `json:"subject"`
+	Username string   `json:"username,omitempty"`
+	Email    string   `json:"email,omitempty"`
+	Groups   []string `json:"groups,omitempty"`
+}
+
+// ApprovalDTO is the view of a single Approval (vote) served to the UI.
+type ApprovalDTO struct {
+	Name           string      `json:"name"`
+	Namespace      string      `json:"namespace"`
+	Order          string      `json:"order"`
+	Preparation    string      `json:"preparation"`
+	ArtifactDigest string      `json:"artifactDigest"`
+	Approver       ApproverDTO `json:"approver"`
+	Decision       string      `json:"decision"`
+	Comment        string      `json:"comment,omitempty"`
+	SubmittedAt    time.Time   `json:"submittedAt"`
+	Counted        bool        `json:"counted"`
+	Reason         string      `json:"reason,omitempty"`
+	Message        string      `json:"message,omitempty"`
+}
+
+// SubmitApprovalRequest is the body for POST /api/v1/preparations/{namespace}/{name}/approvals.
+type SubmitApprovalRequest struct {
+	Decision string `json:"decision"`
+	Comment  string `json:"comment,omitempty"`
 }
 
 // ArtifactDTO is the data-transfer representation of an Artifact.
@@ -130,6 +194,8 @@ type PreparationDTO struct {
 	ParentDigest  string         `json:"parentDigest,omitempty"`
 	GitSource     GitSourceDTO   `json:"gitSource,omitempty"`
 	Conditions    []ConditionDTO `json:"conditions,omitempty"`
+	// Approval is set when the Preparation has an approval policy.
+	Approval *PreparationApprovalDTO `json:"approval,omitempty"`
 }
 
 // CreateOrderRequest is the body for POST /api/v1/orders.
@@ -143,6 +209,7 @@ type CreateOrderRequest struct {
 	Patches       []PatchDTO         `json:"patches,omitempty"`
 	Edits         []PatchDTO         `json:"edits,omitempty"`
 	Mode          string             `json:"mode"`
+	Approvals     *ApprovalPolicyDTO `json:"approvals,omitempty"`
 	CommitMessage *string            `json:"commitMessage,omitempty"`
 }
 
@@ -155,6 +222,7 @@ type UpdateOrderRequest struct {
 	Patches       []PatchDTO         `json:"patches,omitempty"`
 	Edits         []PatchDTO         `json:"edits,omitempty"`
 	Mode          string             `json:"mode"`
+	Approvals     *ApprovalPolicyDTO `json:"approvals,omitempty"`
 	CommitMessage *string            `json:"commitMessage,omitempty"`
 }
 
@@ -168,10 +236,10 @@ type ServingDTO struct {
 	Name                string         `json:"name"`
 	Namespace           string         `json:"namespace"`
 	Order               string         `json:"order"`
-	DesiredPreparation  string         `json:"desiredPreparation"`
+	DesiredPreparation  string         `json:"desiredPreparation,omitempty"`
+	TargetPreparation   string         `json:"targetPreparation,omitempty"`
 	ObservedPreparation string         `json:"observedPreparation,omitempty"`
 	DeployedDigest      string         `json:"deployedDigest,omitempty"`
-	PreparationPolicy   string         `json:"preparationPolicy"`
 	State               string         `json:"state"`
 	Conditions          []ConditionDTO `json:"conditions,omitempty"`
 	CreatedAt           *time.Time     `json:"createdAt,omitempty"`

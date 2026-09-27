@@ -22,12 +22,15 @@ func NewOrderUpdater(c client.Client) *OrderUpdater {
 
 // Processing marks the Order as actively being processed.
 func (u *OrderUpdater) Processing(ctx context.Context, order *deliveryv1alpha1.Order, configHash string) error {
-	return u.set(ctx, order, metav1.ConditionUnknown, "Processing", configHash, "Processing component configuration")
+	return u.set(ctx, order, func(latest *deliveryv1alpha1.Order) {
+		latest.Status.LatestConfigHash = configHash
+		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(latest.Generation, metav1.ConditionUnknown, "Processing", "Processing component configuration"))
+	})
 }
 
 // Ready marks the Order as successfully reconciled.
 func (u *OrderUpdater) Ready(ctx context.Context, order *deliveryv1alpha1.Order, configHash, preparationName, artifactDigest, msg string) error {
-	return SetCondition(ctx, u.client, order, func(latest *deliveryv1alpha1.Order) {
+	return u.set(ctx, order, func(latest *deliveryv1alpha1.Order) {
 		latest.Status.ObservedGeneration = latest.Generation
 		latest.Status.LatestConfigHash = configHash
 		latest.Status.LatestPreparationName = preparationName
@@ -38,15 +41,12 @@ func (u *OrderUpdater) Ready(ctx context.Context, order *deliveryv1alpha1.Order,
 
 // Failed marks the Order as failed with the supplied error as the message.
 func (u *OrderUpdater) Failed(ctx context.Context, order *deliveryv1alpha1.Order, err error) error {
-	return u.set(ctx, order, metav1.ConditionFalse, "ProcessingFailed", "", err.Error())
+	return u.set(ctx, order, func(latest *deliveryv1alpha1.Order) {
+		latest.Status.LatestConfigHash = ""
+		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(latest.Generation, metav1.ConditionFalse, "ProcessingFailed", err.Error()))
+	})
 }
 
-func (u *OrderUpdater) set(ctx context.Context, order *deliveryv1alpha1.Order, condStatus metav1.ConditionStatus, reason, configHash, msg string) error {
-	return SetCondition(ctx, u.client, order, func(latest *deliveryv1alpha1.Order) {
-		if condStatus != metav1.ConditionUnknown {
-			latest.Status.ObservedGeneration = latest.Generation
-		}
-		latest.Status.LatestConfigHash = configHash
-		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(latest.Generation, condStatus, reason, msg))
-	})
+func (u *OrderUpdater) set(ctx context.Context, order *deliveryv1alpha1.Order, mutate func(*deliveryv1alpha1.Order)) error {
+	return setCondition(ctx, u.client, order, mutate)
 }

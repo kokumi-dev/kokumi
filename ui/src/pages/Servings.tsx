@@ -89,9 +89,9 @@ export default function Servings() {
                   <th>Name</th>
                   <th>Namespace</th>
                   <th>Order</th>
-                  <th>Desired Prep</th>
+                  <th>Target Prep</th>
                   <th>Observed Prep</th>
-                  <th>Policy</th>
+                  <th>Approval</th>
                   <th>Created</th>
                   <th>Argo CD</th>
                 </tr>
@@ -114,12 +114,16 @@ export default function Servings() {
                       <td>{s.namespace}</td>
                       <td>{s.order}</td>
                       <td>
-                        <span
-                          className={`${styles.mono} ${styles.truncate}`}
-                          title={s.desiredPreparation}
-                        >
-                          {s.desiredPreparation.slice(0, 12)}
-                        </span>
+                        {(() => {
+                          const target = s.targetPreparation || s.desiredPreparation
+                          return target ? (
+                            <span className={`${styles.mono} ${styles.truncate}`} title={target}>
+                              {target.slice(0, 12)}
+                            </span>
+                          ) : (
+                            <span style={{ color: 'var(--color-text-muted-light)' }}>—</span>
+                          )
+                        })()}
                       </td>
                       <td>
                         {s.observedPreparation ? (
@@ -134,7 +138,14 @@ export default function Servings() {
                         )}
                       </td>
                       <td>
-                        <span className={styles.policyPill}>{s.preparationPolicy}</span>
+                        {(() => {
+                          const gate = s.conditions?.find((c) => c.type === 'Approved')
+                          return (
+                            <span className={styles.policyPill} title={gate?.message}>
+                              {gate?.reason ?? '—'}
+                            </span>
+                          )
+                        })()}
                       </td>
                       <td style={{ whiteSpace: 'nowrap' }}>{formatDate(s.createdAt)}</td>
                       <td>

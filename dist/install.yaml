@@ -25,11 +25,25 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
+    - jsonPath: .spec.orderName
+      name: Order
+      priority: 1
+      type: string
     - jsonPath: .spec.preparationRef.name
       name: Preparation
       type: string
     - jsonPath: .spec.approver.username
       name: Approver
+      type: string
+    - jsonPath: .spec.decision
+      name: Decision
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Counted')].status
+      name: Counted
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Counted')].reason
+      name: Reason
+      priority: 1
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -60,63 +74,106 @@ spec:
             description: spec defines the desired state of Approval
             properties:
               approver:
-                description: |-
-                  approver is populated by admission from the authenticated request or by
-                  the server.
+                description: approver identifies who submitted this vote.
                 properties:
                   email:
-                    description: email is an optional email address.
+                    description: email is the verified email address of the approver.
+                    maxLength: 254
                     type: string
                   groups:
-                    description: groups contains the authenticated Kubernetes groups
-                      or verified OIDC groups.
+                    description: groups are the verified OIDC groups of the approver
+                      at submission time.
                     items:
+                      maxLength: 253
                       type: string
+                    maxItems: 64
                     type: array
                     x-kubernetes-list-type: set
-                  uid:
-                    description: uid is the authenticated Kubernetes user ID when
-                      available.
-                    type: string
-                  username:
-                    description: username is the authenticated users username.
+                  issuer:
+                    description: issuer is the OIDC issuer URL that authenticated
+                      the approver.
+                    maxLength: 2048
                     minLength: 1
                     type: string
+                  subject:
+                    description: |-
+                      subject is the OIDC subject (sub claim). Together with issuer it is the
+                      stable identity key: only the latest vote per issuer and subject counts.
+                    maxLength: 255
+                    minLength: 1
+                    type: string
+                  username:
+                    description: username is the human-readable name of the approver.
+                    maxLength: 253
+                    type: string
                 required:
-                - username
+                - issuer
+                - subject
                 type: object
+              comment:
+                description: comment is an optional review comment.
+                maxLength: 1024
+                type: string
               decision:
-                allOf:
-                - enum:
-                  - Approve
-                - enum:
-                  - Approve
-                default: Approve
-                description: decision is the verdict of this Approval.
+                description: decision is the verdict of this vote.
+                enum:
+                - Approve
+                - Reject
+                type: string
+              orderName:
+                description: orderName is the name of the Order the reviewed Preparation
+                  belongs to.
+                maxLength: 253
+                minLength: 1
                 type: string
               preparationRef:
-                description: preparationRef references a Preparation in the same namespace.
+                description: preparationRef references the reviewed Preparation.
                 properties:
-                  name:
-                    default: ""
-                    description: |-
-                      Name of the referent.
-                      This field is effectively required, but due to backwards compatibility is
-                      allowed to be empty. Instances of this type with an empty value here are
-                      almost certainly wrong.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                  artifactDigest:
+                    description: artifactDigest is the digest of the reviewed Preparation
+                      artifact.
+                    maxLength: 71
+                    pattern: ^sha256:[a-f0-9]{64}$
                     type: string
+                  name:
+                    description: name is the name of the Preparation in the same namespace.
+                    maxLength: 253
+                    minLength: 1
+                    type: string
+                  uid:
+                    description: |-
+                      uid is the UID of the Preparation. A recreated Preparation with the
+                      same name does not inherit votes.
+                    type: string
+                required:
+                - artifactDigest
+                - name
+                - uid
                 type: object
-                x-kubernetes-map-type: atomic
+              submittedTime:
+                description: |-
+                  submittedTime is when the kokumi server accepted the vote. It orders
+                  votes of the same approver submitted within the same second.
+                format: date-time
+                type: string
             required:
+            - approver
+            - decision
+            - orderName
             - preparationRef
+            - submittedTime
             type: object
+            x-kubernetes-validations:
+            - message: Approval spec is immutable
+              rule: self == oldSelf
           status:
             description: status defines the observed state of Approval
             properties:
               conditions:
-                description: conditions represent the current state of the Approval
-                  resource.
+                description: |-
+                  conditions represent the current state of the Approval resource.
+                  The Counted condition reports whether this vote contributes to the
+                  approval gate of its Preparation.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -175,10 +232,18 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              observedGeneration:
+                description: observedGeneration is the most recent generation observed
+                  by the controller.
+                format: int64
+                type: integer
             type: object
         required:
         - spec
         type: object
+    selectableFields:
+    - jsonPath: .spec.orderName
+    - jsonPath: .spec.preparationRef.name
     served: true
     storage: true
     subresources:
@@ -1177,6 +1242,8 @@ spec:
                       set, the Preparation is blocked from being served until enough
                       distinct approvers from the listed groups have approved it, in both
                       Automatic and Manual mode. When omitted, no approval gate applies.
+                      The policy is copied into each Preparation when it is created, so a
+                      change produces a new Preparation that needs fresh approvals.
                     properties:
                       allowedGroups:
                         description: allowedGroups lists the groups whose members
@@ -1587,6 +1654,9 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Ready')].reason
       name: Reason
       type: string
+    - jsonPath: .status.conditions[?(@.type=='Approved')].reason
+      name: Approved
+      type: string
     - jsonPath: .spec.artifact.digest
       name: Digest
       priority: 1
@@ -1623,6 +1693,33 @@ spec:
           spec:
             description: spec defines the desired state of Preparation
             properties:
+              approvalPolicy:
+                description: |-
+                  approvalPolicy is the approval gate copied from the Order when this
+                  Preparation was created. When set, the Preparation is only served once
+                  the policy is satisfied. It is also recorded on the OCI artifact.
+                properties:
+                  allowedGroups:
+                    description: allowedGroups lists the groups whose members are
+                      eligible to approve.
+                    items:
+                      maxLength: 253
+                      type: string
+                    maxItems: 16
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-type: set
+                  requiredApprovals:
+                    description: requiredApprovals is the minimum number of distinct
+                      eligible approvers.
+                    format: int32
+                    maximum: 32
+                    minimum: 1
+                    type: integer
+                required:
+                - allowedGroups
+                - requiredApprovals
+                type: object
               artifact:
                 description: artifact defines the output artifact information
                 properties:
@@ -1755,6 +1852,116 @@ spec:
           status:
             description: status defines the observed state of Preparation
             properties:
+              approval:
+                description: |-
+                  approval aggregates the Approvals of this Preparation. Only set when
+                  spec.approvalPolicy is set.
+                properties:
+                  approvedCount:
+                    description: approvedCount is the number of eligible approvers
+                      whose latest vote is Approve.
+                    format: int32
+                    type: integer
+                  attestation:
+                    description: attestation references the OCI artifact recording
+                      the sealed votes.
+                    properties:
+                      digest:
+                        description: digest is the manifest digest of the attestation.
+                        maxLength: 71
+                        pattern: ^sha256:[a-f0-9]{64}$
+                        type: string
+                      ociRef:
+                        description: ociRef is the full OCI reference of the attestation
+                          including digest.
+                        maxLength: 2048
+                        type: string
+                    required:
+                    - digest
+                    - ociRef
+                    type: object
+                  ineligibleCount:
+                    description: ineligibleCount is the number of approvers not in
+                      any allowed group.
+                    format: int32
+                    type: integer
+                  rejectedCount:
+                    description: rejectedCount is the number of eligible approvers
+                      whose latest vote is Reject.
+                    format: int32
+                    type: integer
+                  requiredApprovals:
+                    description: requiredApprovals is the number of approvals required
+                      by the policy.
+                    format: int32
+                    type: integer
+                  sealedTime:
+                    description: |-
+                      sealedTime is when the votes were locked because the Preparation was
+                      promoted. Votes submitted afterwards are ignored.
+                    format: date-time
+                    type: string
+                  submissionCount:
+                    description: |-
+                      submissionCount is the total number of Approvals for this Preparation,
+                      including superseded ones.
+                    format: int32
+                    type: integer
+                  votes:
+                    description: |-
+                      votes lists the latest vote of each approver. Once sealed, only these
+                      votes are considered.
+                    items:
+                      description: ApprovalVote is the latest vote of a single approver
+                        on a Preparation.
+                      properties:
+                        approvalName:
+                          description: approvalName is the name of the Approval carrying
+                            this vote.
+                          maxLength: 253
+                          type: string
+                        decision:
+                          description: decision is the verdict of the vote.
+                          enum:
+                          - Approve
+                          - Reject
+                          type: string
+                        issuer:
+                          description: issuer is the OIDC issuer of the approver.
+                          maxLength: 2048
+                          type: string
+                        result:
+                          description: result reports whether the vote counts towards
+                            the gate.
+                          enum:
+                          - Counted
+                          - NotEligible
+                          type: string
+                        subject:
+                          description: subject is the OIDC subject of the approver.
+                          maxLength: 255
+                          type: string
+                        submittedTime:
+                          description: submittedTime is when the vote was submitted.
+                          format: date-time
+                          type: string
+                        username:
+                          description: username is the human-readable name of the
+                            approver.
+                          maxLength: 253
+                          type: string
+                      required:
+                      - approvalName
+                      - decision
+                      - issuer
+                      - result
+                      - subject
+                      - submittedTime
+                      type: object
+                    maxItems: 64
+                    type: array
+                    x-kubernetes-list-type: atomic
+                type: object
               conditions:
                 description: conditions represent the current state of the Preparation
                   resource.
@@ -1816,10 +2023,17 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              observedGeneration:
+                description: observedGeneration is the most recent generation observed
+                  by the controller.
+                format: int64
+                type: integer
             type: object
         required:
         - spec
         type: object
+    selectableFields:
+    - jsonPath: .spec.orderName
     served: true
     storage: true
     subresources:
@@ -1972,6 +2186,10 @@ spec:
       type: string
     - jsonPath: .spec.preparationName
       name: Preparation
+      priority: 1
+      type: string
+    - jsonPath: .status.targetPreparationName
+      name: Target
       type: string
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
       name: Ready
@@ -1979,9 +2197,8 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Ready')].reason
       name: Reason
       type: string
-    - jsonPath: .spec.preparationPolicy.type
-      name: Policy
-      priority: 1
+    - jsonPath: .status.conditions[?(@.type=='Approved')].reason
+      name: Approved
       type: string
     - jsonPath: .status.observedPreparationName
       name: Observed
@@ -2019,27 +2236,12 @@ spec:
                 description: orderName is the name of the Order to serve
                 type: string
               preparationName:
-                description: preparationName is the name of the desired Preparation
-                  to serve
+                description: |-
+                  preparationName is the Preparation promoted for Manual promotion.
+                  It is ignored when the Order uses Automatic promotion.
                 type: string
-              preparationPolicy:
-                description: preparationPolicy defines how preparation updates are
-                  handled
-                properties:
-                  type:
-                    default: Manual
-                    description: type specifies whether preparation updates are automatic
-                      or manual
-                    enum:
-                    - Automatic
-                    - Manual
-                    type: string
-                required:
-                - type
-                type: object
             required:
             - orderName
-            - preparationName
             type: object
           status:
             description: status defines the observed state of Serving
@@ -2118,6 +2320,12 @@ spec:
               observedPreparationName:
                 description: observedPreparationName is the name of the Preparation
                   that was last observed by the controller
+                type: string
+              targetPreparationName:
+                description: |-
+                  targetPreparationName is the Preparation the Serving is converging to:
+                  spec.preparationName for Manual promotion, or the newest Ready
+                  Preparation of the Order for Automatic promotion.
                 type: string
             type: object
         required:
@@ -2272,7 +2480,9 @@ rules:
   resources:
   - approvals
   verbs:
-  - '*'
+  - get
+  - list
+  - watch
 - apiGroups:
   - delivery.kokumi.dev
   resources:
@@ -2293,12 +2503,8 @@ rules:
   resources:
   - approvals
   verbs:
-  - create
-  - delete
   - get
   - list
-  - patch
-  - update
   - watch
 - apiGroups:
   - delivery.kokumi.dev
@@ -2431,6 +2637,28 @@ rules:
   - delivery.kokumi.dev
   resources:
   - approvals
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - delivery.kokumi.dev
+  resources:
+  - approvals/status
+  - kitchens/status
+  - menus/status
+  - orders/status
+  - pantries/status
+  - preparations/status
+  - recipes/status
+  - servings/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - delivery.kokumi.dev
+  resources:
   - kitchens
   - menus
   - orders
@@ -2449,7 +2677,6 @@ rules:
 - apiGroups:
   - delivery.kokumi.dev
   resources:
-  - approvals/finalizers
   - kitchens/finalizers
   - menus/finalizers
   - orders/finalizers
@@ -2458,21 +2685,6 @@ rules:
   - recipes/finalizers
   - servings/finalizers
   verbs:
-  - update
-- apiGroups:
-  - delivery.kokumi.dev
-  resources:
-  - approvals/status
-  - kitchens/status
-  - menus/status
-  - orders/status
-  - pantries/status
-  - preparations/status
-  - recipes/status
-  - servings/status
-  verbs:
-  - get
-  - patch
   - update
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -2861,6 +3073,18 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
+  name: kokumi-server-approval-submitter
+rules:
+- apiGroups:
+  - delivery.kokumi.dev
+  resources:
+  - approvals
+  verbs:
+  - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
   name: kokumi-server-editor-role
 rules:
 - apiGroups:
@@ -2880,6 +3104,20 @@ rules:
   - update
   - patch
   - delete
+- apiGroups:
+  - delivery.kokumi.dev
+  resources:
+  - approvals
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - delivery.kokumi.dev
+  resources:
+  - preparations
+  verbs:
+  - approve
 - apiGroups:
   - ""
   resources:
@@ -2925,7 +3163,6 @@ rules:
   - servings
   - pantries
   - kitchens
-  - approvals
   verbs:
   - get
   - list
@@ -2934,6 +3171,20 @@ rules:
   - update
   - patch
   - delete
+- apiGroups:
+  - delivery.kokumi.dev
+  resources:
+  - approvals
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - delivery.kokumi.dev
+  resources:
+  - preparations
+  verbs:
+  - approve
 - apiGroups:
   - ""
   resources:
@@ -3120,6 +3371,19 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: kokumi-admin
+  namespace: kokumi
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kokumi-server-approval-submitter-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kokumi-server-approval-submitter
+subjects:
+- kind: ServiceAccount
+  name: kokumi-server
   namespace: kokumi
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -3472,62 +3736,9 @@ spec:
         name: tmp
 ---
 apiVersion: admissionregistration.k8s.io/v1
-kind: MutatingAdmissionPolicy
-metadata:
-  name: kokumi-approval-identity-inject-policy
-  namespace: kokumi
-spec:
-  failurePolicy: Fail
-  matchConstraints:
-    resourceRules:
-    - apiGroups:
-      - delivery.kokumi.dev
-      apiVersions:
-      - v1alpha1
-      operations:
-      - CREATE
-      resources:
-      - approvals
-  mutations:
-  - jsonPatch:
-      expression: |-
-        variables.isKokumiServer
-
-          ? [
-              JSONPatch{
-                op: "add",
-                path: "/spec/approver",
-                value: object.spec.approver
-              }
-            ]
-          : [
-              JSONPatch{
-                op: "add",
-                path: "/spec/approver",
-                value: Object{
-                  username: request.userInfo.username,
-                  groups: request.userInfo.groups
-                }
-              }
-            ]
-    patchType: JSONPatch
-  reinvocationPolicy: Never
-  variables:
-  - expression: request.userInfo.username == "system:serviceaccount:kokumi:kokumi-server"
-    name: isKokumiServer
----
-apiVersion: admissionregistration.k8s.io/v1
-kind: MutatingAdmissionPolicyBinding
-metadata:
-  name: kokumi-approval-identity-inject-policy
-  namespace: kokumi
-spec:
-  policyName: kokumi-approval-identity-inject-policy
----
-apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
-  name: kokumi-approval-validate-policy
+  name: kokumi-approval-integrity
   namespace: kokumi
 spec:
   failurePolicy: Fail
@@ -3536,7 +3747,7 @@ spec:
     - apiGroups:
       - delivery.kokumi.dev
       apiVersions:
-      - v1alpha1
+      - '*'
       operations:
       - CREATE
       - UPDATE
@@ -3544,31 +3755,61 @@ spec:
       resources:
       - approvals
   validations:
-  - expression: request.operation != 'DELETE'
-    message: Approvals are append-only and cannot be deleted
+  - expression: request.operation != 'CREATE' || request.userInfo.username == variables.serverSA
+    message: Approvals can only be submitted through the kokumi server
     reason: Forbidden
   - expression: request.operation != 'UPDATE'
-    message: Approvals are immutable and cannot be updated
+    message: Approvals are immutable
     reason: Forbidden
-  - expression: |-
-      request.operation == 'DELETE' || variables.isKokumiServer || (
-
-        object.spec.approver.username == request.userInfo.username &&
-        object.spec.approver.groups == request.userInfo.groups &&
-        !has(object.spec.approver.email)
-      )
-    message: approver identity must match the authenticated Kubernetes user
+  - expression: request.operation != 'DELETE' || request.userInfo.username == variables.namespaceController
+    message: Approvals are append-only and cannot be deleted
     reason: Forbidden
   variables:
-  - expression: request.userInfo.username == "system:serviceaccount:kokumi:kokumi-server"
-    name: isKokumiServer
+  - expression: '''system:serviceaccount:kokumi:kokumi-server'''
+    name: serverSA
+  - expression: '''system:serviceaccount:kube-system:namespace-controller'''
+    name: namespaceController
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: kokumi-status-integrity
+  namespace: kokumi
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - delivery.kokumi.dev
+      apiVersions:
+      - '*'
+      operations:
+      - UPDATE
+      resources:
+      - approvals/status
+      - preparations/status
+      - servings/status
+  validations:
+  - expression: request.userInfo.username == 'system:serviceaccount:kokumi:kokumi-controller-manager'
+    message: Approval, Preparation and Serving status is owned by the kokumi controller
+    reason: Forbidden
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
 metadata:
-  name: kokumi-approval-validate-policy
+  name: kokumi-approval-integrity
   namespace: kokumi
 spec:
-  policyName: kokumi-approval-validate-policy
+  policyName: kokumi-approval-integrity
+  validationActions:
+  - Deny
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: kokumi-status-integrity
+  namespace: kokumi
+spec:
+  policyName: kokumi-status-integrity
   validationActions:
   - Deny

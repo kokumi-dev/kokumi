@@ -3,6 +3,7 @@ package oci
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"fmt"
 	"path/filepath"
 
@@ -14,9 +15,18 @@ type FakeClient struct {
 	fs          afero.Fs
 	Annotations map[string]string
 	Copies      []CopiedRefs
+	Referrers   []PushedReferrer
+	// PushReferrerErr, when set, is returned by PushReferrer.
+	PushReferrerErr error
 }
 
 var _ Client = (*FakeClient)(nil)
+
+// PushedReferrer records PushReferrer calls for test assertions.
+type PushedReferrer struct {
+	Subject  Reference
+	Artifact ReferrerArtifact
+}
 
 // CopiedRefs records Copy calls for test assertions.
 type CopiedRefs struct {
@@ -69,4 +79,13 @@ func (c *FakeClient) Resolve(_ context.Context, _ Reference) (string, error) {
 func (c *FakeClient) Copy(_ context.Context, _ Client, srcRef, dstRef Reference) error {
 	c.Copies = append(c.Copies, CopiedRefs{Source: srcRef, Target: dstRef})
 	return nil
+}
+
+// PushReferrer records the referrer and returns the payload's SHA-256 digest.
+func (c *FakeClient) PushReferrer(_ context.Context, subject Reference, artifact ReferrerArtifact) (string, error) {
+	if c.PushReferrerErr != nil {
+		return "", c.PushReferrerErr
+	}
+	c.Referrers = append(c.Referrers, PushedReferrer{Subject: subject, Artifact: artifact})
+	return fmt.Sprintf("sha256:%x", sha256.Sum256(artifact.Payload)), nil
 }
