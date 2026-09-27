@@ -9,7 +9,7 @@ spec:
     spec:
       containers:
         - name: dex
-          image: ghcr.io/dexidp/dex:v2.45.1
+          image: ghcr.io/dexidp/dex:v2.45.1@sha256:8499afd690c437f52301efd2b05b2455da5bd2dfc20332cd697dc9937f808462
           imagePullPolicy: IfNotPresent
           command:
             - /usr/local/bin/dex

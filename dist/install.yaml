@@ -3631,7 +3631,7 @@ spec:
         app: registry
     spec:
       containers:
-      - image: registry:3
+      - image: registry:3.1.2@sha256:c87f33837722a100572e95d7dc4bf539fc42cf68202b13c3bc03c0ff54c3a649
         livenessProbe:
           httpGet:
             path: /
