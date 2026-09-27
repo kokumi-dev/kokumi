@@ -28,7 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
@@ -49,15 +49,37 @@ type ApprovalReconciler struct {
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=approvals/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=preparations,verbs=get;list;watch
 
-// Reconcile evaluates the Approval against its Preparation and siblings and
-// records the verdict in the Counted condition.
+// Reconcile is part of the main kubernetes reconciliation loop which aims to
+// move the current state of the cluster closer to the desired state.
+//
+// Approvals are immutable audit records managed by the admission policy; the
+// reconciler only reports on them and therefore adds no finalizer.
+//
+// For more details, check Reconcile and its Result here:
+// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.23.1/pkg/reconcile
 func (r *ApprovalReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := logf.FromContext(ctx)
+	logger := log.FromContext(ctx)
+	logger.Info("Reconciling Approval", "namespace", req.Namespace, "name", req.Name)
 
 	a := &deliveryv1alpha1.Approval{}
 	if err := r.Get(ctx, req.NamespacedName, a); err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		if apierrors.IsNotFound(err) {
+			logger.Info("Approval resource not found, ignoring")
+			return ctrl.Result{}, nil
+		}
+
+		logger.Error(err, "Failed to get Approval")
+
+		return ctrl.Result{}, fmt.Errorf("failed to get Approval: %w", err)
 	}
+
+	return r.reconcileApproval(ctx, a)
+}
+
+// reconcileApproval evaluates the Approval against its Preparation and siblings
+// and records the verdict in the Counted condition.
+func (r *ApprovalReconciler) reconcileApproval(ctx context.Context, a *deliveryv1alpha1.Approval) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
 
 	prep := &deliveryv1alpha1.Preparation{}
 	err := r.Get(ctx, client.ObjectKey{Namespace: a.Namespace, Name: a.Spec.PreparationRef.Name}, prep)
@@ -97,7 +119,7 @@ func (r *ApprovalReconciler) enqueueApprovalsForPreparation(ctx context.Context,
 	}
 	approvals, err := index.ApprovalsForPreparation(ctx, r.Client, prep)
 	if err != nil {
-		logf.FromContext(ctx).Error(err, "Failed to list Approvals", "preparation", prep.Name)
+		log.FromContext(ctx).Error(err, "Failed to list Approvals", "preparation", prep.Name)
 		return nil
 	}
 	requests := make([]ctrl.Request, 0, len(approvals))

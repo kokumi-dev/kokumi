@@ -163,6 +163,11 @@ var _ = Describe("Preparation Controller", func() {
 			DeferCleanup(func() {
 				deleteApprovalsOfOrder(ctx, orderName)
 				_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Serving{Name: orderName, Namespace: testNamespace})
+				prep := &deliveryv1alpha1.Preparation{}
+				if err := k8sClient.Get(ctx, key, prep); err == nil {
+					prep.SetFinalizers(nil)
+					_ = k8sClient.Update(ctx, prep)
+				}
 				_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Preparation{Name: prepName, Namespace: testNamespace})
 			})
 		})

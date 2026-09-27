@@ -18,11 +18,14 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 )
@@ -43,7 +46,59 @@ type RecipeReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.23.1/pkg/reconcile
 func (r *RecipeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = logf.FromContext(ctx)
+	logger := log.FromContext(ctx)
+	logger.Info("Reconciling Recipe", "namespace", req.Namespace, "name", req.Name)
+
+	recipe := &deliveryv1alpha1.Recipe{}
+
+	if err := r.Get(ctx, req.NamespacedName, recipe); err != nil {
+		if apierrors.IsNotFound(err) {
+			logger.Info("Recipe resource not found, ignoring")
+			return ctrl.Result{}, nil
+		}
+
+		logger.Error(err, "Failed to get Recipe")
+
+		return ctrl.Result{}, fmt.Errorf("failed to get Recipe: %w", err)
+	}
+
+	if !recipe.DeletionTimestamp.IsZero() {
+		return r.reconcileDelete(ctx, recipe)
+	}
+
+	if !controllerutil.ContainsFinalizer(recipe, deliveryv1alpha1.Finalizer) {
+		controllerutil.AddFinalizer(recipe, deliveryv1alpha1.Finalizer)
+
+		if err := r.Update(ctx, recipe); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	return r.reconcileRecipe(ctx, recipe)
+}
+
+// reconcileRecipe materializes the Recipe. Behavior is reserved for future work.
+func (r *RecipeReconciler) reconcileRecipe(ctx context.Context, recipe *deliveryv1alpha1.Recipe) (ctrl.Result, error) {
+	_ = log.FromContext(ctx)
+	_ = recipe
+
+	return ctrl.Result{}, nil
+}
+
+// reconcileDelete removes the finalizer from the Recipe, allowing garbage collection.
+func (r *RecipeReconciler) reconcileDelete(ctx context.Context, recipe *deliveryv1alpha1.Recipe) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	logger.Info("Handling deletion of Recipe")
+
+	if controllerutil.ContainsFinalizer(recipe, deliveryv1alpha1.Finalizer) {
+		logger.Info("Cleaning up Recipe resources")
+
+		controllerutil.RemoveFinalizer(recipe, deliveryv1alpha1.Finalizer)
+
+		if err := r.Update(ctx, recipe); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 
 	return ctrl.Result{}, nil
 }

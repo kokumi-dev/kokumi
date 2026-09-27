@@ -29,7 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
@@ -55,10 +55,15 @@ const minTokenSigningKeyLen = 32
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 //
+// The Kitchen is a self-healing singleton: a missing object is recreated so
+// the UI always has a resource to read/write. There is no finalizer because
+// there is nothing to clean up.
+//
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.24.1/pkg/reconcile
 func (r *KitchenReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := logf.FromContext(ctx)
+	logger := log.FromContext(ctx)
+	logger.Info("Reconciling Kitchen", "namespace", req.Namespace, "name", req.Name)
 
 	// Singleton: only the "default" Kitchen in the install namespace is managed.
 	if req.Name != deliveryv1alpha1.DefaultKitchenName || req.Namespace != r.Namespace {
@@ -68,7 +73,8 @@ func (r *KitchenReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	kitchen := &deliveryv1alpha1.Kitchen{}
 	if err := r.Get(ctx, req.NamespacedName, kitchen); err != nil {
 		if !apierrors.IsNotFound(err) {
-			return ctrl.Result{}, err
+			logger.Error(err, "Failed to get Kitchen")
+			return ctrl.Result{}, fmt.Errorf("failed to get Kitchen: %w", err)
 		}
 		// Ensure the singleton exists so the UI always has a resource to read/write.
 		kitchen = &deliveryv1alpha1.Kitchen{
@@ -76,11 +82,17 @@ func (r *KitchenReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			Namespace: r.Namespace,
 		}
 		if err := r.Create(ctx, kitchen); err != nil && !apierrors.IsAlreadyExists(err) {
-			log.Error(err, "Failed to create default Kitchen")
+			logger.Error(err, "Failed to create default Kitchen")
 			return ctrl.Result{}, err
 		}
 	}
 
+	return r.reconcileKitchen(ctx, kitchen)
+}
+
+// reconcileKitchen ensures the auth-related Secrets and records the Kitchen's
+// readiness based on the configured auth sources.
+func (r *KitchenReconciler) reconcileKitchen(ctx context.Context, kitchen *deliveryv1alpha1.Kitchen) (ctrl.Result, error) {
 	updater := status.NewKitchenUpdater(r.Client)
 
 	// Ensure the token signing-key Secret exists before validating auth config
@@ -234,6 +246,21 @@ func generateSigningKey() ([]byte, error) {
 	return out, nil
 }
 
+// secretInInstallNamespace filters Secret events to the install namespace.
+func (r *KitchenReconciler) secretInInstallNamespace() predicate.Predicate {
+	return predicate.NewPredicateFuncs(func(obj client.Object) bool {
+		return obj.GetNamespace() == r.Namespace
+	})
+}
+
+// mapSecretToKitchen maps any Secret in the install namespace to the singleton
+// Kitchen so its readiness is re-evaluated when credentials change.
+func (r *KitchenReconciler) mapSecretToKitchen(_ context.Context, obj client.Object) []ctrl.Request {
+	return []ctrl.Request{
+		{Namespace: obj.GetNamespace(), Name: deliveryv1alpha1.DefaultKitchenName},
+	}
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *KitchenReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Ensure the singleton exists at startup so the UI always has a resource
@@ -251,19 +278,4 @@ func (r *KitchenReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		).
 		Named("kitchen").
 		Complete(r)
-}
-
-// secretInInstallNamespace filters Secret events to the install namespace.
-func (r *KitchenReconciler) secretInInstallNamespace() predicate.Predicate {
-	return predicate.NewPredicateFuncs(func(obj client.Object) bool {
-		return obj.GetNamespace() == r.Namespace
-	})
-}
-
-// mapSecretToKitchen maps any Secret in the install namespace to the singleton
-// Kitchen so its readiness is re-evaluated when credentials change.
-func (r *KitchenReconciler) mapSecretToKitchen(_ context.Context, obj client.Object) []ctrl.Request {
-	return []ctrl.Request{
-		{Namespace: obj.GetNamespace(), Name: deliveryv1alpha1.DefaultKitchenName},
-	}
 }
