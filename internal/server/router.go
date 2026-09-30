@@ -33,6 +33,7 @@ func addRoutes(
 	// Settings (singleton Kitchen/default)
 	mux.HandleFunc("GET /api/v1/settings", handleGetSettings(deps, installNamespace))
 	mux.HandleFunc("PUT /api/v1/settings", handlePutSettings(deps, installNamespace))
+	mux.HandleFunc("GET /api/v1/whoami", handleWhoami(deps, installNamespace))
 
 	// Order CRUD
 	mux.HandleFunc("GET /api/v1/orders", handleListOrders(deps))

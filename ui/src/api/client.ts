@@ -308,8 +308,35 @@ export function deletePantry(namespace: string, name: string): Promise<void> {
 
 // ── Settings (singleton Kitchen) ──────────────────────────────────────────────
 
+export interface SecretRef {
+  name: string
+}
+
+export interface AdminUserSettings {
+  enabled?: boolean
+  username?: string
+  secretRef?: SecretRef
+}
+
+export interface OIDCSettings {
+  issuerURL: string
+  clientID: string
+  clientSecretRef?: SecretRef
+  usernameClaim?: string
+  emailClaim?: string
+  groupsClaim?: string
+  scopes?: string[]
+}
+
+export interface AuthSettings {
+  adminUser?: AdminUserSettings
+  oidc?: OIDCSettings
+  tokenSigningKeySecretRef?: SecretRef
+}
+
 export interface Settings {
   argoCDURL: string
+  auth?: AuthSettings
 }
 
 export function getSettings(): Promise<Settings> {
@@ -321,4 +348,28 @@ export function saveSettings(argoCDURL: string): Promise<Settings> {
     method: 'PUT',
     body: JSON.stringify({ argoCDURL }),
   })
+}
+
+// saveAuthSettings replaces the whole auth subtree; argoCDURL is omitted so
+// the server's merge semantics leave the General tab's value untouched.
+export function saveAuthSettings(auth: AuthSettings): Promise<Settings> {
+  return request<Settings>('/settings', {
+    method: 'PUT',
+    body: JSON.stringify({ auth }),
+  })
+}
+
+// ── WhoAmI (identity + admin flag for Settings visibility) ───────────────────
+
+export interface WhoAmI {
+  subject: string
+  username?: string
+  email?: string
+  provider?: string
+  groups?: string[]
+  isAdmin: boolean
+}
+
+export function getWhoAmI(): Promise<WhoAmI> {
+  return request<WhoAmI>('/whoami')
 }
