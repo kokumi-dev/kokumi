@@ -11,6 +11,7 @@ import Servings from './pages/Servings'
 import Settings from './pages/Settings'
 import Login from './pages/Login'
 import { logout, onAuthChange, refresh, getTokenTTL, isAuthed, consumeFragmentToken } from './api/auth'
+import { getWhoAmI } from './api/client'
 
 interface Info {
   name: string
@@ -26,10 +27,27 @@ function App() {
   const [ready, setReady] = useState(false)
   const [authed, setAuthed] = useState(() => isAuthed())
   const [bootRefreshDone, setBootRefreshDone] = useState(false)
+  const [isAdmin, setIsAdmin] = useState(false)
 
   // Keep authed in sync with token changes (login/logout/401/OIDC fragment).
   // Registered before the mount effect so consumeFragmentToken() updates it via this subscription, not a direct setState.
   useEffect(() => onAuthChange(() => setAuthed(isAuthed())), [])
+
+  useEffect(() => {
+    if (!authed) {
+      // Defer to a microtask to avoid a synchronous setState in the effect body.
+      void Promise.resolve().then(() => setIsAdmin(false))
+      return
+    }
+    const fetchWhoAmI = () => {
+      getWhoAmI()
+        .then((w) => setIsAdmin(w.isAdmin))
+        .catch(() => setIsAdmin(false))
+    }
+    fetchWhoAmI()
+    window.addEventListener('focus', fetchWhoAmI)
+    return () => window.removeEventListener('focus', fetchWhoAmI)
+  }, [authed])
 
   useEffect(() => {
     // Consume the OIDC callback's access token from the URL fragment first so the app boots authed.
@@ -138,7 +156,7 @@ function App() {
       case 'servings':
         return <Servings />
       case 'settings':
-        return <Settings />
+        return isAdmin ? <Settings /> : <Dashboard operatorName={info?.name} operatorVersion={info?.version} />
     }
   }
 
@@ -152,6 +170,7 @@ function App() {
         }}
         operatorVersion={info?.version}
         onLogout={() => void logout()}
+        isAdmin={isAdmin}
       />
       <main className={styles.content}>
         {renderPage()}

@@ -8,6 +8,8 @@ interface NavItem {
   id: Page
   label: string
   icon: React.ReactNode
+  /** Only shown when the signed-in user is an admin. */
+  adminOnly?: boolean
 }
 
 interface NavSection {
@@ -20,6 +22,8 @@ interface Props {
   onNavigate: (page: Page) => void
   operatorVersion?: string
   onLogout?: () => void
+  /** When false, the admin-only Settings entry is hidden. */
+  isAdmin: boolean
 }
 
 function IconDashboard() {
@@ -108,12 +112,19 @@ const sections: NavSection[] = [
   {
     label: 'System',
     items: [
-      { id: 'settings', label: 'Settings', icon: <IconSettings /> },
+      { id: 'settings', label: 'Settings', icon: <IconSettings />, adminOnly: true },
     ],
   },
 ]
 
-export default function Sidebar({ activePage, onNavigate, operatorVersion, onLogout }: Props) {
+export default function Sidebar({ activePage, onNavigate, operatorVersion, onLogout, isAdmin }: Props) {
+  const visibleSections = sections
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => !item.adminOnly || isAdmin),
+    }))
+    .filter((section) => section.items.length > 0)
+
   return (
     <aside className={styles.sidebar}>
       {/* ── Logo ── */}
@@ -125,7 +136,7 @@ export default function Sidebar({ activePage, onNavigate, operatorVersion, onLog
 
       {/* ── Navigation ── */}
       <nav className={styles.nav}>
-        {sections.map((section) => (
+        {visibleSections.map((section) => (
           <div key={section.label ?? 'default'} className={styles.navSection}>
             {section.label && (
               <div className={styles.navSectionLabel}>{section.label}</div>

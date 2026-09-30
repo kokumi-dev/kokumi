@@ -65,6 +65,35 @@
   overflow: hidden;
 }
 
+/* ── Tab bar (Settings) ── */
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid rgba(49, 54, 56, 0.1);
+  margin-bottom: 20px;
+}
+
+.tab {
+  background: none;
+  border: none;
+  padding: 6px 12px;
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-text-muted-light);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+.tab:hover {
+  color: var(--color-text-on-light);
+}
+
+.tabActive {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+}
+
 .sectionHeader {
   display: flex;
   align-items: center;
@@ -276,7 +305,7 @@
   font-size: 0.875rem;
   font-weight: 500;
   color: var(--color-text-on-light);
-  min-width: 140px;
+  flex: 0 0 200px;
 }
 
 .fieldInput {
@@ -302,3 +331,40 @@
   color: #2d8a5a;
   font-weight: 500;
 }
+
+.saveBtn {
+  padding: 7px 16px;
+  border-radius: 6px;
+  border: 1px solid rgba(49, 54, 56, 0.2);
+  background: var(--color-accent);
+  color: #fff;
+  font-family: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.saveBtn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.fieldHint {
+  font-size: 0.8rem;
+  color: var(--color-text-muted-light);
+  max-width: 520px;
+}
+
+.fieldError {
+  font-size: 0.8rem;
+  color: #c13a37;
+  font-weight: 500;
+}
+
+/* ── Group cards (Authentication tab) ── */
+.groupStack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
