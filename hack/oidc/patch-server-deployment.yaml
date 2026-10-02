@@ -34,11 +34,10 @@ spec:
             periodSeconds: 10
           resources:
             limits:
-              cpu: 100m
               memory: 64Mi
             requests:
               cpu: 10m
-              memory: 32Mi
+              memory: 64Mi
           securityContext:
             runAsUser: 1001
             runAsGroup: 1001
@@ -46,15 +45,20 @@ spec:
             capabilities:
               drop:
                 - ALL
+            readOnlyRootFilesystem: true
           volumeMounts:
             - name: dex-config
               mountPath: /etc/dex/cfg
               readOnly: true
             - name: dex-data
               mountPath: /var/dex
+            - name: dex-tmp
+              mountPath: /tmp
       volumes:
         - name: dex-config
           configMap:
             name: dex-config
         - name: dex-data
+          emptyDir: {}
+        - name: dex-tmp
           emptyDir: {}
