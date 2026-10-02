@@ -24,7 +24,7 @@ for the required repo-creds secret to let Argo CD reach the in-cluster registry.
 <!-- x-release-please-start-version -->
 ```bash
 kubectl apply -f \
-    https://github.com/kokumi-dev/kokumi/releases/download/0.16.0/install.yaml
+    https://github.com/kokumi-dev/kokumi/releases/download/0.17.0/install.yaml
 ```
 <!-- x-release-please-end -->
 
@@ -78,7 +78,7 @@ resource.
 ## Pin a specific version
 
 <!-- x-release-please-start-version -->
-Replace `0.16.0` with any released version:
+Replace `0.17.0` with any released version:
 <!-- x-release-please-end -->
 
 ```bash
@@ -100,6 +100,6 @@ kubectl apply -f \
 <!-- x-release-please-start-version -->
 ```bash
 kubectl delete -f \
-    https://github.com/kokumi-dev/kokumi/releases/download/0.16.0/install.yaml
+    https://github.com/kokumi-dev/kokumi/releases/download/0.17.0/install.yaml
 ```
 <!-- x-release-please-end -->
