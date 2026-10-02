@@ -2477,18 +2477,22 @@ metadata:
 rules:
 - apiGroups:
   - ""
+  resourceNames:
+  - kokumi-admin
+  - kokumi-editor
+  - kokumi-viewer
+  resources:
+  - serviceaccounts
+  verbs:
+  - impersonate
+- apiGroups:
+  - ""
   resources:
   - serviceaccounts
   verbs:
   - get
   - list
   - watch
-- apiGroups:
-  - ""
-  resources:
-  - serviceaccounts
-  verbs:
-  - impersonate
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
