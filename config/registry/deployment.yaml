@@ -19,16 +19,39 @@ spec:
       labels:
         app: registry
     spec:
+      serviceAccountName: registry
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+        fsGroup: 65532
       containers:
         - name: registry
           image: registry:3.1.2@sha256:c87f33837722a100572e95d7dc4bf539fc42cf68202b13c3bc03c0ff54c3a649
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 5000
               name: http
               protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+          resources:
+            limits:
+              memory: 256Mi
+            requests:
+              cpu: 100m
+              memory: 256Mi
           volumeMounts:
             - name: config
               mountPath: /etc/docker/registry
+              readOnly: true
             - name: storage
               mountPath: /var/lib/registry
           livenessProbe:
