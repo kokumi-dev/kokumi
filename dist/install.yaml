@@ -2370,6 +2370,16 @@ metadata:
   namespace: kokumi
 ---
 apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  labels:
+    app.kubernetes.io/component: registry
+    app.kubernetes.io/name: kokumi
+  name: kokumi-registry
+  namespace: kokumi
+---
+apiVersion: v1
 kind: ServiceAccount
 metadata:
   labels:
@@ -2389,6 +2399,19 @@ metadata:
     app.kubernetes.io/name: kokumi
   name: kokumi-viewer
   namespace: kokumi
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kokumi-controller-manager-secret-creator
+  namespace: kokumi
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - create
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -2617,7 +2640,6 @@ rules:
   resources:
   - secrets
   verbs:
-  - create
   - get
   - list
   - watch
@@ -3289,6 +3311,20 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
+  name: kokumi-controller-manager-secret-creator
+  namespace: kokumi
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kokumi-controller-manager-secret-creator
+subjects:
+- kind: ServiceAccount
+  name: kokumi-controller-manager
+  namespace: kokumi
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: kokumi
@@ -3630,8 +3666,10 @@ spec:
       labels:
         app: registry
     spec:
+      automountServiceAccountToken: false
       containers:
       - image: registry:3.1.2@sha256:c87f33837722a100572e95d7dc4bf539fc42cf68202b13c3bc03c0ff54c3a649
+        imagePullPolicy: IfNotPresent
         livenessProbe:
           httpGet:
             path: /
@@ -3649,11 +3687,32 @@ spec:
             port: 5000
           initialDelaySeconds: 5
           periodSeconds: 5
+        resources:
+          limits:
+            memory: 256Mi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
         volumeMounts:
         - mountPath: /etc/docker/registry
           name: config
+          readOnly: true
         - mountPath: /var/lib/registry
           name: storage
+      securityContext:
+        fsGroup: 65532
+        runAsGroup: 65532
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccountName: kokumi-registry
       volumes:
       - configMap:
           name: kokumi-registry-config
