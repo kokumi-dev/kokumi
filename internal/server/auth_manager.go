@@ -22,19 +22,16 @@ const (
 // intentionally off only when no provider is configured; any other failure
 // keeps last-known-good state so the API fails closed.
 type authManager struct {
-	mu          sync.RWMutex
-	auth        *authenticator // admin account; nil when disabled or not yet resolved
-	oidc        *oidcProvider  // OIDC provider; nil when not configured or not yet resolved
-	disabled    bool           // true only when auth is intentionally off (no providers)
-	adminLogin  bool           // true when admin credential login is available
-	secret      string         // name of the admin Secret last resolved from
-	oidcSecret  string         // name of the OIDC Secret last resolved from
-	tokenSecret string         // name of the token signing-key Secret last resolved from
-	reader      client.Reader  // informer cache, used for the Kitchen singleton
-	apiReader   client.Reader  // direct API client, used for live Secret reads
-	ns          string
-	tokenTTL    time.Duration
-	logger      logr.Logger
+	mu         sync.RWMutex
+	auth       *authenticator // admin account; nil when disabled or not yet resolved
+	oidc       *oidcProvider  // OIDC provider; nil when not configured or not yet resolved
+	disabled   bool           // true only when auth is intentionally off (no providers)
+	adminLogin bool           // true when admin credential login is available
+	reader     client.Reader  // informer cache, used for the Kitchen singleton
+	apiReader  client.Reader  // direct API client, used for live Secret reads
+	ns         string
+	tokenTTL   time.Duration
+	logger     logr.Logger
 }
 
 // newAuthManager builds an authManager and performs the initial resolution.
@@ -99,28 +96,6 @@ func (m *authManager) providers() []string {
 		out = append(out, providerOIDC)
 	}
 	return out
-}
-
-// secretName returns the admin Secret last resolved, used to filter Secret events.
-func (m *authManager) secretName() string {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.secret
-}
-
-// oidcSecretName returns the OIDC Secret last resolved, used to filter Secret events.
-func (m *authManager) oidcSecretName() string {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.oidcSecret
-}
-
-// tokenSecretName returns the token signing-key Secret last resolved, used to
-// filter Secret events.
-func (m *authManager) tokenSecretName() string {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.tokenSecret
 }
 
 // tokenSigningKeySecretName returns the configured token signing-key Secret
@@ -188,7 +163,7 @@ func (m *authManager) reload(ctx context.Context, kitchen *deliveryv1alpha1.Kitc
 	// A provider that fails to (re)build keeps last-known-good state so the API
 	// fails closed; an intentionally disabled provider (nil, nil) is applied as-is.
 	m.mu.Lock()
-	m.apply(auth, adminCfg, adminErr, oidc, oidcCfg, oidcErr, tokenSecretName)
+	m.apply(auth, adminCfg, adminErr, oidc, oidcErr)
 	m.mu.Unlock()
 
 	switch {
@@ -212,9 +187,7 @@ func (m *authManager) apply(
 	adminCfg *deliveryv1alpha1.AdminUserConfig,
 	adminErr error,
 	oidc *oidcProvider,
-	oidcCfg *deliveryv1alpha1.OIDCConfig,
 	oidcErr error,
-	tokenSecretName string,
 ) {
 	prevAuth := m.auth
 	if auth != nil {
@@ -223,26 +196,21 @@ func (m *authManager) apply(
 		// the admin is still enabled; a changed SecretRef or a disabled admin
 		// must take effect immediately, not resurrect stale credentials.
 		if adminErr != nil && prevAuth != nil && prevAuth.passwordHash != nil &&
-			adminCfg != nil && adminCfg.SecretRef != nil &&
-			adminCfg.SecretRef.Name == m.secret && adminCfg.IsEnabled() {
+			adminCfg != nil && adminCfg.SecretRef != nil && adminCfg.IsEnabled() &&
+			adminCfg.SecretRef.Name == prevAuth.credentialSource {
 			auth.username = prevAuth.username
 			auth.passwordHash = prevAuth.passwordHash
 		}
+		if adminCfg != nil && adminCfg.SecretRef != nil {
+			auth.credentialSource = adminCfg.SecretRef.Name
+		}
 		m.auth = auth
 	}
-	// Track the configured token Secret name even when the build failed, so
-	// Secret events for the new name are not filtered out while it is missing.
-	m.tokenSecret = tokenSecretName
-	if adminCfg != nil && adminCfg.SecretRef != nil {
-		m.secret = adminCfg.SecretRef.Name
-	} else {
-		m.secret = ""
-	}
+	// A provider that fails to (re)build keeps last-known-good state
+	// (m.oidc untouched when oidcErr != nil); an intentionally disabled
+	// provider (nil, nil) is applied as-is.
 	if oidc != nil || oidcErr == nil {
 		m.oidc = oidc
-		if oidcCfg != nil && oidcCfg.ClientSecretRef != nil {
-			m.oidcSecret = oidcCfg.ClientSecretRef.Name
-		}
 	}
 	// adminLogin reflects the retained authenticator (may be last-known-good),
 	// not the freshly-built one that may have failed.

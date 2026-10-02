@@ -2462,12 +2462,14 @@ metadata:
 rules:
 - apiGroups:
   - ""
+  resourceNames:
+  - kokumi-server-auth
+  - kokumi-server-oidc
+  - kokumi-server-tokens
   resources:
   - secrets
   verbs:
   - get
-  - watch
-  - list
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
