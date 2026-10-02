@@ -2370,6 +2370,16 @@ metadata:
   namespace: kokumi
 ---
 apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  labels:
+    app.kubernetes.io/component: registry
+    app.kubernetes.io/name: kokumi
+  name: kokumi-registry
+  namespace: kokumi
+---
+apiVersion: v1
 kind: ServiceAccount
 metadata:
   labels:
@@ -2454,18 +2464,22 @@ metadata:
 rules:
 - apiGroups:
   - ""
+  resourceNames:
+  - kokumi-admin
+  - kokumi-editor
+  - kokumi-viewer
+  resources:
+  - serviceaccounts
+  verbs:
+  - impersonate
+- apiGroups:
+  - ""
   resources:
   - serviceaccounts
   verbs:
   - get
   - list
   - watch
-- apiGroups:
-  - ""
-  resources:
-  - serviceaccounts
-  verbs:
-  - impersonate
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -3630,8 +3644,10 @@ spec:
       labels:
         app: registry
     spec:
+      automountServiceAccountToken: false
       containers:
       - image: registry:3.1.2@sha256:c87f33837722a100572e95d7dc4bf539fc42cf68202b13c3bc03c0ff54c3a649
+        imagePullPolicy: IfNotPresent
         livenessProbe:
           httpGet:
             path: /
@@ -3649,11 +3665,32 @@ spec:
             port: 5000
           initialDelaySeconds: 5
           periodSeconds: 5
+        resources:
+          limits:
+            memory: 256Mi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
         volumeMounts:
         - mountPath: /etc/docker/registry
           name: config
+          readOnly: true
         - mountPath: /var/lib/registry
           name: storage
+      securityContext:
+        fsGroup: 65532
+        runAsGroup: 65532
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccountName: kokumi-registry
       volumes:
       - configMap:
           name: kokumi-registry-config
