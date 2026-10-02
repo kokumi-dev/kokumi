@@ -41,6 +41,11 @@ const (
 	eventPantries     = "pantries"
 )
 
+// authSecretPollInterval bounds how long rotated admin/OIDC/token credentials
+// can go unnoticed, since auth Secrets are polled rather than watched
+// (get-only RBAC on named Secrets).
+const authSecretPollInterval = 30 * time.Second
+
 // newScheme builds a runtime Scheme with the types the server needs.
 func newScheme() *runtime.Scheme {
 	s := runtime.NewScheme()
@@ -69,14 +74,11 @@ func startK8sWatcher(
 
 	k8sCache, err := cache.New(cfg, cache.Options{
 		Scheme: scheme,
-		// Restrict Secret and ServiceAccount watches to the server namespace so
-		// the namespaced RBAC Role suffices.
+		// Restrict the ServiceAccount watch to the server namespace so the
+		// namespaced RBAC Role suffices. Auth Secrets are no longer watched:
+		// the authManager poller (see startAuthSecretPoller) reads them by name
+		// with get-only RBAC on named Secrets.
 		ByObject: map[client.Object]cache.ByObject{
-			&corev1.Secret{}: {
-				Namespaces: map[string]cache.Config{
-					installNamespace: {},
-				},
-			},
 			&corev1.ServiceAccount{}: {
 				Namespaces: map[string]cache.Config{
 					installNamespace: {},
@@ -125,7 +127,6 @@ func startK8sWatcher(
 	menuInformer := informers.menu
 	pantryInformer := informers.pantry
 	kitchenInformer := informers.kitchen
-	secretInformer := informers.secret
 	saInformer := informers.sa
 
 	// saList reads ServiceAccounts in the install namespace from the informer
@@ -206,31 +207,27 @@ func startK8sWatcher(
 		}
 	}
 
-	// Kitchen changes reload the authenticator (plus SSE refresh). Auth Secrets only
-	// affect authentication, so they get a dedicated handler that reloads without a
-	// full SSE broadcast; filter to the resolved admin/OIDC/token Secret names to skip unrelated Secrets.
-	isAuthSecret := func(obj any) bool {
-		o, ok := obj.(client.Object)
-		if !ok || o.GetNamespace() != installNamespace {
-			return false
-		}
-		name := o.GetName()
-		return name == deps.authMgr.secretName() || name == deps.authMgr.oidcSecretName() || name == deps.authMgr.tokenSecretName()
-	}
+	// Kitchen changes reload the authenticator (plus SSE refresh). Auth
+	// Secrets cannot be watched (get-only RBAC on named Secrets), so the
+	// authManager polls them on a short ticker instead.
 	kitchenHandler := toolscache.ResourceEventHandlerFuncs{
 		AddFunc:    func(_ any) { refreshAll(); deps.authMgr.refresh(ctx) },
 		UpdateFunc: func(_, _ any) { refreshAll(); deps.authMgr.refresh(ctx) },
 		DeleteFunc: func(_ any) { refreshAll(); deps.authMgr.refresh(ctx) },
 	}
-	secretHandler := newAuthSecretHandler(deps.authMgr, ctx, isAuthSecret)
 
 	if err := registerWatchers(
 		orderInformer, prepInformer, servingInformer, menuInformer, pantryInformer,
-		kitchenInformer, secretInformer, saInformer,
-		refreshAll, kitchenHandler, secretHandler,
+		kitchenInformer, saInformer,
+		refreshAll, kitchenHandler,
 	); err != nil {
 		return nil, err
 	}
+
+	// Poll the resolved auth Secrets (admin/OIDC/token signing key) so rotated
+	// credentials are picked up without a restart; Kitchen events already
+	// trigger immediate refreshes via kitchenHandler.
+	startAuthSecretPoller(ctx, deps.authMgr)
 
 	// Start the cache in the background until ctx is cancelled.
 	go func() {
@@ -250,34 +247,30 @@ func startK8sWatcher(
 	return deps, nil
 }
 
-// newAuthSecretHandler builds the Secret event handler that reloads auth
-// without a full SSE broadcast when an auth-relevant Secret changes.
-func newAuthSecretHandler(mgr *authManager, ctx context.Context, isAuthSecret func(any) bool) toolscache.ResourceEventHandlerFuncs {
-	return toolscache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj any) {
-			if isAuthSecret(obj) {
+// startAuthSecretPoller re-resolves the auth Secrets on a ticker so rotated
+// admin/OIDC/token credentials are honored without a server restart. RBAC for
+// this path is get-only on the named Secrets (server-auth-reader Role).
+func startAuthSecretPoller(ctx context.Context, mgr *authManager) {
+	go func() {
+		ticker := time.NewTicker(authSecretPollInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
 				mgr.refresh(ctx)
 			}
-		},
-		UpdateFunc: func(_, newObj any) {
-			if isAuthSecret(newObj) {
-				mgr.refresh(ctx)
-			}
-		},
-		DeleteFunc: func(obj any) {
-			if isAuthSecret(obj) {
-				mgr.refresh(ctx)
-			}
-		},
-	}
+		}
+	}()
 }
 
 // registerWatchers wires the SSE-refresh handler onto resource informers and the
-// auth handlers onto Kitchen/Secret informers (split out to keep startK8sWatcher small).
+// auth handler onto the Kitchen informer (split out to keep startK8sWatcher small).
 func registerWatchers(
-	order, prep, serving, menu, pantry, kitchen, secret, sa cache.Informer,
+	order, prep, serving, menu, pantry, kitchen, sa cache.Informer,
 	refreshAll func(),
-	kitchenHandler, secretHandler toolscache.ResourceEventHandlerFuncs,
+	kitchenHandler toolscache.ResourceEventHandlerFuncs,
 ) error {
 	sseHandler := toolscache.ResourceEventHandlerFuncs{
 		AddFunc:    func(_ any) { refreshAll() },
@@ -298,7 +291,7 @@ func registerWatchers(
 		{menu, sseHandler, "Menu"},
 		{pantry, sseHandler, "Pantry"},
 		{kitchen, kitchenHandler, "Kitchen"},
-		{secret, secretHandler, "Secret"},
+
 		{sa, noopHandler, "ServiceAccount"},
 	} {
 		if _, err := r.informer.AddEventHandler(r.handler); err != nil {
@@ -316,7 +309,6 @@ type informers struct {
 	menu    cache.Informer
 	pantry  cache.Informer
 	kitchen cache.Informer
-	secret  cache.Informer
 	sa      cache.Informer
 }
 
@@ -341,9 +333,6 @@ func getInformers(ctx context.Context, c cache.Cache) (informers, error) {
 	}
 	if out.kitchen, err = c.GetInformer(ctx, &deliveryv1alpha1.Kitchen{}); err != nil {
 		return out, fmt.Errorf("getting Kitchen informer: %w", err)
-	}
-	if out.secret, err = c.GetInformer(ctx, &corev1.Secret{}); err != nil {
-		return out, fmt.Errorf("getting Secret informer: %w", err)
 	}
 	if out.sa, err = c.GetInformer(ctx, &corev1.ServiceAccount{}); err != nil {
 		return out, fmt.Errorf("getting ServiceAccount informer: %w", err)

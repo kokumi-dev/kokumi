@@ -56,6 +56,9 @@ type authenticator struct {
 	signingKey   []byte
 	accessTTL    time.Duration
 	refreshTTL   time.Duration
+	// credentialSource records the admin Secret the credentials were resolved
+	// from, so last-known-good retention can detect a changed SecretRef.
+	credentialSource string
 }
 
 // publicAPIPaths are API paths reachable without a valid access token.
