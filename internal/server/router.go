@@ -78,5 +78,5 @@ func addRoutes(
 	if err != nil {
 		panic("embedded web/dist not found: " + err.Error())
 	}
-	mux.Handle("/", http.FileServer(http.FS(distFS)))
+	mux.Handle("/", spaHandler(distFS))
 }

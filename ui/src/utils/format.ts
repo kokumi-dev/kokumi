@@ -18,13 +18,37 @@ export function shortDigest(digest: string): string {
   return digest.replace('sha256:', '').slice(0, 8)
 }
 
-/**
- * Maps a Kubernetes resource state string to a CSS module class key.
- * Used by pages that render inline state badges without the shared Badge component.
- */
-export function stateToStatusKey(state: string): 'badgeSuccess' | 'badgeError' | 'badgeWarning' {
-  const p = state.toLowerCase()
-  if (p === 'ready' || p === 'succeeded' || p === 'deployed') return 'badgeSuccess'
-  if (p === 'failed' || p === 'error') return 'badgeError'
-  return 'badgeWarning'
+/** Formats a count with a singular/plural noun, e.g. "1 approval", "2 approvals". */
+export function plural(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? '' : 's'}`
+}
+
+/** Strips the oci:// scheme, e.g. for compact registry URLs in lists. */
+export function stripOCIScheme(url: string): string {
+  return url.replace(/^oci:\/\//, '')
+}
+
+/** Last path segment of an OCI reference, e.g. "external-secrets" for oci://ghcr.io/org/external-secrets. */
+export function ociName(url: string): string {
+  return stripOCIScheme(url).split('/').filter(Boolean).pop() ?? url
+}
+
+const relativeUnits: [Intl.RelativeTimeFormatUnit, number][] = [
+  ['year', 365 * 24 * 3600],
+  ['month', 30 * 24 * 3600],
+  ['week', 7 * 24 * 3600],
+  ['day', 24 * 3600],
+  ['hour', 3600],
+  ['minute', 60],
+]
+
+/** Formats an ISO date relative to now, e.g. "3 hours ago". Returns '—' for empty input. */
+export function formatRelative(iso?: string, now: number = Date.now()): string {
+  if (!iso) return '—'
+  const seconds = Math.round((new Date(iso).getTime() - now) / 1000)
+  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto', style: 'short' })
+  for (const [unit, size] of relativeUnits) {
+    if (Math.abs(seconds) >= size) return rtf.format(Math.round(seconds / size), unit)
+  }
+  return rtf.format(0, 'second')
 }

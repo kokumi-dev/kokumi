@@ -13,9 +13,9 @@ interface Props {
 }
 
 /**
- * FileInspector shows a GitHub-style file browser for multi-file manifest
- * artifacts: a file list on the left, the selected file's YAML on the right.
- * With `editable` and `onSave`, individual files can be edited in place.
+ * FileInspector shows a file browser for multi-file manifestvartifacts: 
+ * a file list on the left, the selected file's YAML on the right.vWith 
+ * `editable` and `onSave`, individual files can be edited in place.
  */
 export default function FileInspector({ files, editable = false, onSave, saving = false }: Props) {
   const [selectedPath, setSelectedPath] = useState(files[0]?.path ?? '')

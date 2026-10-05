@@ -1,0 +1,21 @@
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--color-text-on-light);
+  white-space: nowrap;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: currentColor;
+}
+
+.success .dot { color: #2d8a5a; }
+.warning .dot { color: #c08a1e; }
+.error .dot   { color: #c0312e; }
+.neutral .dot { color: rgba(49, 54, 56, 0.35); }

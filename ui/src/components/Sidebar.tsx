@@ -1,11 +1,10 @@
+import { NavLink } from 'react-router'
 import styles from './Sidebar.module.css'
 import logo from '../assets/logo.png'
 import { getUsername } from '../api/auth'
 
-export type Page = 'dashboard' | 'orders' | 'menus' | 'preparations' | 'servings' | 'pantries' | 'settings'
-
 interface NavItem {
-  id: Page
+  to: string
   label: string
   icon: React.ReactNode
   /** Only shown when the signed-in user is an admin. */
@@ -18,8 +17,6 @@ interface NavSection {
 }
 
 interface Props {
-  activePage: Page
-  onNavigate: (page: Page) => void
   operatorVersion?: string
   onLogout?: () => void
   /** When false, the admin-only Settings entry is hidden. */
@@ -96,28 +93,28 @@ const sections: NavSection[] = [
   {
     label: 'Overview',
     items: [
-      { id: 'dashboard', label: 'Dashboard', icon: <IconDashboard /> },
+      { to: '/', label: 'Dashboard', icon: <IconDashboard /> },
     ],
   },
   {
     label: 'Resources',
     items: [
-      { id: 'orders',       label: 'Orders',       icon: <IconOrder /> },
-      { id: 'menus',        label: 'Menus',        icon: <IconMenu /> },
-      { id: 'pantries',     label: 'Pantries',     icon: <IconPantry /> },
-      { id: 'preparations', label: 'Preparations', icon: <IconPreparation /> },
-      { id: 'servings',     label: 'Servings',     icon: <IconServing /> },
+      { to: '/orders',       label: 'Orders',       icon: <IconOrder /> },
+      { to: '/menus',        label: 'Menus',        icon: <IconMenu /> },
+      { to: '/pantries',     label: 'Pantries',     icon: <IconPantry /> },
+      { to: '/preparations', label: 'Preparations', icon: <IconPreparation /> },
+      { to: '/servings',     label: 'Servings',     icon: <IconServing /> },
     ],
   },
   {
     label: 'System',
     items: [
-      { id: 'settings', label: 'Settings', icon: <IconSettings />, adminOnly: true },
+      { to: '/settings', label: 'Settings', icon: <IconSettings />, adminOnly: true },
     ],
   },
 ]
 
-export default function Sidebar({ activePage, onNavigate, operatorVersion, onLogout, isAdmin }: Props) {
+export default function Sidebar({ operatorVersion, onLogout, isAdmin }: Props) {
   const visibleSections = sections
     .map((section) => ({
       ...section,
@@ -142,14 +139,15 @@ export default function Sidebar({ activePage, onNavigate, operatorVersion, onLog
               <div className={styles.navSectionLabel}>{section.label}</div>
             )}
             {section.items.map((item) => (
-              <button
-                key={item.id}
-                className={`${styles.navItem} ${activePage === item.id ? styles.active : ''}`}
-                onClick={() => onNavigate(item.id)}
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.to === '/'}
+                className={({ isActive }) => `${styles.navItem} ${isActive ? styles.active : ''}`}
               >
                 {item.icon}
                 {item.label}
-              </button>
+              </NavLink>
             ))}
           </div>
         ))}

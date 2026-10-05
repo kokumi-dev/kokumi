@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
+import { Navigate, useParams } from 'react-router'
 import styles from './pages.module.css'
+import layout from '../components/layout/layout.module.css'
 import Toggle from '../components/shared/Toggle'
+import PageHeader from '../components/layout/PageHeader'
+import TabNav from '../components/layout/TabNav'
+import { paths } from '../routes/paths'
 import {
   getSettings,
   saveSettings,
@@ -8,7 +13,8 @@ import {
 } from '../api/client'
 import type { AuthSettings, Settings } from '../api/client'
 
-type Tab = 'general' | 'authentication'
+const tabs = ['general', 'authentication'] as const
+type Tab = typeof tabs[number]
 
 const maxClaimLength = 253
 
@@ -19,7 +25,8 @@ const maxClaimLength = 253
  * enforces RBAC on every write.
  */
 export default function Settings() {
-  const [tab, setTab] = useState<Tab>('general')
+  const params = useParams()
+  const tab = params.tab as Tab
   const [settings, setSettings] = useState<Settings | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -47,13 +54,16 @@ export default function Settings() {
     setSettingsRev((rev) => rev + 1)
   }
 
+  if (!tabs.includes(tab)) {
+    return <Navigate to={paths.settings()} replace />
+  }
+
+  const header = <PageHeader title="Settings" subtitle="Operator configuration and preferences" />
+
   if (loadError) {
     return (
-      <div className={styles.page}>
-        <div className={styles.header}>
-          <h1 className={styles.title}>Settings</h1>
-          <p className={styles.subtitle}>Operator configuration and preferences</p>
-        </div>
+      <div className={layout.page}>
+        {header}
         <p className={styles.fieldError}>Failed to load settings: {loadError}</p>
         <button className={styles.saveBtn} onClick={load}>
           Retry
@@ -63,30 +73,15 @@ export default function Settings() {
   }
 
   return (
-    <div className={styles.page}>
-      <div className={styles.header}>
-        <h1 className={styles.title}>Settings</h1>
-        <p className={styles.subtitle}>Operator configuration and preferences</p>
-      </div>
+    <div className={layout.page}>
+      {header}
 
-      <div className={styles.tabs} role="tablist">
-        <button
-          role="tab"
-          aria-selected={tab === 'general'}
-          className={`${styles.tab} ${tab === 'general' ? styles.tabActive : ''}`}
-          onClick={() => setTab('general')}
-        >
-          General
-        </button>
-        <button
-          role="tab"
-          aria-selected={tab === 'authentication'}
-          className={`${styles.tab} ${tab === 'authentication' ? styles.tabActive : ''}`}
-          onClick={() => setTab('authentication')}
-        >
-          Authentication
-        </button>
-      </div>
+      <TabNav
+        tabs={[
+          { to: paths.settings('general'), label: 'General' },
+          { to: paths.settings('authentication'), label: 'Authentication' },
+        ]}
+      />
 
       {loading ? (
         <p className={styles.fieldHint}>Loading…</p>
