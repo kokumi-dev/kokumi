@@ -7,6 +7,7 @@ import PropertyList from '../../components/layout/PropertyList'
 import ConditionList from '../../components/layout/ConditionList'
 import PatchList from '../../components/shared/PatchList'
 import CommitBox from '../../components/shared/CommitBox'
+import Counter from '../../components/shared/Counter'
 import Btn from '../../components/shared/Btn'
 import { paths } from '../../routes/paths'
 import { formatDate } from '../../utils/format'
@@ -108,14 +109,14 @@ export default function OrderOverview() {
       </Section>
 
       {order.patches && order.patches.length > 0 && (
-        <Section title={`Patches (${order.patches.length})`} description="Declared in the Order spec">
+        <Section title={<>Patches<Counter count={order.patches.length} /></>} description="Declared in the Order spec">
           <PatchList patches={order.patches} />
         </Section>
       )}
 
       {(edits.length > 0 || pendingEdits !== null) && (
         <Section
-          title={`Edits (${edits.length})`}
+          title={<>Edits<Counter count={edits.length} /></>}
           description="Field changes made on the rendered manifest"
           actions={edits.length > 0 && (
             <Btn variant="danger" size="sm" onClick={() => setPendingEdits([])}>Clear all</Btn>

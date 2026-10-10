@@ -1,17 +1,16 @@
 import { useOutletContext } from 'react-router'
 import type { Menu } from '../../api/types'
-import { ociName } from '../../utils/format'
+import { stripOCIScheme } from '../../utils/format'
 
 export function menuSourceLabel(m: Menu): string {
   const where = m.source.pantryRef?.name ? `Pantry ${m.source.pantryRef.name}` : m.source.oci ?? ''
-  return m.source.version ? `${where} @ ${m.source.version}` : where
+  return m.source.version ? `${where}@${m.source.version}` : where
 }
 
-/** Short form for lists: artifact name and version only. */
-export function menuSourceShort(m: Menu): string {
-  if (!m.source.oci || m.source.pantryRef?.name) return menuSourceLabel(m)
-  const name = ociName(m.source.oci)
-  return m.source.version ? `${name} @ ${m.source.version}` : name
+/** Source without version for lists, e.g. "ghcr.io/org/app". */
+export function menuSourceRef(m: Menu): string {
+  if (m.source.pantryRef?.name) return `Pantry ${m.source.pantryRef.name}`
+  return m.source.oci ? stripOCIScheme(m.source.oci) : '—'
 }
 
 export function useMenuContext(): { menu: Menu } {

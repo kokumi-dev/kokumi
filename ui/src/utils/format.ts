@@ -28,11 +28,6 @@ export function stripOCIScheme(url: string): string {
   return url.replace(/^oci:\/\//, '')
 }
 
-/** Last path segment of an OCI reference, e.g. "external-secrets" for oci://ghcr.io/org/external-secrets. */
-export function ociName(url: string): string {
-  return stripOCIScheme(url).split('/').filter(Boolean).pop() ?? url
-}
-
 const relativeUnits: [Intl.RelativeTimeFormatUnit, number][] = [
   ['year', 365 * 24 * 3600],
   ['month', 30 * 24 * 3600],
