@@ -26,18 +26,18 @@
 }
 
 .stateApproved {
-  background: rgba(52, 168, 83, 0.15);
-  color: #1e7e34;
+  background: var(--color-success-bg);
+  color: var(--color-success);
 }
 
 .statePending {
-  background: rgba(251, 188, 5, 0.18);
-  color: #8a6100;
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
 }
 
 .stateRejected {
-  background: rgba(234, 67, 53, 0.14);
-  color: #b3261e;
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
 }
 
 .sealed {
@@ -70,7 +70,7 @@
   flex-direction: column;
   gap: 4px;
   padding: 8px 0;
-  border-bottom: 1px solid rgba(49, 54, 56, 0.07);
+  border-bottom: 1px solid var(--color-border-subtle);
 }
 
 .vote:last-child {
@@ -102,13 +102,13 @@
 }
 
 .approve {
-  background: rgba(52, 168, 83, 0.15);
-  color: #1e7e34;
+  background: var(--color-success-bg);
+  color: var(--color-success);
 }
 
 .reject {
-  background: rgba(234, 67, 53, 0.14);
-  color: #b3261e;
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
 }
 
 .time,
@@ -133,7 +133,7 @@
 .textarea {
   padding: 8px 11px;
   border-radius: 7px;
-  border: 1px solid rgba(49, 54, 56, 0.15);
+  border: 1px solid var(--color-border-strong);
   background: var(--color-bg-main);
   font-family: inherit;
   font-size: 0.875rem;
@@ -157,5 +157,5 @@
 .error {
   margin: 0;
   font-size: 0.85rem;
-  color: #b3261e;
+  color: var(--color-danger);
 }

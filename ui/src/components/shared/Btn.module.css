@@ -26,26 +26,26 @@
 /* ── Variants ── */
 .primary {
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-on-accent);
 }
 .primary:hover:not(:disabled) {
-  background: #d9554f;
+  background: var(--color-accent-hover);
 }
 
 .secondary {
-  background: rgba(49, 54, 56, 0.1);
+  background: var(--color-fill-strong);
   color: var(--color-text-on-light);
 }
 .secondary:hover:not(:disabled) {
-  background: rgba(49, 54, 56, 0.17);
+  background: var(--color-fill-strong-hover);
 }
 
 .danger {
-  background: rgba(239, 100, 97, 0.12);
-  color: #c0312e;
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
 }
 .danger:hover:not(:disabled) {
-  background: rgba(239, 100, 97, 0.22);
+  background: var(--color-danger-bg-hover);
 }
 
 .ghost {
@@ -54,28 +54,28 @@
   padding: 5px 10px;
 }
 .ghost:hover:not(:disabled) {
-  background: rgba(49, 54, 56, 0.08);
+  background: var(--color-fill);
   color: var(--color-text-on-light);
 }
 
 .promote {
-  background: rgba(52, 168, 83, 0.12);
-  color: #1e7e34;
+  background: var(--color-success-bg);
+  color: var(--color-success);
   font-size: 0.8rem;
   padding: 5px 10px;
 }
 .promote:hover:not(:disabled) {
-  background: rgba(52, 168, 83, 0.22);
+  background: var(--color-success-bg-hover);
 }
 
 .rollback {
-  background: rgba(228, 179, 99, 0.15);
-  color: #8a6200;
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
   font-size: 0.8rem;
   padding: 5px 10px;
 }
 .rollback:hover:not(:disabled) {
-  background: rgba(228, 179, 99, 0.28);
+  background: var(--color-warning-bg-hover);
 }
 
 /* ── Size modifier ── */

@@ -1,7 +1,7 @@
 .graph {
   height: 420px;
   width: 100%;
-  border: 1px solid rgba(49, 54, 56, 0.12);
+  border: 1px solid var(--color-border);
   border-radius: 10px;
   background: var(--color-bg-card);
   overflow: hidden;
@@ -10,7 +10,7 @@
 .empty {
   height: 420px;
   width: 100%;
-  border: 1px dashed rgba(49, 54, 56, 0.25);
+  border: 1px dashed var(--color-border-emphasis);
   border-radius: 10px;
   display: flex;
   flex-direction: column;
@@ -33,7 +33,7 @@
 
 /* ── Nodes ── */
 .menuNode {
-  border: 2px solid var(--color-accent, #4a7fb5);
+  border: 2px solid var(--color-accent);
   border-radius: 10px;
   background: var(--color-bg-card);
   padding: 10px 14px;
@@ -44,7 +44,7 @@
   flex-direction: column;
   justify-content: center;
   gap: 2px;
-  box-shadow: 0 2px 8px rgba(49, 54, 56, 0.12);
+  box-shadow: var(--shadow-md);
 }
 
 .menuNodeLabel {
@@ -72,7 +72,7 @@
 }
 
 .orderNode {
-  border: 2px solid rgba(49, 54, 56, 0.2);
+  border: 2px solid var(--color-border-strong);
   border-radius: 10px;
   background: var(--color-bg-card);
   padding: 8px 12px;
@@ -85,23 +85,23 @@
   gap: 2px;
   cursor: pointer;
   transition: box-shadow 0.15s, border-color 0.15s;
-  box-shadow: 0 1px 4px rgba(49, 54, 56, 0.1);
+  box-shadow: var(--shadow-sm);
 }
 
 .orderNode:hover {
-  box-shadow: 0 3px 10px rgba(49, 54, 56, 0.2);
+  box-shadow: var(--shadow-lg);
 }
 
 .orderNodeReady {
-  border-color: #2e9e5b;
+  border-color: var(--color-success);
 }
 
 .orderNodeNotReady {
-  border-color: #c94f4f;
+  border-color: var(--color-danger);
 }
 
 .orderNodeUnknown {
-  border-color: rgba(49, 54, 56, 0.25);
+  border-color: var(--color-border-emphasis);
 }
 
 .orderNodeLabel {
@@ -135,6 +135,6 @@
   vertical-align: middle;
 }
 
-.dotReady { background: #2e9e5b; }
-.dotNotReady { background: #c94f4f; }
-.dotUnknown { background: rgba(49, 54, 56, 0.35); }
+.dotReady { background: var(--color-success); }
+.dotNotReady { background: var(--color-danger); }
+.dotUnknown { background: var(--color-status-neutral); }

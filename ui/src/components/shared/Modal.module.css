@@ -1,7 +1,7 @@
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(49, 54, 56, 0.55);
+  background: var(--color-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -13,9 +13,7 @@
 .modal {
   background: var(--color-bg-card);
   border-radius: 12px;
-  box-shadow:
-    0 8px 32px rgba(49, 54, 56, 0.24),
-    0 2px 8px rgba(49, 54, 56, 0.12);
+  box-shadow: var(--shadow-modal);
   display: flex;
   flex-direction: column;
   max-height: 90vh;
@@ -34,7 +32,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 18px 24px 16px;
-  border-bottom: 1px solid rgba(49, 54, 56, 0.1);
+  border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
 }
 
@@ -60,7 +58,7 @@
 }
 
 .closeBtn:hover {
-  background: rgba(49, 54, 56, 0.1);
+  background: var(--color-fill-strong);
   color: var(--color-text-on-light);
 }
 
@@ -76,6 +74,12 @@
   justify-content: flex-end;
   gap: 10px;
   padding: 14px 24px;
-  border-top: 1px solid rgba(49, 54, 56, 0.1);
+  border-top: 1px solid var(--color-border);
   flex-shrink: 0;
+}
+
+.errorText {
+  color: var(--color-danger);
+  font-size: 0.82rem;
+  margin: 12px 0 0;
 }

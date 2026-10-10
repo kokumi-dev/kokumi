@@ -11,10 +11,10 @@
 }
 
 /* State variants */
-.ready    { background: rgba(52, 168, 83, 0.15); color: #1e7e34; }
-.deployed { background: rgba(52, 168, 83, 0.15); color: #1e7e34; }
-.pending  { background: rgba(228, 179, 99, 0.2);  color: #8a6200; }
-.processing { background: rgba(228, 179, 99, 0.2); color: #8a6200; }
-.deploying  { background: rgba(228, 179, 99, 0.2); color: #8a6200; }
-.failed   { background: rgba(239, 100, 97, 0.15); color: #c0312e; }
-.unknown  { background: rgba(49, 54, 56, 0.1);   color: var(--color-text-muted-light); }
+.ready    { background: var(--color-success-bg); color: var(--color-success); }
+.deployed { background: var(--color-success-bg); color: var(--color-success); }
+.pending  { background: var(--color-warning-bg); color: var(--color-warning); }
+.processing { background: var(--color-warning-bg); color: var(--color-warning); }
+.deploying  { background: var(--color-warning-bg); color: var(--color-warning); }
+.failed   { background: var(--color-danger-bg);  color: var(--color-danger); }
+.unknown  { background: var(--color-fill-strong); color: var(--color-text-muted-light); }

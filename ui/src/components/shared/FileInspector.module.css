@@ -1,7 +1,7 @@
 .inspector {
   display: flex;
   gap: 0;
-  border: 1px solid rgba(49, 54, 56, 0.15);
+  border: 1px solid var(--color-border-strong);
   border-radius: 8px;
   overflow: hidden;
   height: min(560px, 60vh);
@@ -14,7 +14,7 @@
   max-width: 260px;
   overflow-y: auto;
   max-height: 600px;
-  border-right: 1px solid rgba(49, 54, 56, 0.15);
+  border-right: 1px solid var(--color-border-strong);
   background: var(--color-bg-card);
   padding: 6px 0;
 }
@@ -36,11 +36,11 @@
 }
 
 .fileRow:hover {
-  background: rgba(49, 54, 56, 0.06);
+  background: var(--color-fill);
 }
 
 .fileRowActive {
-  background: rgba(49, 54, 56, 0.1);
+  background: var(--color-fill-strong);
   font-weight: 600;
 }
 
@@ -53,7 +53,7 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--color-accent, #e5c07b);
+  background: var(--color-accent);
   margin-left: auto;
   flex-shrink: 0;
 }
@@ -82,7 +82,7 @@
   align-items: center;
   gap: 8px;
   padding: 6px 12px;
-  border-bottom: 1px solid rgba(49, 54, 56, 0.15);
+  border-bottom: 1px solid var(--color-border-strong);
   background: var(--color-bg-card);
 }
 
@@ -95,7 +95,7 @@
 }
 
 .headerBtn {
-  border: 1px solid rgba(49, 54, 56, 0.2);
+  border: 1px solid var(--color-border-strong);
   background: transparent;
   color: var(--color-text-on-light);
   border-radius: 6px;
@@ -105,7 +105,7 @@
 }
 
 .headerBtn:hover:not(:disabled) {
-  background: rgba(49, 54, 56, 0.08);
+  background: var(--color-fill);
 }
 
 .headerBtn:disabled {

@@ -1,12 +1,22 @@
+/* One Dark palette, kept in sync with @codemirror/theme-one-dark */
 .diffWrap {
-  background: #282c34;
+  --diff-bg: #282c34;
+  --diff-fg: #abb2bf;
+  --diff-muted: #5c6370;
+  --diff-separator: #3a3f4b;
+  --diff-added-fg: #98c379;
+  --diff-added-bg: rgba(80, 220, 100, 0.12);
+  --diff-removed-fg: #e06c75;
+  --diff-removed-bg: rgba(240, 71, 71, 0.12);
+
+  background: var(--diff-bg);
   border-radius: 8px;
   overflow: auto;
   max-height: 560px;
   font-family: 'SF Mono', 'Fira Code', 'Fira Mono', 'Roboto Mono', monospace;
   font-size: 0.78rem;
   line-height: 1.6;
-  border: 1px solid rgba(49, 54, 56, 0.12);
+  border: 1px solid var(--color-border);
 }
 
 .diffTable {
@@ -24,7 +34,7 @@
   text-align: right;
   user-select: none;
   opacity: 0.45;
-  color: #abb2bf;
+  color: var(--diff-fg);
   min-width: 40px;
   font-size: 0.72rem;
   vertical-align: top;
@@ -32,39 +42,39 @@
 
 .lineContent {
   padding: 0 12px 0 4px;
-  color: #abb2bf;
+  color: var(--diff-fg);
   width: 100%;
 }
 
 .lineAdded .lineGutter,
 .lineAdded .lineContent {
-  background: rgba(80, 220, 100, 0.12);
-  color: #98c379;
+  background: var(--diff-added-bg);
+  color: var(--diff-added-fg);
 }
 
 .lineAdded .linePrefix {
-  color: #98c379;
+  color: var(--diff-added-fg);
 }
 
 .lineRemoved .lineGutter,
 .lineRemoved .lineContent {
-  background: rgba(240, 71, 71, 0.12);
-  color: #e06c75;
+  background: var(--diff-removed-bg);
+  color: var(--diff-removed-fg);
 }
 
 .lineRemoved .linePrefix {
-  color: #e06c75;
+  color: var(--diff-removed-fg);
 }
 
 .lineOmitted td {
   text-align: center;
-  color: #5c6370;
-  background: #282c34;
+  color: var(--diff-muted);
+  background: var(--diff-bg);
   padding: 4px 0;
   font-style: italic;
   font-size: 0.72rem;
-  border-top: 1px solid #3a3f4b;
-  border-bottom: 1px solid #3a3f4b;
+  border-top: 1px solid var(--diff-separator);
+  border-bottom: 1px solid var(--diff-separator);
 }
 
 .linePrefix {

@@ -155,12 +155,11 @@ function GeneralTab({ argoCDURL, onSaved }: { argoCDURL: string; onSaved: (s: Se
             </label>
             <input
               id="argoCDBase"
-              className={styles.fieldInput}
+              className={urlError ? `${styles.fieldInput} ${styles.fieldInputError}` : styles.fieldInput}
               type="url"
               placeholder="https://argocd.example.com"
               value={base}
               disabled={submitting}
-              style={urlError ? { borderColor: '#c13a37' } : undefined}
               onChange={(e) => { setBase(e.target.value); setSaved(false); setUrlError(false); setSaveError(null) }}
               onKeyDown={(e) => { if (e.key === 'Enter') handleSave() }}
             />

@@ -16,7 +16,7 @@
   max-width: 320px;
   padding: 6px 10px;
   border-radius: 6px;
-  border: 1px solid rgba(49, 54, 56, 0.15);
+  border: 1px solid var(--color-border-strong);
   background: var(--color-bg-main);
   font-family: inherit;
   font-size: 0.85rem;
@@ -50,13 +50,13 @@
   list-style: none;
   margin: 0;
   padding: 0;
-  border: 1px solid rgba(49, 54, 56, 0.08);
+  border: 1px solid var(--color-border-subtle);
   border-radius: 8px;
   overflow: hidden;
 }
 
 .row {
-  border-bottom: 1px solid rgba(49, 54, 56, 0.06);
+  border-bottom: 1px solid var(--color-border-subtle);
 }
 
 .row:last-child {
@@ -78,7 +78,7 @@
 }
 
 .rowHeader:hover {
-  background: rgba(49, 54, 56, 0.03);
+  background: var(--color-fill-subtle);
 }
 
 .chevron {
@@ -102,8 +102,8 @@
 
 .detail {
   padding: 4px 14px 14px 34px;
-  background: rgba(49, 54, 56, 0.02);
-  border-top: 1px solid rgba(49, 54, 56, 0.06);
+  background: var(--color-fill-subtle);
+  border-top: 1px solid var(--color-border-subtle);
 }
 
 .placeholder {
@@ -140,7 +140,7 @@
 .tabs {
   display: flex;
   gap: 4px;
-  border-bottom: 1px solid rgba(49, 54, 56, 0.1);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .tab {

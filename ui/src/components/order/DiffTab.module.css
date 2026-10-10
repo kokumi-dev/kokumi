@@ -22,7 +22,7 @@
 }
 
 .error {
-  color: #c0312e;
+  color: var(--color-danger);
   font-size: 0.875rem;
   padding: 8px 0;
 }

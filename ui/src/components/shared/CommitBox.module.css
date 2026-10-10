@@ -4,7 +4,7 @@
   gap: 8px;
   padding: 16px 20px;
   border-radius: 10px;
-  border: 1px solid rgba(49, 54, 56, 0.12);
+  border: 1px solid var(--color-border);
   background: var(--color-bg-card);
 }
 
@@ -17,7 +17,7 @@
 .textarea {
   padding: 8px 11px;
   border-radius: 7px;
-  border: 1px solid rgba(49, 54, 56, 0.15);
+  border: 1px solid var(--color-border-strong);
   background: var(--color-bg-main);
   font-family: inherit;
   font-size: 0.875rem;
@@ -51,6 +51,6 @@
 
 .error {
   font-size: 0.82rem;
-  color: #c0312e;
+  color: var(--color-danger);
   margin: 0;
 }
