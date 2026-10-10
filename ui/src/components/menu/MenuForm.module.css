@@ -5,7 +5,7 @@
 
 .formCard {
   background: var(--color-bg-card);
-  border: 1px solid rgba(49, 54, 56, 0.08);
+  border: 1px solid var(--color-border-subtle);
   border-radius: 10px;
   padding: 20px;
   margin-bottom: 20px;
@@ -45,7 +45,7 @@
 .input {
   padding: 8px 11px;
   border-radius: 7px;
-  border: 1px solid rgba(49, 54, 56, 0.15);
+  border: 1px solid var(--color-border-strong);
   background: var(--color-bg-main);
   font-family: inherit;
   font-size: 0.875rem;
@@ -105,7 +105,7 @@ select.input {
 .patchCard {
   background: var(--color-bg-main);
   border-radius: 8px;
-  border: 1px solid rgba(49, 54, 56, 0.1);
+  border: 1px solid var(--color-border);
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
@@ -137,7 +137,7 @@ select.input {
   flex: 1;
   padding: 6px 10px;
   border-radius: 6px;
-  border: 1px solid rgba(49, 54, 56, 0.13);
+  border: 1px solid var(--color-border);
   background: var(--color-bg-card);
   font-family: 'SF Mono', 'Fira Code', monospace;
   font-size: 0.78rem;
@@ -166,8 +166,8 @@ select.input {
 }
 
 .iconBtn:hover {
-  background: rgba(239, 100, 97, 0.12);
-  color: #c0312e;
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
 }
 
 .addSetBtn {
@@ -190,8 +190,8 @@ select.input {
   font-size: 0.875rem;
   font-weight: 600;
   color: var(--color-accent);
-  background: rgba(239, 100, 97, 0.08);
-  border: 1px dashed rgba(239, 100, 97, 0.4);
+  background: var(--color-accent-tint);
+  border: 1px dashed var(--color-accent-border);
   border-radius: 7px;
   padding: 9px;
   width: 100%;
@@ -200,16 +200,16 @@ select.input {
 }
 
 .addPatchBtn:hover {
-  background: rgba(239, 100, 97, 0.14);
+  background: var(--color-accent-tint-hover);
 }
 
 .yamlError {
   margin-top: 10px;
   padding: 8px 12px;
   border-radius: 7px;
-  background: rgba(239, 100, 97, 0.1);
-  border: 1px solid rgba(239, 100, 97, 0.25);
-  color: #c0312e;
+  background: var(--color-danger-bg);
+  border: 1px solid var(--color-danger-border);
+  color: var(--color-danger);
   font-size: 0.8rem;
   font-family: 'SF Mono', 'Fira Code', monospace;
 }
@@ -222,7 +222,7 @@ select.input {
 .helmCard {
   background: var(--color-bg-main);
   border-radius: 8px;
-  border: 1px solid rgba(49, 54, 56, 0.1);
+  border: 1px solid var(--color-border);
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
@@ -234,7 +234,7 @@ select.input {
   min-height: 80px;
   padding: 8px 11px;
   border-radius: 7px;
-  border: 1px solid rgba(49, 54, 56, 0.15);
+  border: 1px solid var(--color-border-strong);
   background: var(--color-bg-main);
   font-family: 'SF Mono', 'Fira Code', monospace;
   font-size: 0.78rem;
@@ -257,7 +257,7 @@ select.input {
 .valuesError {
   margin: 4px 0 0;
   font-size: 0.78rem;
-  color: #c0312e;
+  color: var(--color-danger);
 }
 
 .sectionTitle {
@@ -278,8 +278,8 @@ select.input {
   gap: 6px;
   padding: 8px 12px;
   border-radius: 7px;
-  background: rgba(49, 54, 56, 0.05);
-  border: 1px solid rgba(49, 54, 56, 0.1);
+  background: var(--color-fill-subtle);
+  border: 1px solid var(--color-border);
   font-size: 0.8rem;
   color: var(--color-text-muted-light);
   line-height: 1.6;
@@ -291,10 +291,10 @@ select.input {
   gap: 6px;
   padding: 8px 12px;
   border-radius: 7px;
-  background: rgba(52, 211, 153, 0.08);
-  border: 1px solid rgba(52, 211, 153, 0.2);
+  background: var(--color-success-bg);
+  border: 1px solid var(--color-success-border);
   font-size: 0.8rem;
-  color: #059669;
+  color: var(--color-success);
 }
 
 .policyIcon {
@@ -306,7 +306,7 @@ select.input {
   display: inline-block;
   padding: 2px 8px;
   border-radius: 4px;
-  background: rgba(49, 54, 56, 0.08);
+  background: var(--color-fill);
   font-family: 'SF Mono', 'Fira Code', monospace;
   font-size: 0.75rem;
   color: var(--color-text-on-light);

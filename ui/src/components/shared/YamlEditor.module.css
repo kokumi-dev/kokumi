@@ -1,7 +1,7 @@
 .wrap {
   border-radius: 8px;
   overflow: hidden;
-  border: 1px solid rgba(49, 54, 56, 0.12);
+  border: 1px solid var(--color-border);
   font-size: 0.82rem;
   /* Override CodeMirror's default font */
   --cm-font: 'SF Mono', 'Fira Code', 'Fira Mono', 'Roboto Mono', monospace;

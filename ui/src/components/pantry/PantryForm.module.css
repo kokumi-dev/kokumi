@@ -1,6 +1,6 @@
 .formCard {
   background: var(--color-bg-card);
-  border: 1px solid rgba(49, 54, 56, 0.08);
+  border: 1px solid var(--color-border-subtle);
   border-radius: 10px;
   padding: 20px;
   margin-bottom: 20px;
@@ -40,7 +40,7 @@
 .input {
   padding: 8px 11px;
   border-radius: 7px;
-  border: 1px solid rgba(49, 54, 56, 0.15);
+  border: 1px solid var(--color-border-strong);
   background: var(--color-bg-main);
   font-family: inherit;
   font-size: 0.875rem;
@@ -65,7 +65,7 @@
 
 .divider {
   border: none;
-  border-top: 1px solid rgba(49, 54, 56, 0.1);
+  border-top: 1px solid var(--color-border);
   margin: 2px 0;
 }
 
@@ -81,7 +81,7 @@
 .credTabs {
   display: flex;
   gap: 2px;
-  background: rgba(49, 54, 56, 0.07);
+  background: var(--color-fill);
   border-radius: 8px;
   padding: 3px;
 }
@@ -102,5 +102,10 @@
 .credTabActive {
   background: var(--color-bg-card);
   color: var(--color-text-on-light);
-  box-shadow: 0 1px 4px rgba(49, 54, 56, 0.1);
+  box-shadow: var(--shadow-sm);
+}
+
+.error {
+  color: var(--color-danger);
+  font-size: 0.82rem;
 }

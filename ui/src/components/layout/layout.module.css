@@ -68,7 +68,7 @@
 .tabs {
   display: flex;
   gap: 4px;
-  border-bottom: 1px solid rgba(49, 54, 56, 0.1);
+  border-bottom: 1px solid var(--color-border);
   margin-bottom: 20px;
   overflow-x: auto;
 }
@@ -107,7 +107,7 @@
 .section {
   background: var(--color-bg-card);
   border-radius: 10px;
-  border: 1px solid rgba(49, 54, 56, 0.08);
+  border: 1px solid var(--color-border-subtle);
   margin-bottom: 20px;
   overflow: hidden;
 }
@@ -117,7 +117,7 @@
   align-items: center;
   gap: 12px;
   padding: 14px 20px;
-  border-bottom: 1px solid rgba(49, 54, 56, 0.07);
+  border-bottom: 1px solid var(--color-border-subtle);
 }
 
 .sectionHeading {
@@ -149,11 +149,11 @@
 }
 
 .sectionDanger {
-  border-color: rgba(239, 100, 97, 0.45);
+  border-color: var(--color-danger-border);
 }
 
 .sectionDanger .sectionTitle {
-  color: #c0312e;
+  color: var(--color-danger);
 }
 
 /* ── Property list (label / value rows) ── */
@@ -184,7 +184,7 @@
   width: 260px;
   padding: 6px 10px;
   border-radius: 6px;
-  border: 1px solid rgba(49, 54, 56, 0.15);
+  border: 1px solid var(--color-border-strong);
   background: var(--color-bg-main);
   font-family: inherit;
   font-size: 0.85rem;
@@ -221,7 +221,7 @@
   letter-spacing: 0.07em;
   color: var(--color-text-muted-light);
   padding: 8px 12px;
-  border-bottom: 1px solid rgba(49, 54, 56, 0.1);
+  border-bottom: 1px solid var(--color-border);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -230,7 +230,7 @@
 .table td {
   padding: 10px 12px;
   vertical-align: middle;
-  border-bottom: 1px solid rgba(49, 54, 56, 0.06);
+  border-bottom: 1px solid var(--color-border-subtle);
   font-size: 0.875rem;
   color: var(--color-text-on-light);
   white-space: nowrap;
@@ -247,7 +247,7 @@
 }
 
 .rowLink:hover td {
-  background: rgba(49, 54, 56, 0.04);
+  background: var(--color-fill-subtle);
 }
 
 .primaryLink {
@@ -382,7 +382,7 @@
   line-height: 1.4;
   padding: 0 7px;
   border-radius: 20px;
-  border: 1px solid rgba(49, 54, 56, 0.25);
+  border: 1px solid var(--color-border-emphasis);
   color: var(--color-text-muted-light);
   vertical-align: middle;
   white-space: nowrap;
@@ -390,7 +390,7 @@
 
 .error {
   font-size: 0.82rem;
-  color: #c0312e;
+  color: var(--color-danger);
   font-weight: 500;
 }
 

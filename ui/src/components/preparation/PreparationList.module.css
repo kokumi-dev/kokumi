@@ -10,7 +10,7 @@
   gap: 16px;
   align-items: center;
   padding: 12px 0;
-  border-bottom: 1px solid rgba(49, 54, 56, 0.07);
+  border-bottom: 1px solid var(--color-border-subtle);
 }
 
 .row:last-child {

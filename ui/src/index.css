@@ -10,6 +10,53 @@
   --color-text-muted-dark:  rgba(232, 233, 235, 0.55);
   --color-text-on-light:    #313638;
   --color-text-muted-light: rgba(49, 54, 56, 0.55);
+  --color-text-faint-dark:  rgba(232, 233, 235, 0.4);
+
+  --color-accent-hover:       #d9554f;
+  --color-on-accent:          #fff;
+  --color-accent-tint:        rgba(239, 100, 97, 0.1);
+  --color-accent-tint-hover:  rgba(239, 100, 97, 0.14);
+  --color-accent-ring:        rgba(239, 100, 97, 0.18);
+  --color-accent-border:      rgba(239, 100, 97, 0.4);
+
+  --color-success:          #1e7e34;
+  --color-success-bg:       rgba(52, 168, 83, 0.15);
+  --color-success-bg-hover: rgba(52, 168, 83, 0.22);
+  --color-success-border:   rgba(52, 168, 83, 0.3);
+
+  --color-danger:           #c0312e;
+  --color-danger-bg:        rgba(239, 100, 97, 0.12);
+  --color-danger-bg-hover:  rgba(239, 100, 97, 0.22);
+  --color-danger-border:    rgba(239, 100, 97, 0.4);
+
+  --color-warning:          #8a6200;
+  --color-warning-bg:       rgba(228, 179, 99, 0.2);
+  --color-warning-bg-hover: rgba(228, 179, 99, 0.28);
+
+  /* Neutrals are --color-text-on-light at fixed alpha steps */
+  --color-border-subtle:       rgba(49, 54, 56, 0.07);
+  --color-border:              rgba(49, 54, 56, 0.12);
+  --color-border-strong:       rgba(49, 54, 56, 0.18);
+  --color-border-emphasis:     rgba(49, 54, 56, 0.25);
+  --color-fill-subtle:         rgba(49, 54, 56, 0.04);
+  --color-fill:                rgba(49, 54, 56, 0.07);
+  --color-fill-strong:         rgba(49, 54, 56, 0.1);
+  --color-fill-strong-hover:   rgba(49, 54, 56, 0.17);
+  --color-fill-emphasis:       rgba(49, 54, 56, 0.25);
+  --color-fill-emphasis-hover: rgba(49, 54, 56, 0.45);
+  --color-status-neutral:      rgba(49, 54, 56, 0.35);
+  --color-overlay:             rgba(49, 54, 56, 0.55);
+
+  --color-border-on-dark:     rgba(255, 255, 255, 0.07);
+  --color-fill-on-dark:       rgba(255, 255, 255, 0.06);
+  --color-fill-on-dark-hover: rgba(255, 255, 255, 0.12);
+
+  --shadow-xs:    0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-sm:    0 1px 4px rgba(49, 54, 56, 0.1);
+  --shadow-md:    0 2px 8px rgba(49, 54, 56, 0.12);
+  --shadow-lg:    0 4px 16px rgba(49, 54, 56, 0.16);
+  --shadow-xl:    0 18px 50px rgba(0, 0, 0, 0.35);
+  --shadow-modal: 0 8px 32px rgba(49, 54, 56, 0.24), 0 2px 8px rgba(49, 54, 56, 0.12);
 
   --sidebar-width: 240px;
   --topbar-height: 56px;
@@ -69,9 +116,9 @@ button {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(49, 54, 56, 0.25);
+  background: var(--color-fill-emphasis);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(49, 54, 56, 0.45);
+  background: var(--color-fill-emphasis-hover);
 }

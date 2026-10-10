@@ -182,7 +182,7 @@ export default function PantryForm({ pantry, onCancel, onSubmit, onDirtyChange }
           )}
 
           {error && (
-            <div style={{ color: '#c62828', fontSize: '0.82rem' }}>{error}</div>
+            <div className={styles.error}>{error}</div>
           )}
         </div>
       </div>

@@ -15,7 +15,7 @@
   margin-left: 8px;
   font-size: 0.75rem;
   color: var(--color-accent);
-  background: rgba(239, 100, 97, 0.1);
+  background: var(--color-accent-tint);
   padding: 2px 8px;
   border-radius: 4px;
 }

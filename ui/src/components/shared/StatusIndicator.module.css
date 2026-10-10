@@ -15,7 +15,7 @@
   background: currentColor;
 }
 
-.success .dot { color: #2d8a5a; }
-.warning .dot { color: #c08a1e; }
-.error .dot   { color: #c0312e; }
-.neutral .dot { color: rgba(49, 54, 56, 0.35); }
+.success .dot { color: var(--color-success); }
+.warning .dot { color: var(--color-warning); }
+.error .dot   { color: var(--color-danger); }
+.neutral .dot { color: var(--color-status-neutral); }
