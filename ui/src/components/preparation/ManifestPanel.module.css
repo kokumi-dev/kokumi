@@ -1,0 +1,21 @@
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.toolbarActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.editsPill {
+  margin-left: 8px;
+  font-size: 0.75rem;
+  color: var(--color-accent);
+  background: rgba(239, 100, 97, 0.1);
+  padding: 2px 8px;
+  border-radius: 4px;
+}

@@ -1,0 +1,401 @@
+/* ── Page ── */
+.page {
+  padding: 32px 36px;
+}
+
+/* ── Page header ── */
+.header {
+  margin-bottom: 24px;
+}
+
+.breadcrumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: var(--color-text-muted-light);
+  margin-bottom: 6px;
+}
+
+.breadcrumbLink:hover {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
+
+.breadcrumbSep {
+  opacity: 0.6;
+}
+
+.headerRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+
+.title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--color-text-on-light);
+  letter-spacing: -0.01em;
+  margin: 0;
+  word-break: break-all;
+}
+
+.subtitle {
+  font-size: 0.95rem;
+  color: var(--color-text-muted-light);
+  margin: 4px 0 0;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* ── Tab navigation ── */
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid rgba(49, 54, 56, 0.1);
+  margin-bottom: 20px;
+  overflow-x: auto;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-text-muted-light);
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+
+.tab:hover {
+  color: var(--color-text-on-light);
+}
+
+.tabActive {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+}
+
+.tabButton {
+  background: none;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+/* ── Section ── */
+.section {
+  background: var(--color-bg-card);
+  border-radius: 10px;
+  border: 1px solid rgba(49, 54, 56, 0.08);
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  border-bottom: 1px solid rgba(49, 54, 56, 0.07);
+}
+
+.sectionHeading {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sectionTitle {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--color-text-on-light);
+}
+
+.sectionDescription {
+  font-size: 0.8rem;
+  color: var(--color-text-muted-light);
+}
+
+.sectionActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.sectionBody {
+  padding: 20px;
+}
+
+.sectionDanger {
+  border-color: rgba(239, 100, 97, 0.45);
+}
+
+.sectionDanger .sectionTitle {
+  color: #c0312e;
+}
+
+/* ── Property list (label / value rows) ── */
+.propertyList {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  column-gap: 16px;
+  row-gap: 12px;
+  margin: 0;
+}
+
+.propertyLabel {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--color-text-muted-light);
+}
+
+.propertyValue {
+  font-size: 0.875rem;
+  color: var(--color-text-on-light);
+  margin: 0;
+  min-width: 0;
+  word-break: break-word;
+}
+
+/* ── Filter input ── */
+.filterInput {
+  width: 260px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(49, 54, 56, 0.15);
+  background: var(--color-bg-main);
+  font-family: inherit;
+  font-size: 0.85rem;
+  color: var(--color-text-on-light);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.filterInput:focus {
+  border-color: var(--color-accent);
+}
+
+.filterInput::placeholder {
+  color: var(--color-text-muted-light);
+}
+
+/* ── Data table ── */
+.tableScroll {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.table th {
+  text-align: left;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--color-text-muted-light);
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(49, 54, 56, 0.1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.table td {
+  padding: 10px 12px;
+  vertical-align: middle;
+  border-bottom: 1px solid rgba(49, 54, 56, 0.06);
+  font-size: 0.875rem;
+  color: var(--color-text-on-light);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.table tr:last-child td {
+  border-bottom: none;
+}
+
+.rowLink {
+  cursor: pointer;
+}
+
+.rowLink:hover td {
+  background: rgba(49, 54, 56, 0.04);
+}
+
+.primaryLink {
+  font-weight: 600;
+  color: var(--color-text-on-light);
+}
+
+.primaryLink:hover {
+  text-decoration: underline;
+}
+
+/* References to other resources inside a row: quiet until hovered. */
+.refLink {
+  color: inherit;
+}
+
+.refLink:hover {
+  color: var(--color-text-on-light);
+  text-decoration: underline;
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.secondaryText {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--color-text-muted-light);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cellRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cellRow .primaryLink {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Empty state ── */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 48px 20px;
+  color: var(--color-text-muted-light);
+  text-align: center;
+}
+
+.emptyIcon {
+  width: 40px;
+  height: 40px;
+  opacity: 0.35;
+}
+
+.emptyText {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+/* ── Conditions ── */
+.conditionList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.condition {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.conditionHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.conditionType {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.conditionReason {
+  font-size: 0.78rem;
+  color: var(--color-text-muted-light);
+}
+
+.conditionMessage {
+  font-size: 0.82rem;
+  color: var(--color-text-muted-light);
+  word-break: break-word;
+}
+
+/* ── Misc ── */
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+}
+
+.muted {
+  color: var(--color-text-muted-light);
+}
+
+.inlineLink {
+  color: var(--color-accent);
+  font-weight: 500;
+}
+
+.inlineLink:hover {
+  text-decoration: underline;
+}
+
+/* Neutral flag such as "Active" or "2 approvals"; the only label style in lists. */
+.label {
+  display: inline-block;
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.4;
+  padding: 0 7px;
+  border-radius: 20px;
+  border: 1px solid rgba(49, 54, 56, 0.25);
+  color: var(--color-text-muted-light);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.error {
+  font-size: 0.82rem;
+  color: #c0312e;
+  font-weight: 500;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}

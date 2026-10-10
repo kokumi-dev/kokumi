@@ -1,0 +1,1402 @@
+import { useState, useEffect, useRef } from 'react'
+import { load, dump } from 'js-yaml'
+import YamlEditor from '../shared/YamlEditor'
+import CommitBox from '../shared/CommitBox'
+import TabButtons from '../layout/TabButtons'
+import PreviewTab from './PreviewTab'
+import DiffTab from './DiffTab'
+import type { Order, OrderFormData, Patch, HelmRender, Menu, ChartInfo, FileLayout } from '../../api/types'
+import { emptyOrderForm, orderToFormData } from '../../api/types'
+import { objectToYaml, yamlToValues } from '../../utils/yaml'
+import { listOCITags, getChartInfo } from '../../api/client'
+import { cleanTags } from '../../api/ociTags'
+import { usePantries } from '../../hooks/usePantries'
+import DestinationEditor from '../shared/DestinationEditor'
+import styles from './OrderForm.module.css'
+
+interface Props {
+  /** When provided the form is in "edit" mode. */
+  order?: Order
+  /** When provided, pre-fill menuRef and hide source fields. */
+  menuRef?: { name: string }
+  /** Full menu object — used to display override policy constraints. */
+  menu?: Menu
+  /** Available menus for the selector dropdown (create mode). */
+  menus?: Menu[]
+  onCancel: () => void
+  onSubmit: (data: OrderFormData, commitMessage: string) => Promise<void>
+  /** Reports whether the form holds unsaved changes. */
+  onDirtyChange?: (dirty: boolean) => void
+}
+
+// ── YAML serialisation helpers ────────────────────────────────────────────────
+
+type Tab = 'form' | 'yaml' | 'preview' | 'diff'
+
+function parseGroups(text: string): string[] {
+  return [...new Set(text.split(',').map((g) => g.trim()).filter(Boolean))]
+}
+
+function formToYaml(data: OrderFormData): string {
+  const doc: Record<string, unknown> = {
+    promotion: data.approvals ? { mode: data.mode, approvals: data.approvals } : { mode: data.mode },
+  }
+  if (data.destination?.pantryRef?.name) {
+    doc.destination = { pantryRef: { name: data.destination.pantryRef.name } }
+  } else if (data.destination?.oci) {
+    doc.destination = { oci: data.destination.oci }
+  }
+  if (data.menuRef) {
+    doc.menuRef = { name: data.menuRef.name }
+  }
+  if (data.source) {
+    if (data.source.pantryRef?.name) {
+      doc.source = { pantryRef: { name: data.source.pantryRef.name }, version: data.source.version }
+    } else {
+      doc.source = { oci: data.source.oci ?? '', version: data.source.version }
+    }
+  }
+  if (data.render?.helm) {
+    const h = data.render.helm
+    const helmDoc: Record<string, unknown> = {}
+    if (h.releaseName) helmDoc.releaseName = h.releaseName
+    if (h.namespace) helmDoc.namespace = h.namespace
+    if (h.includeCRDs) helmDoc.includeCRDs = true
+    if (Object.keys(h.values).length > 0) helmDoc.values = h.values
+    doc.render = { helm: helmDoc }
+  } else if (data.render?.manifest) {
+    doc.render = { manifest: { layout: data.render.manifest.layout } }
+  }
+  if (data.patches.length > 0) {
+    doc.patches = data.patches.map((p) => ({
+      target: {
+        kind: p.target.kind,
+        name: p.target.name,
+        ...(p.target.namespace ? { namespace: p.target.namespace } : {}),
+      },
+      set: p.set,
+    }))
+  }
+  return dump(doc, { lineWidth: 100 })
+}
+
+function assertKnownKeys(obj: Record<string, unknown> | undefined, allowed: string[], path: string) {
+  if (!obj) return
+  const unknown = Object.keys(obj).filter((k) => !allowed.includes(k))
+  if (unknown.length > 0) {
+    throw new Error(`unknown field ${unknown.map((k) => (path ? `${path}.${k}` : k)).join(', ')}`)
+  }
+}
+
+function yamlToPartialForm(text: string): Omit<OrderFormData, 'name' | 'namespace'> {
+  const doc = load(text) as Record<string, unknown>
+  if (!doc || typeof doc !== 'object') throw new Error('YAML must be a mapping')
+  assertKnownKeys(doc, ['source', 'destination', 'menuRef', 'render', 'patches', 'promotion'], '')
+
+  const src = doc.source as Record<string, unknown> | undefined
+  const dst = doc.destination as Record<string, unknown> | undefined
+  const rawMenuRef = doc.menuRef as Record<string, string> | undefined
+  const rawPatches = Array.isArray(doc.patches) ? (doc.patches as unknown[]) : []
+
+  const rawRender = doc.render as Record<string, unknown> | undefined
+  let render: OrderFormData['render']
+  if (rawRender?.helm) {
+    const h = rawRender.helm as Record<string, unknown>
+    render = {
+      helm: {
+        releaseName: (h.releaseName as string) ?? '',
+        namespace: (h.namespace as string) ?? '',
+        includeCRDs: Boolean(h.includeCRDs),
+        values: h.values && typeof h.values === 'object' && !Array.isArray(h.values)
+          ? (h.values as Record<string, unknown>)
+          : {},
+      },
+    }
+  } else if (rawRender?.manifest) {
+    const m = rawRender.manifest as Record<string, unknown>
+    render = {
+      manifest: {
+        layout: m.layout === 'Multi' ? 'Multi' : 'Single',
+      },
+    }
+  }
+
+  // Resolve source — exactly one of oci or pantryRef
+  let source: OrderFormData['source']
+  if (src) {
+    const srcPantryRef = src.pantryRef as Record<string, string> | undefined
+    if (srcPantryRef?.name) {
+      source = { version: (src.version as string) ?? '', pantryRef: { name: srcPantryRef.name } }
+    } else {
+      source = { oci: (src.oci as string) ?? '', version: (src.version as string) ?? '' }
+    }
+  }
+
+  // Resolve destination — at most one of oci or pantryRef
+  let destination: OrderFormData['destination'] = {}
+  if (dst) {
+    const dstPantryRef = dst.pantryRef as Record<string, string> | undefined
+    if (dstPantryRef?.name) {
+      destination = { pantryRef: { name: dstPantryRef.name } }
+    } else {
+      destination = { oci: (dst.oci as string) ?? '' }
+    }
+  }
+
+  const promotion = doc.promotion as Record<string, unknown> | undefined
+  const rawApprovals = promotion?.approvals as Record<string, unknown> | undefined
+  assertKnownKeys(promotion, ['mode', 'approvals'], 'promotion')
+  assertKnownKeys(rawApprovals, ['requiredApprovals', 'allowedGroups'], 'promotion.approvals')
+  if (promotion?.mode !== undefined && promotion.mode !== 'Manual' && promotion.mode !== 'Automatic') {
+    throw new Error('promotion.mode must be Manual or Automatic')
+  }
+  if (rawApprovals) {
+    const n = rawApprovals.requiredApprovals
+    if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > 32) {
+      throw new Error('promotion.approvals.requiredApprovals must be an integer between 1 and 32')
+    }
+  }
+
+  return {
+    menuRef: rawMenuRef?.name ? { name: rawMenuRef.name } : undefined,
+    source,
+    destination,
+    render,
+    mode: promotion?.mode === 'Automatic' ? 'Automatic' : 'Manual',
+    approvals: rawApprovals
+      ? {
+          requiredApprovals: rawApprovals.requiredApprovals as number,
+          allowedGroups: Array.isArray(rawApprovals.allowedGroups)
+            ? (rawApprovals.allowedGroups as unknown[]).map(String)
+            : [],
+        }
+      : undefined,
+    edits: [],
+    patches: rawPatches.map((p) => {
+      const patch = p as Record<string, unknown>
+      const target = (patch.target ?? {}) as Record<string, string>
+      const set = (patch.set ?? {}) as Record<string, string>
+      return {
+        target: {
+          kind: target.kind ?? '',
+          name: target.name ?? '',
+          namespace: target.namespace,
+        },
+        set,
+      } satisfies Patch
+    }),
+  }
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+
+export default function OrderForm({ order, menuRef, menu, menus, onCancel, onSubmit, onDirtyChange }: Props) {
+  const isEdit = !!order
+  const showDiffTab = isEdit && !!order?.activePreparation
+  const [tab, setTab] = useState<Tab>('form')
+  const [selectedMenu, setSelectedMenu] = useState<Menu | null>(null)
+  const [formData, setFormData] = useState<OrderFormData>(() => {
+    if (order) return orderToFormData(order)
+    if (menuRef) {
+      const base = { ...emptyOrderForm(), namespace: menu?.namespace ?? emptyOrderForm().namespace, menuRef, source: undefined }
+      if (menu?.render?.helm) {
+        base.render = { helm: { releaseName: '', namespace: '', includeCRDs: false, values: {} } }
+      }
+      return base
+    }
+    return emptyOrderForm()
+  })
+  const [yamlText, setYamlText] = useState(() => formToYaml(formData))
+  const [yamlError, setYamlError] = useState<string | null>(null)
+
+  const [initialYaml] = useState(() => formToYaml(formData))
+  const [initialIdentity] = useState(() => `${formData.namespace}/${formData.name}`)
+
+  const effectiveMenu = menu ?? selectedMenu
+
+  function handleMenuSelect(menuKey: string) {
+    if (!menuKey) {
+      setSelectedMenu(null)
+      setFormData((prev) => ({
+        ...prev,
+        menuRef: undefined,
+        source: prev.source ?? { oci: '', version: '' },
+      }))
+      return
+    }
+    // Menus are namespaced and live in the Order's namespace.
+    const m = menus?.find(
+      (x) => `${x.namespace}/${x.name}` === menuKey,
+    )
+    if (!m) return
+    setSelectedMenu(m)
+    setFormData((prev) => ({
+      ...prev,
+      menuRef: { name: m.name },
+      source: undefined,
+      render: m.render?.helm
+        ? { helm: { releaseName: '', namespace: '', includeCRDs: false, values: {} } }
+        : prev.render,
+    }))
+  }
+
+  // ── Tab switching ──────────────────────────────────────────────────────────
+
+  function switchToYaml() {
+    setYamlText(formToYaml(formData))
+    setYamlError(null)
+    setTab('yaml')
+  }
+
+  function selectTab(next: Tab) {
+    if (next === 'yaml') return switchToYaml()
+    if (tab === 'yaml') {
+      try {
+        const partial = yamlToPartialForm(yamlText)
+        setFormData((prev) => ({ ...prev, ...partial }))
+        setYamlError(null)
+      } catch (e) {
+        setYamlError(e instanceof Error ? e.message : String(e))
+        return
+      }
+    }
+    setTab(next)
+  }
+
+  // ── Submit ─────────────────────────────────────────────────────────────────
+
+  async function handleCommit(commitMessage: string) {
+    let data = formData
+    if (tab === 'yaml') {
+      try {
+        const partial = yamlToPartialForm(yamlText)
+        data = { ...formData, ...partial }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        setYamlError(msg)
+        throw new Error(`Fix the YAML before saving: ${msg}`, { cause: e })
+      }
+    }
+    await onSubmit(data, commitMessage)
+  }
+
+  // ── Form field helpers ─────────────────────────────────────────────────────
+
+  function setField<K extends keyof OrderFormData>(key: K, val: OrderFormData[K]) {
+    setFormData((prev) => ({ ...prev, [key]: val }))
+  }
+
+  function enableHelm() {
+    setFormData((prev) => ({
+      ...prev,
+      render: { helm: { releaseName: '', namespace: '', includeCRDs: false, values: {} } },
+    }))
+  }
+
+  function disableHelm() {
+    setFormData((prev) => ({ ...prev, render: undefined }))
+  }
+
+  function updateHelm(h: HelmRender) {
+    setFormData((prev) => ({ ...prev, render: { helm: h } }))
+  }
+
+  function setLayout(policy: FileLayout) {
+    setFormData((prev) => {
+      if (policy === 'Single') {
+        // Single is the default — omit the manifest block entirely.
+        if (!prev.render?.manifest) return prev
+        const rest = { ...prev.render }
+        delete rest.manifest
+        return { ...prev, render: Object.keys(rest).length > 0 ? rest : undefined }
+      }
+      return {
+        ...prev,
+        render: { ...(prev.render ?? {}), manifest: { layout: policy } },
+      }
+    })
+  }
+
+  function addPatch() {
+    setFormData((prev) => ({
+      ...prev,
+      patches: [...prev.patches, { target: { kind: '', name: '' }, set: {} }],
+    }))
+  }
+
+  function removePatch(idx: number) {
+    setFormData((prev) => ({
+      ...prev,
+      patches: prev.patches.filter((_, i) => i !== idx),
+    }))
+  }
+
+  function updatePatch(idx: number, patch: Patch) {
+    setFormData((prev) => {
+      const patches = [...prev.patches]
+      patches[idx] = patch
+      return { ...prev, patches }
+    })
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
+  let isDirty: boolean
+  if (tab === 'yaml') {
+    try {
+      const partial = yamlToPartialForm(yamlText)
+      isDirty = formToYaml({ ...formData, ...partial }) !== initialYaml
+    } catch {
+      isDirty = true
+    }
+  } else {
+    isDirty = formToYaml(formData) !== initialYaml
+  }
+  // Name/namespace are not part of the YAML view but still count as changes.
+  if (`${formData.namespace}/${formData.name}` !== initialIdentity) isDirty = true
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty)
+  }, [isDirty, onDirtyChange])
+
+  return (
+    <>
+      <TabButtons<Tab>
+        tabs={[
+          { id: 'form', label: 'Form' },
+          { id: 'yaml', label: 'YAML' },
+          { id: 'preview', label: 'Preview' },
+          ...(showDiffTab ? [{ id: 'diff' as const, label: 'Diff' }] : []),
+        ]}
+        active={tab}
+        onSelect={selectTab}
+      />
+
+      <div className={`${styles.formCard} ${styles.tabContent}`}>
+        {tab === 'form' && (
+          <FormView
+            formData={formData}
+            isEdit={isEdit}
+            menu={effectiveMenu ?? undefined}
+            menus={menus}
+            hasPresetMenu={!!menuRef || !!menu}
+            onMenuSelect={handleMenuSelect}
+            onFieldChange={setField}
+            onEnableHelm={enableHelm}
+            onDisableHelm={disableHelm}
+            onUpdateHelm={updateHelm}
+            onSetLayout={setLayout}
+            onAddPatch={addPatch}
+            onRemovePatch={removePatch}
+            onUpdatePatch={updatePatch}
+          />
+        )}
+        {tab === 'yaml' && (
+          <YamlView
+            yamlText={yamlText}
+            yamlError={yamlError}
+            onChange={(v) => { setYamlText(v); setYamlError(null) }}
+          />
+        )}
+        {tab === 'preview' && (
+          <PreviewTab formData={formData} />
+        )}
+        {tab === 'diff' && showDiffTab && (
+          <DiffTab formData={formData} order={order!} />
+        )}
+      </div>
+
+      <CommitBox
+        title={isEdit ? 'Commit changes' : 'Create Order'}
+        submitLabel={isEdit ? 'Commit changes' : 'Create Order'}
+        onCommit={handleCommit}
+        onCancel={onCancel}
+        disabled={isEdit && !isDirty}
+        disabledReason="No changes to commit yet"
+      />
+    </>
+  )
+}
+
+// ── FormView ──────────────────────────────────────────────────────────────────
+
+interface FormViewProps {
+  formData: OrderFormData
+  isEdit: boolean
+  menu?: Menu
+  menus?: Menu[]
+  hasPresetMenu: boolean
+  onMenuSelect: (menuName: string) => void
+  onFieldChange: <K extends keyof OrderFormData>(key: K, val: OrderFormData[K]) => void
+  onEnableHelm: () => void
+  onDisableHelm: () => void
+  onUpdateHelm: (h: HelmRender) => void
+  onSetLayout: (policy: FileLayout) => void
+  onAddPatch: () => void
+  onRemovePatch: (idx: number) => void
+  onUpdatePatch: (idx: number, p: Patch) => void
+}
+
+function FormView({
+  formData,
+  isEdit,
+  menu,
+  menus,
+  hasPresetMenu,
+  onMenuSelect,
+  onFieldChange,
+  onEnableHelm,
+  onDisableHelm,
+  onUpdateHelm,
+  onSetLayout,
+  onAddPatch,
+  onRemovePatch,
+  onUpdatePatch,
+}: FormViewProps) {
+  const valuesPolicy = menu?.overrides.values.policy
+  const patchesPolicy = menu?.overrides.patches.policy
+
+  const pantries = usePantries()
+
+  const [isDestOpen, setIsDestOpen] = useState(
+    !!(formData.destination?.oci || formData.destination?.pantryRef?.name),
+  )
+  const [groupsText, setGroupsText] = useState(formData.approvals?.allowedGroups.join(', ') ?? '')
+  const [isAdvancedOpen, setIsAdvancedOpen] = useState(
+    !!(formData.render?.helm || (formData.patches?.length ?? 0) > 0),
+  )
+
+  // Source type: 'oci' = direct URL, 'pantry' = named Pantry provides the URL
+  const [sourceMode, setSourceMode] = useState<'oci' | 'pantry'>(
+    formData.source?.pantryRef?.name ? 'pantry' : 'oci',
+  )
+
+  const [versionTags, setVersionTags] = useState<string[]>([])
+  const [versionTagsLoading, setVersionTagsLoading] = useState(false)
+  const lastFetchedTagsRef = useRef<string>('')
+  const tagsSeqRef = useRef(0)
+
+  const [chartInfo, setChartInfo] = useState<ChartInfo | null>(null)
+  const [chartInfoLoading, setChartInfoLoading] = useState(false)
+  const lastFetchedChartRef = useRef<string>('')
+  const chartSeqRef = useRef(0)
+
+  // Build the OCI ref for the current source — resolves pantry URL when in pantry mode.
+  function resolveOciRef(): string {
+    if (formData.source?.pantryRef?.name) {
+      const p = (pantries ?? []).find(
+        (p) => p.name === formData.source!.pantryRef!.name && p.namespace === formData.namespace,
+      )
+      return p?.url ?? ''
+    }
+    return formData.source?.oci ?? ''
+  }
+
+  function fetchTags(oci: string, pantryName?: string, pantryNs?: string) {
+    const resolvedPantryName = pantryName ?? formData.source?.pantryRef?.name
+    const resolvedPantryNs = pantryNs ?? formData.namespace
+    const dedupeKey = `${oci}|${resolvedPantryName ?? ''}`
+    if (!oci || dedupeKey === lastFetchedTagsRef.current) return
+    lastFetchedTagsRef.current = dedupeKey
+    const seq = ++tagsSeqRef.current
+    setVersionTagsLoading(true)
+    listOCITags(oci, resolvedPantryName, resolvedPantryNs)
+      .then((tags) => {
+        if (tagsSeqRef.current !== seq) return
+        // Drop cosign signature/attestation tags and sort semver-desc so the
+        // newest release appears first, matching the Pantry tag browser.
+        setVersionTags(cleanTags(tags))
+      })
+      .catch(() => { /* non-blocking: keep previous tags */ })
+      .finally(() => { if (tagsSeqRef.current === seq) setVersionTagsLoading(false) })
+  }
+
+  // On mount: load tags and chart info immediately if source is already
+  // populated (edit mode or pre-filled create).
+  useEffect(() => {
+    const oci = formData.source?.oci ?? ''
+    const version = formData.source?.version ?? ''
+    if (oci) fetchTags(oci)
+    if (oci && version) fetchChartInfo(oci, version)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  function handleOciBlur() {
+    const oci = resolveOciRef()
+    fetchTags(oci)
+    const version = formData.source?.version ?? ''
+    if (version) fetchChartInfo(oci, version)
+  }
+
+  function fetchChartInfo(oci: string, version: string) {
+    const key = `${oci}@${version}`
+    if (!oci || !version || key === lastFetchedChartRef.current) return
+    lastFetchedChartRef.current = key
+    const seq = ++chartSeqRef.current
+    setChartInfoLoading(true)
+    getChartInfo(oci, version, formData.source?.pantryRef?.name, formData.namespace)
+      .then((info) => {
+        if (chartSeqRef.current !== seq) return
+        setChartInfo(info)
+        // Auto-enable Helm rendering when the chart is identified as a Helm chart
+        // and Helm rendering has not been configured yet. Never auto-disable.
+        if (info.isHelm && !formData.render?.helm) {
+          onEnableHelm()
+        }
+      })
+      .catch(() => { if (chartSeqRef.current === seq) setChartInfo(null) })
+      .finally(() => { if (chartSeqRef.current === seq) setChartInfoLoading(false) })
+  }
+
+  function handleVersionSelect(version: string) {
+    onFieldChange('source', { ...(formData.source ?? { oci: '', version: '' }), version })
+    const oci = resolveOciRef()
+    if (oci) fetchChartInfo(oci, version)
+  }
+
+  return (
+    <div className={styles.formGrid}>
+      {/* Name + Namespace */}
+      <div className={styles.row2}>
+        <div className={styles.fieldGroup}>
+          <label className={styles.label}>Name</label>
+          <input
+            className={`${styles.input} ${isEdit ? styles.inputDisabled : ''}`}
+            value={formData.name}
+            onChange={(e) => onFieldChange('name', e.target.value)}
+            readOnly={isEdit}
+            placeholder="my-order"
+          />
+        </div>
+        <div className={styles.fieldGroup}>
+          <label className={styles.label}>Namespace</label>
+          <input
+            className={`${styles.input} ${isEdit ? styles.inputDisabled : ''}`}
+            value={formData.namespace}
+            onChange={(e) => onFieldChange('namespace', e.target.value)}
+            readOnly={isEdit}
+            placeholder="default"
+          />
+        </div>
+      </div>
+
+      {/* Menu selector (create mode, when menus are available and no preset menu) */}
+      {!isEdit && !hasPresetMenu && menus && menus.length > 0 && (
+        <div className={styles.fieldGroup}>
+          <label className={styles.label}>Order Mode</label>
+          <select
+            className={styles.input}
+            value={formData.menuRef?.name ?? ''}
+            onChange={(e) => onMenuSelect(e.target.value)}
+          >
+            <option value="">Standalone (manual source)</option>
+            {menus
+              .filter((m) => m.namespace === formData.namespace)
+              .map((m) => (
+                <option key={`${m.namespace}/${m.name}`} value={m.name}>
+                  Menu: {m.name}
+                </option>
+              ))}
+          </select>
+        </div>
+      )}
+
+      {/* Source or Menu Reference */}
+      {formData.menuRef ? (
+        <div className={styles.fieldGroup}>
+          <p className={styles.sectionTitle}>Menu Reference</p>
+          <input
+            className={`${styles.input} ${styles.inputDisabled}`}
+            value={formData.menuRef.name}
+            readOnly
+          />
+          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted-light)', marginTop: 4 }}>
+            Source and version are provided by the Menu
+          </span>
+        </div>
+      ) : (
+        <>
+          <div className={styles.fieldGroup}>
+            <p className={styles.sectionTitle}>Source</p>
+            {/* Source mode toggle */}
+            <div className={styles.tabs} style={{ marginBottom: 0 }}>
+              <button
+                type="button"
+                className={`${styles.tab} ${sourceMode === 'oci' ? styles.tabActive : ''}`}
+                onClick={() => {
+                  setSourceMode('oci')
+                  onFieldChange('source', { oci: '', version: formData.source?.version ?? '', pantryRef: undefined })
+                }}
+              >
+                Direct OCI URL
+              </button>
+              <button
+                type="button"
+                className={`${styles.tab} ${sourceMode === 'pantry' ? styles.tabActive : ''}`}
+                onClick={() => {
+                  setSourceMode('pantry')
+                  onFieldChange('source', { version: formData.source?.version ?? '', pantryRef: { name: '' } })
+                }}
+              >
+                From Pantry
+              </button>
+            </div>
+          </div>
+          <div className={styles.row2}>
+            <div className={styles.fieldGroup}>
+              {sourceMode === 'oci' ? (
+                <>
+                  <label className={styles.label}>OCI URL</label>
+                  <input
+                    className={styles.input}
+                    value={formData.source?.oci ?? ''}
+                    onChange={(e) => onFieldChange('source', { ...(formData.source ?? { oci: '', version: '' }), oci: e.target.value })}
+                    onBlur={handleOciBlur}
+                    placeholder="oci://ghcr.io/my-org/charts/app"
+                  />
+                </>
+              ) : (
+                <>
+                  <label className={styles.label}>Pantry</label>
+                  <select
+                    className={styles.input}
+                    value={formData.source?.pantryRef?.name ?? ''}
+                    onChange={(e) => {
+                      const name = e.target.value
+                      const version = formData.source?.version ?? ''
+                      onFieldChange('source', { version, pantryRef: { name } })
+                      if (name) {
+                        const p = (pantries ?? []).find((p) => p.name === name && p.namespace === formData.namespace)
+                        if (p?.url) fetchTags(p.url, name, formData.namespace)
+                      }
+                    }}
+                  >
+                    <option value="">— select a pantry —</option>
+                    {(pantries ?? []).filter((p) => p.namespace === formData.namespace).map((p) => (
+                      <option key={p.name} value={p.name}>{p.name}</option>
+                    ))}
+                  </select>
+                </>
+              )}
+            </div>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label}>Version</label>
+              <VersionPicker
+                value={formData.source?.version ?? ''}
+                tags={versionTags}
+                loading={versionTagsLoading}
+                onChange={handleVersionSelect}
+              />
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Destination (collapsible) */}
+      <div>
+        <button type="button" className={styles.sectionHeader} onClick={() => setIsDestOpen((v) => !v)}>
+          <span className={`${styles.sectionChevron} ${isDestOpen ? styles.sectionChevronOpen : ''}`}>›</span>
+          Destination
+          {!isDestOpen && (formData.destination?.oci || formData.destination?.pantryRef?.name) && (
+            <span className={styles.sectionSummary}>
+              {formData.destination.oci || `pantry: ${formData.destination.pantryRef?.name}`}
+            </span>
+          )}
+        </button>
+        {isDestOpen && (
+          <div className={styles.formGrid} style={{ gap: 10, marginTop: 4 }}>
+            <DestinationEditor
+              destination={formData.destination ?? {}}
+              onChange={(dest) => onFieldChange('destination', dest)}
+              namespace={formData.namespace}
+              name={formData.name}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Promotion */}
+      <label className={styles.checkRow}>
+        <input
+          type="checkbox"
+          checked={formData.mode === 'Automatic'}
+          onChange={(e) => onFieldChange('mode', e.target.checked ? 'Automatic' : 'Manual')}
+        />
+        Automatic promotion — promote new Preparations as soon as they are ready and approved
+      </label>
+
+      {/* Approval gate */}
+      <label className={styles.checkRow}>
+        <input
+          type="checkbox"
+          checked={!!formData.approvals}
+          onChange={(e) => {
+            onFieldChange('approvals', e.target.checked ? { requiredApprovals: 1, allowedGroups: [] } : undefined)
+            setGroupsText('')
+          }}
+        />
+        Require approvals — block promotion until enough eligible reviewers approve
+      </label>
+      {formData.approvals && (
+        <div className={styles.row2}>
+          <div className={styles.fieldGroup}>
+            <label className={styles.label}>Required approvals</label>
+            <input
+              className={styles.input}
+              type="number"
+              min={1}
+              max={32}
+              value={formData.approvals.requiredApprovals}
+              onChange={(e) =>
+                onFieldChange('approvals', {
+                  ...formData.approvals!,
+                  requiredApprovals: Math.max(1, Math.min(32, Number(e.target.value) || 1)),
+                })
+              }
+            />
+          </div>
+          <div className={styles.fieldGroup}>
+            <label className={styles.label}>Allowed groups</label>
+            <input
+              className={styles.input}
+              value={groupsText}
+              onChange={(e) => {
+                setGroupsText(e.target.value)
+                onFieldChange('approvals', {
+                  ...formData.approvals!,
+                  allowedGroups: parseGroups(e.target.value),
+                })
+              }}
+              placeholder="release-approvers, security"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Advanced: Renderer + Patches (collapsible) */}
+      <div>
+        <button type="button" className={styles.sectionHeader} onClick={() => setIsAdvancedOpen((v) => !v)}>
+          <span className={`${styles.sectionChevron} ${isAdvancedOpen ? styles.sectionChevronOpen : ''}`}>›</span>
+          Advanced
+        </button>
+        {isAdvancedOpen && (
+          <>
+            {/* Renderer */}
+            <div style={{ marginTop: 10 }}>
+              <p className={styles.sectionTitle}>Renderer</p>
+              {valuesPolicy === 'None' ? (
+                <div className={styles.policyBanner}>
+                  <span className={styles.policyIcon}>🔒</span>
+                  Value overrides are locked by the Menu
+                </div>
+              ) : (
+                <>
+                  {!menu && (
+                    <label className={styles.checkRow}>
+                      <input
+                        type="checkbox"
+                        checked={!!formData.render?.helm}
+                        onChange={(e) => (e.target.checked ? onEnableHelm() : onDisableHelm())}
+                      />
+                      Enable Helm rendering
+                    </label>
+                  )}
+                  {valuesPolicy === 'Restricted' && menu?.overrides.values.allowed && (
+                    <div className={styles.policyBanner}>
+                      <span className={styles.policyIcon}>📋</span>
+                      Allowed values:{' '}
+                      {menu.overrides.values.allowed.map((k) => (
+                        <span key={k} className={styles.policyChip}>{k}</span>
+                      ))}
+                    </div>
+                  )}
+                  {valuesPolicy === 'All' && menu && (
+                    <div className={styles.policyBannerOpen}>
+                      <span className={styles.policyIcon}>✓</span>
+                      All value overrides are allowed
+                    </div>
+                  )}
+                  {formData.render?.helm && (
+                    <div className={styles.helmSection}>
+                      <HelmRenderEditor
+                        helm={formData.render.helm}
+                        onUpdate={onUpdateHelm}
+                        chartInfo={chartInfo}
+                        chartInfoLoading={chartInfoLoading}
+                      />
+                    </div>
+                  )}
+                  {!formData.render?.helm && !menu && (
+                    <div className={styles.fieldGroup} style={{ marginTop: 10 }}>
+                      <label className={styles.label}>Manifest files</label>
+                      <select
+                        className={styles.input}
+                        value={formData.render?.manifest?.layout ?? 'Single'}
+                        onChange={(e) => onSetLayout(e.target.value as FileLayout)}
+                      >
+                        <option value="Single">Single manifest file</option>
+                        <option value="Multi">Keep separate files</option>
+                      </select>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Patches */}
+            <div style={{ marginTop: 10 }}>
+              <p className={styles.sectionTitle}>Patches</p>
+              {patchesPolicy === 'None' ? (
+                <div className={styles.policyBanner}>
+                  <span className={styles.policyIcon}>🔒</span>
+                  Patch overrides are locked by the Menu
+                </div>
+              ) : (
+                <>
+                  {patchesPolicy === 'Restricted' && menu?.overrides.patches.allowed && (
+                    <div className={styles.policyBanner}>
+                      <span className={styles.policyIcon}>📋</span>
+                      Allowed patches:{' '}
+                      {menu.overrides.patches.allowed.map((a, i) => (
+                        <span key={i} className={styles.policyChip}>
+                          {a.target.kind}/{a.target.name}: {a.paths.join(', ')}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {patchesPolicy === 'All' && menu && (
+                    <div className={styles.policyBannerOpen}>
+                      <span className={styles.policyIcon}>✓</span>
+                      All patch overrides are allowed
+                    </div>
+                  )}
+                  <div className={styles.patchList}>
+                    {formData.patches.map((patch, idx) => (
+                      <PatchEditor
+                        key={idx}
+                        index={idx}
+                        patch={patch}
+                        onUpdate={(p) => onUpdatePatch(idx, p)}
+                        onRemove={() => onRemovePatch(idx)}
+                      />
+                    ))}
+                  </div>
+                  <button className={styles.addPatchBtn} onClick={onAddPatch}>
+                    + Add Patch
+                  </button>
+                </>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── PatchEditor ───────────────────────────────────────────────────────────────
+
+interface PatchEditorProps {
+  index: number
+  patch: Patch
+  onUpdate: (p: Patch) => void
+  onRemove: () => void
+}
+
+function PatchEditor({ index, patch, onUpdate, onRemove }: PatchEditorProps) {
+  const setEntries = Object.entries(patch.set)
+
+  function updateTarget(field: keyof Patch['target'], val: string) {
+    onUpdate({ ...patch, target: { ...patch.target, [field]: val } })
+  }
+
+  function addSetEntry() {
+    onUpdate({ ...patch, set: { ...patch.set, '': '' } })
+  }
+
+  function updateSetEntry(oldKey: string, newKey: string, val: string) {
+    const next: Record<string, string> = {}
+    for (const [k, v] of Object.entries(patch.set)) {
+      if (k === oldKey) {
+        next[newKey] = val
+      } else {
+        next[k] = v
+      }
+    }
+    onUpdate({ ...patch, set: next })
+  }
+
+  function removeSetEntry(key: string) {
+    const next = { ...patch.set }
+    delete next[key]
+    onUpdate({ ...patch, set: next })
+  }
+
+  return (
+    <div className={styles.patchCard}>
+      <div className={styles.patchCardHeader}>
+        <span className={styles.patchCardTitle}>Patch {index + 1}</span>
+        <button className={styles.iconBtn} onClick={onRemove} title="Remove patch">
+          <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M2 2l8 8M10 2L2 10" />
+          </svg>
+        </button>
+      </div>
+
+      <div className={styles.row2}>
+        <div className={styles.fieldGroup}>
+          <label className={styles.label}>Kind</label>
+          <input
+            className={styles.input}
+            value={patch.target.kind}
+            onChange={(e) => updateTarget('kind', e.target.value)}
+            placeholder="Deployment"
+          />
+        </div>
+        <div className={styles.fieldGroup}>
+          <label className={styles.label}>Name</label>
+          <input
+            className={styles.input}
+            value={patch.target.name}
+            onChange={(e) => updateTarget('name', e.target.value)}
+            placeholder="my-app"
+          />
+        </div>
+      </div>
+
+      <div className={styles.fieldGroup}>
+        <label className={styles.label}>Namespace (optional)</label>
+        <input
+          className={styles.input}
+          value={patch.target.namespace ?? ''}
+          onChange={(e) => updateTarget('namespace', e.target.value)}
+          placeholder="inherit from Order namespace"
+        />
+      </div>
+
+      <div>
+        <label className={styles.label}>Set (JSONPath → value)</label>
+        {setEntries.map(([k, v], i) => (
+          <div key={i} className={styles.setRow}>
+            <input
+              className={styles.setKey}
+              value={k}
+              onChange={(e) => updateSetEntry(k, e.target.value, v)}
+              placeholder=".spec.replicas"
+            />
+            <input
+              className={styles.setValue}
+              value={v}
+              onChange={(e) => updateSetEntry(k, k, e.target.value)}
+              placeholder="3"
+            />
+            <button
+              className={styles.iconBtn}
+              onClick={() => removeSetEntry(k)}
+              title="Remove"
+            >
+              <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M2 2l8 8M10 2L2 10" />
+              </svg>
+            </button>
+          </div>
+        ))}
+        <button className={styles.addSetBtn} onClick={addSetEntry}>
+          + Add key/value
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── HelmRenderEditor ──────────────────────────────────────────────────────────
+
+interface HelmRenderEditorProps {
+  helm: HelmRender
+  onUpdate: (h: HelmRender) => void
+  chartInfo: ChartInfo | null
+  chartInfoLoading: boolean
+}
+
+function HelmRenderEditor({ helm, onUpdate, chartInfo, chartInfoLoading }: HelmRenderEditorProps) {
+  const [valuesYaml, setValuesYaml] = useState(() => objectToYaml(helm.values))
+  const [valuesError, setValuesError] = useState<string | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  function handleValuesChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    const text = e.target.value
+    setValuesYaml(text)
+    try {
+      const values = yamlToValues(text)
+      setValuesError(null)
+      onUpdate({ ...helm, values })
+    } catch (err) {
+      setValuesError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  function jumpToPath(dotPath: string) {
+    const el = textareaRef.current
+    if (!el) return
+    const segments = dotPath.split('.')
+    const lines = valuesYaml.split('\n')
+    // Walk lines tracking indent depth; match each path segment in order.
+    let segIdx = 0
+    let charOffset = 0
+    let matchOffset = -1
+    let matchLength = 0
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
+      const trimmed = line.trimStart()
+      const expectedIndent = segIdx * 2
+      const actualIndent = line.length - trimmed.length
+      const seg = segments[segIdx]
+      if (
+        actualIndent === expectedIndent &&
+        trimmed.startsWith(`${seg}:`) &&
+        (trimmed.length === seg.length + 1 || trimmed[seg.length + 1] === ' ')
+      ) {
+        if (segIdx === segments.length - 1) {
+          matchOffset = charOffset
+          matchLength = line.length
+          break
+        }
+        segIdx++
+      } else if (actualIndent < segIdx * 2) {
+        // Went back up — restart from first segment
+        segIdx = 0
+        if (
+          actualIndent === 0 &&
+          trimmed.startsWith(`${segments[0]}:`) &&
+          (trimmed.length === segments[0].length + 1 || trimmed[segments[0].length + 1] === ' ')
+        ) {
+          segIdx = 1
+          if (segments.length === 1) {
+            matchOffset = charOffset
+            matchLength = line.length
+            break
+          }
+        }
+      }
+      charOffset += line.length + 1
+    }
+    if (matchOffset === -1) return
+    el.focus()
+    el.setSelectionRange(matchOffset, matchOffset + matchLength)
+    const lineIndex = valuesYaml.slice(0, matchOffset).split('\n').length - 1
+    const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 20
+    el.scrollTop = lineIndex * lineHeight - el.clientHeight / 3
+  }
+
+  const showReference =
+    chartInfoLoading || (chartInfo !== null && chartInfo.isHelm)
+
+  return (
+    <div className={styles.helmCard}>
+      <div className={styles.row2}>
+        <div className={styles.fieldGroup}>
+          <label className={styles.label}>Release Name</label>
+          <input
+            className={styles.input}
+            value={helm.releaseName}
+            onChange={(e) => onUpdate({ ...helm, releaseName: e.target.value })}
+            placeholder="defaults to Order name"
+          />
+        </div>
+        <div className={styles.fieldGroup}>
+          <label className={styles.label}>Namespace</label>
+          <input
+            className={styles.input}
+            value={helm.namespace}
+            onChange={(e) => onUpdate({ ...helm, namespace: e.target.value })}
+            placeholder="defaults to Order namespace"
+          />
+        </div>
+      </div>
+
+      <label className={styles.checkRow}>
+        <input
+          type="checkbox"
+          checked={helm.includeCRDs}
+          onChange={(e) => onUpdate({ ...helm, includeCRDs: e.target.checked })}
+        />
+        Include CRDs
+      </label>
+
+      <div className={styles.fieldGroup}>
+        <label className={styles.label}>Values (YAML)</label>
+        <textarea
+          ref={textareaRef}
+          className={styles.valuesArea}
+          value={valuesYaml}
+          onChange={handleValuesChange}
+          placeholder={'replicaCount: 2\nimage:\n  tag: v1.0.0'}
+          spellCheck={false}
+        />
+        {valuesError && <p className={styles.valuesError}>{valuesError}</p>}
+      </div>
+
+      {showReference && (
+        <ChartReferencePanel
+          chartInfo={chartInfo}
+          loading={chartInfoLoading}
+          onJumpToPath={jumpToPath}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── ChartReferencePanel ───────────────────────────────────────────────────────
+
+interface DefaultEntry {
+  path: string
+  value: string
+}
+
+/** Recursively flattens a nested object into dotted-path entries. */
+function flattenValues(obj: unknown, prefix = ''): DefaultEntry[] {
+  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
+    return prefix ? [{ path: prefix, value: String(obj ?? '') }] : []
+  }
+  const entries: DefaultEntry[] = []
+  for (const [key, val] of Object.entries(obj as Record<string, unknown>)) {
+    const path = prefix ? `${prefix}.${key}` : key
+    if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
+      entries.push(...flattenValues(val, path))
+    } else {
+      entries.push({ path, value: String(val ?? '') })
+    }
+  }
+  return entries
+}
+
+interface ChartReferencePanelProps {
+  chartInfo: ChartInfo | null
+  loading: boolean
+  onJumpToPath: (dotPath: string) => void
+}
+
+function ChartReferencePanel({ chartInfo, loading, onJumpToPath }: ChartReferencePanelProps) {
+  const [open, setOpen] = useState(false)
+  const [readmeOpen, setReadmeOpen] = useState(false)
+  const [query, setQuery] = useState('')
+
+  const defaultEntries: DefaultEntry[] = (() => {
+    if (!chartInfo?.isHelm || !chartInfo.defaultValues) return []
+    try {
+      const parsed = load(chartInfo.defaultValues)
+      return flattenValues(parsed)
+    } catch {
+      return []
+    }
+  })()
+
+  const filteredEntries = query
+    ? defaultEntries.filter((e) => e.path.toLowerCase().includes(query.toLowerCase()))
+    : defaultEntries
+
+  const headerLabel = chartInfo?.isHelm
+    ? `Chart Reference — ${chartInfo.name} ${chartInfo.chartVersion}`
+    : 'Chart Reference'
+
+  return (
+    <div className={styles.chartRef}>
+      <button
+        type="button"
+        className={styles.chartRefToggle}
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <span className={`${styles.chartRefChevron} ${open ? styles.chartRefChevronOpen : ''}`}>
+          ›
+        </span>
+        <span className={styles.chartRefToggleLabel}>
+          {loading ? (
+            <>
+              <span className={styles.chartRefSpinner} />
+              Loading chart info…
+            </>
+          ) : (
+            headerLabel
+          )}
+        </span>
+      </button>
+
+      {open && !loading && chartInfo?.isHelm && (
+        <div className={styles.chartRefBody}>
+          {chartInfo.description && (
+            <p className={styles.chartRefDescription}>{chartInfo.description}</p>
+          )}
+
+          <input
+            type="search"
+            className={`${styles.input} ${styles.chartRefSearch}`}
+            placeholder="Search defaults… e.g. replicas or server.replicas"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            spellCheck={false}
+          />
+
+          {filteredEntries.length === 0 && (
+            <p className={styles.chartRefEmpty}>
+              {query ? 'No matching defaults.' : 'No default values.'}
+            </p>
+          )}
+
+          {filteredEntries.length > 0 && (
+            <ul className={styles.chartRefList} aria-label="Default values">
+              {filteredEntries.map((entry) => (
+                <li
+                  key={entry.path}
+                  className={styles.chartRefItem}
+                  onClick={() => onJumpToPath(entry.path)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') onJumpToPath(entry.path)
+                  }}
+                  title={`Jump to ${entry.path} in Values editor`}
+                >
+                  <span className={styles.chartRefPath}>{entry.path}</span>
+                  <span className={styles.chartRefValue}>{entry.value}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {chartInfo.readme && (
+            <div className={styles.chartRefReadme}>
+              <button
+                type="button"
+                className={styles.chartRefToggle}
+                onClick={() => setReadmeOpen((v) => !v)}
+                aria-expanded={readmeOpen}
+              >
+                <span className={`${styles.chartRefChevron} ${readmeOpen ? styles.chartRefChevronOpen : ''}`}>
+                  ›
+                </span>
+                <span className={styles.chartRefToggleLabel}>README</span>
+              </button>
+              {readmeOpen && (
+                <pre className={styles.chartRefReadmeContent}>{chartInfo.readme}</pre>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── YamlView ──────────────────────────────────────────────────────────────────
+
+interface YamlViewProps {
+  yamlText: string
+  yamlError: string | null
+  onChange: (v: string) => void
+}
+
+function YamlView({ yamlText, yamlError, onChange }: YamlViewProps) {
+  return (
+    <>
+      <YamlEditor value={yamlText} onChange={onChange} />
+      {yamlError && <p className={styles.yamlError}>Parse error: {yamlError}</p>}
+    </>
+  )
+}
+
+// ── VersionPicker ─────────────────────────────────────────────────────────────
+
+interface VersionPickerProps {
+  value: string
+  tags: string[]
+  loading: boolean
+  onChange: (value: string) => void
+}
+
+function VersionPicker({ value, tags, loading, onChange }: VersionPickerProps) {
+  const [open, setOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+  // Set to true when the user focuses the input while a fetch is in progress,
+  // so we can auto-open the dropdown once loading finishes.
+  const pendingOpenRef = useRef(false)
+
+  // Close dropdown when clicking outside.
+  useEffect(() => {
+    function handleMouseDown(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleMouseDown)
+    return () => document.removeEventListener('mousedown', handleMouseDown)
+  }, [])
+
+  // When loading finishes, open the dropdown if the user already focused the field.
+  useEffect(() => {
+    if (!loading && pendingOpenRef.current) {
+      pendingOpenRef.current = false
+      const id = setTimeout(() => setOpen(true), 0)
+      return () => clearTimeout(id)
+    }
+  }, [loading])
+
+  function handleSelect(tag: string) {
+    onChange(tag)
+    setOpen(false)
+  }
+
+  const filteredTags = value
+    ? tags.filter((t) => t.toLowerCase().includes(value.toLowerCase()))
+    : tags
+
+  const showDropdown = open && (filteredTags.length > 0 || loading)
+
+  return (
+    <div ref={containerRef} className={styles.versionPicker}>
+      <div className={styles.versionInputWrap}>
+        {loading && (
+          <div className={styles.versionLoadingOverlay} aria-hidden="true">
+            <span className={styles.versionSpinner} />
+            Fetching versions…
+          </div>
+        )}
+        <input
+          className={styles.input}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onFocus={() => {
+            if (loading) {
+              pendingOpenRef.current = true
+            } else {
+              setOpen(true)
+            }
+          }}
+          placeholder="1.0.0"
+          readOnly={loading}
+        />
+      </div>
+      {showDropdown && (
+        <ul className={styles.versionDropdown} role="listbox">
+          {loading && filteredTags.length === 0 && (
+            <li className={styles.versionDropdownItem} style={{ opacity: 0.6, cursor: 'default' }}>
+              Loading…
+            </li>
+          )}
+          {filteredTags.map((tag) => (
+            <li
+              key={tag}
+              className={`${styles.versionDropdownItem} ${tag === value ? styles.versionDropdownItemActive : ''}`}
+              role="option"
+              aria-selected={tag === value}
+              onMouseDown={(e) => { e.preventDefault(); handleSelect(tag) }}
+            >
+              {tag}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}

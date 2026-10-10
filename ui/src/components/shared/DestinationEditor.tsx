@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { OCIDestination } from '../../api/types'
 import { getDefaultRegistry } from '../../api/client'
 import { usePantries } from '../../hooks/usePantries'
-import styles from '../order/OrderFormModal.module.css'
+import styles from '../order/OrderForm.module.css'
 
 // Destination mode: 'default' = in-cluster registry, 'oci' = direct URL, 'pantry' = Pantry provides URL.
 type DestMode = 'default' | 'oci' | 'pantry'

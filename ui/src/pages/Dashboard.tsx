@@ -1,23 +1,21 @@
 import OpenPromotions from '../components/dashboard/OpenPromotions'
+import PageHeader from '../components/layout/PageHeader'
+import Section from '../components/layout/Section'
 import { useResourceCounts } from '../hooks/useResourceCounts'
+import { useAppInfo } from '../appContext'
+import layout from '../components/layout/layout.module.css'
 import styles from './pages.module.css'
 
-interface Props {
-  operatorName?: string
-  operatorVersion?: string
-}
-
-export default function Dashboard({ operatorName, operatorVersion }: Props) {
+export default function Dashboard() {
+  const { operatorName, operatorVersion } = useAppInfo()
   const counts = useResourceCounts()
 
   return (
-    <div className={styles.page}>
-      <div className={styles.header}>
-        <h1 className={styles.title}>Dashboard</h1>
-        <p className={styles.subtitle}>
-          Overview of your {operatorName ?? 'kokumi'} operator deployment
-        </p>
-      </div>
+    <div className={layout.page}>
+      <PageHeader
+        title="Dashboard"
+        subtitle={`Overview of your ${operatorName ?? 'kokumi'} operator deployment`}
+      />
 
       <div className={styles.statsGrid}>
         <div className={styles.statCard}>
@@ -44,14 +42,9 @@ export default function Dashboard({ operatorName, operatorVersion }: Props) {
         </div>
       </div>
 
-      <div className={styles.section}>
-        <div className={styles.sectionHeader}>
-          <span className={styles.sectionTitle}>Open Promotions</span>
-        </div>
-        <div>
-          <OpenPromotions />
-        </div>
-      </div>
+      <Section title="Open Promotions" description="Orders whose latest Preparation is not live yet" flush>
+        <OpenPromotions />
+      </Section>
     </div>
   )
 }

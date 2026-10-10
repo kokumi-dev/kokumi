@@ -1,206 +1,102 @@
 import { useState } from 'react'
-import { promote } from '../../api/client'
+import { Link } from 'react-router'
 import type { Order, Preparation } from '../../api/types'
 import { useOrders } from '../../hooks/useOrders'
 import { usePreparations } from '../../hooks/usePreparations'
-import { formatDate, shortDigest } from '../../utils/format'
-import DiffModal from '../preparation/DiffModal'
-import ManifestModal from '../preparation/ManifestModal'
+import { shortDigest } from '../../utils/format'
+import { paths } from '../../routes/paths'
+import PromoteDialog from '../preparation/PromoteDialog'
+import DataTable from '../layout/DataTable'
+import EmptyState from '../layout/EmptyState'
+import NameCell from '../layout/NameCell'
+import RelativeTime from '../shared/RelativeTime'
 import Btn from '../shared/Btn'
-import pageStyles from '../../pages/pages.module.css'
-import styles from './OpenPromotions.module.css'
+import layout from '../layout/layout.module.css'
 
-// ── Types ────────────────────────────────────────────────────────────────────
-
-/** Order that has a latestRevision not yet matching its activePreparation. */
-type PromotableOrder = Order & { latestRevision: string }
-
-// ── OpenPromotions ────────────────────────────────────────────────────────────
-
-interface DiffTarget {
-  prep: Preparation
-  active: Preparation
+interface Row {
+  order: Order
+  latest: Preparation
+  active?: Preparation
 }
 
+/** Orders whose latest Preparation is not live yet, newest first. */
 export default function OpenPromotions() {
   const orders = useOrders()
   const preparations = usePreparations()
+  const [promoting, setPromoting] = useState<Preparation | null>(null)
 
-  const [manifestPrep, setManifestPrep] = useState<Preparation | null>(null)
-  const [diffTarget, setDiffTarget] = useState<DiffTarget | null>(null)
-  const [promotingKeys, setPromotingKeys] = useState<Set<string>>(new Set())
-  const [promoteErrors, setPromoteErrors] = useState<Map<string, string>>(new Map())
+  if (orders === null || preparations === null) return <EmptyState text="Loading…" />
 
-  if (orders === null || preparations === null) {
-    return <p className={styles.loading}>Loading…</p>
-  }
-
-  // Build a fast lookup: "namespace/name" → Preparation
-  const prepByKey = new Map<string, Preparation>()
-  for (const p of preparations) {
-    prepByKey.set(`${p.namespace}/${p.name}`, p)
-  }
-
-  // Orders that have a latestRevision which is not yet the activePreparation
-  const promotable = orders
-    .filter((o): o is PromotableOrder =>
-      !!o.latestRevision &&
-      o.state === 'Ready' &&
-      o.latestRevision !== o.activePreparation,
-    )
-    .sort((a, b) => {
-      const aDate = a.latestRevision ? prepByKey.get(`${a.namespace}/${a.latestRevision}`)?.createdAt : undefined
-      const bDate = b.latestRevision ? prepByKey.get(`${b.namespace}/${b.latestRevision}`)?.createdAt : undefined
-      if (!aDate && !bDate) return 0
-      if (!aDate) return 1
-      if (!bDate) return -1
-      return new Date(bDate).getTime() - new Date(aDate).getTime()
+  const prepByKey = new Map(preparations.map((p) => [`${p.namespace}/${p.name}`, p]))
+  const rows: Row[] = orders
+    .filter((o) => o.state === 'Ready' && !!o.latestRevision && o.latestRevision !== o.activePreparation)
+    .flatMap((order) => {
+      const latest = prepByKey.get(`${order.namespace}/${order.latestRevision}`)
+      if (!latest) return []
+      const active = order.activePreparation ? prepByKey.get(`${order.namespace}/${order.activePreparation}`) : undefined
+      return [{ order, latest, active }]
     })
+    .sort((a, b) => (b.latest.createdAt ?? '').localeCompare(a.latest.createdAt ?? ''))
 
-  if (promotable.length === 0) {
-    return (
-      <div className={styles.emptyState}>
-        <svg
-          className={styles.emptyIcon}
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <path d="M20 6L9 17l-5-5" />
-        </svg>
-        <span className={styles.emptyText}>All orders are up to date</span>
-      </div>
-    )
-  }
+  if (rows.length === 0) return <EmptyState text="All Orders are up to date." />
 
-  async function handlePromote(order: PromotableOrder) {
-    const key = `${order.namespace}/${order.name}`
-    setPromotingKeys((prev) => new Set(prev).add(key))
-    setPromoteErrors((prev) => {
-      const next = new Map(prev)
-      next.delete(key)
-      return next
-    })
-    try {
-      await promote(order.namespace, order.name, order.latestRevision)
-    } catch (e) {
-      setPromoteErrors((prev) => new Map(prev).set(key, (e as Error).message))
-    } finally {
-      setPromotingKeys((prev) => {
-        const next = new Set(prev)
-        next.delete(key)
-        return next
-      })
-    }
-  }
+  const changesPath = (r: Row) =>
+    r.active
+      ? `${paths.preparation(r.latest.namespace, r.latest.name, 'changes')}?base=active`
+      : paths.preparation(r.latest.namespace, r.latest.name)
+  const message = (r: Row) => r.latest.commitMessage?.trim() || r.latest.name
 
   return (
     <>
-      <table className={pageStyles.table}>
-        <thead className={pageStyles.tableHead}>
-          <tr>
-            <th>Order</th>
-            <th>Namespace</th>
-            <th>Commit Message</th>
-            <th>From</th>
-            <th>To</th>
-            <th>Created</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {promotable.map((order) => {
-            const latestPrep = order.latestRevision
-              ? prepByKey.get(`${order.namespace}/${order.latestRevision}`)
-              : undefined
-            const activePrep = order.activePreparation
-              ? prepByKey.get(`${order.namespace}/${order.activePreparation}`)
-              : undefined
-            const canDiff = !!activePrep && !!latestPrep
-            const key = `${order.namespace}/${order.name}`
-            const promoting = promotingKeys.has(key)
-            const promoteError = promoteErrors.get(key)
-            const approval = latestPrep?.approval
-            const blockedByApproval = !!approval && !approval.approved
+      <DataTable<Row>
+        rows={rows}
+        rowKey={(r) => `${r.order.namespace}/${r.order.name}`}
+        rowHref={changesPath}
+        columns={[
+          {
+            header: 'Order',
+            width: '24%',
+            cell: (r) => <NameCell to={paths.order(r.order.namespace, r.order.name)} name={r.order.name} secondary={r.order.namespace} />,
+          },
+          {
+            header: 'Change',
+            truncate: true,
+            title: message,
+            cell: (r) => <Link className={layout.refLink} to={changesPath(r)}>{message(r)}</Link>,
+          },
+          {
+            header: 'Digest',
+            width: '190px',
+            cell: (r) => (
+              <span className={layout.mono}>
+                {r.active ? shortDigest(r.active.artifact.digest) : 'new'} → {shortDigest(r.latest.artifact.digest)}
+              </span>
+            ),
+          },
+          { header: 'Created', width: '110px', cell: (r) => <RelativeTime iso={r.latest.createdAt} /> },
+          {
+            header: '',
+            width: '110px',
+            cell: (r) => {
+              if (r.order.mode !== 'Manual') return <span className={layout.muted}>Automatic</span>
+              const blocked = !!r.latest.approval && !r.latest.approval.approved
+              return (
+                <Btn
+                  variant="promote"
+                  size="sm"
+                  onClick={() => setPromoting(r.latest)}
+                  disabled={blocked}
+                  title={blocked ? r.latest.approval?.message ?? 'Approval required' : undefined}
+                >
+                  Promote
+                </Btn>
+              )
+            },
+          },
+        ]}
+      />
 
-            return (
-              <tr key={key} className={pageStyles.tableRow}>
-                <td>{order.name}</td>
-                <td>{order.namespace}</td>
-                <td className={styles.commitMessage}>
-                  {latestPrep?.commitMessage?.trim() || <span className={styles.muted}>—</span>}
-                </td>
-                <td>
-                  {activePrep
-                    ? <span className={styles.hashChip}>{shortDigest(activePrep.artifact.digest)}</span>
-                    : <span className={styles.muted}>(new)</span>}
-                </td>
-                <td>
-                  {latestPrep
-                    ? <span className={styles.hashChip}>{shortDigest(latestPrep.artifact.digest)}</span>
-                    : <span className={styles.muted}>—</span>}
-                </td>
-                <td style={{ whiteSpace: 'nowrap' }}>{formatDate(latestPrep?.createdAt)}</td>
-                <td>
-                  <div className={styles.actions}>
-                    {canDiff && (
-                      <Btn
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          if (latestPrep && activePrep) {
-                            setDiffTarget({ prep: latestPrep, active: activePrep })
-                          }
-                        }}
-                      >
-                        Diff
-                      </Btn>
-                    )}
-                    <Btn
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => latestPrep && setManifestPrep(latestPrep)}
-                      disabled={!latestPrep}
-                    >
-                      Manifest
-                    </Btn>
-                    {order.mode === 'Manual' && (
-                      <Btn
-                        variant="promote"
-                        size="sm"
-                        onClick={() => handlePromote(order)}
-                        disabled={promoting || blockedByApproval}
-                        title={blockedByApproval ? approval?.message ?? 'Approval required' : undefined}
-                      >
-                        {promoting ? '…' : 'Promote'}
-                      </Btn>
-                    )}
-                  </div>
-                  {promoteError && <span className={styles.error}>{promoteError}</span>}
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-
-      {manifestPrep && (
-        <ManifestModal
-          preparation={manifestPrep}
-          onClose={() => setManifestPrep(null)}
-        />
-      )}
-
-      {diffTarget && (
-        <DiffModal
-          preparation={diffTarget.prep}
-          activePreparation={diffTarget.active}
-          onClose={() => setDiffTarget(null)}
-        />
-      )}
+      {promoting && <PromoteDialog preparation={promoting} action="Promote" onClose={() => setPromoting(null)} />}
     </>
   )
 }

@@ -1,15 +1,8 @@
-import { useEffect, useState } from 'react'
-import styles from './App.module.css'
-import Sidebar, { type Page } from './components/Sidebar'
-import Dashboard from './pages/Dashboard'
-import Orders from './pages/Orders'
-import Menus from './pages/Menus'
-import MenuDetailPage from './pages/MenuDetailPage'
-import Pantries from './pages/Pantries'
-import Preparations from './pages/Preparations'
-import Servings from './pages/Servings'
-import Settings from './pages/Settings'
+import { useEffect, useMemo, useState } from 'react'
+import { RouterProvider } from 'react-router/dom'
 import Login from './pages/Login'
+import { router } from './routes/router'
+import { AppContext, type AppInfo } from './appContext'
 import { logout, onAuthChange, refresh, getTokenTTL, isAuthed, consumeFragmentToken } from './api/auth'
 import { getWhoAmI } from './api/client'
 
@@ -20,14 +13,12 @@ interface Info {
 }
 
 function App() {
-  const [activePage, setActivePage] = useState<Page>('dashboard')
-  const [menuDetail, setMenuDetail] = useState<{ namespace: string; name: string } | null>(null)
-  const [pendingOrderKey, setPendingOrderKey] = useState<{ namespace: string; name: string } | null>(null)
   const [info, setInfo] = useState<Info | null>(null)
   const [ready, setReady] = useState(false)
   const [authed, setAuthed] = useState(() => isAuthed())
   const [bootRefreshDone, setBootRefreshDone] = useState(false)
-  const [isAdmin, setIsAdmin] = useState(false)
+  // null = unknown; admin-only routes wait for it instead of redirecting.
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(null)
 
   // Keep authed in sync with token changes (login/logout/401/OIDC fragment).
   // Registered before the mount effect so consumeFragmentToken() updates it via this subscription, not a direct setState.
@@ -36,7 +27,7 @@ function App() {
   useEffect(() => {
     if (!authed) {
       // Defer to a microtask to avoid a synchronous setState in the effect body.
-      void Promise.resolve().then(() => setIsAdmin(false))
+      void Promise.resolve().then(() => setIsAdmin(null))
       return
     }
     const fetchWhoAmI = () => {
@@ -107,6 +98,16 @@ function App() {
     }
   }, [])
 
+  const appInfo = useMemo<AppInfo>(
+    () => ({
+      operatorName: info?.name,
+      operatorVersion: info?.version,
+      isAdmin,
+      onLogout: () => void logout(),
+    }),
+    [info, isAdmin],
+  )
+
   // Wait until /api/v1/info resolves. If we have no valid token, hold off
   // showing the login screen until the boot-time silent refresh attempt has
   // completed (it may authenticate via the shared cookie).
@@ -123,59 +124,10 @@ function App() {
     )
   }
 
-  function renderPage() {
-    switch (activePage) {
-      case 'dashboard':
-        return <Dashboard operatorName={info?.name} operatorVersion={info?.version} />
-      case 'orders':
-        return (
-          <Orders
-            pendingSelectedKey={pendingOrderKey}
-            onConsumePendingSelectedKey={() => setPendingOrderKey(null)}
-          />
-        )
-      case 'menus':
-        return menuDetail ? (
-          <MenuDetailPage
-            namespace={menuDetail.namespace}
-            name={menuDetail.name}
-            onBack={() => setMenuDetail(null)}
-            onOpenOrder={(order) => {
-              setPendingOrderKey({ namespace: order.namespace, name: order.name })
-              setMenuDetail(null)
-              setActivePage('orders')
-            }}
-          />
-        ) : (
-          <Menus onOpenMenuDetail={setMenuDetail} />
-        )
-      case 'pantries':
-        return <Pantries />
-      case 'preparations':
-        return <Preparations />
-      case 'servings':
-        return <Servings />
-      case 'settings':
-        return isAdmin ? <Settings /> : <Dashboard operatorName={info?.name} operatorVersion={info?.version} />
-    }
-  }
-
   return (
-    <div className={styles.layout}>
-      <Sidebar
-        activePage={activePage}
-        onNavigate={(page) => {
-          setMenuDetail(null)
-          setActivePage(page)
-        }}
-        operatorVersion={info?.version}
-        onLogout={() => void logout()}
-        isAdmin={isAdmin}
-      />
-      <main className={styles.content}>
-        {renderPage()}
-      </main>
-    </div>
+    <AppContext.Provider value={appInfo}>
+      <RouterProvider router={router} />
+    </AppContext.Provider>
   )
 }
 
