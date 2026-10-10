@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import Btn from './Btn'
+import { Button } from '../ui'
 import styles from './CommitBox.module.css'
 
 interface Props {
@@ -54,11 +54,11 @@ export default function CommitBox({
       <div className={styles.actions}>
         {disabled && disabledReason && <span className={styles.hint}>{disabledReason}</span>}
         {onCancel && (
-          <Btn variant="secondary" onClick={onCancel} disabled={saving}>Cancel</Btn>
+          <Button variant="secondary" onClick={onCancel} disabled={saving}>Cancel</Button>
         )}
-        <Btn variant="primary" onClick={handleCommit} disabled={saving || disabled}>
+        <Button variant="primary" onClick={handleCommit} disabled={saving || disabled}>
           {saving ? 'Saving…' : submitLabel}
-        </Btn>
+        </Button>
       </div>
     </div>
   )

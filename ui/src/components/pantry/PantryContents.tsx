@@ -3,7 +3,7 @@ import type { ArtifactInfo, Pantry } from '../../api/types'
 import { getArtifactInfo, listOCITags } from '../../api/client'
 import { cleanTags } from '../../api/ociTags'
 import Badge from '../shared/Badge'
-import Btn from '../shared/Btn'
+import { Button, TabButtons } from '../ui'
 import Modal from '../shared/Modal'
 import YamlEditor from '../shared/YamlEditor'
 import FileInspector from '../shared/FileInspector'
@@ -91,7 +91,7 @@ export default function PantryContents({ pantry }: Props) {
           }}
         />
         <div className={styles.pager}>
-          <Btn
+          <Button
             variant="ghost"
             size="sm"
             disabled={loading}
@@ -102,26 +102,26 @@ export default function PantryContents({ pantry }: Props) {
             }}
           >
             Refresh
-          </Btn>
-          <Btn
+          </Button>
+          <Button
             variant="ghost"
             size="sm"
             disabled={loading || safePage <= 0}
             onClick={() => setPage((p) => Math.max(0, p - 1))}
           >
             ‹ Prev
-          </Btn>
+          </Button>
           <span className={styles.pageIndicator}>
             {safePage + 1} / {pageCount}
           </span>
-          <Btn
+          <Button
             variant="ghost"
             size="sm"
             disabled={loading || safePage >= pageCount - 1}
             onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
           >
             Next ›
-          </Btn>
+          </Button>
         </div>
       </div>
 
@@ -137,6 +137,7 @@ export default function PantryContents({ pantry }: Props) {
             const isOpen = expanded?.tag === tag
             return (
               <li key={tag} className={styles.row}>
+                {/* eslint-disable-next-line no-restricted-syntax -- accordion list row, not an action button */}
                 <button className={styles.rowHeader} onClick={() => toggle(tag)} aria-expanded={isOpen}>
                   <span className={`${styles.chevron} ${isOpen ? styles.chevronOpen : ''}`}>›</span>
                   <span className={styles.tagName}>{tag}</span>
@@ -190,23 +191,11 @@ function ArtifactDetail({ info, onViewManifest }: { info: ArtifactInfo; onViewMa
         </div>
       )}
 
-      <div className={styles.tabs}>
-        {info.isHelm && (
-          <>
-            <button className={`${styles.tab} ${tab === 'readme' ? styles.tabActive : ''}`} onClick={() => setTab('readme')}>
-              README
-            </button>
-            <button className={`${styles.tab} ${tab === 'values' ? styles.tabActive : ''}`} onClick={() => setTab('values')}>
-              Values
-            </button>
-          </>
-        )}
-        {!info.isHelm && (
-          <button className={`${styles.tab} ${tab === 'manifest' ? styles.tabActive : ''}`} onClick={() => setTab('manifest')}>
-            Manifest
-          </button>
-        )}
-      </div>
+      <TabButtons<Tab>
+        tabs={info.isHelm ? [{ id: 'readme', label: 'README' }, { id: 'values', label: 'Values' }] : [{ id: 'manifest', label: 'Manifest' }]}
+        active={tab}
+        onSelect={setTab}
+      />
 
       <div className={styles.tabBody}>
         {tab === 'readme' && <pre className={styles.pre}>{info.chartInfo?.readme || 'No README.'}</pre>}
@@ -218,9 +207,9 @@ function ArtifactDetail({ info, onViewManifest }: { info: ArtifactInfo; onViewMa
             ) : (
               <>
                 <pre className={styles.pre}>{info.manifest}</pre>
-                <Btn variant="secondary" size="sm" onClick={() => onViewManifest(info.manifest ?? '')}>
+                <Button variant="secondary" size="sm" onClick={() => onViewManifest(info.manifest ?? '')}>
                   Open in viewer
-                </Btn>
+                </Button>
               </>
             )}
           </div>

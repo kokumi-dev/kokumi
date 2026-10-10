@@ -2,6 +2,7 @@ import { NavLink } from 'react-router'
 import styles from './Sidebar.module.css'
 import logo from '../assets/logo.png'
 import { getUsername } from '../api/auth'
+import { Button } from './ui'
 
 interface NavItem {
   to: string
@@ -156,9 +157,9 @@ export default function Sidebar({ operatorVersion, onLogout, isAdmin }: Props) {
       {/* ── Footer ── */}
       <div className={styles.footer}>
         {onLogout && (
-          <button className={styles.logout} onClick={onLogout}>
+          <Button variant="inverse" size="sm" className={styles.logout} onClick={onLogout}>
             Sign out
-          </button>
+          </Button>
         )}
         {getUsername() && (
           <div className={styles.userInfo}>

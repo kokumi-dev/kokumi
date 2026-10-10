@@ -11,7 +11,7 @@ import DataTable from '../layout/DataTable'
 import EmptyState from '../layout/EmptyState'
 import NameCell from '../layout/NameCell'
 import RelativeTime from '../shared/RelativeTime'
-import Btn from '../shared/Btn'
+import { Button, PromoteIcon } from '../ui'
 import layout from '../layout/layout.module.css'
 
 interface Row {
@@ -85,20 +85,22 @@ export default function OpenPromotions() {
           { header: 'Created', width: '110px', cell: (r) => <RelativeTime iso={r.latest.createdAt} /> },
           {
             header: '',
-            width: '110px',
+            width: '136px',
+            alignEnd: true,
             cell: (r) => {
               if (r.order.mode !== 'Manual') return <span className={layout.muted}>Automatic</span>
               const blocked = !!r.latest.approval && !r.latest.approval.approved
               return (
-                <Btn
+                <Button
                   variant="promote"
                   size="sm"
+                  icon={<PromoteIcon />}
                   onClick={() => setPromoting(r.latest)}
                   disabled={blocked}
                   title={blocked ? r.latest.approval?.message ?? 'Approval required' : undefined}
                 >
                   Promote
-                </Btn>
+                </Button>
               )
             },
           },

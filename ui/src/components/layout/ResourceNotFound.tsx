@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import PageHeader from './PageHeader'
 import Section from './Section'
 import EmptyState from './EmptyState'
-import { BtnLink } from '../shared/Btn'
+import { ButtonLink } from '../ui'
 import styles from './layout.module.css'
 
 interface Props {
@@ -33,7 +33,7 @@ export default function ResourceNotFound({ kind, listPath, listLabel, namespace,
       <Section>
         <EmptyState
           text={pending ? 'Loading…' : `${kind} ${namespace}/${name} was not found. It may have been deleted.`}
-          action={pending ? undefined : <BtnLink to={listPath} variant="secondary" size="sm">Back to {listLabel}</BtnLink>}
+          action={pending ? undefined : <ButtonLink to={listPath} variant="secondary" size="sm">Back to {listLabel}</ButtonLink>}
         />
       </Section>
     </div>

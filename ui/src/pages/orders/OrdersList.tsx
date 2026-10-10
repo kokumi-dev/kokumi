@@ -10,7 +10,7 @@ import FilterInput from '../../components/layout/FilterInput'
 import NameCell from '../../components/layout/NameCell'
 import StatusIndicator from '../../components/shared/StatusIndicator'
 import RelativeTime from '../../components/shared/RelativeTime'
-import { BtnLink } from '../../components/shared/Btn'
+import { ButtonLink, PlusIcon } from '../../components/ui'
 import { paths } from '../../routes/paths'
 import { orderSourceRef } from './orderFormat'
 import layout from '../../components/layout/layout.module.css'
@@ -28,7 +28,7 @@ export default function OrdersList() {
       <PageHeader
         title="Orders"
         subtitle="What to render, how to configure it, and where it gets promoted"
-        actions={<BtnLink variant="primary" to={paths.newOrder()}>New Order</BtnLink>}
+        actions={<ButtonLink variant="primary" icon={<PlusIcon />} to={paths.newOrder()}>New Order</ButtonLink>}
       />
 
       <Section
@@ -41,7 +41,7 @@ export default function OrdersList() {
         ) : filtered.length === 0 ? (
           <EmptyState
             text={query ? 'No orders match your filter' : 'No orders yet'}
-            action={!query && <BtnLink variant="secondary" size="sm" to={paths.newOrder()}>Create your first Order</BtnLink>}
+            action={!query && <ButtonLink variant="secondary" size="sm" to={paths.newOrder()}>Create your first Order</ButtonLink>}
           />
         ) : (
           <DataTable<Order>

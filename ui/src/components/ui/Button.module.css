@@ -1,0 +1,113 @@
+/* Look is defined by the --control-* and --btn-* tokens in src/index.css. */
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: var(--_h);
+  padding: 0 var(--_pad-x);
+  font-family: inherit;
+  font-size: var(--_font);
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  border: none;
+  border-radius: var(--control-radius);
+  background: var(--_bg);
+  color: var(--_fg);
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.15s, color 0.15s, opacity 0.15s, transform 0.1s;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--_bg-hover);
+  color: var(--_fg-hover);
+}
+
+.button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.button:focus-visible {
+  outline: none;
+  box-shadow: var(--control-focus-ring);
+}
+
+.button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.icon {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.block {
+  display: flex;
+  width: 100%;
+}
+
+/* ── Sizes ── */
+.md {
+  --_h: var(--control-h-md);
+  --_pad-x: var(--control-pad-x-md);
+  --_font: var(--control-font-md);
+}
+
+.sm {
+  --_h: var(--control-h-sm);
+  --_pad-x: var(--control-pad-x-sm);
+  --_font: var(--control-font-sm);
+}
+
+/* ── Variants ── */
+.primary {
+  --_bg: var(--btn-primary-bg);
+  --_bg-hover: var(--btn-primary-bg-hover);
+  --_fg: var(--btn-primary-fg);
+  --_fg-hover: var(--btn-primary-fg);
+}
+
+.secondary {
+  --_bg: var(--btn-secondary-bg);
+  --_bg-hover: var(--btn-secondary-bg-hover);
+  --_fg: var(--btn-secondary-fg);
+  --_fg-hover: var(--btn-secondary-fg);
+}
+
+.danger {
+  --_bg: var(--btn-danger-bg);
+  --_bg-hover: var(--btn-danger-bg-hover);
+  --_fg: var(--btn-danger-fg);
+  --_fg-hover: var(--btn-danger-fg);
+}
+
+.ghost {
+  --_bg: var(--btn-ghost-bg);
+  --_bg-hover: var(--btn-ghost-bg-hover);
+  --_fg: var(--btn-ghost-fg);
+  --_fg-hover: var(--btn-ghost-fg-hover);
+}
+
+.promote {
+  --_bg: var(--btn-promote-bg);
+  --_bg-hover: var(--btn-promote-bg-hover);
+  --_fg: var(--btn-promote-fg);
+  --_fg-hover: var(--btn-promote-fg);
+}
+
+.rollback {
+  --_bg: var(--btn-rollback-bg);
+  --_bg-hover: var(--btn-rollback-bg-hover);
+  --_fg: var(--btn-rollback-fg);
+  --_fg-hover: var(--btn-rollback-fg);
+}
+
+.inverse {
+  --_bg: var(--btn-inverse-bg);
+  --_bg-hover: var(--btn-inverse-bg-hover);
+  --_fg: var(--btn-inverse-fg);
+  --_fg-hover: var(--btn-inverse-fg-hover);
+}

@@ -12,34 +12,6 @@
   min-height: 420px;
 }
 
-.tabs {
-  display: flex;
-  gap: 2px;
-  margin-bottom: 20px;
-  background: var(--color-fill);
-  border-radius: 8px;
-  padding: 3px;
-}
-
-.tab {
-  flex: 1;
-  padding: 7px 0;
-  font-size: 0.875rem;
-  font-weight: 600;
-  border: none;
-  background: transparent;
-  border-radius: 6px;
-  color: var(--color-text-muted-light);
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-
-.tabActive {
-  background: var(--color-bg-card);
-  color: var(--color-text-on-light);
-  box-shadow: var(--shadow-sm);
-}
-
 .formGrid {
   display: grid;
   gap: 14px;
@@ -173,57 +145,8 @@ select.input {
   border-color: var(--color-accent);
 }
 
-.iconBtn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 5px;
-  border: none;
-  background: transparent;
-  color: var(--color-text-muted-light);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: background 0.15s, color 0.15s;
-}
-
-.iconBtn:hover {
-  background: var(--color-danger-bg);
-  color: var(--color-danger);
-}
-
-.addSetBtn {
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--color-accent);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  padding: 3px 0;
-  text-align: left;
-}
-
-.addSetBtn:hover {
-  text-decoration: underline;
-}
-
-.addPatchBtn {
-  margin-top: 4px;
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: var(--color-accent);
-  background: var(--color-accent-tint);
-  border: 1px dashed var(--color-accent-border);
-  border-radius: 7px;
-  padding: 9px;
-  width: 100%;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.addPatchBtn:hover {
-  background: var(--color-accent-tint-hover);
+.addPatch {
+  margin-top: 10px;
 }
 
 .yamlError {
@@ -288,46 +211,6 @@ select.input {
   border-top: 1px solid var(--color-border);
   margin-top: 4px;
   padding-top: 6px;
-}
-
-.chartRefToggle {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  width: 100%;
-  background: none;
-  border: none;
-  padding: 2px 0;
-  cursor: pointer;
-  text-align: left;
-  color: var(--color-text-muted-light);
-  font-size: 0.8rem;
-  font-weight: 600;
-  font-family: inherit;
-  transition: color 0.15s;
-}
-
-.chartRefToggle:hover {
-  color: var(--color-text-on-light);
-}
-
-.chartRefChevron {
-  display: inline-block;
-  font-size: 1rem;
-  line-height: 1;
-  transition: transform 0.15s;
-  transform: rotate(0deg);
-  color: var(--color-text-muted-light);
-}
-
-.chartRefChevronOpen {
-  transform: rotate(90deg);
-}
-
-.chartRefToggleLabel {
-  display: flex;
-  align-items: center;
-  gap: 6px;
 }
 
 .chartRefSpinner {
@@ -457,85 +340,6 @@ select.input {
   color: var(--color-text-muted-light);
   margin-bottom: 8px;
   margin-top: 4px;
-}
-
-/* ── Mode toggle (pill buttons for OCI / Pantry) ── */
-.modeToggle {
-  display: flex;
-  gap: 2px;
-  background: var(--color-fill);
-  border-radius: 7px;
-  padding: 3px;
-}
-
-.modeBtn {
-  flex: 1;
-  padding: 6px 0;
-  font-size: 0.8rem;
-  font-weight: 600;
-  border: none;
-  background: transparent;
-  border-radius: 5px;
-  color: var(--color-text-muted-light);
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-  font-family: inherit;
-}
-
-.modeBtnActive {
-  background: var(--color-bg-card);
-  color: var(--color-text-on-light);
-  box-shadow: var(--shadow-sm);
-}
-
-/* ── Collapsible section header ── */
-.sectionHeader {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  width: 100%;
-  background: none;
-  border: none;
-  padding: 2px 0 6px;
-  cursor: pointer;
-  text-align: left;
-  font-family: inherit;
-  font-size: 0.8rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--color-text-muted-light);
-  transition: color 0.15s;
-}
-
-.sectionHeader:hover {
-  color: var(--color-text-on-light);
-}
-
-.sectionChevron {
-  display: inline-block;
-  font-size: 1rem;
-  line-height: 1;
-  transition: transform 0.15s;
-  transform: rotate(0deg);
-}
-
-.sectionChevronOpen {
-  transform: rotate(90deg);
-}
-
-.sectionSummary {
-  margin-left: 6px;
-  font-size: 0.72rem;
-  font-weight: 500;
-  text-transform: none;
-  letter-spacing: 0;
-  color: var(--color-text-muted-light);
-  opacity: 0.8;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 160px;
 }
 
 /* ── Override Policy Indicators ── */

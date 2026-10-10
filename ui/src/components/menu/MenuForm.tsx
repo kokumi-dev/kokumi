@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
 import { load, dump } from 'js-yaml'
-import Btn from '../shared/Btn'
+import { Button, CloseIcon, Disclosure, IconButton, PlusIcon, TabButtons } from '../ui'
 import YamlEditor from '../shared/YamlEditor'
-import TabButtons from '../layout/TabButtons'
 import type { Menu, MenuFormData, Patch, HelmRender, OverridePolicy } from '../../api/types'
 import { emptyMenuForm, menuToFormData } from '../../api/types'
 import { objectToYaml, yamlToValues } from '../../utils/yaml'
@@ -252,10 +251,10 @@ export default function MenuForm({ menu, onCancel, onSubmit, onDirtyChange }: Pr
 
       {submitError && <p className={formStyles.yamlError}>{submitError}</p>}
       <div className={formStyles.formActions}>
-        <Btn variant="secondary" onClick={onCancel} disabled={saving}>Cancel</Btn>
-        <Btn variant="primary" onClick={handleSubmit} disabled={saving || (isEdit && !isDirty)}>
+        <Button variant="secondary" onClick={onCancel} disabled={saving}>Cancel</Button>
+        <Button variant="primary" onClick={handleSubmit} disabled={saving || (isEdit && !isDirty)}>
           {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Create Menu'}
-        </Btn>
+        </Button>
       </div>
     </>
   )
@@ -353,81 +352,63 @@ function MenuFormView({
       </label>
 
       {/* Publish (Vendor) — collapsible like the Order destination section */}
-      <div>
-        <button
-          type="button"
-          className={formStyles.sectionHeader}
-          onClick={() => setIsVendorOpen((v) => !v)}
-        >
-          <span className={`${formStyles.sectionChevron} ${isVendorOpen ? formStyles.sectionChevronOpen : ''}`}>›</span>
-          Publish Destination (Vendor)
-          {!isVendorOpen && formData.vendor && (
-            <span className={formStyles.sectionSummary}>
-              {formData.vendor.mode ?? 'Render'} → {vendorDestinationSummary(formData.vendor.destination)}
-            </span>
-          )}
-        </button>
-        {isVendorOpen && (
-          <>
-            <label className={formStyles.checkRow}>
-              <input
-                type="checkbox"
-                checked={!!formData.vendor}
+      <Disclosure
+        label="Publish Destination (Vendor)"
+        summary={formData.vendor && `${formData.vendor.mode ?? 'Render'} → ${vendorDestinationSummary(formData.vendor.destination)}`}
+        open={isVendorOpen}
+        onOpenChange={setIsVendorOpen}
+      >
+        <label className={formStyles.checkRow}>
+          <input
+            type="checkbox"
+            checked={!!formData.vendor}
+            onChange={(e) =>
+              onFieldChange(
+                'vendor',
+                e.target.checked
+                  ? { mode: 'Render', destination: { oci: '', pantryRef: undefined } }
+                  : undefined,
+              )
+            }
+          />
+          Publish source to another registry (Render mode renders + patches first)
+        </label>
+        {formData.vendor && (
+          <div className={formStyles.helmSection}>
+            <div className={formStyles.fieldGroup}>
+              <label className={formStyles.label}>Mode</label>
+              <select
+                className={formStyles.input}
+                value={formData.vendor.mode ?? 'Render'}
                 onChange={(e) =>
-                  onFieldChange(
-                    'vendor',
-                    e.target.checked
-                      ? { mode: 'Render', destination: { oci: '', pantryRef: undefined } }
-                      : undefined,
-                  )
+                  onFieldChange('vendor', { ...formData.vendor!, mode: e.target.value as 'Render' | 'Copy' })
                 }
+              >
+                <option value="Render">Render — render + patch, push manifests</option>
+                <option value="Copy">Copy — push the raw artifact</option>
+              </select>
+            </div>
+            <Disclosure
+              className={formStyles.vendorDestination}
+              label="Destination"
+              summary={
+                (formData.vendor.destination.oci || formData.vendor.destination.pantryRef?.name) &&
+                vendorDestinationSummary(formData.vendor.destination)
+              }
+              open={isVendorDestOpen}
+              onOpenChange={setIsVendorDestOpen}
+            >
+              <DestinationEditor
+                destination={formData.vendor.destination}
+                onChange={(dest) => onFieldChange('vendor', { ...formData.vendor!, destination: dest })}
+                namespace={formData.namespace}
+                name={formData.name}
+                pathHint="rendered"
               />
-              Publish source to another registry (Render mode renders + patches first)
-            </label>
-            {formData.vendor && (
-              <div className={formStyles.helmSection}>
-                <div className={formStyles.fieldGroup}>
-                  <label className={formStyles.label}>Mode</label>
-                  <select
-                    className={formStyles.input}
-                    value={formData.vendor.mode ?? 'Render'}
-                    onChange={(e) =>
-                      onFieldChange('vendor', { ...formData.vendor!, mode: e.target.value as 'Render' | 'Copy' })
-                    }
-                  >
-                    <option value="Render">Render — render + patch, push manifests</option>
-                    <option value="Copy">Copy — push the raw artifact</option>
-                  </select>
-                </div>
-                <div style={{ marginTop: 12 }}>
-                  <button
-                    type="button"
-                    className={formStyles.sectionHeader}
-                    onClick={() => setIsVendorDestOpen((v) => !v)}
-                  >
-                    <span className={`${formStyles.sectionChevron} ${isVendorDestOpen ? formStyles.sectionChevronOpen : ''}`}>›</span>
-                    Destination
-                    {!isVendorDestOpen && (formData.vendor.destination.oci || formData.vendor.destination.pantryRef?.name) && (
-                      <span className={formStyles.sectionSummary}>
-                        {vendorDestinationSummary(formData.vendor.destination)}
-                      </span>
-                    )}
-                  </button>
-                  {isVendorDestOpen && (
-                    <DestinationEditor
-                      destination={formData.vendor.destination}
-                      onChange={(dest) => onFieldChange('vendor', { ...formData.vendor!, destination: dest })}
-                      namespace={formData.namespace}
-                      name={formData.name}
-                      pathHint="rendered"
-                    />
-                  )}
-                </div>
-              </div>
-            )}
-          </>
+            </Disclosure>
+          </div>
         )}
-      </div>
+      </Disclosure>
 
       {/* Override Policies */}
       <div>
@@ -470,9 +451,9 @@ function MenuFormView({
             />
           ))}
         </div>
-        <button className={formStyles.addPatchBtn} onClick={onAddPatch}>
-          + Add Patch
-        </button>
+        <Button block className={formStyles.addPatch} icon={<PlusIcon />} onClick={onAddPatch}>
+          Add patch
+        </Button>
       </div>
     </div>
   )
@@ -595,11 +576,9 @@ function PatchEditor({ index, patch, onUpdate, onRemove }: PatchEditorProps) {
     <div className={formStyles.patchCard}>
       <div className={formStyles.patchCardHeader}>
         <span className={formStyles.patchCardTitle}>Patch {index + 1}</span>
-        <button className={formStyles.iconBtn} onClick={onRemove} title="Remove patch">
-          <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <path d="M2 2l8 8M10 2L2 10" />
-          </svg>
-        </button>
+        <IconButton tone="danger" onClick={onRemove} aria-label="Remove patch">
+          <CloseIcon />
+        </IconButton>
       </div>
 
       <div className={formStyles.row2}>
@@ -639,16 +618,14 @@ function PatchEditor({ index, patch, onUpdate, onRemove }: PatchEditorProps) {
               onChange={(e) => updateSetEntry(k, k, e.target.value)}
               placeholder="3"
             />
-            <button className={formStyles.iconBtn} onClick={() => removeSetEntry(k)} title="Remove">
-              <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <path d="M2 2l8 8M10 2L2 10" />
-              </svg>
-            </button>
+            <IconButton tone="danger" onClick={() => removeSetEntry(k)} aria-label="Remove key/value">
+              <CloseIcon />
+            </IconButton>
           </div>
         ))}
-        <button className={formStyles.addSetBtn} onClick={addSetEntry}>
-          + Add key/value
-        </button>
+        <Button variant="ghost" size="sm" icon={<PlusIcon />} onClick={addSetEntry}>
+          Add key/value
+        </Button>
       </div>
     </div>
   )

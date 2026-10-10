@@ -1,5 +1,6 @@
 import { createPortal } from 'react-dom'
 import type { ReactNode } from 'react'
+import { CloseIcon, IconButton } from '../ui'
 import styles from './Modal.module.css'
 
 interface Props {
@@ -26,11 +27,9 @@ export default function Modal({ title, onClose, children, footer, wide }: Props)
       <div className={`${styles.modal} ${wide ? styles.modalWide : ''}`}>
         <div className={styles.header}>
           <span className={styles.title}>{title}</span>
-          <button className={styles.closeBtn} onClick={onClose} aria-label="Close">
-            <svg viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <path d="M2 2l10 10M12 2L2 12" />
-            </svg>
-          </button>
+          <IconButton onClick={onClose} aria-label="Close">
+            <CloseIcon />
+          </IconButton>
         </div>
 
         <div className={styles.body}>{children}</div>

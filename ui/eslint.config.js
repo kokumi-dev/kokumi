@@ -20,4 +20,14 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  {
+    files: ['src/**/*.tsx'],
+    ignores: ['src/components/ui/**'],
+    rules: {
+      'no-restricted-syntax': ['error', {
+        selector: "JSXOpeningElement[name.name='button']",
+        message: 'Use Button, IconButton, SegmentedControl, TabButtons or Disclosure from components/ui instead of a raw <button>.',
+      }],
+    },
+  },
 ])

@@ -122,26 +122,11 @@
   flex-shrink: 0;
 }
 
-.logout {
-  display: block;
+.footer .logout {
+  display: flex;
+  justify-content: flex-start;
   width: calc(100% - 28px);
   margin: 4px 14px 8px;
-  padding: 7px 10px;
-  font-family: inherit;
-  font-size: 0.78rem;
-  font-weight: 600;
-  text-align: left;
-  border: none;
-  border-radius: 7px;
-  background: var(--color-fill-on-dark);
-  color: var(--color-text-muted-dark);
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-
-.logout:hover {
-  background: var(--color-fill-on-dark-hover);
-  color: var(--color-text-on-dark);
 }
 
 .footerInfo {

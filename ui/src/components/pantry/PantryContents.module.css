@@ -137,33 +137,6 @@
   word-break: break-all;
 }
 
-.tabs {
-  display: flex;
-  gap: 4px;
-  border-bottom: 1px solid var(--color-border);
-}
-
-.tab {
-  background: none;
-  border: none;
-  padding: 6px 12px;
-  font-family: inherit;
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: var(--color-text-muted-light);
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-}
-
-.tab:hover {
-  color: var(--color-text-on-light);
-}
-
-.tabActive {
-  color: var(--color-accent);
-  border-bottom-color: var(--color-accent);
-}
-
 .tabBody {
   min-height: 60px;
 }

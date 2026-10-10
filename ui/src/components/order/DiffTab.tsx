@@ -3,7 +3,7 @@ import { getManifest, previewOrder } from '../../api/client'
 import type { Order, OrderFormData } from '../../api/types'
 import { computeDiff, filterContext } from '../../utils/diff'
 import { filterCRDDocuments, hasCRDDocuments } from '../../utils/manifest'
-import Btn from '../shared/Btn'
+import { Button } from '../ui'
 import DiffView from '../shared/DiffView'
 import styles from './DiffTab.module.css'
 
@@ -85,13 +85,13 @@ export default function DiffTab({ formData, order }: Props) {
         </span>
         <div style={{ display: 'flex', gap: '8px' }}>
           {hasCRDs && (
-            <Btn variant="secondary" size="sm" onClick={() => setHideCRDs((v) => !v)}>
+            <Button variant="secondary" size="sm" onClick={() => setHideCRDs((v) => !v)}>
               {hideCRDs ? 'Show CRDs' : 'Hide CRDs'}
-            </Btn>
+            </Button>
           )}
-          <Btn variant="secondary" size="sm" onClick={() => setShowFull((v) => !v)}>
+          <Button variant="secondary" size="sm" onClick={() => setShowFull((v) => !v)}>
             {showFull ? 'Show changed only' : 'Show full file'}
-          </Btn>
+          </Button>
         </div>
       </div>
       <DiffView lines={displayLines} />

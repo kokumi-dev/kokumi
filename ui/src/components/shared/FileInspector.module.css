@@ -93,22 +93,3 @@
   color: var(--color-text-on-light);
   margin-right: auto;
 }
-
-.headerBtn {
-  border: 1px solid var(--color-border-strong);
-  background: transparent;
-  color: var(--color-text-on-light);
-  border-radius: 6px;
-  padding: 3px 10px;
-  font-size: 0.75rem;
-  cursor: pointer;
-}
-
-.headerBtn:hover:not(:disabled) {
-  background: var(--color-fill);
-}
-
-.headerBtn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}

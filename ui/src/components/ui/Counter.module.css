@@ -1,0 +1,18 @@
+.counter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  padding: 0 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 18px;
+  border-radius: 2em;
+  background: var(--color-fill-strong);
+  color: var(--color-text-muted-light);
+}
+
+.active {
+  background: var(--color-accent-tint);
+  color: var(--color-accent);
+}

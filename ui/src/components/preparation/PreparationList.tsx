@@ -3,7 +3,7 @@ import { Link } from 'react-router'
 import type { Preparation, PromotionMode } from '../../api/types'
 import StatusIndicator from '../shared/StatusIndicator'
 import RelativeTime from '../shared/RelativeTime'
-import Btn from '../shared/Btn'
+import { Button, PromoteIcon, RollbackIcon } from '../ui'
 import PromoteDialog from './PromoteDialog'
 import { paths } from '../../routes/paths'
 import { shortDigest } from '../../utils/format'
@@ -75,15 +75,16 @@ export default function PreparationList({ preparations, mode }: Props) {
 
               <div className={styles.actions}>
                 {!prep.isActive && mode === 'Manual' && (
-                  <Btn
+                  <Button
                     variant={action === 'Rollback' ? 'rollback' : 'promote'}
                     size="sm"
+                    icon={action === 'Rollback' ? <RollbackIcon /> : <PromoteIcon />}
                     onClick={() => setPromoting({ prep, action })}
                     disabled={blockedByApproval}
                     title={blockedByApproval ? approval?.message ?? 'Approval required' : undefined}
                   >
                     {action}
-                  </Btn>
+                  </Button>
                 )}
               </div>
             </li>

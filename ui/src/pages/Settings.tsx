@@ -3,8 +3,8 @@ import { Navigate, useParams } from 'react-router'
 import styles from './pages.module.css'
 import layout from '../components/layout/layout.module.css'
 import Toggle from '../components/shared/Toggle'
+import { Button, TabNav } from '../components/ui'
 import PageHeader from '../components/layout/PageHeader'
-import TabNav from '../components/layout/TabNav'
 import { paths } from '../routes/paths'
 import {
   getSettings,
@@ -65,9 +65,9 @@ export default function Settings() {
       <div className={layout.page}>
         {header}
         <p className={styles.fieldError}>Failed to load settings: {loadError}</p>
-        <button className={styles.saveBtn} onClick={load}>
+        <Button variant="secondary" onClick={load}>
           Retry
-        </button>
+        </Button>
       </div>
     )
   }
@@ -163,9 +163,9 @@ function GeneralTab({ argoCDURL, onSaved }: { argoCDURL: string; onSaved: (s: Se
               onChange={(e) => { setBase(e.target.value); setSaved(false); setUrlError(false); setSaveError(null) }}
               onKeyDown={(e) => { if (e.key === 'Enter') handleSave() }}
             />
-            <button className={styles.saveBtn} onClick={handleSave} disabled={submitting}>
+            <Button variant="primary" onClick={handleSave} disabled={submitting}>
               Save
-            </button>
+            </Button>
             {saved && <span className={styles.savedMsg}>Saved ✓</span>}
             {urlError && <span className={styles.fieldError}>Must be a valid http:// or https:// URL</span>}
             {saveError && <span className={styles.fieldError}>{saveError}</span>}
@@ -515,9 +515,9 @@ function AuthenticationTab({ auth, onSaved }: { auth?: AuthSettings; onSaved: (s
       {error && <p className={styles.fieldError}>{error}</p>}
 
       <div className={styles.fieldRow}>
-        <button className={styles.saveBtn} onClick={handleSave} disabled={submitting}>
+        <Button variant="primary" onClick={handleSave} disabled={submitting}>
           Save
-        </button>
+        </Button>
         {saved && <span className={styles.savedMsg}>Saved ✓</span>}
       </div>
     </div>

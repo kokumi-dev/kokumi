@@ -1,0 +1,40 @@
+.track {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 2px;
+  padding: var(--segmented-pad);
+  border-radius: var(--segmented-radius);
+  background: var(--segmented-track-bg);
+}
+
+.item {
+  height: var(--control-h-sm);
+  padding: 0 var(--control-pad-x-sm);
+  font-family: inherit;
+  font-size: var(--control-font-sm);
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  border: none;
+  border-radius: var(--segmented-item-radius);
+  background: transparent;
+  color: var(--segmented-fg);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+
+.item:hover {
+  color: var(--color-text-on-light);
+}
+
+.item:focus-visible {
+  outline: none;
+  box-shadow: var(--control-focus-ring);
+}
+
+.active,
+.active:hover {
+  background: var(--segmented-active-bg);
+  color: var(--segmented-active-fg);
+  box-shadow: var(--segmented-active-shadow);
+}

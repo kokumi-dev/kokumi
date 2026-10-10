@@ -111,23 +111,6 @@
   font-weight: 500;
 }
 
-.saveBtn {
-  padding: 7px 16px;
-  border-radius: 6px;
-  border: 1px solid var(--color-border-strong);
-  background: var(--color-accent);
-  color: var(--color-on-accent);
-  font-family: inherit;
-  font-size: 0.875rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.saveBtn:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
 .fieldHint {
   font-size: 0.8rem;
   color: var(--color-text-muted-light);
