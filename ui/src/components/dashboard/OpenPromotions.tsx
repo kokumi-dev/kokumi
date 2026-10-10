@@ -4,6 +4,7 @@ import type { Order, Preparation } from '../../api/types'
 import { useOrders } from '../../hooks/useOrders'
 import { usePreparations } from '../../hooks/usePreparations'
 import { shortDigest } from '../../utils/format'
+import { approvalLabel } from '../../utils/preparations'
 import { paths } from '../../routes/paths'
 import PromoteDialog from '../preparation/PromoteDialog'
 import DataTable from '../layout/DataTable'
@@ -72,6 +73,14 @@ export default function OpenPromotions() {
                 {r.active ? shortDigest(r.active.artifact.digest) : 'new'} → {shortDigest(r.latest.artifact.digest)}
               </span>
             ),
+          },
+          {
+            header: 'Approval',
+            width: '150px',
+            cell: (r) =>
+              r.latest.approval
+                ? approvalLabel(r.latest.approval.state, r.latest.approval.approvedCount, r.latest.approval.requiredApprovals)
+                : <span className={layout.muted}>—</span>,
           },
           { header: 'Created', width: '110px', cell: (r) => <RelativeTime iso={r.latest.createdAt} /> },
           {

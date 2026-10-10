@@ -94,6 +94,25 @@
   border-bottom-color: var(--color-accent);
 }
 
+.counter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  padding: 0 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 18px;
+  border-radius: 2em;
+  background: var(--color-fill-strong);
+  color: var(--color-text-muted-light);
+}
+
+.tabActive .counter {
+  background: var(--color-accent-tint);
+  color: var(--color-accent);
+}
+
 .tabButton {
   background: none;
   border-top: none;
@@ -127,6 +146,9 @@
 }
 
 .sectionTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 0.95rem;
   font-weight: 600;
   color: var(--color-text-on-light);

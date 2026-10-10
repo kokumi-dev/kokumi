@@ -12,8 +12,7 @@ import StatusIndicator from '../../components/shared/StatusIndicator'
 import RelativeTime from '../../components/shared/RelativeTime'
 import { BtnLink } from '../../components/shared/Btn'
 import { paths } from '../../routes/paths'
-import { plural } from '../../utils/format'
-import { orderSourceLabel, orderSourceShort } from './orderFormat'
+import { orderSourceRef } from './orderFormat'
 import layout from '../../components/layout/layout.module.css'
 
 export default function OrdersList() {
@@ -21,7 +20,7 @@ export default function OrdersList() {
   const [query, setQuery] = useFilterParam()
 
   const filtered = (orders ?? []).filter((o) =>
-    matchesFilter(query, o.name, o.namespace, o.menuRef?.name, o.source?.oci, o.source?.pantryRef?.name),
+    matchesFilter(query, o.name, o.namespace, o.menuRef?.name, o.source?.oci, o.source?.pantryRef?.name, o.source?.version),
   )
 
   return (
@@ -56,16 +55,14 @@ export default function OrdersList() {
                 cell: (o) => <NameCell to={paths.order(o.namespace, o.name)} name={o.name} secondary={o.namespace} />,
               },
               { header: 'Status', width: '110px', cell: (o) => <StatusIndicator state={o.state} /> },
-              { header: 'Source', truncate: true, title: orderSourceLabel, cell: orderSourceShort },
+              { header: 'Source', truncate: true, title: (o) => o.source?.oci ?? orderSourceRef(o), cell: orderSourceRef },
               {
-                header: 'Promotion',
-                width: '160px',
-                cell: (o) => (
-                  <div className={layout.cellRow}>
-                    {o.mode}
-                    {o.approvals && <span className={layout.label}>{plural(o.approvals.requiredApprovals, 'approval')}</span>}
-                  </div>
-                ),
+                header: 'Version',
+                width: '110px',
+                truncate: true,
+                title: (o) => o.source?.version,
+                cell: (o) =>
+                  o.source?.version ? <span className={layout.mono}>{o.source.version}</span> : <span className={layout.muted}>—</span>,
               },
               {
                 header: 'Active',

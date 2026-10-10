@@ -2,6 +2,7 @@ import Section from '../../components/layout/Section'
 import PropertyList from '../../components/layout/PropertyList'
 import ConditionList from '../../components/layout/ConditionList'
 import PatchList from '../../components/shared/PatchList'
+import Counter from '../../components/shared/Counter'
 import { formatDate } from '../../utils/format'
 import { useMenuContext } from './menuFormat'
 import layout from '../../components/layout/layout.module.css'
@@ -56,7 +57,7 @@ export default function MenuOverview() {
       </Section>
 
       {menu.patches && menu.patches.length > 0 && (
-        <Section title={`Base patches (${menu.patches.length})`} description="Applied to every Order created from this Menu">
+        <Section title={<>Base patches<Counter count={menu.patches.length} /></>} description="Applied to every Order created from this Menu">
           <PatchList patches={menu.patches} />
         </Section>
       )}

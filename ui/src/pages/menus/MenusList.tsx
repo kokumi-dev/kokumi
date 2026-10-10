@@ -11,16 +11,16 @@ import StatusIndicator from '../../components/shared/StatusIndicator'
 import RelativeTime from '../../components/shared/RelativeTime'
 import { BtnLink } from '../../components/shared/Btn'
 import { paths } from '../../routes/paths'
-import { menuSourceLabel, menuSourceShort } from './menuFormat'
+import { menuSourceRef } from './menuFormat'
 import layout from '../../components/layout/layout.module.css'
-
-const overridesLabel = (m: Menu) => `Values: ${m.overrides.values.policy}, Patches: ${m.overrides.patches.policy}`
 
 export default function MenusList() {
   const menus = useMenus()
   const [query, setQuery] = useFilterParam()
 
-  const filtered = (menus ?? []).filter((m) => matchesFilter(query, m.name, m.namespace, m.source.oci, m.source.pantryRef?.name))
+  const filtered = (menus ?? []).filter((m) =>
+    matchesFilter(query, m.name, m.namespace, m.source.oci, m.source.pantryRef?.name, m.source.version),
+  )
 
   return (
     <div className={layout.page}>
@@ -54,8 +54,15 @@ export default function MenusList() {
                 cell: (m) => <NameCell to={paths.menu(m.namespace, m.name)} name={m.name} secondary={m.namespace} />,
               },
               { header: 'Status', width: '110px', cell: (m) => <StatusIndicator state={m.state} /> },
-              { header: 'Source', truncate: true, title: menuSourceLabel, cell: menuSourceShort },
-              { header: 'Overrides', width: '26%', truncate: true, title: overridesLabel, cell: overridesLabel },
+              { header: 'Source', truncate: true, title: (m) => m.source.oci || menuSourceRef(m), cell: menuSourceRef },
+              {
+                header: 'Version',
+                width: '110px',
+                truncate: true,
+                title: (m) => m.source.version,
+                cell: (m) =>
+                  m.source.version ? <span className={layout.mono}>{m.source.version}</span> : <span className={layout.muted}>—</span>,
+              },
               { header: 'Created', width: '110px', cell: (m) => <RelativeTime iso={m.createdAt} /> },
             ]}
           />

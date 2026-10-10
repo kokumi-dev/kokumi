@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router'
+import Counter from '../shared/Counter'
 import styles from './layout.module.css'
 
 export interface TabItem {
@@ -19,7 +20,8 @@ export default function TabNav({ tabs }: { tabs: TabItem[] }) {
           end={t.end}
           className={({ isActive }) => `${styles.tab} ${isActive ? styles.tabActive : ''}`}
         >
-          {t.count !== undefined ? `${t.label} (${t.count})` : t.label}
+          {t.label}
+          <Counter count={t.count} />
         </NavLink>
       ))}
     </nav>
