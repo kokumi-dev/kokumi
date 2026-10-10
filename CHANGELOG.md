@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.17.0](https://github.com/kokumi-dev/kokumi/compare/0.16.0...0.17.0) (2026-10-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* replace AutoDeploy with Promotion mode in Menu and Order specs ([#389](https://github.com/kokumi-dev/kokumi/issues/389))
+
+### Features
+
+* add approval crd and policies ([#391](https://github.com/kokumi-dev/kokumi/issues/391)) ([8c73fe1](https://github.com/kokumi-dev/kokumi/commit/8c73fe1dc191245a98a7d155a5cb0c15999ab197))
+* add counter component and integrate into menus and orders overview ([#419](https://github.com/kokumi-dev/kokumi/issues/419)) ([e9593ca](https://github.com/kokumi-dev/kokumi/commit/e9593caea260408cd968ebbca08ac4ee780d61b9))
+* align layouts with resource lists and detail pages ([#414](https://github.com/kokumi-dev/kokumi/issues/414)) ([4654a30](https://github.com/kokumi-dev/kokumi/commit/4654a30f81a3c1931a95f052e35f113188b13ad5))
+* implement approval system for preparations ([#393](https://github.com/kokumi-dev/kokumi/issues/393)) ([616d85e](https://github.com/kokumi-dev/kokumi/commit/616d85ec28cbdc36e3d0e1c65843fba2d54607f5))
+* refactor buttons and create ui components lib ([#420](https://github.com/kokumi-dev/kokumi/issues/420)) ([2eb1e7d](https://github.com/kokumi-dev/kokumi/commit/2eb1e7d65c0ed468d4ab3d71246fca0bbd0227fc))
+* restrict server impersonation to identity service accounts ([#412](https://github.com/kokumi-dev/kokumi/issues/412)) ([ceeaa8c](https://github.com/kokumi-dev/kokumi/commit/ceeaa8c55c7e58e4ca8b77c5f9f8fb16f6ad4695))
+* restrict setting to admins and add settings tabs ([#406](https://github.com/kokumi-dev/kokumi/issues/406)) ([ab3ab5b](https://github.com/kokumi-dev/kokumi/commit/ab3ab5bd13e0fa6a5006ebd408c519ec93ed8925))
+* scope manager secret creation to the install namespace ([#411](https://github.com/kokumi-dev/kokumi/issues/411)) ([97bd135](https://github.com/kokumi-dev/kokumi/commit/97bd1351e9c81de3ed561eb164821bc92d7a2223))
+* use design tokens across components ([#418](https://github.com/kokumi-dev/kokumi/issues/418)) ([64a8b1c](https://github.com/kokumi-dev/kokumi/commit/64a8b1cb32d6ca8f7098922dd1f6eda956bacb87))
+
+
+### Code Refactoring
+
+* replace AutoDeploy with Promotion mode in Menu and Order specs ([#389](https://github.com/kokumi-dev/kokumi/issues/389)) ([4badf2d](https://github.com/kokumi-dev/kokumi/commit/4badf2d551faa9e1b2e88de382a2c39fe2edbd53))
+
 ## [0.16.0](https://github.com/kokumi-dev/kokumi/compare/0.15.1...0.16.0) (2026-09-20)
 
 
