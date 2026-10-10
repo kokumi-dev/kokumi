@@ -83,59 +83,10 @@
   border-radius: 8px;
 }
 
-.submit {
-  margin-top: 4px;
-  font-family: inherit;
-  font-size: 0.95rem;
-  font-weight: 600;
-  padding: 11px 14px;
-  border-radius: 8px;
-  border: none;
-  background: var(--color-accent);
-  color: var(--color-on-accent);
-  cursor: pointer;
-  transition: background 0.15s, opacity 0.15s, transform 0.1s;
-}
-
-.submit:hover:not(:disabled) {
-  background: var(--color-accent-hover);
-}
-
-.submit:active:not(:disabled) {
-  transform: scale(0.98);
-}
-
-.submit:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
 .footer {
   text-align: center;
   font-size: 0.75rem;
   color: var(--color-text-muted-light);
-}
-
-.ssoButton {
-  font-family: inherit;
-  font-size: 0.95rem;
-  font-weight: 600;
-  padding: 11px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--color-border-strong);
-  background: var(--color-bg-card);
-  color: var(--color-text-on-light);
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, transform 0.1s;
-}
-
-.ssoButton:hover {
-  background: var(--color-fill);
-  border-color: var(--color-accent);
-}
-
-.ssoButton:active {
-  transform: scale(0.98);
 }
 
 .divider {

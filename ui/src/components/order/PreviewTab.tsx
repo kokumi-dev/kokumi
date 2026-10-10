@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { previewOrder, previewOrderFiles } from '../../api/client'
 import type { ArtifactFile, OrderFormData } from '../../api/types'
 import { filterCRDDocuments, hasCRDDocuments } from '../../utils/manifest'
-import Btn from '../shared/Btn'
+import { Button } from '../ui'
 import YamlEditor from '../shared/YamlEditor'
 import FileInspector from '../shared/FileInspector'
 import styles from './PreviewTab.module.css'
@@ -90,9 +90,9 @@ export default function PreviewTab({ formData }: Props) {
     <div>
       {hasCRDs && !multiFile && (
         <div className={styles.toolbar}>
-          <Btn variant="secondary" size="sm" onClick={() => setHideCRDs((v) => !v)}>
+          <Button variant="secondary" size="sm" onClick={() => setHideCRDs((v) => !v)}>
             {hideCRDs ? 'Show CRDs' : 'Hide CRDs'}
-          </Btn>
+          </Button>
         </div>
       )}
       {multiFile && files ? (

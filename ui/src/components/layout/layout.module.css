@@ -64,64 +64,6 @@
   flex-shrink: 0;
 }
 
-/* ── Tab navigation ── */
-.tabs {
-  display: flex;
-  gap: 4px;
-  border-bottom: 1px solid var(--color-border);
-  margin-bottom: 20px;
-  overflow-x: auto;
-}
-
-.tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  font-size: 0.82rem;
-  font-weight: 600;
-  color: var(--color-text-muted-light);
-  border-bottom: 2px solid transparent;
-  white-space: nowrap;
-}
-
-.tab:hover {
-  color: var(--color-text-on-light);
-}
-
-.tabActive {
-  color: var(--color-accent);
-  border-bottom-color: var(--color-accent);
-}
-
-.counter {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 20px;
-  padding: 0 6px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  line-height: 18px;
-  border-radius: 2em;
-  background: var(--color-fill-strong);
-  color: var(--color-text-muted-light);
-}
-
-.tabActive .counter {
-  background: var(--color-accent-tint);
-  color: var(--color-accent);
-}
-
-.tabButton {
-  background: none;
-  border-top: none;
-  border-left: none;
-  border-right: none;
-  font-family: inherit;
-  cursor: pointer;
-}
-
 /* ── Section ── */
 .section {
   background: var(--color-bg-card);
@@ -262,6 +204,10 @@
 
 .table tr:last-child td {
   border-bottom: none;
+}
+
+.table .alignEnd {
+  text-align: right;
 }
 
 .rowLink {

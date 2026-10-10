@@ -7,8 +7,7 @@ import PropertyList from '../../components/layout/PropertyList'
 import ConditionList from '../../components/layout/ConditionList'
 import PatchList from '../../components/shared/PatchList'
 import CommitBox from '../../components/shared/CommitBox'
-import Counter from '../../components/shared/Counter'
-import Btn from '../../components/shared/Btn'
+import { Button, Counter } from '../../components/ui'
 import { paths } from '../../routes/paths'
 import { formatDate } from '../../utils/format'
 import { useOrderContext } from './orderContext'
@@ -119,7 +118,7 @@ export default function OrderOverview() {
           title={<>Edits<Counter count={edits.length} /></>}
           description="Field changes made on the rendered manifest"
           actions={edits.length > 0 && (
-            <Btn variant="danger" size="sm" onClick={() => setPendingEdits([])}>Clear all</Btn>
+            <Button variant="danger" size="sm" onClick={() => setPendingEdits([])}>Clear all</Button>
           )}
         >
           <div className={layout.stack}>

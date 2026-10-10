@@ -4,10 +4,9 @@ import { useOrders } from '../../hooks/useOrders'
 import { useMenus } from '../../hooks/useMenus'
 import { usePreparations } from '../../hooks/usePreparations'
 import PageHeader from '../../components/layout/PageHeader'
-import TabNav from '../../components/layout/TabNav'
 import ResourceNotFound from '../../components/layout/ResourceNotFound'
 import Badge from '../../components/shared/Badge'
-import Btn from '../../components/shared/Btn'
+import { Button, PromoteIcon, RollbackIcon, TabNav } from '../../components/ui'
 import PromoteDialog from '../../components/preparation/PromoteDialog'
 import { paths } from '../../routes/paths'
 import { promoteLabel } from '../../utils/preparations'
@@ -65,14 +64,15 @@ export default function PreparationLayout() {
         }
         subtitle={prep.commitMessage?.trim() || undefined}
         actions={canPromote && (
-          <Btn
+          <Button
             variant={action === 'Rollback' ? 'rollback' : 'promote'}
+            icon={action === 'Rollback' ? <RollbackIcon /> : <PromoteIcon />}
             onClick={() => setPromoting(true)}
             disabled={blockedByApproval}
             title={blockedByApproval ? prep.approval?.message ?? 'Approval required' : undefined}
           >
             {action}
-          </Btn>
+          </Button>
         )}
       />
 

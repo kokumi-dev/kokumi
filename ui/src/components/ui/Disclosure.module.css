@@ -1,0 +1,67 @@
+.header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 2px 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  text-align: left;
+  color: var(--color-text-muted-light);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.header:hover {
+  color: var(--color-text-on-light);
+}
+
+.header:focus-visible {
+  outline: none;
+  border-radius: 4px;
+  box-shadow: var(--control-focus-ring);
+}
+
+.section {
+  padding-bottom: 6px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.inline {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.chevron {
+  display: inline-block;
+  font-size: 1rem;
+  line-height: 1;
+  transition: transform 0.15s;
+}
+
+.chevronOpen {
+  transform: rotate(90deg);
+}
+
+.label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.summary {
+  min-width: 0;
+  margin-left: 6px;
+  overflow: hidden;
+  font-size: 0.72rem;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.8;
+}

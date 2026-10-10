@@ -3,11 +3,10 @@ import { Outlet, useNavigate, useParams } from 'react-router'
 import { deletePantry } from '../../api/client'
 import { usePantries } from '../../hooks/usePantries'
 import PageHeader from '../../components/layout/PageHeader'
-import TabNav from '../../components/layout/TabNav'
 import ResourceNotFound from '../../components/layout/ResourceNotFound'
 import Badge from '../../components/shared/Badge'
-import Btn, { BtnLink } from '../../components/shared/Btn'
 import ConfirmDialog from '../../components/shared/ConfirmDialog'
+import { Button, ButtonLink, EditIcon, TabNav, TrashIcon } from '../../components/ui'
 import { paths } from '../../routes/paths'
 import layout from '../../components/layout/layout.module.css'
 
@@ -33,8 +32,8 @@ export default function PantryLayout() {
         subtitle={<span className={layout.mono}>{pantry.url}</span>}
         actions={
           <>
-            <BtnLink variant="secondary" size="sm" to={paths.pantry(pantry.namespace, pantry.name, 'edit')}>Edit</BtnLink>
-            <Btn variant="danger" size="sm" onClick={() => setConfirmDelete(true)}>Delete</Btn>
+            <ButtonLink variant="secondary" icon={<EditIcon />} to={paths.pantry(pantry.namespace, pantry.name, 'edit')}>Edit</ButtonLink>
+            <Button variant="danger" icon={<TrashIcon />} onClick={() => setConfirmDelete(true)}>Delete</Button>
           </>
         }
       />

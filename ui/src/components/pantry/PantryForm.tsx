@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Pantry, PantryFormData } from '../../api/types'
 import { emptyPantryForm, pantryToFormData } from '../../api/types'
-import Btn from '../shared/Btn'
+import { Button, SegmentedControl } from '../ui'
 import styles from './PantryForm.module.css'
 
 interface Props {
@@ -117,22 +117,15 @@ export default function PantryForm({ pantry, onCancel, onSubmit, onDirtyChange }
           <hr className={styles.divider} />
           <div className={styles.sectionLabel}>Credentials (optional)</div>
 
-          <div className={styles.credTabs}>
-            <button
-              type="button"
-              className={`${styles.credTab} ${credMode === 'direct' ? styles.credTabActive : ''}`}
-              onClick={() => switchCredMode('direct')}
-            >
-              Direct Credentials
-            </button>
-            <button
-              type="button"
-              className={`${styles.credTab} ${credMode === 'secretRef' ? styles.credTabActive : ''}`}
-              onClick={() => switchCredMode('secretRef')}
-            >
-              Secret Ref
-            </button>
-          </div>
+          <SegmentedControl
+            aria-label="Credentials"
+            segments={[
+              { id: 'direct', label: 'Direct Credentials' },
+              { id: 'secretRef', label: 'Secret Ref' },
+            ]}
+            value={credMode}
+            onChange={switchCredMode}
+          />
 
           {credMode === 'direct' ? (
             <>
@@ -187,10 +180,10 @@ export default function PantryForm({ pantry, onCancel, onSubmit, onDirtyChange }
         </div>
       </div>
       <div className={styles.formActions}>
-        <Btn type="button" variant="secondary" onClick={onCancel} disabled={submitting}>Cancel</Btn>
-        <Btn type="submit" variant="primary" disabled={submitting || (isEdit && !isDirty)}>
+        <Button variant="secondary" onClick={onCancel} disabled={submitting}>Cancel</Button>
+        <Button type="submit" variant="primary" disabled={submitting || (isEdit && !isDirty)}>
           {submitting ? 'Saving…' : isEdit ? 'Save changes' : 'Create Pantry'}
-        </Btn>
+        </Button>
       </div>
     </form>
   )

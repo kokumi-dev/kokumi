@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import Modal from './Modal'
-import Btn from './Btn'
+import { Button } from '../ui'
 import styles from './Modal.module.css'
 
 interface Props {
@@ -30,10 +30,10 @@ export default function ConfirmDialog({ title, children, confirmLabel, variant =
 
   const footer = (
     <>
-      <Btn variant="secondary" onClick={onCancel} disabled={busy}>Cancel</Btn>
-      <Btn variant={variant} onClick={handleConfirm} disabled={busy} autoFocus>
+      <Button variant="secondary" onClick={onCancel} disabled={busy}>Cancel</Button>
+      <Button variant={variant} onClick={handleConfirm} disabled={busy} autoFocus>
         {busy ? '…' : confirmLabel}
-      </Btn>
+      </Button>
     </>
   )
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { listApprovals, submitApproval } from '../../api/client'
 import type { Approval, ApprovalDecision, Preparation } from '../../api/types'
-import Btn from '../shared/Btn'
+import { Button } from '../ui'
 import Section from '../layout/Section'
 import EmptyState from '../layout/EmptyState'
 import styles from './ApprovalPanel.module.css'
@@ -91,12 +91,12 @@ export default function ApprovalPanel({ preparation: prep }: { preparation: Prep
               disabled={submitting !== null}
             />
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <Btn variant="danger" onClick={() => handleVote('Reject')} disabled={submitting !== null}>
+              <Button variant="danger" onClick={() => handleVote('Reject')} disabled={submitting !== null}>
                 {submitting === 'Reject' ? '…' : 'Request changes'}
-              </Btn>
-              <Btn variant="promote" onClick={() => handleVote('Approve')} disabled={submitting !== null}>
+              </Button>
+              <Button variant="promote" onClick={() => handleVote('Approve')} disabled={submitting !== null}>
                 {submitting === 'Approve' ? '…' : 'Approve'}
-              </Btn>
+              </Button>
             </div>
           </div>
         </Section>

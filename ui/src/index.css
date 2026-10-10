@@ -61,6 +61,56 @@
   --sidebar-width: 240px;
   --topbar-height: 56px;
 
+  /* ── Controls (buttons, icon buttons, segmented controls, tabs) ── */
+  --control-h-md: 34px;
+  --control-h-sm: 28px;
+  --control-h-xs: 22px;
+  --control-font-md: 0.8125rem;
+  --control-font-sm: 0.75rem;
+  --control-pad-x-md: 14px;
+  --control-pad-x-sm: 10px;
+  --control-radius: 7px;
+  --control-focus-ring: 0 0 0 3px var(--color-accent-ring);
+
+  --btn-primary-bg:          var(--color-accent);
+  --btn-primary-bg-hover:    var(--color-accent-hover);
+  --btn-primary-fg:          var(--color-on-accent);
+
+  --btn-secondary-bg:        var(--color-fill-strong);
+  --btn-secondary-bg-hover:  var(--color-fill-strong-hover);
+  --btn-secondary-fg:        var(--color-text-on-light);
+
+  --btn-danger-bg:           var(--color-danger-bg);
+  --btn-danger-bg-hover:     var(--color-danger-bg-hover);
+  --btn-danger-fg:           var(--color-danger);
+
+  --btn-ghost-bg:            transparent;
+  --btn-ghost-bg-hover:      var(--color-fill);
+  --btn-ghost-fg:            var(--color-text-muted-light);
+  --btn-ghost-fg-hover:      var(--color-text-on-light);
+
+  --btn-promote-bg:          var(--color-success-bg);
+  --btn-promote-bg-hover:    var(--color-success-bg-hover);
+  --btn-promote-fg:          var(--color-success);
+
+  --btn-rollback-bg:         var(--color-warning-bg);
+  --btn-rollback-bg-hover:   var(--color-warning-bg-hover);
+  --btn-rollback-fg:         var(--color-warning);
+
+  --btn-inverse-bg:          var(--color-fill-on-dark);
+  --btn-inverse-bg-hover:    var(--color-fill-on-dark-hover);
+  --btn-inverse-fg:          var(--color-text-muted-dark);
+  --btn-inverse-fg-hover:    var(--color-text-on-dark);
+
+  --segmented-radius:        8px;
+  --segmented-item-radius:   6px;
+  --segmented-pad:           3px;
+  --segmented-track-bg:      var(--color-fill-strong);
+  --segmented-fg:            var(--color-text-muted-light);
+  --segmented-active-bg:     var(--color-bg-main);
+  --segmented-active-fg:     var(--color-text-on-light);
+  --segmented-active-shadow: var(--shadow-sm);
+
   font-family: 'Inter', system-ui, Avenir, Helvetica, Arial, sans-serif;
   font-size: 18px;
   line-height: 1.6;

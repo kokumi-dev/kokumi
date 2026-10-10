@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react'
 import styles from './Login.module.css'
 import logo from '../assets/logo.png'
 import { login } from '../api/auth'
+import { Button } from '../components/ui'
 
 interface Props {
   /** Called after a successful login so the parent can render the app. */
@@ -61,13 +62,9 @@ export default function Login({ onSuccess, operatorVersion, authProviders }: Pro
         )}
 
         {showOIDC && (
-          <button
-            className={styles.ssoButton}
-            type="button"
-            onClick={startSSO}
-          >
+          <Button variant="secondary" block onClick={startSSO}>
             Sign in with SSO
-          </button>
+          </Button>
         )}
 
         {showOIDC && showAdmin && (
@@ -105,9 +102,9 @@ export default function Login({ onSuccess, operatorVersion, authProviders }: Pro
 
             {error && <div className={styles.error}>{error}</div>}
 
-            <button className={styles.submit} type="submit" disabled={submitting}>
+            <Button variant="primary" block type="submit" disabled={submitting}>
               {submitting ? 'Signing in…' : 'Sign in'}
-            </button>
+            </Button>
           </>
         )}
 

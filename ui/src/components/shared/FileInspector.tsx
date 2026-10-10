@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { ArtifactFile } from '../../api/types'
 import YamlEditor from './YamlEditor'
+import { Button, EditIcon } from '../ui'
 import styles from './FileInspector.module.css'
 
 interface Props {
@@ -55,6 +56,7 @@ export default function FileInspector({ files, editable = false, onSave, saving 
     <div className={styles.inspector}>
       <div className={styles.fileList}>
         {files.map((f) => (
+          // eslint-disable-next-line no-restricted-syntax -- file list row, not an action button
           <button
             key={f.path}
             type="button"
@@ -73,23 +75,18 @@ export default function FileInspector({ files, editable = false, onSave, saving 
         <div className={styles.fileHeader}>
           <span className={styles.fileName}>{selected.path}</span>
           {canEdit && !editing && (
-            <button type="button" className={styles.headerBtn} onClick={() => setEditing(true)}>
+            <Button size="sm" icon={<EditIcon />} onClick={() => setEditing(true)}>
               Edit
-            </button>
+            </Button>
           )}
           {editing && (
             <>
-              <button
-                type="button"
-                className={styles.headerBtn}
-                onClick={handleSave}
-                disabled={saving || !dirty}
-              >
-                {saving ? 'Saving…' : 'Save'}
-              </button>
-              <button type="button" className={styles.headerBtn} onClick={handleDiscard} disabled={saving}>
+              <Button size="sm" onClick={handleDiscard} disabled={saving}>
                 Discard
-              </button>
+              </Button>
+              <Button variant="primary" size="sm" onClick={handleSave} disabled={saving || !dirty}>
+                {saving ? 'Saving…' : 'Save'}
+              </Button>
             </>
           )}
         </div>

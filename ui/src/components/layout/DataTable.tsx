@@ -10,6 +10,8 @@ export interface Column<T> {
   /** Cut overflowing content with an ellipsis; `title` supplies the full value on hover. */
   truncate?: boolean
   title?: (row: T) => string | undefined
+  /** Right-align header and cells, e.g. for a trailing action column. */
+  alignEnd?: boolean
 }
 
 interface Props<T> {
@@ -39,7 +41,7 @@ export default function DataTable<T>({ rows, columns, rowKey, rowHref }: Props<T
         </colgroup>
         <thead>
           <tr>
-            {columns.map((c, i) => <th key={i}>{c.header}</th>)}
+            {columns.map((c, i) => <th key={i} className={c.alignEnd ? styles.alignEnd : undefined}>{c.header}</th>)}
           </tr>
         </thead>
         <tbody>
@@ -50,7 +52,7 @@ export default function DataTable<T>({ rows, columns, rowKey, rowHref }: Props<T
               onClick={(e) => handleRowClick(e, row)}
             >
               {columns.map((c, i) => (
-                <td key={i}>
+                <td key={i} className={c.alignEnd ? styles.alignEnd : undefined}>
                   {c.truncate ? (
                     <div className={styles.truncate} title={c.title?.(row)}>{c.cell(row)}</div>
                   ) : (

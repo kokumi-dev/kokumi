@@ -3,7 +3,7 @@ import { getManifest, getManifestFiles } from '../../api/client'
 import type { ArtifactFile, Preparation } from '../../api/types'
 import { computeDiff, filterContext } from '../../utils/diff'
 import { filterCRDDocuments, hasCRDDocuments } from '../../utils/manifest'
-import Btn from '../shared/Btn'
+import { Button } from '../ui'
 import DiffView from '../shared/DiffView'
 import layout from '../layout/layout.module.css'
 import styles from './PreparationDiff.module.css'
@@ -74,13 +74,13 @@ export default function PreparationDiff({ base, target }: Props) {
         </span>
         <div style={{ display: 'flex', gap: '8px' }}>
           {hasCRDs && !fileDiffs && (
-            <Btn variant="secondary" size="sm" onClick={() => setHideCRDs((v) => !v)}>
+            <Button variant="secondary" size="sm" onClick={() => setHideCRDs((v) => !v)}>
               {hideCRDs ? 'Show CRDs' : 'Hide CRDs'}
-            </Btn>
+            </Button>
           )}
-          <Btn variant="secondary" size="sm" onClick={() => setShowFull((v) => !v)}>
+          <Button variant="secondary" size="sm" onClick={() => setShowFull((v) => !v)}>
             {showFull ? 'Show changed only' : 'Show full file'}
-          </Btn>
+          </Button>
         </div>
       </div>
 

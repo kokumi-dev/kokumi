@@ -6,10 +6,9 @@ import { useMenus } from '../../hooks/useMenus'
 import { usePreparations } from '../../hooks/usePreparations'
 import { useServings } from '../../hooks/useServings'
 import PageHeader from '../../components/layout/PageHeader'
-import TabNav from '../../components/layout/TabNav'
 import ResourceNotFound from '../../components/layout/ResourceNotFound'
 import Badge from '../../components/shared/Badge'
-import Btn, { BtnLink } from '../../components/shared/Btn'
+import { Button, ButtonLink, EditIcon, TabNav, TrashIcon } from '../../components/ui'
 import ConfirmDialog from '../../components/shared/ConfirmDialog'
 import { paths } from '../../routes/paths'
 import { preparationsOf, sortByChain } from '../../utils/preparations'
@@ -68,8 +67,8 @@ export default function OrderLayout() {
         subtitle={<span className={layout.mono}>{orderSourceLabel(order)}</span>}
         actions={
           <>
-            <BtnLink variant="secondary" size="sm" to={paths.order(order.namespace, order.name, 'edit')}>Edit</BtnLink>
-            <Btn variant="danger" size="sm" onClick={() => setConfirmDelete(true)}>Delete</Btn>
+            <ButtonLink variant="secondary" icon={<EditIcon />} to={paths.order(order.namespace, order.name, 'edit')}>Edit</ButtonLink>
+            <Button variant="danger" icon={<TrashIcon />} onClick={() => setConfirmDelete(true)}>Delete</Button>
           </>
         }
       />

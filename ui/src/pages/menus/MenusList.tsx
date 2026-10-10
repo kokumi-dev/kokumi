@@ -9,7 +9,7 @@ import FilterInput from '../../components/layout/FilterInput'
 import NameCell from '../../components/layout/NameCell'
 import StatusIndicator from '../../components/shared/StatusIndicator'
 import RelativeTime from '../../components/shared/RelativeTime'
-import { BtnLink } from '../../components/shared/Btn'
+import { ButtonLink, PlusIcon } from '../../components/ui'
 import { paths } from '../../routes/paths'
 import { menuSourceRef } from './menuFormat'
 import layout from '../../components/layout/layout.module.css'
@@ -27,7 +27,7 @@ export default function MenusList() {
       <PageHeader
         title="Menus"
         subtitle="Reusable templates that Orders are created from, with guardrails on what may be overridden"
-        actions={<BtnLink variant="primary" to={paths.newMenu()}>New Menu</BtnLink>}
+        actions={<ButtonLink variant="primary" icon={<PlusIcon />} to={paths.newMenu()}>New Menu</ButtonLink>}
       />
 
       <Section
@@ -40,7 +40,7 @@ export default function MenusList() {
         ) : filtered.length === 0 ? (
           <EmptyState
             text={query ? 'No menus match your filter' : 'No menus yet'}
-            action={!query && <BtnLink variant="secondary" size="sm" to={paths.newMenu()}>Create your first Menu</BtnLink>}
+            action={!query && <ButtonLink variant="secondary" size="sm" to={paths.newMenu()}>Create your first Menu</ButtonLink>}
           />
         ) : (
           <DataTable<Menu>

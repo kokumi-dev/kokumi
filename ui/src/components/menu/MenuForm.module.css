@@ -150,57 +150,12 @@ select.input {
   border-color: var(--color-accent);
 }
 
-.iconBtn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 5px;
-  border: none;
-  background: transparent;
-  color: var(--color-text-muted-light);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: background 0.15s, color 0.15s;
+.addPatch {
+  margin-top: 10px;
 }
 
-.iconBtn:hover {
-  background: var(--color-danger-bg);
-  color: var(--color-danger);
-}
-
-.addSetBtn {
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--color-accent);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  padding: 3px 0;
-  text-align: left;
-}
-
-.addSetBtn:hover {
-  text-decoration: underline;
-}
-
-.addPatchBtn {
-  margin-top: 4px;
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: var(--color-accent);
-  background: var(--color-accent-tint);
-  border: 1px dashed var(--color-accent-border);
-  border-radius: 7px;
-  padding: 9px;
-  width: 100%;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.addPatchBtn:hover {
-  background: var(--color-accent-tint-hover);
+.vendorDestination {
+  margin-top: 12px;
 }
 
 .yamlError {
@@ -311,49 +266,4 @@ select.input {
   font-size: 0.75rem;
   color: var(--color-text-on-light);
   white-space: nowrap;
-}
-
-/* ── Collapsible section header ── */
-.sectionHeader {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  width: 100%;
-  background: none;
-  border: none;
-  padding: 2px 0 6px;
-  cursor: pointer;
-  text-align: left;
-  font-family: inherit;
-  font-size: 0.8rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--color-text-muted-light);
-  transition: color 0.15s;
-}
-
-.sectionHeader:hover {
-  color: var(--color-text-on-light);
-}
-
-.sectionChevron {
-  display: inline-block;
-  font-size: 1rem;
-  line-height: 1;
-  transition: transform 0.15s;
-  transform: rotate(0deg);
-}
-
-.sectionChevronOpen {
-  transform: rotate(90deg);
-}
-
-.sectionSummary {
-  margin-left: 6px;
-  font-size: 0.72rem;
-  font-weight: 500;
-  text-transform: none;
-  letter-spacing: 0;
-  color: var(--color-text-muted-light);
 }

@@ -78,33 +78,6 @@
   margin-bottom: 4px;
 }
 
-.credTabs {
-  display: flex;
-  gap: 2px;
-  background: var(--color-fill);
-  border-radius: 8px;
-  padding: 3px;
-}
-
-.credTab {
-  flex: 1;
-  padding: 6px 0;
-  font-size: 0.8rem;
-  font-weight: 600;
-  border: none;
-  background: transparent;
-  border-radius: 6px;
-  color: var(--color-text-muted-light);
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-
-.credTabActive {
-  background: var(--color-bg-card);
-  color: var(--color-text-on-light);
-  box-shadow: var(--shadow-sm);
-}
-
 .error {
   color: var(--color-danger);
   font-size: 0.82rem;

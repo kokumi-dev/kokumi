@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { load, dump } from 'js-yaml'
 import YamlEditor from '../shared/YamlEditor'
+import { Button, CloseIcon, Disclosure, IconButton, PlusIcon, SegmentedControl, TabButtons } from '../ui'
 import CommitBox from '../shared/CommitBox'
-import TabButtons from '../layout/TabButtons'
 import PreviewTab from './PreviewTab'
 import DiffTab from './DiffTab'
 import type { Order, OrderFormData, Patch, HelmRender, Menu, ChartInfo, FileLayout } from '../../api/types'
@@ -619,28 +619,23 @@ function FormView({
           <div className={styles.fieldGroup}>
             <p className={styles.sectionTitle}>Source</p>
             {/* Source mode toggle */}
-            <div className={styles.tabs} style={{ marginBottom: 0 }}>
-              <button
-                type="button"
-                className={`${styles.tab} ${sourceMode === 'oci' ? styles.tabActive : ''}`}
-                onClick={() => {
-                  setSourceMode('oci')
-                  onFieldChange('source', { oci: '', version: formData.source?.version ?? '', pantryRef: undefined })
-                }}
-              >
-                Direct OCI URL
-              </button>
-              <button
-                type="button"
-                className={`${styles.tab} ${sourceMode === 'pantry' ? styles.tabActive : ''}`}
-                onClick={() => {
-                  setSourceMode('pantry')
-                  onFieldChange('source', { version: formData.source?.version ?? '', pantryRef: { name: '' } })
-                }}
-              >
-                From Pantry
-              </button>
-            </div>
+            <SegmentedControl
+              aria-label="Source"
+              segments={[
+                { id: 'oci', label: 'Direct OCI URL' },
+                { id: 'pantry', label: 'From Pantry' },
+              ]}
+              value={sourceMode}
+              onChange={(m) => {
+                setSourceMode(m)
+                onFieldChange(
+                  'source',
+                  m === 'oci'
+                    ? { oci: '', version: formData.source?.version ?? '', pantryRef: undefined }
+                    : { version: formData.source?.version ?? '', pantryRef: { name: '' } },
+                )
+              }}
+            />
           </div>
           <div className={styles.row2}>
             <div className={styles.fieldGroup}>
@@ -693,27 +688,21 @@ function FormView({
       )}
 
       {/* Destination (collapsible) */}
-      <div>
-        <button type="button" className={styles.sectionHeader} onClick={() => setIsDestOpen((v) => !v)}>
-          <span className={`${styles.sectionChevron} ${isDestOpen ? styles.sectionChevronOpen : ''}`}>›</span>
-          Destination
-          {!isDestOpen && (formData.destination?.oci || formData.destination?.pantryRef?.name) && (
-            <span className={styles.sectionSummary}>
-              {formData.destination.oci || `pantry: ${formData.destination.pantryRef?.name}`}
-            </span>
-          )}
-        </button>
-        {isDestOpen && (
-          <div className={styles.formGrid} style={{ gap: 10, marginTop: 4 }}>
-            <DestinationEditor
-              destination={formData.destination ?? {}}
-              onChange={(dest) => onFieldChange('destination', dest)}
-              namespace={formData.namespace}
-              name={formData.name}
-            />
-          </div>
-        )}
-      </div>
+      <Disclosure
+        label="Destination"
+        summary={formData.destination?.oci || (formData.destination?.pantryRef?.name && `pantry: ${formData.destination.pantryRef.name}`)}
+        open={isDestOpen}
+        onOpenChange={setIsDestOpen}
+      >
+        <div className={styles.formGrid} style={{ gap: 10, marginTop: 4 }}>
+          <DestinationEditor
+            destination={formData.destination ?? {}}
+            onChange={(dest) => onFieldChange('destination', dest)}
+            namespace={formData.namespace}
+            name={formData.name}
+          />
+        </div>
+      </Disclosure>
 
       {/* Promotion */}
       <label className={styles.checkRow}>
@@ -774,122 +763,114 @@ function FormView({
       )}
 
       {/* Advanced: Renderer + Patches (collapsible) */}
-      <div>
-        <button type="button" className={styles.sectionHeader} onClick={() => setIsAdvancedOpen((v) => !v)}>
-          <span className={`${styles.sectionChevron} ${isAdvancedOpen ? styles.sectionChevronOpen : ''}`}>›</span>
-          Advanced
-        </button>
-        {isAdvancedOpen && (
-          <>
-            {/* Renderer */}
-            <div style={{ marginTop: 10 }}>
-              <p className={styles.sectionTitle}>Renderer</p>
-              {valuesPolicy === 'None' ? (
-                <div className={styles.policyBanner}>
-                  <span className={styles.policyIcon}>🔒</span>
-                  Value overrides are locked by the Menu
-                </div>
-              ) : (
-                <>
-                  {!menu && (
-                    <label className={styles.checkRow}>
-                      <input
-                        type="checkbox"
-                        checked={!!formData.render?.helm}
-                        onChange={(e) => (e.target.checked ? onEnableHelm() : onDisableHelm())}
-                      />
-                      Enable Helm rendering
-                    </label>
-                  )}
-                  {valuesPolicy === 'Restricted' && menu?.overrides.values.allowed && (
-                    <div className={styles.policyBanner}>
-                      <span className={styles.policyIcon}>📋</span>
-                      Allowed values:{' '}
-                      {menu.overrides.values.allowed.map((k) => (
-                        <span key={k} className={styles.policyChip}>{k}</span>
-                      ))}
-                    </div>
-                  )}
-                  {valuesPolicy === 'All' && menu && (
-                    <div className={styles.policyBannerOpen}>
-                      <span className={styles.policyIcon}>✓</span>
-                      All value overrides are allowed
-                    </div>
-                  )}
-                  {formData.render?.helm && (
-                    <div className={styles.helmSection}>
-                      <HelmRenderEditor
-                        helm={formData.render.helm}
-                        onUpdate={onUpdateHelm}
-                        chartInfo={chartInfo}
-                        chartInfoLoading={chartInfoLoading}
-                      />
-                    </div>
-                  )}
-                  {!formData.render?.helm && !menu && (
-                    <div className={styles.fieldGroup} style={{ marginTop: 10 }}>
-                      <label className={styles.label}>Manifest files</label>
-                      <select
-                        className={styles.input}
-                        value={formData.render?.manifest?.layout ?? 'Single'}
-                        onChange={(e) => onSetLayout(e.target.value as FileLayout)}
-                      >
-                        <option value="Single">Single manifest file</option>
-                        <option value="Multi">Keep separate files</option>
-                      </select>
-                    </div>
-                  )}
-                </>
-              )}
+      <Disclosure label="Advanced" open={isAdvancedOpen} onOpenChange={setIsAdvancedOpen}>
+        {/* Renderer */}
+        <div style={{ marginTop: 10 }}>
+          <p className={styles.sectionTitle}>Renderer</p>
+          {valuesPolicy === 'None' ? (
+            <div className={styles.policyBanner}>
+              <span className={styles.policyIcon}>🔒</span>
+              Value overrides are locked by the Menu
             </div>
+          ) : (
+            <>
+              {!menu && (
+                <label className={styles.checkRow}>
+                  <input
+                    type="checkbox"
+                    checked={!!formData.render?.helm}
+                    onChange={(e) => (e.target.checked ? onEnableHelm() : onDisableHelm())}
+                  />
+                  Enable Helm rendering
+                </label>
+              )}
+              {valuesPolicy === 'Restricted' && menu?.overrides.values.allowed && (
+                <div className={styles.policyBanner}>
+                  <span className={styles.policyIcon}>📋</span>
+                  Allowed values:{' '}
+                  {menu.overrides.values.allowed.map((k) => (
+                    <span key={k} className={styles.policyChip}>{k}</span>
+                  ))}
+                </div>
+              )}
+              {valuesPolicy === 'All' && menu && (
+                <div className={styles.policyBannerOpen}>
+                  <span className={styles.policyIcon}>✓</span>
+                  All value overrides are allowed
+                </div>
+              )}
+              {formData.render?.helm && (
+                <div className={styles.helmSection}>
+                  <HelmRenderEditor
+                    helm={formData.render.helm}
+                    onUpdate={onUpdateHelm}
+                    chartInfo={chartInfo}
+                    chartInfoLoading={chartInfoLoading}
+                  />
+                </div>
+              )}
+              {!formData.render?.helm && !menu && (
+                <div className={styles.fieldGroup} style={{ marginTop: 10 }}>
+                  <label className={styles.label}>Manifest files</label>
+                  <select
+                    className={styles.input}
+                    value={formData.render?.manifest?.layout ?? 'Single'}
+                    onChange={(e) => onSetLayout(e.target.value as FileLayout)}
+                  >
+                    <option value="Single">Single manifest file</option>
+                    <option value="Multi">Keep separate files</option>
+                  </select>
+                </div>
+              )}
+            </>
+          )}
+        </div>
 
-            {/* Patches */}
-            <div style={{ marginTop: 10 }}>
-              <p className={styles.sectionTitle}>Patches</p>
-              {patchesPolicy === 'None' ? (
-                <div className={styles.policyBanner}>
-                  <span className={styles.policyIcon}>🔒</span>
-                  Patch overrides are locked by the Menu
-                </div>
-              ) : (
-                <>
-                  {patchesPolicy === 'Restricted' && menu?.overrides.patches.allowed && (
-                    <div className={styles.policyBanner}>
-                      <span className={styles.policyIcon}>📋</span>
-                      Allowed patches:{' '}
-                      {menu.overrides.patches.allowed.map((a, i) => (
-                        <span key={i} className={styles.policyChip}>
-                          {a.target.kind}/{a.target.name}: {a.paths.join(', ')}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  {patchesPolicy === 'All' && menu && (
-                    <div className={styles.policyBannerOpen}>
-                      <span className={styles.policyIcon}>✓</span>
-                      All patch overrides are allowed
-                    </div>
-                  )}
-                  <div className={styles.patchList}>
-                    {formData.patches.map((patch, idx) => (
-                      <PatchEditor
-                        key={idx}
-                        index={idx}
-                        patch={patch}
-                        onUpdate={(p) => onUpdatePatch(idx, p)}
-                        onRemove={() => onRemovePatch(idx)}
-                      />
-                    ))}
-                  </div>
-                  <button className={styles.addPatchBtn} onClick={onAddPatch}>
-                    + Add Patch
-                  </button>
-                </>
-              )}
+        {/* Patches */}
+        <div style={{ marginTop: 10 }}>
+          <p className={styles.sectionTitle}>Patches</p>
+          {patchesPolicy === 'None' ? (
+            <div className={styles.policyBanner}>
+              <span className={styles.policyIcon}>🔒</span>
+              Patch overrides are locked by the Menu
             </div>
-          </>
-        )}
-      </div>
+          ) : (
+            <>
+              {patchesPolicy === 'Restricted' && menu?.overrides.patches.allowed && (
+                <div className={styles.policyBanner}>
+                  <span className={styles.policyIcon}>📋</span>
+                  Allowed patches:{' '}
+                  {menu.overrides.patches.allowed.map((a, i) => (
+                    <span key={i} className={styles.policyChip}>
+                      {a.target.kind}/{a.target.name}: {a.paths.join(', ')}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {patchesPolicy === 'All' && menu && (
+                <div className={styles.policyBannerOpen}>
+                  <span className={styles.policyIcon}>✓</span>
+                  All patch overrides are allowed
+                </div>
+              )}
+              <div className={styles.patchList}>
+                {formData.patches.map((patch, idx) => (
+                  <PatchEditor
+                    key={idx}
+                    index={idx}
+                    patch={patch}
+                    onUpdate={(p) => onUpdatePatch(idx, p)}
+                    onRemove={() => onRemovePatch(idx)}
+                  />
+                ))}
+              </div>
+              <Button block className={styles.addPatch} icon={<PlusIcon />} onClick={onAddPatch}>
+                Add patch
+              </Button>
+            </>
+          )}
+        </div>
+      </Disclosure>
     </div>
   )
 }
@@ -936,11 +917,9 @@ function PatchEditor({ index, patch, onUpdate, onRemove }: PatchEditorProps) {
     <div className={styles.patchCard}>
       <div className={styles.patchCardHeader}>
         <span className={styles.patchCardTitle}>Patch {index + 1}</span>
-        <button className={styles.iconBtn} onClick={onRemove} title="Remove patch">
-          <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <path d="M2 2l8 8M10 2L2 10" />
-          </svg>
-        </button>
+        <IconButton tone="danger" onClick={onRemove} aria-label="Remove patch">
+          <CloseIcon />
+        </IconButton>
       </div>
 
       <div className={styles.row2}>
@@ -990,20 +969,14 @@ function PatchEditor({ index, patch, onUpdate, onRemove }: PatchEditorProps) {
               onChange={(e) => updateSetEntry(k, k, e.target.value)}
               placeholder="3"
             />
-            <button
-              className={styles.iconBtn}
-              onClick={() => removeSetEntry(k)}
-              title="Remove"
-            >
-              <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <path d="M2 2l8 8M10 2L2 10" />
-              </svg>
-            </button>
+            <IconButton tone="danger" onClick={() => removeSetEntry(k)} aria-label="Remove key/value">
+              <CloseIcon />
+            </IconButton>
           </div>
         ))}
-        <button className={styles.addSetBtn} onClick={addSetEntry}>
-          + Add key/value
-        </button>
+        <Button variant="ghost" size="sm" icon={<PlusIcon />} onClick={addSetEntry}>
+          Add key/value
+        </Button>
       </div>
     </div>
   )
@@ -1201,29 +1174,23 @@ function ChartReferencePanel({ chartInfo, loading, onJumpToPath }: ChartReferenc
     : 'Chart Reference'
 
   return (
-    <div className={styles.chartRef}>
-      <button
-        type="button"
-        className={styles.chartRefToggle}
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-      >
-        <span className={`${styles.chartRefChevron} ${open ? styles.chartRefChevronOpen : ''}`}>
-          ›
-        </span>
-        <span className={styles.chartRefToggleLabel}>
-          {loading ? (
-            <>
-              <span className={styles.chartRefSpinner} />
-              Loading chart info…
-            </>
-          ) : (
-            headerLabel
-          )}
-        </span>
-      </button>
-
-      {open && !loading && chartInfo?.isHelm && (
+    <Disclosure
+      tone="inline"
+      className={styles.chartRef}
+      open={open}
+      onOpenChange={setOpen}
+      label={
+        loading ? (
+          <>
+            <span className={styles.chartRefSpinner} />
+            Loading chart info…
+          </>
+        ) : (
+          headerLabel
+        )
+      }
+    >
+      {!loading && chartInfo?.isHelm && (
         <div className={styles.chartRefBody}>
           {chartInfo.description && (
             <p className={styles.chartRefDescription}>{chartInfo.description}</p>
@@ -1266,26 +1233,19 @@ function ChartReferencePanel({ chartInfo, loading, onJumpToPath }: ChartReferenc
           )}
 
           {chartInfo.readme && (
-            <div className={styles.chartRefReadme}>
-              <button
-                type="button"
-                className={styles.chartRefToggle}
-                onClick={() => setReadmeOpen((v) => !v)}
-                aria-expanded={readmeOpen}
-              >
-                <span className={`${styles.chartRefChevron} ${readmeOpen ? styles.chartRefChevronOpen : ''}`}>
-                  ›
-                </span>
-                <span className={styles.chartRefToggleLabel}>README</span>
-              </button>
-              {readmeOpen && (
-                <pre className={styles.chartRefReadmeContent}>{chartInfo.readme}</pre>
-              )}
-            </div>
+            <Disclosure
+              tone="inline"
+              className={styles.chartRefReadme}
+              label="README"
+              open={readmeOpen}
+              onOpenChange={setReadmeOpen}
+            >
+              <pre className={styles.chartRefReadmeContent}>{chartInfo.readme}</pre>
+            </Disclosure>
           )}
         </div>
       )}
-    </div>
+    </Disclosure>
   )
 }
 

@@ -43,25 +43,6 @@
   letter-spacing: -0.01em;
 }
 
-.closeBtn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  border: none;
-  background: transparent;
-  color: var(--color-text-muted-light);
-  transition: background 0.15s, color 0.15s;
-  padding: 0;
-}
-
-.closeBtn:hover {
-  background: var(--color-fill-strong);
-  color: var(--color-text-on-light);
-}
-
 .body {
   flex: 1;
   overflow-y: auto;

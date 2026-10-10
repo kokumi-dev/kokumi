@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { OCIDestination } from '../../api/types'
 import { getDefaultRegistry } from '../../api/client'
 import { usePantries } from '../../hooks/usePantries'
+import { SegmentedControl } from '../ui'
 import styles from '../order/OrderForm.module.css'
 
 // Destination mode: 'default' = in-cluster registry, 'oci' = direct URL, 'pantry' = Pantry provides URL.
@@ -59,29 +60,16 @@ export default function DestinationEditor({
 
   return (
     <div className={styles.fieldGroup}>
-      <div className={styles.tabs} style={{ marginBottom: 0 }}>
-        <button
-          type="button"
-          className={`${styles.tab} ${mode === 'default' ? styles.tabActive : ''}`}
-          onClick={() => switchMode('default')}
-        >
-          In-cluster (default)
-        </button>
-        <button
-          type="button"
-          className={`${styles.tab} ${mode === 'oci' ? styles.tabActive : ''}`}
-          onClick={() => switchMode('oci')}
-        >
-          Direct OCI URL
-        </button>
-        <button
-          type="button"
-          className={`${styles.tab} ${mode === 'pantry' ? styles.tabActive : ''}`}
-          onClick={() => switchMode('pantry')}
-        >
-          From Pantry
-        </button>
-      </div>
+      <SegmentedControl
+        aria-label="Destination"
+        segments={[
+          { id: 'default', label: 'In-cluster (default)' },
+          { id: 'oci', label: 'Direct OCI URL' },
+          { id: 'pantry', label: 'From Pantry' },
+        ]}
+        value={mode}
+        onChange={switchMode}
+      />
       {mode === 'oci' && (
         <div className={styles.fieldGroup}>
           <label className={styles.label}>Destination OCI URL</label>

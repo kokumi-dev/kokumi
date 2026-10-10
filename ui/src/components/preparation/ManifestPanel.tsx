@@ -3,7 +3,7 @@ import { getManifest, getManifestFiles, saveOrderEdits } from '../../api/client'
 import type { ArtifactFile, Order, Patch, Preparation } from '../../api/types'
 import { computeEdits } from '../../utils/edits'
 import { filterCRDDocuments, hasCRDDocuments } from '../../utils/manifest'
-import Btn from '../shared/Btn'
+import { Button, CopyIcon, EditIcon } from '../ui'
 import YamlEditor from '../shared/YamlEditor'
 import FileInspector from '../shared/FileInspector'
 import CommitBox from '../shared/CommitBox'
@@ -92,25 +92,25 @@ export default function ManifestPanel({ preparation: prep, order }: Props) {
         </span>
         <div className={styles.toolbarActions}>
           {hasCRDs && !editing && !multiFile && (
-            <Btn variant="secondary" size="sm" onClick={() => setHideCRDs((v) => !v)}>
+            <Button variant="secondary" size="sm" onClick={() => setHideCRDs((v) => !v)}>
               {hideCRDs ? 'Show CRDs' : 'Hide CRDs'}
-            </Btn>
+            </Button>
           )}
-          <Btn variant="secondary" size="sm" onClick={copyToClipboard}>Copy</Btn>
+          <Button variant="secondary" size="sm" icon={<CopyIcon />} onClick={copyToClipboard}>Copy</Button>
           {canEdit && !multiFile && !editing && (
-            <Btn variant="primary" size="sm" onClick={startEdit}>Edit</Btn>
+            <Button variant="secondary" size="sm" icon={<EditIcon />} onClick={startEdit}>Edit</Button>
           )}
           {editing && pendingEdits === null && (
             <>
-              <Btn variant="secondary" size="sm" onClick={discard}>Discard</Btn>
-              <Btn
+              <Button variant="secondary" size="sm" onClick={discard}>Discard</Button>
+              <Button
                 variant="primary"
                 size="sm"
                 onClick={reviewEdits}
                 disabled={editedContent === displayContent}
               >
                 Save edits…
-              </Btn>
+              </Button>
             </>
           )}
         </div>

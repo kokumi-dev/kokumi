@@ -4,11 +4,10 @@ import { deleteMenu } from '../../api/client'
 import { useMenus } from '../../hooks/useMenus'
 import { useOrders } from '../../hooks/useOrders'
 import PageHeader from '../../components/layout/PageHeader'
-import TabNav from '../../components/layout/TabNav'
 import ResourceNotFound from '../../components/layout/ResourceNotFound'
 import Badge from '../../components/shared/Badge'
-import Btn, { BtnLink } from '../../components/shared/Btn'
 import ConfirmDialog from '../../components/shared/ConfirmDialog'
+import { Button, ButtonLink, EditIcon, PlusIcon, TabNav, TrashIcon } from '../../components/ui'
 import { paths } from '../../routes/paths'
 import { menuSourceLabel } from './menuFormat'
 import layout from '../../components/layout/layout.module.css'
@@ -38,9 +37,9 @@ export default function MenuLayout() {
         subtitle={<span className={layout.mono}>{menuSourceLabel(menu)}</span>}
         actions={
           <>
-            <BtnLink variant="primary" size="sm" to={paths.newOrder(menu)}>Use this menu</BtnLink>
-            <BtnLink variant="secondary" size="sm" to={paths.menu(menu.namespace, menu.name, 'edit')}>Edit</BtnLink>
-            <Btn variant="danger" size="sm" onClick={() => setConfirmDelete(true)}>Delete</Btn>
+            <ButtonLink variant="secondary" icon={<EditIcon />} to={paths.menu(menu.namespace, menu.name, 'edit')}>Edit</ButtonLink>
+            <Button variant="danger" icon={<TrashIcon />} onClick={() => setConfirmDelete(true)}>Delete</Button>
+            <ButtonLink variant="primary" icon={<PlusIcon />} to={paths.newOrder(menu)}>Use this menu</ButtonLink>
           </>
         }
       />
