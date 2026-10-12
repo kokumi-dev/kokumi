@@ -3672,7 +3672,7 @@ spec:
     spec:
       automountServiceAccountToken: false
       containers:
-      - image: registry:3.1.2@sha256:c87f33837722a100572e95d7dc4bf539fc42cf68202b13c3bc03c0ff54c3a649
+      - image: ghcr.io/kokumi-dev/distribution:3.2.0-kokumi.1@sha256:ad2977e04c260aa6cf169e183be4f14e0ef6afd1f2dc931b15ee7114a37b39d8
         imagePullPolicy: IfNotPresent
         livenessProbe:
           httpGet:
@@ -3704,7 +3704,7 @@ spec:
             - ALL
           readOnlyRootFilesystem: true
         volumeMounts:
-        - mountPath: /etc/docker/registry
+        - mountPath: /etc/distribution
           name: config
           readOnly: true
         - mountPath: /var/lib/registry
