@@ -3,8 +3,11 @@ package oci
 import (
 	"fmt"
 
-	"oras.land/oras-go/v2/registry/remote/credentials"
+	"github.com/oras-project/oras-go/v3/registry/remote/credentials"
 )
+
+// CredentialStore holds registry credentials. A nil store means anonymous access.
+type CredentialStore = credentials.Store
 
 // CredentialsFromDockerConfigJSON parses a kubernetes.io/dockerconfigjson
 // secret value and returns an in-memory ORAS credential store.

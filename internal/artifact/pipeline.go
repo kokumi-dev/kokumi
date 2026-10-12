@@ -113,7 +113,7 @@ func (p *Pipeline) Render(ctx context.Context, req RenderRequest) (*RenderResult
 		Extra:        req.ExtraAnnotations,
 	})
 
-	destDigest, err := dstClient.Push(ctx, destRef, pulled.dir, annotations)
+	destDigest, err := dstClient.Push(ctx, destRef, pulled.dir, oci.PushOptions{Annotations: annotations})
 	if err != nil {
 		return nil, fmt.Errorf("failed to push artifact: %w", err)
 	}

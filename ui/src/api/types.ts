@@ -237,6 +237,7 @@ export interface Pantry {
   secretRef?: string
   description?: string
   state: string
+  referrersAPI?: 'Supported' | 'Unsupported'
   conditions?: Condition[]
   createdAt?: string
 }

@@ -329,14 +329,16 @@ type UpdateMenuRequest struct {
 
 // PantryDTO is the view of a Pantry served to the UI.
 type PantryDTO struct {
-	Name        string         `json:"name"`
-	Namespace   string         `json:"namespace"`
-	URL         string         `json:"url"`
-	SecretRef   string         `json:"secretRef,omitempty"`
-	Description string         `json:"description,omitempty"`
-	State       string         `json:"state"`
-	Conditions  []ConditionDTO `json:"conditions,omitempty"`
-	CreatedAt   *time.Time     `json:"createdAt,omitempty"`
+	Name        string `json:"name"`
+	Namespace   string `json:"namespace"`
+	URL         string `json:"url"`
+	SecretRef   string `json:"secretRef,omitempty"`
+	Description string `json:"description,omitempty"`
+	State       string `json:"state"`
+	// ReferrersAPI is "Supported" or "Unsupported"; empty while unknown.
+	ReferrersAPI string         `json:"referrersAPI,omitempty"`
+	Conditions   []ConditionDTO `json:"conditions,omitempty"`
+	CreatedAt    *time.Time     `json:"createdAt,omitempty"`
 }
 
 // CreatePantryRequest is the body for POST /api/v1/pantries.

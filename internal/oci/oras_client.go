@@ -2,9 +2,11 @@ package oci
 
 import (
 	"archive/tar"
+	"cmp"
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -13,11 +15,12 @@ import (
 	"strings"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"oras.land/oras-go/v2"
-	"oras.land/oras-go/v2/content/file"
-	"oras.land/oras-go/v2/registry/remote"
-	"oras.land/oras-go/v2/registry/remote/auth"
-	"oras.land/oras-go/v2/registry/remote/credentials"
+	"github.com/oras-project/oras-go/v3"
+	"github.com/oras-project/oras-go/v3/content"
+	"github.com/oras-project/oras-go/v3/content/file"
+	"github.com/oras-project/oras-go/v3/registry/remote"
+	"github.com/oras-project/oras-go/v3/registry/remote/auth"
+	"github.com/oras-project/oras-go/v3/registry/remote/credentials"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
@@ -50,15 +53,26 @@ func (c *ORASClient) newRepository(ref string) (*remote.Repository, error) {
 		return nil, err
 	}
 
-	repo.PlainHTTP = isPlainHTTP(ref)
+	repo.Registry.PlainHTTP = isPlainHTTP(ref)
 
 	if c.credStore != nil {
-		repo.Client = &auth.Client{
-			Credential: c.credStore.Get,
-		}
+		repo.Registry.Client = newAuthClient(c.credStore)
 	}
 
 	return repo, nil
+}
+
+// newAuthClient returns an auth client that reads credentials from credStore.
+// It keeps the distribution token flow for username/password credentials;
+// oras-go v3 would otherwise default to the OAuth2 password grant, which not
+// every registry serves.
+func newAuthClient(credStore credentials.Store) *auth.Client {
+	client := &auth.Client{
+		CredentialFunc: remote.NewCredentialFunc(credStore),
+	}
+	client.TokenFetcher = auth.NewCompositeTokenFetcher(client.Client, client.Header, client.ClientID, true)
+
+	return client
 }
 
 // isPlainHTTP reports whether ref should be accessed over plain HTTP.
@@ -118,6 +132,10 @@ func (c *ORASClient) Pull(ctx context.Context, ref Reference, targetDir string) 
 	manifestDesc, err := repo.Resolve(ctx, reference)
 	if err != nil {
 		return "", "", nil, fmt.Errorf("resolve %s:%s: %w", ref, reference, err)
+	}
+
+	if isIndex(manifestDesc.MediaType) {
+		return "", "", nil, fmt.Errorf("pull %s:%s: %w", ref, reference, ErrIsIndex)
 	}
 
 	rc, err := repo.Fetch(ctx, manifestDesc)
@@ -308,9 +326,11 @@ func (c *ORASClient) Resolve(ctx context.Context, ref Reference) (string, error)
 	return desc.Digest.String(), nil
 }
 
-// Copy copies the artifact at srcRef (in this client's registry) to dstRef
-// (in target's registry), preserving the original manifest and media types.
-func (c *ORASClient) Copy(ctx context.Context, target Client, srcRef, dstRef Reference) error {
+// Copy copies the artifact at srcRef (in this client's registry) and
+// everything it references to dstRef (in target's registry), preserving the
+// original manifests and media types. Blobs are mounted instead of transferred
+// when both repositories live in the same registry and share this client.
+func (c *ORASClient) Copy(ctx context.Context, target Client, srcRef, dstRef Reference, opts CopyOptions) error {
 	dst, ok := target.(*ORASClient)
 	if !ok {
 		return fmt.Errorf("copy target must be an ORASClient, got %T", target)
@@ -326,16 +346,70 @@ func (c *ORASClient) Copy(ctx context.Context, target Client, srcRef, dstRef Ref
 		return fmt.Errorf("create destination repository for %q: %w", dstRef, err)
 	}
 
-	if _, err := oras.Copy(ctx, srcRepo, srcRef.GetReference(), dstRepo, dstRef.GetReference(), oras.DefaultCopyOptions); err != nil {
+	graphOpts := oras.DefaultCopyGraphOptions
+	if dst == c && srcRef.Registry == dstRef.Registry && srcRef.Repository != dstRef.Repository {
+		graphOpts.MountFrom = func(context.Context, ocispec.Descriptor) ([]string, error) {
+			return []string{srcRef.Repository}, nil
+		}
+	}
+
+	root, err := oras.Copy(ctx, srcRepo, srcRef.GetReference(), dstRepo, dstRef.GetReference(), oras.CopyOptions{CopyGraphOptions: graphOpts})
+	if err != nil {
 		return fmt.Errorf("copy %s to %s: %w", srcRef, dstRef, err)
+	}
+
+	if !opts.IncludeReferrers {
+		return nil
+	}
+
+	// oras.ExtendedCopy only follows the referrers of the root, so the
+	// referrers of index children are copied manifest by manifest.
+	manifests, err := manifestsOf(ctx, srcRepo, root)
+	if err != nil {
+		return fmt.Errorf("walk %s: %w", srcRef, err)
+	}
+
+	extOpts := oras.DefaultExtendedCopyGraphOptions
+	extOpts.CopyGraphOptions = graphOpts
+	for _, manifest := range manifests {
+		if err := oras.ExtendedCopyGraph(ctx, srcRepo, dstRepo, manifest, extOpts); err != nil {
+			return fmt.Errorf("copy referrers of %s to %s: %w", manifest.Digest, dstRef, err)
+		}
 	}
 
 	return nil
 }
 
+// manifestsOf returns root and every manifest reachable from it through
+// image indexes.
+func manifestsOf(ctx context.Context, repo *remote.Repository, root ocispec.Descriptor) ([]ocispec.Descriptor, error) {
+	manifests := []ocispec.Descriptor{root}
+	if !isIndex(root.MediaType) {
+		return manifests, nil
+	}
+
+	children, err := content.Successors(ctx, repo, root)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, child := range children {
+		nested, err := manifestsOf(ctx, repo, child)
+		if err != nil {
+			return nil, err
+		}
+		manifests = append(manifests, nested...)
+	}
+
+	return manifests, nil
+}
+
 // Push packages sourceDir as an OCI artifact and pushes it to ref:tag, returning its digest.
-// annotations are attached as OCI manifest annotations; pass nil for none.
-func (c *ORASClient) Push(ctx context.Context, ref Reference, sourceDir string, annotations map[string]string) (string, error) {
+func (c *ORASClient) Push(ctx context.Context, ref Reference, sourceDir string, opts PushOptions) (string, error) {
+	if len(opts.Config) > 0 && opts.ConfigMediaType == "" {
+		return "", errors.New("config media type is required when a config is set")
+	}
+
 	log := ctrl.LoggerFrom(ctx)
 
 	repository := ref.RepositoryReference()
@@ -351,17 +425,25 @@ func (c *ORASClient) Push(ctx context.Context, ref Reference, sourceDir string, 
 	}
 	defer fs.Close() //nolint:errcheck
 
-	layerDesc, err := fs.Add(ctx, ".", "application/vnd.oci.image.layer.v1.tar+gzip", ".")
+	layerDesc, err := fs.Add(ctx, ".", ImageLayerMediaType, ".")
 	if err != nil {
 		return "", fmt.Errorf("failed to add directory to file store: %w", err)
 	}
 
 	packOpts := oras.PackManifestOptions{
 		Layers:              []ocispec.Descriptor{layerDesc},
-		ManifestAnnotations: annotations,
+		ManifestAnnotations: opts.Annotations,
 	}
 
-	manifest, err := oras.PackManifest(ctx, fs, oras.PackManifestVersion1_1, oras.MediaTypeUnknownArtifact, packOpts)
+	if len(opts.Config) > 0 {
+		configDesc, err := oras.PushBytes(ctx, fs, opts.ConfigMediaType, opts.Config)
+		if err != nil {
+			return "", fmt.Errorf("failed to add config to file store: %w", err)
+		}
+		packOpts.ConfigDescriptor = &configDesc
+	}
+
+	manifest, err := oras.PackManifest(ctx, fs, oras.PackManifestVersion1_1, cmp.Or(opts.ArtifactType, oras.MediaTypeUnknownArtifact), packOpts)
 	if err != nil {
 		return "", fmt.Errorf("failed to pack manifest: %w", err)
 	}

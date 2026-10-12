@@ -20,10 +20,12 @@ func NewPantryUpdater(c client.Client) *PantryUpdater {
 	return &PantryUpdater{client: c}
 }
 
-// Ready marks the Pantry as reachable with valid credentials.
-func (u *PantryUpdater) Ready(ctx context.Context, pantry *deliveryv1alpha1.Pantry, msg string) error {
+// Ready marks the Pantry as reachable with valid credentials and records the
+// probed referrers API support (empty when unknown).
+func (u *PantryUpdater) Ready(ctx context.Context, pantry *deliveryv1alpha1.Pantry, msg string, referrersAPI deliveryv1alpha1.ReferrersAPISupport) error {
 	return u.set(ctx, pantry, func(latest *deliveryv1alpha1.Pantry) {
 		latest.Status.ObservedGeneration = latest.Generation
+		latest.Status.ReferrersAPI = referrersAPI
 		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(latest.Generation, metav1.ConditionTrue, "Ready", msg))
 	})
 }
@@ -32,6 +34,7 @@ func (u *PantryUpdater) Ready(ctx context.Context, pantry *deliveryv1alpha1.Pant
 func (u *PantryUpdater) Failed(ctx context.Context, pantry *deliveryv1alpha1.Pantry, err error) error {
 	return u.set(ctx, pantry, func(latest *deliveryv1alpha1.Pantry) {
 		latest.Status.ObservedGeneration = latest.Generation
+		latest.Status.ReferrersAPI = ""
 		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(latest.Generation, metav1.ConditionFalse, "ConnectivityCheckFailed", err.Error()))
 	})
 }

@@ -40,11 +40,30 @@ type PantrySpec struct {
 	Description string `json:"description,omitempty"`
 }
 
+// ReferrersAPISupport describes whether a registry serves the OCI referrers API.
+// +kubebuilder:validation:Enum=Supported;Unsupported
+type ReferrersAPISupport string
+
+const (
+	// ReferrersAPISupported means the registry serves the OCI referrers API.
+	ReferrersAPISupported ReferrersAPISupport = "Supported"
+	// ReferrersAPIUnsupported means the registry does not serve the OCI
+	// referrers API; referrers are stored through the referrers tag schema.
+	ReferrersAPIUnsupported ReferrersAPISupport = "Unsupported"
+)
+
 // PantryStatus defines the observed state of Pantry.
 type PantryStatus struct {
 	// observedGeneration is the most recent generation observed by the controller
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// referrersAPI reports whether the registry serves the OCI referrers API
+	// for this Pantry's repository. It is omitted while unknown, for example
+	// when the repository does not exist yet. It is refreshed only when the
+	// Pantry or its credentials Secret changes.
+	// +optional
+	ReferrersAPI ReferrersAPISupport `json:"referrersAPI,omitempty"`
 
 	// conditions represent the current state of the Pantry resource.
 	// +listType=map

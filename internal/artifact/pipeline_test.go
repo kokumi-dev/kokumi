@@ -442,6 +442,7 @@ func listPushedFiles(fs afero.Fs, sourceDir string) (map[string]string, error) {
 }
 
 type capturingFakeClient struct {
+	oci.FakeClient
 	fs                  afero.Fs
 	annotations         map[string]string
 	lastPushAnnotations map[string]string
@@ -458,8 +459,8 @@ func (c *capturingFakeClient) Pull(ctx context.Context, ref oci.Reference, targe
 	return "", fakeDigest, c.annotations, nil
 }
 
-func (c *capturingFakeClient) Push(ctx context.Context, ref oci.Reference, sourceDir string, annotations map[string]string) (string, error) {
-	c.lastPushAnnotations = annotations
+func (c *capturingFakeClient) Push(ctx context.Context, ref oci.Reference, sourceDir string, opts oci.PushOptions) (string, error) {
+	c.lastPushAnnotations = opts.Annotations
 
 	files, err := listPushedFiles(c.fs, sourceDir)
 	if err != nil {
@@ -467,7 +468,7 @@ func (c *capturingFakeClient) Push(ctx context.Context, ref oci.Reference, sourc
 	}
 	c.lastPushedFiles = files
 
-	return oci.NewFakeClient(c.fs).Push(ctx, ref, sourceDir, annotations)
+	return oci.NewFakeClient(c.fs).Push(ctx, ref, sourceDir, opts)
 }
 
 func (c *capturingFakeClient) ListTags(_ context.Context, _ oci.Reference) ([]string, error) {
@@ -482,11 +483,12 @@ func (c *capturingFakeClient) PushReferrer(_ context.Context, _ oci.Reference, _
 	return "", nil
 }
 
-func (c *capturingFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference) error {
+func (c *capturingFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference, _ oci.CopyOptions) error {
 	return nil
 }
 
 type multiFileFakeClient struct {
+	oci.FakeClient
 	fs afero.Fs
 }
 
@@ -505,7 +507,7 @@ func (c *multiFileFakeClient) Pull(_ context.Context, _ oci.Reference, targetDir
 	return "", fakeDigest, nil, nil
 }
 
-func (c *multiFileFakeClient) Push(_ context.Context, _ oci.Reference, _ string, _ map[string]string) (string, error) {
+func (c *multiFileFakeClient) Push(_ context.Context, _ oci.Reference, _ string, _ oci.PushOptions) (string, error) {
 	return fakeDigest, nil
 }
 
@@ -521,11 +523,12 @@ func (c *multiFileFakeClient) PushReferrer(_ context.Context, _ oci.Reference, _
 	return "", nil
 }
 
-func (c *multiFileFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference) error {
+func (c *multiFileFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference, _ oci.CopyOptions) error {
 	return nil
 }
 
 type kustomizeFakeClient struct {
+	oci.FakeClient
 	fs afero.Fs
 }
 
@@ -544,7 +547,7 @@ func (c *kustomizeFakeClient) Pull(_ context.Context, _ oci.Reference, targetDir
 	return "", fakeDigest, nil, nil
 }
 
-func (c *kustomizeFakeClient) Push(_ context.Context, _ oci.Reference, _ string, _ map[string]string) (string, error) {
+func (c *kustomizeFakeClient) Push(_ context.Context, _ oci.Reference, _ string, _ oci.PushOptions) (string, error) {
 	return fakeDigest, nil
 }
 
@@ -560,11 +563,12 @@ func (c *kustomizeFakeClient) PushReferrer(_ context.Context, _ oci.Reference, _
 	return "", nil
 }
 
-func (c *kustomizeFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference) error {
+func (c *kustomizeFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference, _ oci.CopyOptions) error {
 	return nil
 }
 
 type fluxFakeClient struct {
+	oci.FakeClient
 	fs afero.Fs
 }
 
@@ -584,7 +588,7 @@ func (c *fluxFakeClient) Pull(_ context.Context, _ oci.Reference, targetDir stri
 	return "", fakeDigest, nil, nil
 }
 
-func (c *fluxFakeClient) Push(_ context.Context, _ oci.Reference, _ string, _ map[string]string) (string, error) {
+func (c *fluxFakeClient) Push(_ context.Context, _ oci.Reference, _ string, _ oci.PushOptions) (string, error) {
 	return fakeDigest, nil
 }
 
@@ -600,11 +604,12 @@ func (c *fluxFakeClient) PushReferrer(_ context.Context, _ oci.Reference, _ oci.
 	return "", nil
 }
 
-func (c *fluxFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference) error {
+func (c *fluxFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference, _ oci.CopyOptions) error {
 	return nil
 }
 
 type countingFakeClient struct {
+	oci.FakeClient
 	fs     afero.Fs
 	onPull func()
 }
@@ -616,8 +621,8 @@ func (c *countingFakeClient) Pull(ctx context.Context, ref oci.Reference, target
 	return oci.NewFakeClient(c.fs).Pull(ctx, ref, targetDir)
 }
 
-func (c *countingFakeClient) Push(ctx context.Context, ref oci.Reference, sourceDir string, annotations map[string]string) (string, error) {
-	return oci.NewFakeClient(c.fs).Push(ctx, ref, sourceDir, annotations)
+func (c *countingFakeClient) Push(ctx context.Context, ref oci.Reference, sourceDir string, opts oci.PushOptions) (string, error) {
+	return oci.NewFakeClient(c.fs).Push(ctx, ref, sourceDir, opts)
 }
 
 func (c *countingFakeClient) ListTags(_ context.Context, _ oci.Reference) ([]string, error) {
@@ -632,11 +637,12 @@ func (c *countingFakeClient) PushReferrer(_ context.Context, _ oci.Reference, _ 
 	return "", nil
 }
 
-func (c *countingFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference) error {
+func (c *countingFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference, _ oci.CopyOptions) error {
 	return nil
 }
 
 type copyFakeClient struct {
+	oci.FakeClient
 	fs        afero.Fs
 	copiedSrc oci.Reference
 	copiedDst oci.Reference
@@ -648,7 +654,7 @@ func (c *copyFakeClient) Pull(_ context.Context, _ oci.Reference, _ string) (str
 	return "", fakeDigest, nil, nil
 }
 
-func (c *copyFakeClient) Push(_ context.Context, _ oci.Reference, _ string, _ map[string]string) (string, error) {
+func (c *copyFakeClient) Push(_ context.Context, _ oci.Reference, _ string, _ oci.PushOptions) (string, error) {
 	return fakeDigest, nil
 }
 
@@ -664,7 +670,7 @@ func (c *copyFakeClient) PushReferrer(_ context.Context, _ oci.Reference, _ oci.
 	return "", nil
 }
 
-func (c *copyFakeClient) Copy(_ context.Context, _ oci.Client, src, dst oci.Reference) error {
+func (c *copyFakeClient) Copy(_ context.Context, _ oci.Client, src, dst oci.Reference, _ oci.CopyOptions) error {
 	c.copiedSrc = src
 	c.copiedDst = dst
 	return nil

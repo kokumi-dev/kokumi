@@ -61,7 +61,7 @@ func (s *Store) Copy(ctx context.Context, src Source, srcClient oci.Client, dst 
 		return "", fmt.Errorf("failed to parse destination ref: %w", err)
 	}
 
-	if err := source.Copy(ctx, target, srcRef, dstRef); err != nil {
+	if err := source.Copy(ctx, target, srcRef, dstRef, oci.CopyOptions{}); err != nil {
 		return "", fmt.Errorf("failed to copy artifact: %w", err)
 	}
 

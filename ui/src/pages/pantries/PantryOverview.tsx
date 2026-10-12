@@ -16,6 +16,7 @@ export default function PantryOverview() {
             { label: 'URL', value: <span className={layout.mono}>{pantry.url}</span> },
             { label: 'Credentials Secret', value: pantry.secretRef ?? <span className={layout.muted}>None</span> },
             { label: 'Description', value: pantry.description, show: !!pantry.description },
+            { label: 'Referrers API', value: pantry.referrersAPI ?? <span className={layout.muted}>Unknown</span> },
             { label: 'Created', value: formatDate(pantry.createdAt) },
           ]}
         />
