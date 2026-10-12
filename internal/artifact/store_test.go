@@ -14,6 +14,7 @@ import (
 
 // failingResolveClient resolves nothing: every Resolve call errors.
 type failingResolveClient struct {
+	oci.FakeClient
 	fs afero.Fs
 }
 
@@ -23,8 +24,8 @@ func (c *failingResolveClient) Pull(ctx context.Context, ref oci.Reference, targ
 	return oci.NewFakeClient(c.fs).Pull(ctx, ref, targetDir)
 }
 
-func (c *failingResolveClient) Push(ctx context.Context, ref oci.Reference, sourceDir string, annotations map[string]string) (string, error) {
-	return oci.NewFakeClient(c.fs).Push(ctx, ref, sourceDir, annotations)
+func (c *failingResolveClient) Push(ctx context.Context, ref oci.Reference, sourceDir string, opts oci.PushOptions) (string, error) {
+	return oci.NewFakeClient(c.fs).Push(ctx, ref, sourceDir, opts)
 }
 
 func (c *failingResolveClient) ListTags(_ context.Context, _ oci.Reference) ([]string, error) {
@@ -39,7 +40,7 @@ func (c *failingResolveClient) PushReferrer(_ context.Context, _ oci.Reference, 
 	return "", nil
 }
 
-func (c *failingResolveClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference) error {
+func (c *failingResolveClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference, _ oci.CopyOptions) error {
 	return nil
 }
 
@@ -240,6 +241,7 @@ func TestPipeline_Preview_Files(t *testing.T) {
 
 // emptyFakeClient pulls nothing: the target directory stays empty.
 type emptyFakeClient struct {
+	oci.FakeClient
 	fs afero.Fs
 }
 
@@ -249,7 +251,7 @@ func (c *emptyFakeClient) Pull(_ context.Context, _ oci.Reference, _ string) (st
 	return "", fakeDigest, nil, nil
 }
 
-func (c *emptyFakeClient) Push(_ context.Context, _ oci.Reference, _ string, _ map[string]string) (string, error) {
+func (c *emptyFakeClient) Push(_ context.Context, _ oci.Reference, _ string, _ oci.PushOptions) (string, error) {
 	return fakeDigest, nil
 }
 
@@ -265,6 +267,6 @@ func (c *emptyFakeClient) PushReferrer(_ context.Context, _ oci.Reference, _ oci
 	return "", nil
 }
 
-func (c *emptyFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference) error {
+func (c *emptyFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference, _ oci.CopyOptions) error {
 	return nil
 }

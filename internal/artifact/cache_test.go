@@ -26,6 +26,7 @@ const (
 // countingFakeClient wraps oci.FakeClient and invokes onPull on every Pull
 // call, letting tests count registry round-trips.
 type countingFakeClient struct {
+	oci.FakeClient
 	fs     afero.Fs
 	onPull func()
 }
@@ -37,8 +38,8 @@ func (c *countingFakeClient) Pull(ctx context.Context, ref oci.Reference, target
 	return oci.NewFakeClient(c.fs).Pull(ctx, ref, targetDir)
 }
 
-func (c *countingFakeClient) Push(ctx context.Context, ref oci.Reference, sourceDir string, annotations map[string]string) (string, error) {
-	return oci.NewFakeClient(c.fs).Push(ctx, ref, sourceDir, annotations)
+func (c *countingFakeClient) Push(ctx context.Context, ref oci.Reference, sourceDir string, opts oci.PushOptions) (string, error) {
+	return oci.NewFakeClient(c.fs).Push(ctx, ref, sourceDir, opts)
 }
 
 func (c *countingFakeClient) ListTags(_ context.Context, _ oci.Reference) ([]string, error) {
@@ -49,7 +50,7 @@ func (c *countingFakeClient) Resolve(_ context.Context, _ oci.Reference) (string
 	return fakeDigest, nil
 }
 
-func (c *countingFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference) error {
+func (c *countingFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference, _ oci.CopyOptions) error {
 	return nil
 }
 

@@ -1618,6 +1618,16 @@ spec:
                   by the controller
                 format: int64
                 type: integer
+              referrersAPI:
+                description: |-
+                  referrersAPI reports whether the registry serves the OCI referrers API
+                  for this Pantry's repository. It is omitted while unknown, for example
+                  when the repository does not exist yet. It is refreshed only when the
+                  Pantry or its credentials Secret changes.
+                enum:
+                - Supported
+                - Unsupported
+                type: string
             type: object
         required:
         - spec

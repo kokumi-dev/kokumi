@@ -643,12 +643,13 @@ func overridePolicyFromDTO(dto OverridePolicyDTO) deliveryv1alpha1.OverridePolic
 // pantryToDTO converts a Pantry CRD object into a PantryDTO.
 func pantryToDTO(p deliveryv1alpha1.Pantry) PantryDTO {
 	dto := PantryDTO{
-		Name:        p.Name,
-		Namespace:   p.Namespace,
-		URL:         p.Spec.URL,
-		Description: p.Spec.Description,
-		State:       stateFromConditions(p.Status.Conditions),
-		Conditions:  conditionsToDTO(p.Status.Conditions),
+		Name:         p.Name,
+		Namespace:    p.Namespace,
+		URL:          p.Spec.URL,
+		Description:  p.Spec.Description,
+		State:        stateFromConditions(p.Status.Conditions),
+		ReferrersAPI: string(p.Status.ReferrersAPI),
+		Conditions:   conditionsToDTO(p.Status.Conditions),
 	}
 
 	if p.Spec.SecretRef != nil {

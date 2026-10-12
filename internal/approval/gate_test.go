@@ -68,7 +68,7 @@ func TestArchive(t *testing.T) {
 	att, err := Archive(context.Background(), fake, prep, approvals)
 	require.NoError(t, err)
 	require.Len(t, fake.Referrers, 1)
-	assert.Equal(t, AttestationArtifactType, fake.Referrers[0].Artifact.ArtifactType)
+	assert.Equal(t, oci.ApprovalsArtifactType, fake.Referrers[0].Artifact.ArtifactType)
 	assert.Equal(t, "oci://registry.example/shop@"+att.Digest, att.OCIRef)
 
 	again, err := Archive(context.Background(), fake, prep, approvals)

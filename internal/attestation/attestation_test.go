@@ -56,6 +56,6 @@ func TestPush(t *testing.T) {
 	pushed := fake.Referrers[0]
 	assert.Equal(t, subject, pushed.Subject)
 	assert.Equal(t, "application/vnd.example+json", pushed.Artifact.ArtifactType)
-	assert.Equal(t, MediaTypeStatement, pushed.Artifact.MediaType)
+	assert.Equal(t, oci.InTotoStatementMediaType, pushed.Artifact.MediaType)
 	assert.Equal(t, "2026-09-25T08:00:00Z", pushed.Artifact.Annotations[ocispec.AnnotationCreated])
 }

@@ -14,14 +14,8 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/oci"
 )
 
-const (
-	// AttestationArtifactType is the OCI artifact type of the sealed approvals
-	// attestation, pushed as a referrer of the Preparation artifact.
-	AttestationArtifactType = "application/vnd.kokumi.approvals.v1+json"
-
-	// AttestationPredicateType identifies the kokumi approval predicate.
-	AttestationPredicateType = "https://kokumi.dev/attestations/approval/v1"
-)
+// AttestationPredicateType identifies the kokumi approval predicate.
+const AttestationPredicateType = "https://kokumi.dev/attestations/approval/v1"
 
 // Predicate records the approval policy, the result, and every vote that
 // existed when the approvals were sealed.
@@ -65,7 +59,7 @@ func Archive(ctx context.Context, c oci.Client, prep *deliveryv1alpha1.Preparati
 	if err != nil {
 		return deliveryv1alpha1.ApprovalAttestation{}, fmt.Errorf("parsing Preparation artifact reference: %w", err)
 	}
-	digest, err := attestation.Push(ctx, c, subject, AttestationArtifactType, statement, prep.Status.Approval.SealedTime.Time)
+	digest, err := attestation.Push(ctx, c, subject, oci.ApprovalsArtifactType, statement, prep.Status.Approval.SealedTime.Time)
 	if err != nil {
 		return deliveryv1alpha1.ApprovalAttestation{}, err
 	}

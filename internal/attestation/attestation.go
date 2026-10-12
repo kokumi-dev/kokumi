@@ -13,9 +13,6 @@ import (
 )
 
 const (
-	// MediaTypeStatement is the media type of an unsigned in-toto statement.
-	MediaTypeStatement = "application/vnd.in-toto+json"
-
 	statementType = "https://in-toto.io/Statement/v1"
 	sha256Prefix  = "sha256:"
 )
@@ -60,7 +57,7 @@ func NewStatement(subjectName, digest, predicateType string, predicate any) ([]b
 func Push(ctx context.Context, client oci.Client, subject oci.Reference, artifactType string, statement []byte, created time.Time) (string, error) {
 	digest, err := client.PushReferrer(ctx, subject, oci.ReferrerArtifact{
 		ArtifactType: artifactType,
-		MediaType:    MediaTypeStatement,
+		MediaType:    oci.InTotoStatementMediaType,
 		Payload:      statement,
 		Annotations: map[string]string{
 			ocispec.AnnotationCreated: created.UTC().Format(time.RFC3339),

@@ -97,6 +97,7 @@ func packChartDir(fs afero.Fs, targetDir string) error {
 // helmFakeClient simulates pulling a Helm chart OCI artifact: it writes a
 // chart.tgz into the target directory and returns the Helm layer media type.
 type helmFakeClient struct {
+	oci.FakeClient
 	fs afero.Fs
 }
 
@@ -109,8 +110,8 @@ func (c *helmFakeClient) Pull(ctx context.Context, ref oci.Reference, targetDir 
 	return oci.HelmChartLayerMediaType, fakeDigest, nil, nil
 }
 
-func (c *helmFakeClient) Push(ctx context.Context, ref oci.Reference, sourceDir string, annotations map[string]string) (string, error) {
-	return oci.NewFakeClient(c.fs).Push(ctx, ref, sourceDir, annotations)
+func (c *helmFakeClient) Push(ctx context.Context, ref oci.Reference, sourceDir string, opts oci.PushOptions) (string, error) {
+	return oci.NewFakeClient(c.fs).Push(ctx, ref, sourceDir, opts)
 }
 
 func (c *helmFakeClient) ListTags(_ context.Context, _ oci.Reference) ([]string, error) {
@@ -125,13 +126,14 @@ func (c *helmFakeClient) PushReferrer(_ context.Context, _ oci.Reference, _ oci.
 	return "", nil
 }
 
-func (c *helmFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference) error {
+func (c *helmFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference, _ oci.CopyOptions) error {
 	return nil
 }
 
 // nestedFilesFakeClient simulates an artifact with nested directories and a
 // JSON file, exercising the recursive rich listing.
 type nestedFilesFakeClient struct {
+	oci.FakeClient
 	fs afero.Fs
 }
 
@@ -151,7 +153,7 @@ func (c *nestedFilesFakeClient) Pull(_ context.Context, _ oci.Reference, targetD
 	return "", fakeDigest, nil, nil
 }
 
-func (c *nestedFilesFakeClient) Push(_ context.Context, _ oci.Reference, _ string, _ map[string]string) (string, error) {
+func (c *nestedFilesFakeClient) Push(_ context.Context, _ oci.Reference, _ string, _ oci.PushOptions) (string, error) {
 	return fakeDigest, nil
 }
 
@@ -167,7 +169,7 @@ func (c *nestedFilesFakeClient) PushReferrer(_ context.Context, _ oci.Reference,
 	return "", nil
 }
 
-func (c *nestedFilesFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference) error {
+func (c *nestedFilesFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference, _ oci.CopyOptions) error {
 	return nil
 }
 

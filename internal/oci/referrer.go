@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"oras.land/oras-go/v2"
+	"github.com/oras-project/oras-go/v3"
 )
 
 // ReferrerArtifact is a single-blob OCI artifact attached to a subject.
@@ -49,4 +49,65 @@ func (c *ORASClient) PushReferrer(ctx context.Context, subject Reference, artifa
 	}
 
 	return manifestDesc.Digest.String(), nil
+}
+
+// ListReferrers lists the referrers of subject. An empty artifactType lists
+// all of them.
+func (c *ORASClient) ListReferrers(ctx context.Context, subject Reference, artifactType string) ([]Referrer, error) {
+	repo, err := c.newRepository(subject.RepositoryReference())
+	if err != nil {
+		return nil, fmt.Errorf("create repository for %q: %w", subject, err)
+	}
+
+	subjectDesc, err := repo.Resolve(ctx, subject.GetReference())
+	if err != nil {
+		return nil, fmt.Errorf("resolve subject %s: %w", subject, err)
+	}
+
+	var referrers []Referrer
+	err = repo.Referrers(ctx, subjectDesc, artifactType, func(page []ocispec.Descriptor) error {
+		for _, desc := range page {
+			referrers = append(referrers, Referrer{
+				Digest:       desc.Digest.String(),
+				ArtifactType: desc.ArtifactType,
+				Annotations:  desc.Annotations,
+				Size:         desc.Size,
+			})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list referrers of %s: %w", subject, err)
+	}
+
+	return referrers, nil
+}
+
+// FetchReferrer returns the single-blob payload of the referrer at ref.
+func (c *ORASClient) FetchReferrer(ctx context.Context, ref Reference) (ReferrerArtifact, error) {
+	repo, err := c.newRepository(ref.RepositoryReference())
+	if err != nil {
+		return ReferrerArtifact{}, fmt.Errorf("create repository for %q: %w", ref, err)
+	}
+
+	manifest, err := fetchManifest(ctx, repo, ref.GetReference())
+	if err != nil {
+		return ReferrerArtifact{}, fmt.Errorf("fetch referrer %s: %w", ref, err)
+	}
+
+	if len(manifest.Layers) != 1 {
+		return ReferrerArtifact{}, fmt.Errorf("referrer %s has %d layers, want 1", ref, len(manifest.Layers))
+	}
+
+	payload, err := fetchBlobBytes(ctx, repo, manifest.Layers[0])
+	if err != nil {
+		return ReferrerArtifact{}, fmt.Errorf("fetch referrer %s: %w", ref, err)
+	}
+
+	return ReferrerArtifact{
+		ArtifactType: manifest.ArtifactType,
+		MediaType:    manifest.Layers[0].MediaType,
+		Payload:      payload,
+		Annotations:  manifest.Annotations,
+	}, nil
 }

@@ -117,19 +117,18 @@ func (r *PantryReconciler) reconcilePantry(ctx context.Context, pantry *delivery
 	pingCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	var pingErr error
+	var credStore oci.CredentialStore
 	if len(credData) > 0 {
-		cs, err := oci.CredentialsFromDockerConfigJSON(credData)
+		credStore, err = oci.CredentialsFromDockerConfigJSON(credData)
 		if err != nil {
 			if statusErr := updater.Failed(ctx, pantry, err); statusErr != nil {
 				return ctrl.Result{}, statusErr
 			}
 			return ctrl.Result{}, nil
 		}
-		pingErr = oci.PingRegistry(pingCtx, ref.Registry, cs)
-	} else {
-		pingErr = oci.PingRegistry(pingCtx, ref.Registry, nil)
 	}
+
+	pingErr := oci.PingRegistry(pingCtx, ref.Registry, credStore)
 
 	if pingErr != nil {
 		logger.Info("Registry connectivity check failed", "registry", ref.Registry, "error", pingErr)
@@ -141,7 +140,19 @@ func (r *PantryReconciler) reconcilePantry(ctx context.Context, pantry *delivery
 
 	logger.Info("Registry connectivity check passed", "registry", ref.Registry)
 
-	if err := updater.Ready(ctx, pantry, "Registry is reachable"); err != nil {
+	// The probe is informational: a registry that cannot answer it is still usable.
+	var referrersAPI deliveryv1alpha1.ReferrersAPISupport
+	supported, err := oci.ProbeReferrersAPI(pingCtx, ref, credStore)
+	switch {
+	case err != nil:
+		logger.V(1).Info("Could not determine referrers API support", "registry", ref.Registry, "error", err)
+	case supported:
+		referrersAPI = deliveryv1alpha1.ReferrersAPISupported
+	default:
+		referrersAPI = deliveryv1alpha1.ReferrersAPIUnsupported
+	}
+
+	if err := updater.Ready(ctx, pantry, "Registry is reachable", referrersAPI); err != nil {
 		return ctrl.Result{}, err
 	}
 
