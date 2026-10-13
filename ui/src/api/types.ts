@@ -157,8 +157,44 @@ export interface Preparation {
       label: string
     }
   }
+  renderer: Renderer
   conditions?: Condition[]
   approval?: PreparationApproval
+}
+
+/** What rendered a Preparation. The builder is reported by the controller itself. */
+export interface Renderer {
+  type: string
+  version: string
+  builder: string
+}
+
+/** One OCI referrer of a Preparation's artifact, listed live from the registry. */
+export interface Attestation {
+  artifactType: string
+  digest: string
+  createdAt?: string
+  size: number
+  /** Whether Kokumi recorded this referrer on the Preparation. Anyone who can push to the repository can attach one. */
+  recorded: boolean
+  /** Only set for recorded referrers. */
+  mediaType?: string
+  payload?: unknown
+}
+
+/** The config blob of a Preparation's artifact: what was asked for and what it was built from. */
+export interface ArtifactConfig {
+  schemaVersion: number
+  order?: { namespace: string; name: string; uid?: string }
+  configHash?: string
+  commitMessage?: string
+  createdTime: string
+  parent?: string
+  source: { oci: string; version: string; digest: string; pantryRef?: string }
+  destination: { oci: string; pantryRef?: string }
+  menu?: { namespace: string; name: string; configHash?: string }
+  renderer: Renderer
+  intent?: unknown
 }
 
 export interface Serving {

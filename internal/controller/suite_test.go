@@ -57,6 +57,7 @@ const (
 	testIneligibleGroup = "other"
 	testRendererVersion = "v1.0.0"
 	testConfigHash      = "sha256:abc123"
+	testBuilderID       = "ghcr.io/kokumi-dev/kokumi@sha256:bb"
 )
 
 func TestControllers(t *testing.T) {

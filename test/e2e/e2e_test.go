@@ -20,8 +20,11 @@ limitations under the License.
 package e2e
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,6 +33,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/test/utils"
 )
 
@@ -41,6 +45,12 @@ const serviceAccountName = "kokumi-controller-manager"
 
 // metricsServiceName is the name of the metrics service of the project
 const metricsServiceName = "kokumi-controller-manager-metrics-service"
+
+// registryDeploymentName is the name of the bundled OCI registry Deployment
+const registryDeploymentName = "kokumi-registry"
+
+// registryServiceName is the name of the bundled OCI registry Service
+const registryServiceName = "kokumi-registry"
 
 // metricsRoleBindingName is the name of the RBAC that will be created to allow get the metrics data
 const metricsRoleBindingName = "kokumi-metrics-binding"
@@ -268,6 +278,65 @@ var _ = Describe("Manager", Ordered, func() {
 			Eventually(verifyMetricsAvailable, 2*time.Minute).Should(Succeed())
 		})
 
+		It("should serve the OCI referrers API from the bundled registry", func() {
+			By("waiting for the registry to be ready")
+			cmd := exec.Command("kubectl", "rollout", "status", "deployment/"+registryDeploymentName,
+				"-n", namespace, "--timeout=3m")
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Registry did not become ready")
+
+			By("forwarding a local port to the registry")
+			host := forwardRegistry()
+
+			ctx := context.Background()
+			client := oci.NewORASClient()
+
+			By("pushing an artifact with a config blob")
+			dir := GinkgoT().TempDir()
+			Expect(os.WriteFile(filepath.Join(dir, "manifest.yaml"), []byte("kind: ConfigMap\n"), 0o600)).To(Succeed())
+
+			subject, err := oci.Parse(host + "/e2e/referrers:1.0.0")
+			Expect(err).NotTo(HaveOccurred())
+			subject.Digest, err = client.Push(ctx, subject, dir, oci.PushOptions{
+				ArtifactType:    oci.PreparationArtifactType,
+				Config:          []byte(`{"schemaVersion":1}`),
+				ConfigMediaType: oci.PreparationConfigMediaType,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("attaching a referrer")
+			referrerDigest, err := client.PushReferrer(ctx, subject, oci.ReferrerArtifact{
+				ArtifactType: oci.ProvenanceArtifactType,
+				MediaType:    oci.InTotoStatementMediaType,
+				Payload:      []byte(`{"_type":"https://in-toto.io/Statement/v1"}`),
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("calling the referrers endpoint directly")
+			resp, err := http.Get(fmt.Sprintf("http://%s/v2/e2e/referrers/referrers/%s", host, subject.Digest))
+			Expect(err).NotTo(HaveOccurred())
+			defer resp.Body.Close() //nolint:errcheck
+			Expect(resp.StatusCode).To(Equal(http.StatusOK))
+
+			var index struct {
+				Manifests []struct {
+					Digest       string `json:"digest"`
+					ArtifactType string `json:"artifactType"`
+				} `json:"manifests"`
+			}
+			Expect(json.NewDecoder(resp.Body).Decode(&index)).To(Succeed())
+			Expect(index.Manifests).To(HaveLen(1))
+			Expect(index.Manifests[0].Digest).To(Equal(referrerDigest))
+			Expect(index.Manifests[0].ArtifactType).To(Equal(oci.ProvenanceArtifactType))
+
+			By("finding no referrers tag schema fallback tag")
+			repository := subject
+			repository.Tag, repository.Digest = "", ""
+			tags, err := client.ListTags(ctx, repository)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(tags).To(ConsistOf("1.0.0"))
+		})
+
 		// +kubebuilder:scaffold:e2e-webhooks-checks
 
 		// TODO: Customize the e2e test suite with scenarios specific to your project.
@@ -281,6 +350,33 @@ var _ = Describe("Manager", Ordered, func() {
 		// ))
 	})
 })
+
+// forwardRegistry forwards a free local port to the bundled registry for the
+// rest of the spec and returns the local host:port.
+func forwardRegistry() string {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	Expect(err).NotTo(HaveOccurred())
+	port := listener.Addr().(*net.TCPAddr).Port
+	Expect(listener.Close()).To(Succeed())
+
+	cmd := exec.Command("kubectl", "port-forward", "-n", namespace,
+		"service/"+registryServiceName, fmt.Sprintf("%d:5000", port))
+	Expect(cmd.Start()).To(Succeed())
+	DeferCleanup(func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	})
+
+	host := fmt.Sprintf("127.0.0.1:%d", port)
+	Eventually(func(g Gomega) {
+		resp, err := http.Get("http://" + host + "/v2/")
+		g.Expect(err).NotTo(HaveOccurred())
+		defer resp.Body.Close() //nolint:errcheck
+		g.Expect(resp.StatusCode).To(Equal(http.StatusOK))
+	}, time.Minute, time.Second).Should(Succeed())
+
+	return host
+}
 
 // serviceAccountToken returns a token for the specified service account in the given namespace.
 // It uses the Kubernetes TokenRequest API to generate a token by directly sending a request

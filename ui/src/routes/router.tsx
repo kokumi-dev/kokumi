@@ -17,6 +17,8 @@ import PreparationOverview from '../pages/preparations/PreparationOverview'
 import PreparationFiles from '../pages/preparations/PreparationFiles'
 import PreparationChanges from '../pages/preparations/PreparationChanges'
 import PreparationApprovals from '../pages/preparations/PreparationApprovals'
+import PreparationIntent from '../pages/preparations/PreparationIntent'
+import PreparationAttestations from '../pages/preparations/PreparationAttestations'
 import ServingsList from '../pages/servings/ServingsList'
 import ServingDetail from '../pages/servings/ServingDetail'
 import MenusList from '../pages/menus/MenusList'
@@ -59,6 +61,8 @@ export const router = createBrowserRouter([
           { index: true, element: <PreparationOverview /> },
           { path: 'files', element: <PreparationFiles /> },
           { path: 'changes', element: <PreparationChanges /> },
+          { path: 'intent', element: <PreparationIntent /> },
+          { path: 'attestations', element: <PreparationAttestations /> },
           { path: 'approvals', element: <PreparationApprovals /> },
         ],
       },

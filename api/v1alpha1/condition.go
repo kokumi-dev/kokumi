@@ -12,6 +12,10 @@ const (
 	// were locked and recorded as an OCI attestation.
 	ConditionTypeApprovalsSealed = "ApprovalsSealed"
 
+	// ConditionTypeProvenanceAttached reports on Preparations whether the
+	// provenance attestation was recorded in the OCI registry.
+	ConditionTypeProvenanceAttached = "ProvenanceAttached"
+
 	// ConditionTypeCounted reports on Approvals whether the vote counts.
 	ConditionTypeCounted = "Counted"
 )
@@ -27,6 +31,10 @@ const (
 	ReasonSealed        = "Sealed"
 	ReasonArchiving     = "Archiving"
 	ReasonArchiveFailed = "ArchiveFailed"
+
+	ReasonProvenanceAttached     = "ProvenanceAttached"
+	ReasonProvenanceAttachFailed = "ProvenanceAttachFailed"
+	ReasonAwaitingProvenance     = "AwaitingProvenance"
 
 	ReasonCounted             = "Counted"
 	ReasonSuperseded          = "Superseded"

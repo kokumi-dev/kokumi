@@ -32,6 +32,30 @@ type EffectiveSpec struct {
 	Render  *deliveryv1alpha1.Render
 	Patches []deliveryv1alpha1.Patch
 	Edits   []deliveryv1alpha1.Patch
+	// Menu identifies the Menu the spec was merged from. Nil for standalone
+	// Orders.
+	Menu *MenuIdentity
+}
+
+// MenuIdentity identifies the Menu an EffectiveSpec was merged from.
+type MenuIdentity struct {
+	Name string
+	// ConfigHash is the Menu's config hash at merge time.
+	ConfigHash string
+	// PreRenderedDigest is the digest of the artifact the Menu rendered and
+	// published. Empty unless the Menu's source is pre-rendered. Orders
+	// render from exactly this artifact.
+	PreRenderedDigest string
+}
+
+// menuIdentity returns the identity of menu.
+func menuIdentity(menu *deliveryv1alpha1.Menu) *MenuIdentity {
+	identity := &MenuIdentity{Name: menu.Name, ConfigHash: menu.Status.ConfigHash}
+	if menu.Status.Source.PreRendered {
+		identity.PreRenderedDigest = menu.Status.Source.Digest
+	}
+
+	return identity
 }
 
 // FromOrder builds an EffectiveSpec directly from a standalone Order
@@ -88,6 +112,7 @@ func ForMenu(menu *deliveryv1alpha1.Menu, order *deliveryv1alpha1.Order) (*Effec
 		Render:  mergedRender,
 		Patches: mergedPatches,
 		Edits:   order.Spec.Edits,
+		Menu:    menuIdentity(menu),
 	}, nil
 }
 
@@ -125,5 +150,6 @@ func forPreRenderedMenu(menu *deliveryv1alpha1.Menu, order *deliveryv1alpha1.Ord
 		Render:  nil,
 		Patches: order.Spec.Patches,
 		Edits:   order.Spec.Edits,
+		Menu:    menuIdentity(menu),
 	}, nil
 }

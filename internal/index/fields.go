@@ -9,6 +9,9 @@ const (
 	// FieldPreparationRefName selects Approvals by spec.preparationRef.name.
 	FieldPreparationRefName = "spec.preparationRef.name"
 
+	// FieldMenuRefName indexes Orders by spec.menuRef.name (cache only).
+	FieldMenuRefName = "spec.menuRef.name"
+
 	// FieldSourcePantryRefName indexes Orders by spec.source.pantryRef.name (cache only).
 	FieldSourcePantryRefName = "spec.source.pantryRef.name"
 

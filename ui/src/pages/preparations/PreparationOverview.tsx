@@ -55,6 +55,16 @@ export default function PreparationOverview() {
         />
       </Section>
 
+      <Section title="Renderer" description="What rendered this Preparation, as reported by the controller">
+        <PropertyList
+          items={[
+            { label: 'Type', value: prep.renderer.type },
+            { label: 'Version', value: prep.renderer.version },
+            { label: 'Builder', value: <span className={layout.mono}>{prep.renderer.builder}</span> },
+          ]}
+        />
+      </Section>
+
       {git && (
         <Section title="Source">
           <PropertyList

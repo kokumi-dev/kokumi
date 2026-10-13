@@ -19,6 +19,7 @@ package controller
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -39,12 +40,14 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/index"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/provenance"
 	"github.com/kokumi-dev/kokumi/internal/status"
 )
 
-// PreparationReconciler reconciles a Preparation object. It aggregates the
-// Preparation's Approvals and seals them into an OCI attestation once a
-// Serving targets the approved Preparation.
+// PreparationReconciler reconciles a Preparation object. It attaches the
+// provenance of the Preparation's artifact, aggregates the Preparation's
+// Approvals, and seals them into an OCI attestation once a Serving targets
+// the approved Preparation.
 type PreparationReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -91,26 +94,23 @@ func (r *PreparationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		if err := r.Update(ctx, preparation); err != nil {
 			return ctrl.Result{}, err
 		}
+
+		// The update triggers the next reconcile. Continuing here would race
+		// it: both would attach provenance and one status write would
+		// conflict.
+		return ctrl.Result{}, nil
 	}
 
 	return r.reconcilePreparation(ctx, preparation)
 }
 
-// reconcilePreparation aggregates the Preparation's Approvals and seals them
-// into an OCI attestation once a Serving targets the approved Preparation.
+// reconcilePreparation attaches the provenance of the Preparation's artifact,
+// which makes it ready, then aggregates its Approvals and seals them into an
+// OCI attestation once a Serving targets the approved Preparation.
 func (r *PreparationReconciler) reconcilePreparation(ctx context.Context, preparation *deliveryv1alpha1.Preparation) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-	if !apimeta.IsStatusConditionTrue(preparation.Status.Conditions, deliveryv1alpha1.ConditionTypeReady) {
-		logger.Info("Preparation not ready, skipping")
-
-		// Temporary no-op to mark the Preparation as ready.
-		// This should be replaced with proper validation and readiness
-		// conditions once the remaining readiness criteria are defined.
-		statusUpdater := status.NewPreparationUpdater(r.Client)
-		if uerr := statusUpdater.Ready(ctx, preparation, "Preparation is ready for serving"); uerr != nil {
-			logger.Error(uerr, "Failed to update Preparation status")
-		}
-		return ctrl.Result{}, nil
+	if !apimeta.IsStatusConditionTrue(preparation.Status.Conditions, deliveryv1alpha1.ConditionTypeProvenanceAttached) {
+		// The status update triggers the next reconcile.
+		return ctrl.Result{}, r.attachProvenance(ctx, preparation)
 	}
 
 	approvals, err := index.ApprovalsForPreparation(ctx, r.Client, preparation)
@@ -183,18 +183,12 @@ func (r *PreparationReconciler) archive(ctx context.Context, prep *deliveryv1alp
 		return fmt.Errorf("failed to list Approvals: %w", err)
 	}
 
-	// The attestation is pushed with the credentials of the Order's
-	// destination. A deleted Order falls back to the anonymous client.
-	order := &deliveryv1alpha1.Order{}
-	if err := r.Get(ctx, client.ObjectKey{Namespace: prep.Namespace, Name: prep.Spec.OrderName}, order); err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("failed to get Order %q: %w", prep.Spec.OrderName, err)
-	}
-	_, destClient, err := r.PantryResolver.ResolveDestination(ctx, order.Spec.Destination, "", prep.Namespace)
+	destClient, err := r.destinationClient(ctx, prep)
 	if err != nil {
-		return fmt.Errorf("failed to resolve destination credentials: %w", err)
+		return err
 	}
 
-	attestation, err := approval.Archive(ctx, cmp.Or(destClient, r.OCIClient), prep, approvals)
+	attestation, err := approval.Archive(ctx, destClient, prep, approvals)
 	if err != nil {
 		if uerr := updater.ArchiveFailed(ctx, prep, err); uerr != nil {
 			log.FromContext(ctx).Error(uerr, "Failed to update Preparation status")
@@ -206,6 +200,79 @@ func (r *PreparationReconciler) archive(ctx context.Context, prep *deliveryv1alp
 	}
 	log.FromContext(ctx).Info("Recorded approval attestation", "preparation", prep.Name, "attestation", attestation.OCIRef)
 	return nil
+}
+
+// destinationClient returns the client for the registry holding prep's
+// artifact. It uses the credentials of the Order's destination; a deleted
+// Order falls back to the anonymous client.
+func (r *PreparationReconciler) destinationClient(ctx context.Context, prep *deliveryv1alpha1.Preparation) (oci.Client, error) {
+	order := &deliveryv1alpha1.Order{}
+	if err := r.Get(ctx, client.ObjectKey{Namespace: prep.Namespace, Name: prep.Spec.OrderName}, order); err != nil && !apierrors.IsNotFound(err) {
+		return nil, fmt.Errorf("failed to get Order %q: %w", prep.Spec.OrderName, err)
+	}
+
+	_, destClient, err := r.PantryResolver.ResolveDestination(ctx, order.Spec.Destination, "", prep.Namespace)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve destination credentials: %w", err)
+	}
+
+	return cmp.Or(destClient, r.OCIClient), nil
+}
+
+// attachProvenance records the provenance of prep's artifact as an OCI
+// attestation and marks prep ready. The statement is rebuilt from the
+// artifact's config blob, so retries push the same referrer.
+func (r *PreparationReconciler) attachProvenance(ctx context.Context, prep *deliveryv1alpha1.Preparation) error {
+	updater := status.NewPreparationUpdater(r.Client)
+
+	attestation, err := r.pushProvenance(ctx, prep)
+	if err != nil {
+		uerr := updater.ProvenanceFailed(ctx, prep, err)
+
+		// Terminal: the artifact is immutable, so a retry would read the
+		// same config. Only a failed status write is retried.
+		if errors.Is(err, provenance.ErrInvalidConfig) {
+			log.FromContext(ctx).Error(err, "Could not attach provenance", "preparation", prep.Name)
+			return uerr
+		}
+
+		if uerr != nil {
+			log.FromContext(ctx).Error(uerr, "Failed to update Preparation status")
+		}
+		return fmt.Errorf("failed to attach provenance: %w", err)
+	}
+
+	if err := updater.ProvenanceAttached(ctx, prep, attestation); err != nil {
+		return fmt.Errorf("failed to record provenance attestation: %w", err)
+	}
+	log.FromContext(ctx).Info("Attached provenance", "preparation", prep.Name, "attestation", attestation.OCIRef)
+
+	return nil
+}
+
+// pushProvenance pushes the provenance attestation of prep's artifact and
+// returns its reference.
+func (r *PreparationReconciler) pushProvenance(ctx context.Context, prep *deliveryv1alpha1.Preparation) (deliveryv1alpha1.AttestationReference, error) {
+	subject, err := oci.Parse(prep.Spec.Artifact.OCIRef)
+	if err != nil {
+		return deliveryv1alpha1.AttestationReference{}, fmt.Errorf("parsing Preparation artifact reference: %w", err)
+	}
+
+	destClient, err := r.destinationClient(ctx, prep)
+	if err != nil {
+		return deliveryv1alpha1.AttestationReference{}, err
+	}
+
+	digest, err := provenance.Attach(ctx, destClient, subject)
+	if err != nil {
+		return deliveryv1alpha1.AttestationReference{}, err
+	}
+
+	return deliveryv1alpha1.AttestationReference{
+		Type:   deliveryv1alpha1.AttestationTypeProvenance,
+		OCIRef: fmt.Sprintf("oci://%s@%s", subject.RepositoryReference(), digest),
+		Digest: digest,
+	}, nil
 }
 
 // reconcileDelete removes the finalizer from the Preparation, allowing garbage collection.

@@ -1804,29 +1804,34 @@ spec:
                 pattern: ^sha256:[a-f0-9]{64}$
                 type: string
               renderer:
-                description: renderer defines the renderer used to process this preparation
+                description: renderer identifies what rendered this preparation
                 properties:
-                  digest:
-                    description: digest is the SHA256 digest of the renderer binary/image
-                    maxLength: 71
-                    pattern: ^sha256:[a-f0-9]{64}$
-                    type: string
-                  renderType:
+                  builder:
                     description: |-
-                      renderType records how the source was rendered to produce this Preparation.
+                      builder identifies the Kokumi controller that rendered the artifact,
+                      normally its container image reference including digest. It is
+                      reported by the controller itself.
+                    maxLength: 512
+                    minLength: 1
+                    type: string
+                  type:
+                    description: |-
+                      type records how the source was rendered to produce this Preparation.
                       One of "Manifest" or "Helm".
                     enum:
                     - Manifest
                     - Helm
-                    maxLength: 8
                     type: string
                   version:
-                    description: version is the semantic version of the renderer
+                    description: |-
+                      version is the version of the rendering engine: the Helm library
+                      version for Helm, the Kokumi version for Manifest.
                     maxLength: 64
+                    minLength: 1
                     type: string
                 required:
-                - digest
-                - renderType
+                - builder
+                - type
                 - version
                 type: object
               source:
@@ -1972,6 +1977,41 @@ spec:
                     type: array
                     x-kubernetes-list-type: atomic
                 type: object
+              attestations:
+                description: |-
+                  attestations lists the latest attestation of each type that records how
+                  the artifact was produced. The approvals attestation is not listed
+                  here; it is recorded in approval.attestation.
+                items:
+                  description: |-
+                    AttestationReference references an OCI referrer that carries evidence
+                    about how the Preparation's artifact was produced.
+                  properties:
+                    digest:
+                      description: digest is the manifest digest of the attestation.
+                      maxLength: 71
+                      pattern: ^sha256:[a-f0-9]{64}$
+                      type: string
+                    ociRef:
+                      description: ociRef is the full OCI reference of the attestation
+                        including digest.
+                      maxLength: 2048
+                      type: string
+                    type:
+                      description: type is the kind of evidence the attestation carries.
+                      enum:
+                      - Provenance
+                      type: string
+                  required:
+                  - digest
+                  - ociRef
+                  - type
+                  type: object
+                maxItems: 16
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
               conditions:
                 description: conditions represent the current state of the Preparation
                   resource.
@@ -2409,6 +2449,19 @@ metadata:
     app.kubernetes.io/name: kokumi
   name: kokumi-viewer
   namespace: kokumi
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kokumi-controller-manager-pod-reader
+  namespace: kokumi
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -3325,6 +3378,20 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
+  name: kokumi-controller-manager-pod-reader
+  namespace: kokumi
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kokumi-controller-manager-pod-reader
+subjects:
+- kind: ServiceAccount
+  name: kokumi-controller-manager
+  namespace: kokumi
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
   name: kokumi-controller-manager-secret-creator
   namespace: kokumi
 roleRef:
@@ -3618,6 +3685,15 @@ spec:
         - --health-probe-bind-address=:8081
         command:
         - /manager
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
         image: ghcr.io/kokumi-dev/kokumi:latest
         imagePullPolicy: IfNotPresent
         livenessProbe:

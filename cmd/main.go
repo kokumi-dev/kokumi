@@ -45,6 +45,7 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/index"
 	"github.com/kokumi-dev/kokumi/internal/namespace"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/version"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -198,11 +199,13 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "Recipe")
 		os.Exit(1)
 	}
+	ociClient := oci.NewORASClient()
+
 	if err := (&controller.PreparationReconciler{
 		Client:         mgr.GetClient(),
 		Scheme:         mgr.GetScheme(),
 		APIReader:      mgr.GetAPIReader(),
-		OCIClient:      oci.NewORASClient(),
+		OCIClient:      ociClient,
 		PantryResolver: credential.NewKubeResolver(mgr.GetClient()),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Preparation")
@@ -216,14 +219,18 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "Serving")
 		os.Exit(1)
 	}
-	artifactStore := artifact.NewStore(oci.NewORASClient(), afero.NewOsFs(), "/tmp/kokumi-pull-cache")
+	artifactStore := artifact.NewStore(ociClient, afero.NewOsFs(), "/tmp/kokumi-pull-cache")
 	artifactPipeline := artifact.NewPipeline(artifactStore)
+
+	builderID := version.BuilderID(context.Background(), os.Getenv, mgr.GetAPIReader())
+	setupLog.Info("Resolved builder identity", "builder", builderID)
 
 	if err := (&controller.OrderReconciler{
 		Client:         mgr.GetClient(),
 		Scheme:         mgr.GetScheme(),
 		Pipeline:       artifactPipeline,
 		PantryResolver: credential.NewKubeResolver(mgr.GetClient()),
+		BuilderID:      builderID,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Order")
 		os.Exit(1)
@@ -234,6 +241,8 @@ func main() {
 		Store:          artifactStore,
 		Pipeline:       artifactPipeline,
 		PantryResolver: credential.NewKubeResolver(mgr.GetClient()),
+		OCIClient:      ociClient,
+		BuilderID:      builderID,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Menu")
 		os.Exit(1)

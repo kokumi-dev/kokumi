@@ -1,0 +1,43 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod",
+      "digest": {
+        "sha256": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+      }
+    }
+  ],
+  "predicateType": "https://slsa.dev/provenance/v1",
+  "predicate": {
+    "buildDefinition": {
+      "buildType": "https://kokumi.dev/buildtypes/render/v1",
+      "externalParameters": {
+        "order": "shop/podinfo-prod",
+        "menu": "shop/podinfo",
+        "configHash": "sha256:9b1d"
+      },
+      "resolvedDependencies": [
+        {
+          "uri": "oci://ghcr.io/stefanprodan/charts/podinfo:6.10.2",
+          "digest": {
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      ]
+    },
+    "runDetails": {
+      "builder": {
+        "id": "https://kokumi.dev/builders/controller/v1",
+        "version": {
+          "helm": "v4.3.0",
+          "kokumi": "ghcr.io/kokumi-dev/kokumi@sha256:bb"
+        }
+      },
+      "metadata": {
+        "startedOn": "2026-10-12T09:14:03Z",
+        "finishedOn": "2026-10-12T09:14:03Z"
+      }
+    }
+  }
+}

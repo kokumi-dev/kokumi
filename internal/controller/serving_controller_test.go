@@ -105,9 +105,9 @@ var _ = Describe("Serving Controller", func() {
 							BaseDigest: fakeDigest,
 						},
 						Renderer: deliveryv1alpha1.Renderer{
-							Version:    "v1.0.0",
-							Digest:     fakeDigest,
-							RenderType: deliveryv1alpha1.RenderTypeManifest,
+							Type:    deliveryv1alpha1.RenderTypeManifest,
+							Version: "v1.0.0",
+							Builder: testBuilderID,
 						},
 						ConfigHash: "sha256:abc123",
 						Artifact: deliveryv1alpha1.Artifact{
@@ -117,6 +117,7 @@ var _ = Describe("Serving Controller", func() {
 					},
 				})).To(Succeed())
 			}
+			markPreparationReady(ctx, preparationKey)
 
 			By("ensuring the argocd namespace exists")
 			ns := &unstructured.Unstructured{}
@@ -276,9 +277,9 @@ var _ = Describe("Serving Controller", func() {
 						BaseDigest: fakeDigest,
 					},
 					Renderer: deliveryv1alpha1.Renderer{
-						Version:    "v1.0.0",
-						Digest:     fakeDigest,
-						RenderType: deliveryv1alpha1.RenderTypeManifest,
+						Type:    deliveryv1alpha1.RenderTypeManifest,
+						Version: "v1.0.0",
+						Builder: testBuilderID,
 					},
 					ConfigHash: "sha256:abc123",
 					Artifact: deliveryv1alpha1.Artifact{
@@ -291,6 +292,7 @@ var _ = Describe("Serving Controller", func() {
 			DeferCleanup(func() {
 				_ = k8sClient.Delete(ctx, preparationV2)
 			})
+			markPreparationReady(ctx, client.ObjectKeyFromObject(preparationV2))
 
 			By("reconciling while the Application is still healthy at the old revision")
 			_, err = newReconciler().Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
@@ -302,6 +304,45 @@ var _ = Describe("Serving Controller", func() {
 			Expect(cond.Reason).To(Equal("Deploying"),
 				"must not report Deployed while the Application is healthy at an older revision")
 			Expect(s.Status.ObservedPreparationName).To(Equal(preparationName + "-v2"))
+		})
+
+		It("does not deploy a promoted Preparation until it is ready", func() {
+			const v2Digest = "sha256:bbbbbbbbbbccccccccccddddddddddeeeeeeeeeeffffffffffaaaaaaaaaaaaaa"
+
+			targetRevision := func() string {
+				revision, _, _ := unstructured.NestedString(getApp().Object, "spec", "source", "targetRevision")
+				return revision
+			}
+
+			By("deploying the ready Preparation")
+			_, err := newReconciler().Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(targetRevision()).To(Equal(fakeDigest))
+
+			By("promoting a Preparation that is not ready")
+			notReady := createTestPreparation(ctx, preparationName+"-pending", orderName, v2Digest, nil)
+			DeferCleanup(func() {
+				_ = k8sClient.Delete(ctx, notReady)
+			})
+			s := getServing()
+			s.Spec.PreparationName = notReady.Name
+			Expect(k8sClient.Update(ctx, s)).To(Succeed())
+
+			result, err := newReconciler().Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(BeZero(), "the Preparation watch triggers the next reconcile")
+
+			cond := apimeta.FindStatusCondition(getServing().Status.Conditions, deliveryv1alpha1.ConditionTypeReady)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Reason).To(Equal("Pending"))
+			Expect(cond.Message).To(ContainSubstring(notReady.Name))
+			Expect(targetRevision()).To(Equal(fakeDigest), "the deployed Preparation must stay in place")
+
+			By("deploying it once it is ready")
+			markPreparationReady(ctx, client.ObjectKeyFromObject(notReady))
+			_, err = newReconciler().Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(targetRevision()).To(Equal(v2Digest))
 		})
 
 		It("marks the Serving as failed when the Application reports Degraded", func() {
@@ -596,3 +637,14 @@ var _ = Describe("Serving Controller", func() {
 		})
 	})
 })
+
+// markPreparationReady sets the Ready condition that the Preparation
+// controller sets once the provenance is attached.
+func markPreparationReady(ctx context.Context, key types.NamespacedName) {
+	p := &deliveryv1alpha1.Preparation{}
+	Expect(k8sClient.Get(ctx, key, p)).To(Succeed())
+	apimeta.SetStatusCondition(&p.Status.Conditions, metav1.Condition{
+		Type: deliveryv1alpha1.ConditionTypeReady, Status: metav1.ConditionTrue, Reason: "Ready",
+	})
+	Expect(k8sClient.Status().Update(ctx, p)).To(Succeed())
+}

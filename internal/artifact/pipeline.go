@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/spf13/afero"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -58,6 +60,13 @@ type RenderRequest struct {
 	// ExtraAnnotations are merged into the pushed manifest annotations
 	// (e.g. kokumi.dev/prerendered) and may override computed ones.
 	ExtraAnnotations map[string]string
+	// ArtifactType is the artifactType of the pushed manifest.
+	ArtifactType string
+	// Config is pushed as the artifact's config blob. The caller fills what
+	// it knows (Order, ConfigHash, Menu, Renderer, Intent, Pantry names);
+	// Render fills the source, destination, parent, commit message, and
+	// creation time.
+	Config Config
 }
 
 // RenderResult holds the outcome of a Render call.
@@ -68,6 +77,8 @@ type RenderResult struct {
 	DestRef oci.Reference
 	// SCM holds Git provenance extracted from the source artifact.
 	SCM SCMInfo
+	// Config is the config blob that was pushed.
+	Config Config
 }
 
 // Render pulls the source artifact, applies rendering and patches/edits, and
@@ -82,6 +93,8 @@ func (p *Pipeline) Render(ctx context.Context, req RenderRequest) (*RenderResult
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse source ref: %w", err)
 	}
+
+	sourceRef.Digest = req.Source.Digest
 
 	destRef, err := parseTagged(req.Destination.OCI, req.Source.Version)
 	if err != nil {
@@ -113,7 +126,23 @@ func (p *Pipeline) Render(ctx context.Context, req RenderRequest) (*RenderResult
 		Extra:        req.ExtraAnnotations,
 	})
 
-	destDigest, err := dstClient.Push(ctx, destRef, pulled.dir, oci.PushOptions{Annotations: annotations})
+	// The manifest and the config blob carry the same creation time.
+	created := time.Now().UTC().Format(time.RFC3339)
+	annotations[ocispec.AnnotationCreated] = created
+
+	config := completeConfig(req, sourceRef, destRef, created)
+
+	data, err := config.Encode()
+	if err != nil {
+		return nil, err
+	}
+
+	destDigest, err := dstClient.Push(ctx, destRef, pulled.dir, oci.PushOptions{
+		Annotations:     annotations,
+		ArtifactType:    req.ArtifactType,
+		Config:          data,
+		ConfigMediaType: oci.PreparationConfigMediaType,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to push artifact: %w", err)
 	}
@@ -125,7 +154,24 @@ func (p *Pipeline) Render(ctx context.Context, req RenderRequest) (*RenderResult
 		SourceRef: sourceRef,
 		DestRef:   destRef,
 		SCM:       scm,
+		Config:    config,
 	}, nil
+}
+
+// completeConfig returns the request's config with the fields only the
+// pipeline knows filled in.
+func completeConfig(req RenderRequest, sourceRef, destRef oci.Reference, created string) Config {
+	config := req.Config
+	config.SchemaVersion = ConfigSchemaVersion
+	config.CommitMessage = req.Description
+	config.CreatedTime = created
+	config.Parent = req.ParentDigest
+	config.Source.OCI = sourceRef.OCIRepositoryReference()
+	config.Source.Version = req.Source.Version
+	config.Source.Digest = sourceRef.Digest
+	config.Destination.OCI = destRef.OCIRepositoryReference()
+
+	return config
 }
 
 // PreviewRequest describes one render-without-publish operation.

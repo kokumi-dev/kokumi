@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 
@@ -31,6 +32,7 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/provenance"
 	"github.com/kokumi-dev/kokumi/internal/resolve"
 	"github.com/kokumi-dev/kokumi/internal/status"
 )
@@ -42,6 +44,11 @@ type MenuReconciler struct {
 	Store          *artifact.Store
 	Pipeline       *artifact.Pipeline
 	PantryResolver credential.PantryResolver
+	// OCIClient is the default client for registries without a Pantry.
+	OCIClient oci.Client
+	// BuilderID identifies this controller as the builder of the artifacts
+	// it renders.
+	BuilderID string
 }
 
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=menus,verbs=get;list;watch;create;update;patch;delete
@@ -166,6 +173,11 @@ func (r *MenuReconciler) publishRendered(ctx context.Context, menu *deliveryv1al
 		return nil, err
 	}
 
+	config, err := r.artifactConfig(menu, sourceURL, destURL)
+	if err != nil {
+		return nil, err
+	}
+
 	result, err := r.Pipeline.Render(ctx, artifact.RenderRequest{
 		Source:       artifact.Source{OCI: sourceURL, Version: menu.Spec.Source.Version},
 		SourceClient: srcClient,
@@ -179,9 +191,15 @@ func (r *MenuReconciler) publishRendered(ctx context.Context, menu *deliveryv1al
 		ExtraAnnotations: map[string]string{
 			artifact.AnnotationPrerendered: "true",
 		},
+		ArtifactType: oci.MenuArtifactType,
+		Config:       config,
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	if _, err := provenance.Attach(ctx, cmp.Or(destClient, r.OCIClient), result.DestRef); err != nil {
+		return nil, fmt.Errorf("failed to attach provenance: %w", err)
 	}
 
 	return &deliveryv1alpha1.MenuSourceStatus{
@@ -191,6 +209,42 @@ func (r *MenuReconciler) publishRendered(ctx context.Context, menu *deliveryv1al
 		Digest:      result.DestRef.Digest,
 		PreRendered: true,
 	}, nil
+}
+
+// artifactConfig builds the part of the artifact config the Menu controller
+// knows for a pre-rendered artifact; the pipeline fills in the rest. The
+// config carries no Order, parent, or promotion gates.
+func (r *MenuReconciler) artifactConfig(menu *deliveryv1alpha1.Menu, sourceURL, destURL string) (artifact.Config, error) {
+	menuHash, err := resolve.CalculateMenuHash(menu.Spec)
+	if err != nil {
+		return artifact.Config{}, fmt.Errorf("failed to compute Menu config hash: %w", err)
+	}
+
+	intent, err := resolve.Intent{
+		Source:      resolve.IntentSource{OCI: sourceURL, Version: menu.Spec.Source.Version},
+		Destination: destURL,
+		Render:      menu.Spec.Render,
+		Patches:     menu.Spec.Patches,
+	}.Canonical()
+	if err != nil {
+		return artifact.Config{}, err
+	}
+
+	config := artifact.Config{
+		ConfigHash: resolve.CalculateSpecHash(intent),
+		Menu:       &artifact.ConfigMenu{Namespace: menu.Namespace, Name: menu.Name, ConfigHash: menuHash},
+		Renderer:   configRenderer(rendererFor(menu.Spec.Render, r.BuilderID)),
+		Intent:     intent,
+	}
+
+	if menu.Spec.Source.PantryRef != nil {
+		config.Source.PantryRef = menu.Spec.Source.PantryRef.Name
+	}
+	if menu.Spec.Vendor.Destination.PantryRef != nil {
+		config.Destination.PantryRef = menu.Spec.Vendor.Destination.PantryRef.Name
+	}
+
+	return config, nil
 }
 
 // vendorCopy copies the upstream artifact to the destination registry unchanged.

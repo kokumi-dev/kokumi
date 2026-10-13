@@ -256,6 +256,11 @@ func preparationToDTO(p deliveryv1alpha1.Preparation, isActive bool) Preparation
 			CommitHash: p.Spec.GitSource.CommitHash,
 			SourceLink: toSourceLinkDTO(scmlink.Build(p.Spec.GitSource.Repo, p.Spec.GitSource.Tag, p.Spec.GitSource.CommitHash)),
 		},
+		Renderer: RendererDTO{
+			Type:    string(p.Spec.Renderer.Type),
+			Version: p.Spec.Renderer.Version,
+			Builder: p.Spec.Renderer.Builder,
+		},
 		Conditions: conditionsToDTO(p.Status.Conditions),
 		Approval:   preparationApprovalToDTO(p),
 	}

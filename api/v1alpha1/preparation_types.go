@@ -46,24 +46,28 @@ const (
 	RenderTypeHelm RenderType = "Helm"
 )
 
-// Renderer defines the tool and its version/digest used to render the source
+// Renderer identifies what rendered the source into a Preparation.
 type Renderer struct {
-	// version is the semantic version of the renderer
-	// +kubebuilder:validation:Required
+	// type records how the source was rendered to produce this Preparation.
+	// One of "Manifest" or "Helm".
+	// +required
+	// +kubebuilder:validation:Enum=Manifest;Helm
+	Type RenderType `json:"type"`
+
+	// version is the version of the rendering engine: the Helm library
+	// version for Helm, the Kokumi version for Manifest.
+	// +required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=64
 	Version string `json:"version"`
 
-	// digest is the SHA256 digest of the renderer binary/image
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MaxLength=71
-	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
-	Digest string `json:"digest"`
-
-	// renderType records how the source was rendered to produce this Preparation.
-	// One of "Manifest" or "Helm".
-	// +kubebuilder:validation:MaxLength=8
-	// +kubebuilder:validation:Enum=Manifest;Helm
-	RenderType RenderType `json:"renderType"`
+	// builder identifies the Kokumi controller that rendered the artifact,
+	// normally its container image reference including digest. It is
+	// reported by the controller itself.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=512
+	Builder string `json:"builder"`
 }
 
 // Artifact defines the final immutable output of the rendering process
@@ -125,7 +129,7 @@ type PreparationSpec struct {
 	// +kubebuilder:validation:Required
 	Source OrderSource `json:"source"`
 
-	// renderer defines the renderer used to process this preparation
+	// renderer identifies what rendered this preparation
 	// +kubebuilder:validation:Required
 	Renderer Renderer `json:"renderer"`
 
@@ -266,6 +270,34 @@ type PreparationApprovalStatus struct {
 	Attestation *ApprovalAttestation `json:"attestation,omitempty"`
 }
 
+// AttestationType identifies the kind of evidence an attestation carries.
+// +kubebuilder:validation:Enum=Provenance
+type AttestationType string
+
+const (
+	// AttestationTypeProvenance is the SLSA provenance of the artifact.
+	AttestationTypeProvenance AttestationType = "Provenance"
+)
+
+// AttestationReference references an OCI referrer that carries evidence
+// about how the Preparation's artifact was produced.
+type AttestationReference struct {
+	// type is the kind of evidence the attestation carries.
+	// +required
+	Type AttestationType `json:"type"`
+
+	// ociRef is the full OCI reference of the attestation including digest.
+	// +required
+	// +kubebuilder:validation:MaxLength=2048
+	OCIRef string `json:"ociRef"`
+
+	// digest is the manifest digest of the attestation.
+	// +required
+	// +kubebuilder:validation:MaxLength=71
+	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
+	Digest string `json:"digest"`
+}
+
 // PreparationStatus defines the observed state of Preparation.
 type PreparationStatus struct {
 	// observedGeneration is the most recent generation observed by the controller.
@@ -277,6 +309,15 @@ type PreparationStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// attestations lists the latest attestation of each type that records how
+	// the artifact was produced. The approvals attestation is not listed
+	// here; it is recorded in approval.attestation.
+	// +listType=map
+	// +listMapKey=type
+	// +kubebuilder:validation:MaxItems=16
+	// +optional
+	Attestations []AttestationReference `json:"attestations,omitempty"`
 
 	// approval aggregates the Approvals of this Preparation. Only set when
 	// spec.approvalPolicy is set.

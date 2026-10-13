@@ -1,0 +1,55 @@
+{
+    "destination": "oci://registry.kokumi.svc.cluster.local:5000/ns/app",
+    "edits": [
+        {
+            "set": {
+                ".spec.type": "ClusterIP"
+            },
+            "target": {
+                "kind": "Service",
+                "name": "podinfo"
+            }
+        }
+    ],
+    "patches": [
+        {
+            "set": {
+                ".metadata.labels.tier": "web",
+                ".spec.replicas": "3"
+            },
+            "target": {
+                "kind": "Deployment",
+                "name": "podinfo",
+                "namespace": "shop"
+            }
+        }
+    ],
+    "promotion": {
+        "approvals": {
+            "allowedGroups": [
+                "release",
+                "security"
+            ],
+            "requiredApprovals": 2
+        }
+    },
+    "render": {
+        "helm": {
+            "includeCRDs": true,
+            "namespace": "shop",
+            "releaseName": "podinfo",
+            "values": {
+                "args": "a && <b>",
+                "id": 9007199254740993,
+                "image": {
+                    "tag": "1.0.0"
+                },
+                "replicaCount": 2
+            }
+        }
+    },
+    "source": {
+        "oci": "oci://ghcr.io/org/charts/app",
+        "version": "1.0.0"
+    }
+}

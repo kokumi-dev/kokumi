@@ -102,7 +102,8 @@ type Client interface {
 	// lists all of them.
 	ListReferrers(ctx context.Context, subject Reference, artifactType string) ([]Referrer, error)
 
-	// FetchReferrer returns the single-blob payload of the referrer at ref.
+	// FetchReferrer returns the single-blob payload of the referrer at ref,
+	// or ErrPayloadTooLarge when it exceeds MaxReferrerPayloadSize.
 	FetchReferrer(ctx context.Context, ref Reference) (ReferrerArtifact, error)
 
 	// PushIndex pushes an OCI image index whose children already exist in
