@@ -8,6 +8,7 @@ import (
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/approval"
 	"github.com/kokumi-dev/kokumi/internal/index"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -70,7 +71,13 @@ func handlePromote(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		// Early feedback only: the Serving controller enforces the gate.
+		// Early feedback only: the Serving controller enforces readiness and
+		// the gate.
+		if !apimeta.IsStatusConditionTrue(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeReady) {
+			respondError(w, http.StatusConflict, "preparation is not ready")
+			return
+		}
+
 		approvals := &deliveryv1alpha1.ApprovalList{}
 		if err := uc.list(r.Context(), approvals,
 			client.InNamespace(namespace),

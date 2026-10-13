@@ -1,5 +1,5 @@
 import { authHeaders, refresh } from './auth'
-import type { Order, Preparation, OrderFormData, Menu, MenuFormData, Patch, ChartInfo, Pantry, PantryFormData, ArtifactInfo, ArtifactFile, Approval, ApprovalDecision } from './types'
+import type { Order, Preparation, OrderFormData, Menu, MenuFormData, Patch, ChartInfo, Pantry, PantryFormData, ArtifactInfo, ArtifactFile, Approval, ApprovalDecision, Attestation, ArtifactConfig } from './types'
 
 // All API calls are relative so they work both in dev (proxied by Vite) and
 // in production (served from the same Go binary).
@@ -204,6 +204,18 @@ export function getManifestFiles(
   return request<ArtifactFile[]>(
     `/preparations/${namespace}/${prepName}/manifest/files`,
   )
+}
+
+// ── Attestations and intent ───────────────────────────────────────────────────
+
+/** Lists the referrers of a Preparation's artifact, with the payloads of the ones Kokumi recorded. */
+export function listAttestations(namespace: string, prepName: string): Promise<Attestation[]> {
+  return request<Attestation[]>(`/preparations/${namespace}/${prepName}/attestations?payload=true`)
+}
+
+/** Returns the config blob of a Preparation's artifact. */
+export function getIntent(namespace: string, prepName: string): Promise<ArtifactConfig> {
+  return request<ArtifactConfig>(`/preparations/${namespace}/${prepName}/intent`)
 }
 
 // ── Approvals ─────────────────────────────────────────────────────────────────

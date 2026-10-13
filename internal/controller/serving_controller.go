@@ -110,6 +110,17 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 		return ctrl.Result{}, err
 	}
 
+	// A Preparation is served only once it is Ready, under both promotion
+	// modes. The currently deployed Preparation is left untouched, and the
+	// Preparation watch triggers the next reconcile.
+	if !apimeta.IsStatusConditionTrue(preparation.Status.Conditions, deliveryv1alpha1.ConditionTypeReady) {
+		logger.Info("Preparation not ready, waiting", "preparation", preparationName)
+		if uerr := statusUpdater.Pending(ctx, serving, fmt.Sprintf("Waiting for Preparation %q to become ready", preparationName)); uerr != nil {
+			logger.Error(uerr, "Failed to update Serving status")
+		}
+		return ctrl.Result{}, nil
+	}
+
 	blocked, err := r.gate(ctx, serving, preparation, statusUpdater)
 	if blocked || err != nil {
 		return ctrl.Result{}, err

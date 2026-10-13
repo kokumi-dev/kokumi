@@ -220,6 +220,144 @@ the chain is verifiable from the artifact alone:
 - `org.opencontainers.image.base.name` — the base artifact's OCI reference
 - `org.opencontainers.image.base.digest` — the base artifact's digest
 
+#### What a Preparation looks like in the registry
+
+A Preparation artifact explains itself from the registry alone: what was asked
+for, what it was built from, what built it, and what came before it.
+
+```
+kokumi-registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod
+│
+├─ sha256:c3…  manifest   artifactType: application/vnd.kokumi.preparation.v1
+│   ├─ config  application/vnd.kokumi.preparation.config.v1+json     (intent)
+│   ├─ layer   application/vnd.oci.image.layer.v1.tar+gzip           (rendered YAML)
+│   └─ annotations
+│        org.opencontainers.image.description: "bump replicas to 3"
+│        org.opencontainers.image.source / .version / .revision
+│        org.opencontainers.image.base.name / .base.digest
+│        kokumi.dev/parent: sha256:c1…
+│        kokumi.dev/approval-policy: {…}
+│
+├─ referrers of sha256:c3…
+│   ├─ application/vnd.kokumi.provenance.v1+json   SLSA v1 provenance (in-toto)
+│   └─ application/vnd.kokumi.approvals.v1+json    written on promotion
+│
+└─ tag 6.10.2 → sha256:c3…
+```
+
+The **config blob** is the authoritative record. The `kokumi.dev/*` and
+description annotations repeat parts of it so tools can read them without
+fetching a blob.
+
+```json
+{
+  "schemaVersion": 1,
+  "order": { "namespace": "shop", "name": "podinfo-prod", "uid": "6f0c…" },
+  "configHash": "sha256:9b1d…",
+  "commitMessage": "bump replicas to 3",
+  "createdTime": "2026-10-12T09:14:03Z",
+  "parent": "sha256:c1…",
+  "source": { "oci": "oci://ghcr.io/stefanprodan/charts/podinfo", "version": "6.10.2", "digest": "sha256:aa…" },
+  "destination": { "oci": "oci://kokumi-registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod" },
+  "menu": { "namespace": "shop", "name": "podinfo", "configHash": "sha256:77e0…" },
+  "renderer": { "type": "Helm", "version": "v4.3.0", "builder": "ghcr.io/kokumi-dev/kokumi@sha256:bb…" },
+  "intent": { "source": {}, "destination": "", "render": {}, "patches": [], "edits": [], "promotion": {} }
+}
+```
+
+`createdTime` equals the manifest's `org.opencontainers.image.created`
+annotation.
+
+Artifacts that a Menu pre-renders use the artifactType
+`application/vnd.kokumi.menu.v1` and the same config blob without `order`,
+`parent` and promotion gates. Their `configHash` is computed the same way,
+from their own intent; `menu.configHash` is the Menu's own hash.
+
+#### Intent and the config hash
+
+The **intent** is the merged, effective configuration that determines the
+artifact. `configHash` is the SHA-256 of its canonical JSON: compact, object
+keys sorted at every level, numbers kept as written, and no HTML escaping. The
+config blob stores the `intent` member with exactly these bytes, so equal
+hashes mean equal intent, and anyone can recompute the hash: it is the SHA-256
+of the `intent` value as it stands in the blob.
+
+- Changing the approval policy creates a new Preparation that needs fresh
+  approvals. Switching the promotion mode does not.
+- Changing a Menu in a way that alters the merged result (a new source
+  version, other values or patches) renders a new Preparation for every Order
+  on that Menu. Orders on a pre-rendered Menu render again when the Menu
+  publishes a new artifact, because its digest is part of their intent.
+
+{{< callout type="warning" >}}
+The intent is stored inside the artifact, so **anyone who can pull the
+artifact can read it**: Argo CD, cluster nodes, and anyone the artifact is
+copied to. Do not put secrets into Helm values or patches. Pull access to a
+destination repository equals read access to the intent of every Preparation
+in it.
+
+The reverse holds for writing. Artifacts are not signed yet, so intent and
+lineage read from the registry are only as trustworthy as push access to the
+repository.
+{{< /callout >}}
+
+#### Lineage
+
+Lineage is the **render history of one Order in one repository**. Every
+Preparation names the one rendered before it as its `parent`, in the config
+blob and in the `kokumi.dev/parent` annotation. Walking `parent` backwards
+gives the history, including Preparations that were never deployed.
+
+- Nothing is ever written to an older artifact. A Preparation carries no
+  pointer to later revisions, so copying one artifact with its referrers
+  copies exactly that one revision and its evidence.
+- The newest Preparation of an Order is `Order.status.latestArtifactDigest`.
+  Without cluster access it is the version tag whose config blob has the
+  newest `createdTime`: every Preparation is pushed under its source version,
+  so the newest one is always behind a tag.
+- A history ends at a Preparation without a `parent`, or at a `parent` that
+  does not exist in the repository. The second case is normal after the
+  Order's destination changed.
+
+#### Provenance and renderer identity
+
+`spec.renderer` records what rendered a Preparation:
+
+| Field | Meaning |
+|---|---|
+| `type` | `Helm` or `Manifest` |
+| `version` | The Helm library version for `Helm`, the Kokumi version for `Manifest` |
+| `builder` | The controller that rendered it, normally its image reference with digest |
+
+The controller determines `builder` once at start-up: the `KOKUMI_BUILDER_ID`
+environment variable if set, otherwise the image ID of its own Pod, otherwise
+`kokumi@<version>`. It is self-reported.
+
+After the artifact is pushed, the Preparation controller attaches a
+[SLSA v1 provenance](https://slsa.dev/spec/v1.0/provenance) statement as an
+OCI referrer and records it in `status.attestations`. The statement is built
+entirely from the config blob, so it can be rebuilt at any time with identical
+bytes. Its `builder.id` is `https://kokumi.dev/builders/controller/v1`;
+`builder.version` names the controller image and the rendering engine, and
+the source is listed by its OCI URL and digest.
+
+A Preparation becomes `Ready` only once the `ProvenanceAttached` condition is
+true, and only a `Ready` Preparation is served, under both promotion modes:
+promoting one that is not ready is refused, and the Serving keeps the current
+deployment. An artifact whose config blob cannot be read as a Kokumi config
+never gets provenance and is never ready.
+
+The Attestations view lists every referrer of the artifact live from the
+registry. Anyone who can push to the repository can attach one, so the view
+marks the ones Kokumi recorded and shows the content of only those.
+
+```bash
+oras discover kokumi-registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod@sha256:c3…
+```
+
+Provenance is not signed yet. Until it is, it documents how an artifact was
+produced for supply-chain tooling; it does not prove it.
+
 ### Serving
 
 A Serving tracks which Preparation is actively deployed. There is exactly one

@@ -71,6 +71,8 @@ func addRoutes(
 	mux.HandleFunc("POST /api/v1/orders/{namespace}/{name}/promote", handlePromote(deps))
 
 	// Preparation manifest (rendered YAML from OCI)
+	mux.HandleFunc("GET /api/v1/preparations/{namespace}/{name}/attestations", handleListPreparationAttestations(deps))
+	mux.HandleFunc("GET /api/v1/preparations/{namespace}/{name}/intent", handleGetPreparationIntent(deps))
 	mux.HandleFunc("GET /api/v1/preparations/{namespace}/{name}/manifest", handleGetPreparationManifest(deps))
 	mux.HandleFunc("GET /api/v1/preparations/{namespace}/{name}/manifest/files", handleGetPreparationManifestFiles(deps))
 

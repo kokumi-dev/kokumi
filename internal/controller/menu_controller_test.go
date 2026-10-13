@@ -30,6 +30,7 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/resolve"
 )
 
 var _ = Describe("Menu Controller", func() {
@@ -194,18 +195,38 @@ var _ = Describe("Menu Controller", func() {
 			})
 
 			By("Reconciling with a fake OCI client")
+			memfs := afero.NewMemMapFs()
+			fake := oci.NewFakeClient(memfs)
 			controllerReconciler := &MenuReconciler{
 				Client:         k8sClient,
 				Scheme:         k8sClient.Scheme(),
-				Store:          artifact.NewStore(oci.NewFakeClient(afero.NewMemMapFs()), afero.NewMemMapFs(), ""),
-				Pipeline:       artifact.NewPipeline(artifact.NewStore(oci.NewFakeClient(afero.NewMemMapFs()), afero.NewMemMapFs(), "")),
+				Store:          artifact.NewStore(fake, memfs, ""),
+				Pipeline:       artifact.NewPipeline(artifact.NewStore(fake, memfs, "")),
 				PantryResolver: credential.NewKubeResolver(k8sClient),
+				OCIClient:      fake,
+				BuilderID:      testBuilderID,
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: renderName,
 			})
 			Expect(err).NotTo(HaveOccurred())
+
+			By("Pushing a Menu artifact that explains itself")
+			Expect(fake.Pushes).To(HaveLen(1))
+			Expect(fake.Pushes[0].Options.ArtifactType).To(Equal(oci.MenuArtifactType))
+			config, err := artifact.ParseConfig(fake.Pushes[0].Options.ConfigMediaType, fake.Pushes[0].Options.Config)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(config.Order).To(BeNil())
+			Expect(config.Parent).To(BeEmpty())
+			Expect(config.Menu.Name).To(Equal(renderName.Name))
+			Expect(config.Renderer.Builder).To(Equal(testBuilderID))
+			Expect(string(config.Intent)).NotTo(ContainSubstring("promotion"))
+			Expect(config.ConfigHash).To(Equal(resolve.CalculateSpecHash(config.Intent)),
+				"configHash is the hash of the stored intent, not the Menu's own hash")
+
+			By("Attaching provenance")
+			Expect(referrersOfType(fake, oci.ProvenanceArtifactType)).To(HaveLen(1))
 
 			By("Advertising the rendered ref with preRendered set")
 			rendered := &deliveryv1alpha1.Menu{}
@@ -255,6 +276,7 @@ var _ = Describe("Menu Controller", func() {
 				Store:          artifact.NewStore(fake, memfs, ""),
 				Pipeline:       artifact.NewPipeline(artifact.NewStore(fake, memfs, "")),
 				PantryResolver: credential.NewKubeResolver(k8sClient),
+				OCIClient:      fake,
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: renderName})

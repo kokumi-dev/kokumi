@@ -2,11 +2,20 @@ package oci
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/oras-project/oras-go/v3"
 )
+
+// MaxReferrerPayloadSize is the largest referrer payload FetchReferrer reads.
+// Anyone who can push to a repository can attach a referrer of any size.
+const MaxReferrerPayloadSize = 1 << 20
+
+// ErrPayloadTooLarge is returned by FetchReferrer for a payload larger than
+// MaxReferrerPayloadSize.
+var ErrPayloadTooLarge = errors.New("referrer payload too large")
 
 // ReferrerArtifact is a single-blob OCI artifact attached to a subject.
 type ReferrerArtifact struct {
@@ -97,6 +106,10 @@ func (c *ORASClient) FetchReferrer(ctx context.Context, ref Reference) (Referrer
 
 	if len(manifest.Layers) != 1 {
 		return ReferrerArtifact{}, fmt.Errorf("referrer %s has %d layers, want 1", ref, len(manifest.Layers))
+	}
+
+	if size := manifest.Layers[0].Size; size > MaxReferrerPayloadSize {
+		return ReferrerArtifact{}, fmt.Errorf("fetch referrer %s: %d bytes: %w", ref, size, ErrPayloadTooLarge)
 	}
 
 	payload, err := fetchBlobBytes(ctx, repo, manifest.Layers[0])

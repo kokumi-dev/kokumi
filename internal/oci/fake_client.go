@@ -170,9 +170,13 @@ func (c *FakeClient) ListReferrers(_ context.Context, subject Reference, artifac
 // FetchReferrer returns the recorded referrer with ref's digest.
 func (c *FakeClient) FetchReferrer(_ context.Context, ref Reference) (ReferrerArtifact, error) {
 	for _, r := range c.Referrers {
-		if r.Digest == ref.Digest {
-			return r.Artifact, nil
+		if r.Digest != ref.Digest {
+			continue
 		}
+		if len(r.Artifact.Payload) > MaxReferrerPayloadSize {
+			return ReferrerArtifact{}, fmt.Errorf("fetch referrer %s: %w", ref, ErrPayloadTooLarge)
+		}
+		return r.Artifact, nil
 	}
 	return ReferrerArtifact{}, fmt.Errorf("fetch referrer %s: not found", ref)
 }

@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -37,6 +38,8 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/index"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/resolve"
+	"github.com/kokumi-dev/kokumi/internal/version"
 )
 
 var _ = Describe("Order Controller", func() {
@@ -92,6 +95,7 @@ var _ = Describe("Order Controller", func() {
 				Scheme:         k8sClient.Scheme(),
 				Pipeline:       artifact.NewPipeline(artifact.NewStore(oci.NewFakeClient(fs), fs, "")),
 				PantryResolver: credential.NewKubeResolver(k8sClient),
+				BuilderID:      testBuilderID,
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -120,6 +124,7 @@ var _ = Describe("Order Controller", func() {
 				Scheme:         k8sClient.Scheme(),
 				Pipeline:       artifact.NewPipeline(artifact.NewStore(oci.NewFakeClient(fs), fs, "")),
 				PantryResolver: credential.NewKubeResolver(k8sClient),
+				BuilderID:      testBuilderID,
 			}
 		}
 
@@ -392,6 +397,7 @@ var _ = Describe("Order Controller", func() {
 				Scheme:         k8sClient.Scheme(),
 				Pipeline:       artifact.NewPipeline(artifact.NewStore(oci.NewFakeClient(fs), fs, "")),
 				PantryResolver: credential.NewKubeResolver(k8sClient),
+				BuilderID:      testBuilderID,
 			}
 		}
 
@@ -522,6 +528,7 @@ var _ = Describe("Order Controller", func() {
 				Scheme:         k8sClient.Scheme(),
 				Pipeline:       artifact.NewPipeline(artifact.NewStore(oci.NewFakeClient(fs), fs, "")),
 				PantryResolver: credential.NewKubeResolver(k8sClient),
+				BuilderID:      testBuilderID,
 			}
 			_, err := r.Reconcile(ctx, reconcile.Request{Namespace: testNamespace, Name: orderName})
 			Expect(err).NotTo(HaveOccurred())
@@ -537,6 +544,180 @@ var _ = Describe("Order Controller", func() {
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: orderName}, serving)).To(Succeed())
 			Expect(serving.Spec.OrderName).To(Equal(orderName))
 			Expect(serving.Spec.PreparationName).To(BeEmpty())
+		})
+	})
+
+	Context("When recording what a Preparation is made of", func() {
+		const ns = testNamespace
+
+		ctx := context.Background()
+
+		var (
+			fake *oci.FakeClient
+			r    *OrderReconciler
+		)
+
+		BeforeEach(func() {
+			fs := afero.NewMemMapFs()
+			fake = oci.NewFakeClient(fs)
+			r = &OrderReconciler{
+				Client:         k8sClient,
+				Scheme:         k8sClient.Scheme(),
+				Pipeline:       artifact.NewPipeline(artifact.NewStore(fake, fs, "")),
+				PantryResolver: credential.NewKubeResolver(k8sClient),
+				BuilderID:      testBuilderID,
+			}
+		})
+
+		reconcileOrder := func(name string) error {
+			_, err := r.Reconcile(ctx, reconcile.Request{Namespace: ns, Name: name})
+			return err
+		}
+
+		getOrder := func(name string) *deliveryv1alpha1.Order {
+			order := &deliveryv1alpha1.Order{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, order)).To(Succeed())
+			return order
+		}
+
+		listPreparations := func(orderName string) []deliveryv1alpha1.Preparation {
+			list := &deliveryv1alpha1.PreparationList{}
+			Expect(k8sClient.List(ctx, list, client.InNamespace(ns),
+				client.MatchingLabels{deliveryv1alpha1.LabelOrder: orderName})).To(Succeed())
+			return list.Items
+		}
+
+		cleanupOrder := func(name string) {
+			_ = k8sClient.DeleteAllOf(ctx, &deliveryv1alpha1.Preparation{},
+				client.InNamespace(ns), client.MatchingLabels{deliveryv1alpha1.LabelOrder: name})
+			order := &deliveryv1alpha1.Order{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, order); err == nil {
+				order.SetFinalizers(nil)
+				_ = k8sClient.Update(ctx, order)
+				_ = k8sClient.Delete(ctx, order)
+			}
+		}
+
+		lastConfig := func() *artifact.Config {
+			Expect(fake.Pushes).NotTo(BeEmpty())
+			last := fake.Pushes[len(fake.Pushes)-1]
+			config, err := artifact.ParseConfig(last.Options.ConfigMediaType, last.Options.Config)
+			Expect(err).NotTo(HaveOccurred())
+			return config
+		}
+
+		It("stores the intent in the artifact and an honest renderer on the Preparation", func() {
+			const orderName = "order-intent"
+			// The second group holds the characters encoding/json escapes by
+			// default; the stored intent must keep them as hashed.
+			policy := &deliveryv1alpha1.ApprovalPolicy{RequiredApprovals: 1, AllowedGroups: []string{testApproverGroup, "ops & <release>"}}
+			createTestOrder(ctx, orderName, deliveryv1alpha1.PromotionModeManual, policy)
+			DeferCleanup(func() { cleanupOrder(orderName) })
+
+			Expect(reconcileOrder(orderName)).To(Succeed())
+			order := getOrder(orderName)
+
+			By("pushing a typed artifact whose config blob carries the intent")
+			Expect(fake.Pushes).To(HaveLen(1))
+			Expect(fake.Pushes[0].Options.ArtifactType).To(Equal(oci.PreparationArtifactType))
+			config := lastConfig()
+			Expect(config.Order.Name).To(Equal(orderName))
+			Expect(config.Order.UID).To(Equal(order.UID))
+			Expect(config.ConfigHash).To(Equal(order.Status.LatestConfigHash))
+			Expect(config.Parent).To(BeEmpty())
+			Expect(config.Menu).To(BeNil())
+			Expect(config.Source.OCI).To(Equal(testOCIRef))
+			Expect(config.Source.Version).To(Equal(testVersion))
+			Expect(config.Source.Digest).To(HavePrefix("sha256:"))
+			Expect(config.CreatedTime).NotTo(BeEmpty())
+
+			By("hashing exactly the stored intent")
+			var intent resolve.Intent
+			Expect(json.Unmarshal(config.Intent, &intent)).To(Succeed())
+			Expect(intent.Promotion.Approvals).To(Equal(policy))
+			Expect(resolve.CalculateSpecHash(config.Intent)).To(Equal(config.ConfigHash))
+
+			By("recording who rendered it")
+			preps := listPreparations(orderName)
+			Expect(preps).To(HaveLen(1))
+			Expect(preps[0].Spec.Renderer.Type).To(Equal(deliveryv1alpha1.RenderTypeManifest))
+			Expect(preps[0].Spec.Renderer.Builder).To(Equal(testBuilderID))
+			Expect(preps[0].Spec.Renderer.Version).To(Equal("v" + version.Version))
+			Expect(config.Renderer.Builder).To(Equal(testBuilderID))
+		})
+
+		It("does not render again when only the promotion mode changes", func() {
+			const orderName = "order-mode-change"
+			createTestOrder(ctx, orderName, deliveryv1alpha1.PromotionModeManual)
+			DeferCleanup(func() {
+				cleanupOrder(orderName)
+				_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Serving{Name: orderName, Namespace: ns})
+			})
+
+			Expect(reconcileOrder(orderName)).To(Succeed())
+
+			order := getOrder(orderName)
+			order.Spec.Promotion.Mode = deliveryv1alpha1.PromotionModeAutomatic
+			Expect(k8sClient.Update(ctx, order)).To(Succeed())
+
+			Expect(reconcileOrder(orderName)).To(Succeed())
+			Expect(listPreparations(orderName)).To(HaveLen(1))
+			Expect(fake.Pushes).To(HaveLen(1))
+		})
+
+		It("renders again when the Menu changes what is rendered", func() {
+			const (
+				orderName = "order-of-menu"
+				menuName  = "menu-for-order"
+			)
+			menu := &deliveryv1alpha1.Menu{
+				Namespace: ns,
+				Name:      menuName,
+				Spec: deliveryv1alpha1.MenuSpec{
+					Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion},
+					Overrides: deliveryv1alpha1.OverridePolicy{
+						Values:  deliveryv1alpha1.ValueOverridePolicy{Policy: deliveryv1alpha1.OverridePolicyNone},
+						Patches: deliveryv1alpha1.PatchOverridePolicy{Policy: deliveryv1alpha1.OverridePolicyAll},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, menu)).To(Succeed())
+			setMenuSource := func(version string) {
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: menuName}, menu)).To(Succeed())
+				menu.Status.ConfigHash = "sha256:menu-" + version
+				menu.Status.Source = &deliveryv1alpha1.MenuSourceStatus{OCI: testOCIRef, Version: version}
+				Expect(k8sClient.Status().Update(ctx, menu)).To(Succeed())
+			}
+			setMenuSource(testVersion)
+
+			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Order{
+				Name: orderName, Namespace: ns,
+				Spec: deliveryv1alpha1.OrderSpec{
+					MenuRef:   &deliveryv1alpha1.MenuRef{Name: menuName},
+					Promotion: &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
+				},
+			})).To(Succeed())
+			DeferCleanup(func() {
+				cleanupOrder(orderName)
+				_ = k8sClient.Delete(ctx, menu)
+			})
+
+			Expect(reconcileOrder(orderName)).To(Succeed())
+			Expect(listPreparations(orderName)).To(HaveLen(1))
+			config := lastConfig()
+			Expect(config.Menu.Name).To(Equal(menuName))
+			Expect(config.Menu.ConfigHash).To(Equal("sha256:menu-" + testVersion))
+			Expect(string(config.Intent)).NotTo(ContainSubstring("menuRef"))
+
+			By("leaving the Order alone while the Menu is unchanged")
+			Expect(reconcileOrder(orderName)).To(Succeed())
+			Expect(listPreparations(orderName)).To(HaveLen(1))
+
+			By("bumping the Menu's source version without touching the Order")
+			setMenuSource("0.2.0")
+			Expect(reconcileOrder(orderName)).To(Succeed())
+			Expect(listPreparations(orderName)).To(HaveLen(2))
+			Expect(lastConfig().Source.Version).To(Equal("0.2.0"))
 		})
 	})
 })

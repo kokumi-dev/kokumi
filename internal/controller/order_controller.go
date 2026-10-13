@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 
@@ -37,6 +38,7 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/resolve"
 	"github.com/kokumi-dev/kokumi/internal/status"
+	"github.com/kokumi-dev/kokumi/internal/version"
 )
 
 const (
@@ -50,6 +52,9 @@ type OrderReconciler struct {
 	Scheme         *runtime.Scheme
 	Pipeline       *artifact.Pipeline
 	PantryResolver credential.PantryResolver
+	// BuilderID identifies this controller as the builder of the artifacts
+	// it renders.
+	BuilderID string
 }
 
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=orders,verbs=get;list;watch;create;update;patch;delete
@@ -194,10 +199,12 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 		return ctrl.Result{}, err
 	}
 
-	specHash, err := resolve.CalculateSpecHash(order.Spec, sourceURL, resolvedDest)
+	intent, err := resolve.NewIntent(order, effective, sourceURL, resolvedDest).Canonical()
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to calculate spec hash: %w", err)
 	}
+
+	specHash := resolve.CalculateSpecHash(intent)
 
 	if order.Status.LatestConfigHash == specHash && order.Status.LatestPreparationName != "" {
 		logger.Info("Configuration is up-to-date, skipping reconciliation")
@@ -223,8 +230,16 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 		return ctrl.Result{}, err
 	}
 
+	renderer := rendererFor(effective.Render, r.BuilderID)
+	config := artifactConfig(order, effective, intent, specHash, renderer)
+
+	source := artifact.Source{OCI: sourceURL, Version: spec.Source.Version}
+	if effective.Menu != nil {
+		source.Digest = effective.Menu.PreRenderedDigest
+	}
+
 	result, err := r.Pipeline.Render(ctx, artifact.RenderRequest{
-		Source:           artifact.Source{OCI: sourceURL, Version: spec.Source.Version},
+		Source:           source,
 		SourceClient:     sourceClient,
 		Destination:      artifact.Destination{OCI: resolvedDest},
 		DestClient:       destClient,
@@ -236,6 +251,8 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 		Description:      commitMessage,
 		ParentDigest:     parentDigest,
 		ExtraAnnotations: extraAnnotations,
+		ArtifactType:     oci.PreparationArtifactType,
+		Config:           config,
 	})
 	if err != nil {
 		logger.Error(err, "Failed to process Order")
@@ -246,7 +263,7 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 		return ctrl.Result{}, err
 	}
 
-	preparation, err := r.createPreparation(ctx, order, result.SourceRef, result.DestRef, commitMessage, parentDigest, specHash, deliveryv1alpha1.GitSource{Repo: result.SCM.Repo, Tag: result.SCM.Tag, CommitHash: result.SCM.CommitHash})
+	preparation, err := r.createPreparation(ctx, order, result.SourceRef, result.DestRef, renderer, commitMessage, parentDigest, specHash, deliveryv1alpha1.GitSource{Repo: result.SCM.Repo, Tag: result.SCM.Tag, CommitHash: result.SCM.CommitHash})
 	if err != nil {
 		logger.Error(err, "Failed to create Preparation")
 		if uerr := statusUpdater.Failed(ctx, order, fmt.Errorf("failed to create revision: %w", err)); uerr != nil {
@@ -313,6 +330,7 @@ func (r *OrderReconciler) createPreparation(
 	ctx context.Context,
 	order *deliveryv1alpha1.Order,
 	sourceRef, destRef oci.Reference,
+	renderer deliveryv1alpha1.Renderer,
 	commitMessage string,
 	parentDigest string,
 	configHash string,
@@ -334,11 +352,6 @@ func (r *OrderReconciler) createPreparation(
 		return nil, fmt.Errorf("failed to check for existing revision: %w", err)
 	}
 
-	renderType := deliveryv1alpha1.RenderTypeManifest
-	if order.Spec.Render != nil && order.Spec.Render.Helm != nil {
-		renderType = deliveryv1alpha1.RenderTypeHelm
-	}
-
 	preparation := &deliveryv1alpha1.Preparation{
 		Name:      revisionName,
 		Namespace: order.Namespace,
@@ -352,11 +365,7 @@ func (r *OrderReconciler) createPreparation(
 				OCI:        sourceRef.OCIRepositoryReference(),
 				BaseDigest: sourceRef.Digest,
 			},
-			Renderer: deliveryv1alpha1.Renderer{
-				Version:    "v1.0.0",
-				Digest:     destRef.Digest,
-				RenderType: renderType,
-			},
+			Renderer:   renderer,
 			ConfigHash: configHash,
 			Artifact: deliveryv1alpha1.Artifact{
 				OCIRef: destRef.OCIString(),
@@ -379,6 +388,67 @@ func (r *OrderReconciler) createPreparation(
 	}
 
 	return preparation, nil
+}
+
+// rendererFor returns the identity of the renderer that processes render,
+// attributed to the given builder.
+func rendererFor(render *deliveryv1alpha1.Render, builderID string) deliveryv1alpha1.Renderer {
+	renderer := deliveryv1alpha1.Renderer{
+		Type:    deliveryv1alpha1.RenderTypeManifest,
+		Version: "v" + version.Version,
+		Builder: cmp.Or(builderID, version.FallbackBuilderID()),
+	}
+
+	if render != nil && render.Helm != nil {
+		renderer.Type = deliveryv1alpha1.RenderTypeHelm
+		renderer.Version = version.HelmVersion()
+	}
+
+	return renderer
+}
+
+// artifactConfig builds the part of the artifact config the Order controller
+// knows; the pipeline fills in the rest.
+func artifactConfig(order *deliveryv1alpha1.Order, effective *resolve.EffectiveSpec, intent []byte, configHash string, renderer deliveryv1alpha1.Renderer) artifact.Config {
+	config := artifact.Config{
+		Order:      &artifact.ConfigObject{Namespace: order.Namespace, Name: order.Name, UID: order.UID},
+		ConfigHash: configHash,
+		Renderer:   configRenderer(renderer),
+		Intent:     intent,
+	}
+
+	if effective.Source.PantryRef != nil {
+		config.Source.PantryRef = effective.Source.PantryRef.Name
+	}
+	if order.Spec.Destination != nil && order.Spec.Destination.PantryRef != nil {
+		config.Destination.PantryRef = order.Spec.Destination.PantryRef.Name
+	}
+	if effective.Menu != nil {
+		config.Menu = &artifact.ConfigMenu{Namespace: order.Namespace, Name: effective.Menu.Name, ConfigHash: effective.Menu.ConfigHash}
+	}
+
+	return config
+}
+
+// configRenderer converts a Renderer into its artifact config form.
+func configRenderer(renderer deliveryv1alpha1.Renderer) artifact.ConfigRenderer {
+	return artifact.ConfigRenderer{Type: string(renderer.Type), Version: renderer.Version, Builder: renderer.Builder}
+}
+
+func (r *OrderReconciler) enqueueOrdersForMenu() handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+		orders, err := index.OrdersForMenu(ctx, r.Client, obj.GetNamespace(), obj.GetName())
+		if err != nil {
+			log.FromContext(ctx).Error(err, "Failed to list Orders of Menu", "menu", obj.GetName())
+			return nil
+		}
+
+		reqs := make([]reconcile.Request, 0, len(orders))
+		for _, order := range orders {
+			reqs = append(reqs, reconcile.Request{Namespace: order.Namespace, Name: order.Name})
+		}
+		return reqs
+	})
 }
 
 func (r *OrderReconciler) enqueueOrdersForPantry() handler.EventHandler {
@@ -406,6 +476,7 @@ func (r *OrderReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&deliveryv1alpha1.Order{}).
 		Owns(&deliveryv1alpha1.Preparation{}).
+		Watches(&deliveryv1alpha1.Menu{}, r.enqueueOrdersForMenu()).
 		Watches(&deliveryv1alpha1.Pantry{}, r.enqueueOrdersForPantry()).
 		Named("order").
 		Complete(r)

@@ -193,9 +193,37 @@ type PreparationDTO struct {
 	CommitMessage string         `json:"commitMessage,omitempty"`
 	ParentDigest  string         `json:"parentDigest,omitempty"`
 	GitSource     GitSourceDTO   `json:"gitSource,omitempty"`
+	Renderer      RendererDTO    `json:"renderer"`
 	Conditions    []ConditionDTO `json:"conditions,omitempty"`
 	// Approval is set when the Preparation has an approval policy.
 	Approval *PreparationApprovalDTO `json:"approval,omitempty"`
+}
+
+// RendererDTO identifies what rendered a Preparation.
+type RendererDTO struct {
+	Type    string `json:"type"`
+	Version string `json:"version"`
+	Builder string `json:"builder"`
+}
+
+// AttestationDTO is one OCI referrer of a Preparation's artifact, as listed
+// live from the registry.
+type AttestationDTO struct {
+	// ArtifactType is the artifactType of the referrer.
+	ArtifactType string `json:"artifactType"`
+	Digest       string `json:"digest"`
+	// CreatedAt is the referrer's org.opencontainers.image.created
+	// annotation; empty when the referrer carries none.
+	CreatedAt string `json:"createdAt,omitempty"`
+	Size      int64  `json:"size"`
+	// Recorded reports whether Kokumi recorded this referrer in the
+	// Preparation's status. Anyone who can push to the repository can attach
+	// a referrer; only recorded ones were written by the controller.
+	Recorded bool `json:"recorded"`
+	// MediaType and Payload are only set for recorded referrers, and only
+	// when the payload was requested.
+	MediaType string          `json:"mediaType,omitempty"`
+	Payload   json.RawMessage `json:"payload,omitempty"`
 }
 
 // CreateOrderRequest is the body for POST /api/v1/orders.

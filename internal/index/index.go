@@ -17,6 +17,7 @@ func Setup(ctx context.Context, indexer client.FieldIndexer) error {
 	}{
 		{&deliveryv1alpha1.Approval{}, FieldPreparationRefName, approvalPreparation},
 		{&deliveryv1alpha1.Preparation{}, FieldOrderName, preparationOrder},
+		{&deliveryv1alpha1.Order{}, FieldMenuRefName, orderMenu},
 		{&deliveryv1alpha1.Order{}, FieldSourcePantryRefName, orderSourcePantry},
 		{&deliveryv1alpha1.Order{}, FieldDestinationPantryRefName, orderDestinationPantry},
 	}
@@ -50,6 +51,19 @@ func PreparationsForOrder(ctx context.Context, r client.Reader, namespace, order
 		return nil, err
 	}
 	return preparations.Items, nil
+}
+
+// OrdersForMenu returns the Orders rendered from the named Menu. It requires
+// the cache indexes registered by Setup.
+func OrdersForMenu(ctx context.Context, r client.Reader, namespace, menuName string) ([]deliveryv1alpha1.Order, error) {
+	orders := &deliveryv1alpha1.OrderList{}
+	if err := r.List(ctx, orders,
+		client.InNamespace(namespace),
+		client.MatchingFields{FieldMenuRefName: menuName},
+	); err != nil {
+		return nil, err
+	}
+	return orders.Items, nil
 }
 
 // OrdersForPantry returns the Orders whose source or destination references
@@ -87,6 +101,14 @@ func preparationOrder(obj client.Object) []string {
 		return nil
 	}
 	return []string{preparation.Spec.OrderName}
+}
+
+func orderMenu(obj client.Object) []string {
+	order, ok := obj.(*deliveryv1alpha1.Order)
+	if !ok || order.Spec.MenuRef == nil {
+		return nil
+	}
+	return []string{order.Spec.MenuRef.Name}
 }
 
 func orderSourcePantry(obj client.Object) []string {

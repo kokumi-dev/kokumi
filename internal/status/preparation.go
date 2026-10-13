@@ -46,6 +46,39 @@ func (u *PreparationUpdater) set(ctx context.Context, preparation *deliveryv1alp
 	return setCondition(ctx, u.client, preparation, mutate)
 }
 
+// ProvenanceAttached records the provenance attestation and marks the
+// Preparation as ready for serving.
+func (u *PreparationUpdater) ProvenanceAttached(ctx context.Context, preparation *deliveryv1alpha1.Preparation, attestation deliveryv1alpha1.AttestationReference) error {
+	return u.commit(ctx, preparation, func(latest *deliveryv1alpha1.Preparation) {
+		setAttestation(&latest.Status.Attestations, attestation)
+		meta.SetStatusCondition(&latest.Status.Conditions, newTypedCondition(deliveryv1alpha1.ConditionTypeProvenanceAttached, latest.Generation,
+			metav1.ConditionTrue, deliveryv1alpha1.ReasonProvenanceAttached, "Provenance recorded at "+attestation.OCIRef))
+		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(latest.Generation, metav1.ConditionTrue, "Ready", "Preparation is ready for serving"))
+	})
+}
+
+// ProvenanceFailed records that the provenance attestation could not be
+// attached. The Preparation is not ready until it is.
+func (u *PreparationUpdater) ProvenanceFailed(ctx context.Context, preparation *deliveryv1alpha1.Preparation, err error) error {
+	return u.commit(ctx, preparation, func(latest *deliveryv1alpha1.Preparation) {
+		meta.SetStatusCondition(&latest.Status.Conditions, newTypedCondition(deliveryv1alpha1.ConditionTypeProvenanceAttached, latest.Generation,
+			metav1.ConditionFalse, deliveryv1alpha1.ReasonProvenanceAttachFailed, err.Error()))
+		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(latest.Generation, metav1.ConditionFalse,
+			deliveryv1alpha1.ReasonAwaitingProvenance, "Waiting for the provenance attestation to be recorded"))
+	})
+}
+
+// setAttestation replaces the entry of the attestation's type, or appends it.
+func setAttestation(attestations *[]deliveryv1alpha1.AttestationReference, attestation deliveryv1alpha1.AttestationReference) {
+	for i := range *attestations {
+		if (*attestations)[i].Type == attestation.Type {
+			(*attestations)[i] = attestation
+			return
+		}
+	}
+	*attestations = append(*attestations, attestation)
+}
+
 // Approval writes the aggregated approval status and the Approved condition.
 func (u *PreparationUpdater) Approval(ctx context.Context, preparation *deliveryv1alpha1.Preparation, res approval.Result) error {
 	return u.commit(ctx, preparation, func(latest *deliveryv1alpha1.Preparation) {

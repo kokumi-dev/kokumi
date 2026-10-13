@@ -6,6 +6,9 @@ type Source struct {
 	OCI string
 	// Version is the tag to resolve the source to.
 	Version string
+	// Digest optionally pins the source to a manifest digest. When set, the
+	// artifact is pulled by digest and Version only names the pushed tag.
+	Digest string
 }
 
 // Destination describes where a rendered artifact is pushed. The pushed tag
