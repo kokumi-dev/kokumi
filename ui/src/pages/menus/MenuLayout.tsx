@@ -3,6 +3,7 @@ import { Outlet, useNavigate, useParams } from 'react-router'
 import { deleteMenu } from '../../api/client'
 import { useMenus } from '../../hooks/useMenus'
 import { useOrders } from '../../hooks/useOrders'
+import { useDeniedReason } from '../../hooks/useCapability'
 import PageHeader from '../../components/layout/PageHeader'
 import ResourceNotFound from '../../components/layout/ResourceNotFound'
 import Badge from '../../components/shared/Badge'
@@ -18,6 +19,9 @@ export default function MenuLayout() {
   const menus = useMenus()
   const orders = useOrders()
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const editDenied = useDeniedReason('menus:update')
+  const deleteDenied = useDeniedReason('menus:delete')
+  const orderDenied = useDeniedReason('orders:create')
 
   const menu = menus?.find((m) => m.namespace === namespace && m.name === name)
   if (!menu) {
@@ -37,9 +41,9 @@ export default function MenuLayout() {
         subtitle={<span className={layout.mono}>{menuSourceLabel(menu)}</span>}
         actions={
           <>
-            <ButtonLink variant="secondary" icon={<EditIcon />} to={paths.menu(menu.namespace, menu.name, 'edit')}>Edit</ButtonLink>
-            <Button variant="danger" icon={<TrashIcon />} onClick={() => setConfirmDelete(true)}>Delete</Button>
-            <ButtonLink variant="primary" icon={<PlusIcon />} to={paths.newOrder(menu)}>Use this menu</ButtonLink>
+            <ButtonLink variant="secondary" icon={<EditIcon />} to={paths.menu(menu.namespace, menu.name, 'edit')} disabledReason={editDenied}>Edit</ButtonLink>
+            <Button variant="danger" icon={<TrashIcon />} onClick={() => setConfirmDelete(true)} disabledReason={deleteDenied}>Delete</Button>
+            <ButtonLink variant="primary" icon={<PlusIcon />} to={paths.newOrder(menu)} disabledReason={orderDenied}>Use this menu</ButtonLink>
           </>
         }
       />

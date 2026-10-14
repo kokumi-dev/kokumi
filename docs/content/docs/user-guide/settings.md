@@ -14,7 +14,9 @@ resource. The Kitchen is the central place where Kokumi stores configuration
 for the whole instance. There is exactly one Kitchen per Kokumi instance,
 named `default` in the same namespace as your Kokumi installation, and the
 controller creates it automatically there. The Settings page in the UI reads
-and writes this resource through the server API.
+and writes this resource through the server API. It is only shown to users
+who may update the Kitchen (see
+[UI capabilities](../../operator-guide/authorization/#ui-capabilities)).
 
 > **The Kitchen must be named `default`.** Kokumi only reconciles a Kitchen
 > called `default`, and the server only reads and writes that one. If you

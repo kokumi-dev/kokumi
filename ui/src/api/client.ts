@@ -371,7 +371,7 @@ export function saveAuthSettings(auth: AuthSettings): Promise<Settings> {
   })
 }
 
-// ── WhoAmI (identity + admin flag for Settings visibility) ───────────────────
+// ── WhoAmI (identity + capabilities that decide which features are offered) ──
 
 export interface WhoAmI {
   subject: string
@@ -379,7 +379,10 @@ export interface WhoAmI {
   email?: string
   provider?: string
   groups?: string[]
-  isAdmin: boolean
+  /** Capability names; see mergeCapabilities in ./capabilities. */
+  capabilities: string[]
+  /** Capabilities whose checks failed; not part of capabilities. */
+  undetermined?: string[]
 }
 
 export function getWhoAmI(): Promise<WhoAmI> {

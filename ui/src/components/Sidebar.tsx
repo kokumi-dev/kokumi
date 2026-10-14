@@ -2,14 +2,15 @@ import { NavLink } from 'react-router'
 import styles from './Sidebar.module.css'
 import logo from '../assets/logo.png'
 import { getUsername } from '../api/auth'
+import type { Capability } from '../api/capabilities'
 import { Button } from './ui'
 
 interface NavItem {
   to: string
   label: string
   icon: React.ReactNode
-  /** Only shown when the signed-in user is an admin. */
-  adminOnly?: boolean
+  /** Only shown when the signed-in user has any of these capabilities. */
+  requires?: Capability[]
 }
 
 interface NavSection {
@@ -20,8 +21,8 @@ interface NavSection {
 interface Props {
   operatorVersion?: string
   onLogout?: () => void
-  /** When false, the admin-only Settings entry is hidden. */
-  isAdmin: boolean
+  /** Decides which capability-gated entries are shown. */
+  capabilities: ReadonlySet<Capability>
 }
 
 function IconDashboard() {
@@ -110,16 +111,21 @@ const sections: NavSection[] = [
   {
     label: 'System',
     items: [
-      { to: '/settings', label: 'Settings', icon: <IconSettings />, adminOnly: true },
+      {
+        to: '/settings',
+        label: 'Settings',
+        icon: <IconSettings />,
+        requires: ['settings.general:update', 'settings.auth:update'],
+      },
     ],
   },
 ]
 
-export default function Sidebar({ operatorVersion, onLogout, isAdmin }: Props) {
+export default function Sidebar({ operatorVersion, onLogout, capabilities }: Props) {
   const visibleSections = sections
     .map((section) => ({
       ...section,
-      items: section.items.filter((item) => !item.adminOnly || isAdmin),
+      items: section.items.filter((item) => !item.requires || item.requires.some((c) => capabilities.has(c))),
     }))
     .filter((section) => section.items.length > 0)
 

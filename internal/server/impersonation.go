@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -28,7 +29,7 @@ type impersonator struct {
 
 	mu      sync.Mutex
 	clients map[string]client.Client // keyed by SA name
-	ssar    map[string]ssarEntry     // keyed by sa|verb|resource|namespace
+	ssar    map[string]ssarEntry     // keyed by sa|verb|resource|namespace|name
 }
 
 // ssarEntry is a cached SelfSubjectAccessReview result. RBAC grants would
@@ -74,12 +75,13 @@ func (imp *impersonator) clientFor(saName string) (client.Client, error) {
 }
 
 // authorizedFor reports whether the ServiceAccount may perform verb on the
-// delivery.kokumi.dev resource in the namespace (empty = cluster-scoped). The
-// check is a SelfSubjectAccessReview executed as the impersonated SA, so the
-// API server itself answers. Results are cached for ssarCacheTTL; the actual
-// operation is always enforced by the API server regardless of this cache.
-func (imp *impersonator) authorizedFor(ctx context.Context, saName, verb, resource, namespace string) (bool, error) {
-	key := saName + "|" + verb + "|" + resource + "|" + namespace
+// delivery.kokumi.dev resource in the namespace (empty = cluster-scoped) and,
+// when name is set, on that object only. The check is a
+// SelfSubjectAccessReview executed as the impersonated SA, so the API server
+// itself answers. Results are cached for ssarCacheTTL; the actual operation is
+// always enforced by the API server regardless of this cache.
+func (imp *impersonator) authorizedFor(ctx context.Context, saName, verb, resource, namespace, name string) (bool, error) {
+	key := saName + "|" + verb + "|" + resource + "|" + namespace + "|" + name
 	imp.mu.Lock()
 	if e, ok := imp.ssar[key]; ok && time.Since(e.checkedAt) < ssarCacheTTL {
 		imp.mu.Unlock()
@@ -87,7 +89,7 @@ func (imp *impersonator) authorizedFor(ctx context.Context, saName, verb, resour
 	}
 	imp.mu.Unlock()
 
-	allowed, err := imp.checkAccess(ctx, saName, verb, resource, namespace, "")
+	allowed, err := imp.checkAccess(ctx, saName, verb, resource, namespace, name)
 	if err != nil {
 		return false, err
 	}
@@ -127,18 +129,38 @@ func (imp *impersonator) checkAccess(ctx context.Context, saName, verb, resource
 // operation; mapped to HTTP 403.
 var errNotAuthorized = fmt.Errorf("not authorized")
 
-// pickWriteSA returns the name of the first mapped ServiceAccount authorized
-// for verb on resource in the namespace. Returns errNotAuthorized when no
-// mapped SA is allowed (mapped to HTTP 403).
-func (imp *impersonator) pickWriteSA(ctx context.Context, sas []corev1.ServiceAccount, verb, resource, namespace string) (string, error) {
+// firstAllowed returns the name of the first ServiceAccount the check allows.
+// A ServiceAccount whose check fails is skipped, so one that cannot be
+// evaluated (for example one kokumi-server may not impersonate) does not mask
+// the others. When none is allowed, it returns "" and the errors of the
+// skipped ServiceAccounts, which are nil if every ServiceAccount was denied.
+func firstAllowed(sas []corev1.ServiceAccount, check func(saName string) (bool, error)) (string, error) {
+	var errs []error
 	for _, sa := range sas {
-		allowed, err := imp.authorizedFor(ctx, sa.Name, verb, resource, namespace)
+		allowed, err := check(sa.Name)
 		if err != nil {
-			return "", err
+			errs = append(errs, err)
+			continue
 		}
 		if allowed {
 			return sa.Name, nil
 		}
 	}
-	return "", errNotAuthorized
+	return "", errors.Join(errs...)
+}
+
+// pickWriteSA returns the name of the first mapped ServiceAccount authorized
+// for verb on resource in the namespace. Returns errNotAuthorized when no
+// mapped SA is allowed (mapped to HTTP 403).
+func (imp *impersonator) pickWriteSA(ctx context.Context, sas []corev1.ServiceAccount, verb, resource, namespace string) (string, error) {
+	name, err := firstAllowed(sas, func(saName string) (bool, error) {
+		return imp.authorizedFor(ctx, saName, verb, resource, namespace, "")
+	})
+	if err != nil {
+		return "", err
+	}
+	if name == "" {
+		return "", errNotAuthorized
+	}
+	return name, nil
 }

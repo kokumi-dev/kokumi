@@ -66,7 +66,7 @@ func handleEventsStream(h *hub, deps *apiDeps) http.HandlerFunc {
 			if uc, err := deps.resolveUserClient(r); err == nil {
 				for _, res := range []string{"orders", "preparations", "servings", "menus", "pantries"} {
 					for _, sa := range uc.sas {
-						if allowed, err := deps.impersonator.authorizedFor(r.Context(), sa.Name, "list", res, ""); err == nil && allowed {
+						if allowed, err := deps.impersonator.authorizedFor(r.Context(), sa.Name, "list", res, "", ""); err == nil && allowed {
 							readable[res] = true
 							break
 						}

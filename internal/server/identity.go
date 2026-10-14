@@ -27,6 +27,13 @@ type Identity struct {
 	Username string
 }
 
+// isPersonalLogin reports whether the identity is a verified personal OIDC
+// login. The shared admin account is not personal, so it cannot be recorded as
+// an approver.
+func (id *Identity) isPersonalLogin() bool {
+	return id.Provider == providerOIDC && id.Issuer != ""
+}
+
 // identityClaims extends the session JWT with identity fields used for
 // ServiceAccount mapping. RegisteredClaims.Subject carries the OIDC sub (or
 // admin username); email/groups/provider are private claims.

@@ -56,15 +56,54 @@ Matching rules:
 - Users who match no ServiceAccount are authenticated but authorized for
   nothing (every operation returns 403).
 
-Permissions are then granted with ordinary RBAC, the same objects you would
-use for any other subject:
+### Adding your own ServiceAccount
+
+A ServiceAccount you add needs two grants besides its annotations.
+
+**1. Allow kokumi-server to impersonate it.** The server may only impersonate
+the ServiceAccounts named in the `kokumi-server-impersonator` Role, by default
+the three built-in ones. This keeps it from acting as any other ServiceAccount
+in the install namespace, such as the controller's. Grant each additional
+ServiceAccount in its own Role, so upgrades do not overwrite it:
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kokumi-server-impersonate-custom-sa
+  namespace: kokumi
+rules:
+- apiGroups: [""]
+  resources: ["serviceaccounts"]
+  resourceNames: ["custom-sa"]
+  verbs: ["impersonate"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: custom-rb
-  namespace: dev
+  name: kokumi-server-impersonate-custom-sa
+  namespace: kokumi
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kokumi-server-impersonate-custom-sa
+subjects:
+- kind: ServiceAccount
+  name: kokumi-server
+  namespace: kokumi
+```
+
+Without this grant every check as `custom-sa` fails. The user keeps the access
+of their other mapped ServiceAccounts.
+
+**2. Grant its permissions** with ordinary RBAC, the same objects you would use
+for any other subject:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: custom-sa-editor
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -73,6 +112,20 @@ subjects:
 - kind: ServiceAccount
   name: custom-sa
   namespace: kokumi
+```
+
+A `RoleBinding` in a single namespace is enforced for API calls, but the UI
+does not use it: lists come from the live event stream, and the
+[UI capabilities](#ui-capabilities) are evaluated across all namespaces. Use a
+`ClusterRoleBinding` for users of the UI.
+
+Check both grants with kubectl:
+
+```bash
+kubectl -n kokumi auth can-i impersonate serviceaccounts/custom-sa \
+  --as=system:serviceaccount:kokumi:kokumi-server
+kubectl auth can-i create orders.delivery.kokumi.dev --all-namespaces \
+  --as=system:serviceaccount:kokumi:custom-sa
 ```
 
 ## Built-in ServiceAccounts
@@ -105,14 +158,52 @@ credentials, and reads when previewing an Order whose source references that
 Pantry). Viewers cannot read Secrets: previewing a Pantry-backed Order will
 return 403, while plain-OCI previews work without Secret access.
 
+## UI capabilities
+
+The UI decides which features to offer from a list of **capabilities** the
+server reports for the signed-in user (`GET /api/v1/whoami`). Each capability
+is derived from SelfSubjectAccessReviews on the mapped ServiceAccounts, so it
+always follows your RBAC. Pages the user can never use (such as Settings) are
+hidden; actions the user may not perform (such as Promote) are shown disabled
+with an explanation.
+
+Capabilities are display hints only. Every operation is still authorized by
+the API server, so a user who calls the API directly gets exactly the same
+answer.
+
+| Capability | Granted when a mapped ServiceAccount may | UI |
+| ---------- | ---------------------------------------- | -- |
+| `settings.general:update` | `update` the `kitchens/default` object in the install namespace | Settings, General tab |
+| `settings.auth:update` | `update` the `kitchens/default` object in the install namespace | Settings, Authentication tab |
+| `orders:create` / `orders:update` / `orders:delete` | `create` / `update` / `delete` `orders` | New, Edit, Delete Order; edits on rendered files |
+| `menus:create` / `menus:update` / `menus:delete` | `create` / `update` / `delete` `menus` | New, Edit, Delete Menu |
+| `pantries:create` / `pantries:update` / `pantries:delete` | `create` / `patch` / `delete` `pantries` | New, Edit, Delete Pantry |
+| `preparations:promote` | `create` and `update` `servings` | Promote and Rollback |
+| `preparations:approve` | `approve` `preparations`, and the user signed in with OIDC | Approve and Request changes |
+
+Except for the settings, capabilities are evaluated **across all namespaces**:
+a permission granted only by a namespaced `RoleBinding` does not enable the
+action in the UI. This matches the live event stream, which only serves users
+who may list resources cluster-wide. The settings capabilities share one RBAC
+check today; they are reported separately so they can diverge later.
+
+Results are cached for up to 90 seconds, and the UI refreshes them whenever the
+browser window regains focus. A check that fails, for example on a mapped
+ServiceAccount the server may not impersonate, does not fail the request: the
+capability is granted if another mapped ServiceAccount allows it. Otherwise it
+is reported as `undetermined`, and the UI keeps its previous answer for it, or
+denies it on the first load.
+
 ## The kokumi-server ServiceAccount
 
 The server's own ServiceAccount holds **no write permissions on kokumi
 resources**. It can only:
 
-- `impersonate` ServiceAccounts in the install namespace (the trust boundary:
-  treat access to this ServiceAccount as cluster-admin equivalent for kokumi
-  resources),
+- `impersonate` the identity ServiceAccounts in the install namespace, by
+  default `kokumi-admin`, `kokumi-editor` and `kokumi-viewer` (see
+  [Adding your own ServiceAccount](#adding-your-own-serviceaccount)). This is
+  the trust boundary: treat access to this ServiceAccount as cluster-admin
+  equivalent for kokumi resources,
 - read ServiceAccounts (mapping resolution),
 - read Secrets in the install namespace (login/OIDC config),
 - read (get/list/watch) kokumi resources to power the live UI event stream:

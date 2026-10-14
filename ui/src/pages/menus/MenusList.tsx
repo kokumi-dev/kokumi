@@ -1,6 +1,7 @@
 import type { Menu } from '../../api/types'
 import { useMenus } from '../../hooks/useMenus'
 import { matchesFilter, useFilterParam } from '../../hooks/useFilterParam'
+import { useDeniedReason } from '../../hooks/useCapability'
 import PageHeader from '../../components/layout/PageHeader'
 import Section from '../../components/layout/Section'
 import DataTable from '../../components/layout/DataTable'
@@ -17,6 +18,7 @@ import layout from '../../components/layout/layout.module.css'
 export default function MenusList() {
   const menus = useMenus()
   const [query, setQuery] = useFilterParam()
+  const createDenied = useDeniedReason('menus:create')
 
   const filtered = (menus ?? []).filter((m) =>
     matchesFilter(query, m.name, m.namespace, m.source.oci, m.source.pantryRef?.name, m.source.version),
@@ -27,7 +29,7 @@ export default function MenusList() {
       <PageHeader
         title="Menus"
         subtitle="Reusable templates that Orders are created from, with guardrails on what may be overridden"
-        actions={<ButtonLink variant="primary" icon={<PlusIcon />} to={paths.newMenu()}>New Menu</ButtonLink>}
+        actions={<ButtonLink variant="primary" icon={<PlusIcon />} to={paths.newMenu()} disabledReason={createDenied}>New Menu</ButtonLink>}
       />
 
       <Section
@@ -40,7 +42,7 @@ export default function MenusList() {
         ) : filtered.length === 0 ? (
           <EmptyState
             text={query ? 'No menus match your filter' : 'No menus yet'}
-            action={!query && <ButtonLink variant="secondary" size="sm" to={paths.newMenu()}>Create your first Menu</ButtonLink>}
+            action={!query && <ButtonLink variant="secondary" size="sm" to={paths.newMenu()} disabledReason={createDenied}>Create your first Menu</ButtonLink>}
           />
         ) : (
           <DataTable<Menu>

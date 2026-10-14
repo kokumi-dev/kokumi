@@ -6,6 +6,8 @@ import Toggle from '../components/shared/Toggle'
 import { Button, TabNav } from '../components/ui'
 import PageHeader from '../components/layout/PageHeader'
 import { paths } from '../routes/paths'
+import { useAppInfo } from '../appContext'
+import type { Capability } from '../api/capabilities'
 import {
   getSettings,
   saveSettings,
@@ -16,17 +18,30 @@ import type { AuthSettings, Settings } from '../api/client'
 const tabs = ['general', 'authentication'] as const
 type Tab = typeof tabs[number]
 
+/** Capability a tab requires; tabs the user lacks it for are hidden. */
+const tabCapability: Record<Tab, Capability> = {
+  general: 'settings.general:update',
+  authentication: 'settings.auth:update',
+}
+
+const tabLabel: Record<Tab, string> = {
+  general: 'General',
+  authentication: 'Authentication',
+}
+
 const maxClaimLength = 253
 
 /**
  * Settings shows the operator configuration of the Kitchen singleton in two
  * tabs: General (Argo CD URL) and Authentication (admin user, OIDC, token
- * signing key). The page is only reachable for admins; the server still
+ * signing key). Each tab is only shown with its capability; the server still
  * enforces RBAC on every write.
  */
 export default function Settings() {
   const params = useParams()
   const tab = params.tab as Tab
+  const { capabilities } = useAppInfo()
+  const permittedTabs = tabs.filter((t) => capabilities?.has(tabCapability[t]))
   const [settings, setSettings] = useState<Settings | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -54,8 +69,8 @@ export default function Settings() {
     setSettingsRev((rev) => rev + 1)
   }
 
-  if (!tabs.includes(tab)) {
-    return <Navigate to={paths.settings()} replace />
+  if (!permittedTabs.includes(tab)) {
+    return <Navigate to={permittedTabs.length > 0 ? paths.settings(permittedTabs[0]) : paths.dashboard()} replace />
   }
 
   const header = <PageHeader title="Settings" subtitle="Operator configuration and preferences" />
@@ -76,12 +91,7 @@ export default function Settings() {
     <div className={layout.page}>
       {header}
 
-      <TabNav
-        tabs={[
-          { to: paths.settings('general'), label: 'General' },
-          { to: paths.settings('authentication'), label: 'Authentication' },
-        ]}
-      />
+      <TabNav tabs={permittedTabs.map((t) => ({ to: paths.settings(t), label: tabLabel[t] }))} />
 
       {loading ? (
         <p className={styles.fieldHint}>Loading…</p>

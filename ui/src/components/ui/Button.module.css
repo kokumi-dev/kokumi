@@ -20,12 +20,12 @@
   transition: background 0.15s, color 0.15s, opacity 0.15s, transform 0.1s;
 }
 
-.button:hover:not(:disabled) {
+.button:hover:not(:disabled, [aria-disabled='true']) {
   background: var(--_bg-hover);
   color: var(--_fg-hover);
 }
 
-.button:active:not(:disabled) {
+.button:active:not(:disabled, [aria-disabled='true']) {
   transform: scale(0.97);
 }
 
@@ -34,7 +34,8 @@
   box-shadow: var(--control-focus-ring);
 }
 
-.button:disabled {
+.button:disabled,
+.button[aria-disabled='true'] {
   opacity: 0.45;
   cursor: not-allowed;
 }

@@ -1,6 +1,7 @@
 import type { Pantry } from '../../api/types'
 import { usePantries } from '../../hooks/usePantries'
 import { matchesFilter, useFilterParam } from '../../hooks/useFilterParam'
+import { useDeniedReason } from '../../hooks/useCapability'
 import PageHeader from '../../components/layout/PageHeader'
 import Section from '../../components/layout/Section'
 import DataTable from '../../components/layout/DataTable'
@@ -17,6 +18,7 @@ import layout from '../../components/layout/layout.module.css'
 export default function PantriesList() {
   const pantries = usePantries()
   const [query, setQuery] = useFilterParam()
+  const createDenied = useDeniedReason('pantries:create')
 
   const filtered = (pantries ?? []).filter((p) => matchesFilter(query, p.name, p.namespace, p.url, p.description))
 
@@ -25,7 +27,7 @@ export default function PantriesList() {
       <PageHeader
         title="Pantries"
         subtitle="OCI registries and the credentials used to pull sources and push Preparations"
-        actions={<ButtonLink variant="primary" icon={<PlusIcon />} to={paths.newPantry()}>New Pantry</ButtonLink>}
+        actions={<ButtonLink variant="primary" icon={<PlusIcon />} to={paths.newPantry()} disabledReason={createDenied}>New Pantry</ButtonLink>}
       />
 
       <Section
@@ -38,7 +40,7 @@ export default function PantriesList() {
         ) : filtered.length === 0 ? (
           <EmptyState
             text={query ? 'No pantries match your filter' : 'No pantries yet'}
-            action={!query && <ButtonLink variant="secondary" size="sm" to={paths.newPantry()}>Connect a registry</ButtonLink>}
+            action={!query && <ButtonLink variant="secondary" size="sm" to={paths.newPantry()} disabledReason={createDenied}>Connect a registry</ButtonLink>}
           />
         ) : (
           <DataTable<Pantry>

@@ -11,12 +11,14 @@ import { Button, Counter } from '../../components/ui'
 import { paths } from '../../routes/paths'
 import { formatDate } from '../../utils/format'
 import { useOrderContext } from './orderContext'
+import { useDeniedReason } from '../../hooks/useCapability'
 import layout from '../../components/layout/layout.module.css'
 
 export default function OrderOverview() {
   const { order, preparations } = useOrderContext()
   // Edits staged for removal; committed through the CommitBox below.
   const [pendingEdits, setPendingEdits] = useState<Patch[] | null>(null)
+  const editDenied = useDeniedReason('orders:update')
 
   const edits = pendingEdits ?? order.edits ?? []
   const latest = preparations?.[0]
@@ -118,12 +120,16 @@ export default function OrderOverview() {
           title={<>Edits<Counter count={edits.length} /></>}
           description="Field changes made on the rendered manifest"
           actions={edits.length > 0 && (
-            <Button variant="danger" size="sm" onClick={() => setPendingEdits([])}>Clear all</Button>
+            <Button variant="danger" size="sm" onClick={() => setPendingEdits([])} disabledReason={editDenied}>Clear all</Button>
           )}
         >
           <div className={layout.stack}>
             {edits.length > 0 ? (
-              <PatchList patches={edits} onRemove={removeEdit} onRemovePath={removeEditPath} />
+              <PatchList
+                patches={edits}
+                onRemove={editDenied ? undefined : removeEdit}
+                onRemovePath={editDenied ? undefined : removeEditPath}
+              />
             ) : (
               <span className={layout.muted}>All edits will be removed.</span>
             )}

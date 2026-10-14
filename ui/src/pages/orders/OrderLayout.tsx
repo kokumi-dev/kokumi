@@ -5,6 +5,7 @@ import { useOrders } from '../../hooks/useOrders'
 import { useMenus } from '../../hooks/useMenus'
 import { usePreparations } from '../../hooks/usePreparations'
 import { useServings } from '../../hooks/useServings'
+import { useDeniedReason } from '../../hooks/useCapability'
 import PageHeader from '../../components/layout/PageHeader'
 import ResourceNotFound from '../../components/layout/ResourceNotFound'
 import Badge from '../../components/shared/Badge'
@@ -24,6 +25,8 @@ export default function OrderLayout() {
   const allPreps = usePreparations()
   const allServings = useServings()
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const editDenied = useDeniedReason('orders:update')
+  const deleteDenied = useDeniedReason('orders:delete')
 
   const order = orders?.find((o) => o.namespace === namespace && o.name === name)
   const menu = order?.menuRef
@@ -54,7 +57,7 @@ export default function OrderLayout() {
   }
 
   // When a menuRef is set but the menu has not loaded, deny edits (fail closed).
-  const editsAllowed = order.menuRef ? !!menu && menu.overrides.patches.policy !== 'None' : true
+  const editsAllowed = !editDenied && (order.menuRef ? !!menu && menu.overrides.patches.policy !== 'None' : true)
 
   const ctx: OrderContext = { order, menu, editsAllowed, preparations, servings }
 
@@ -67,8 +70,8 @@ export default function OrderLayout() {
         subtitle={<span className={layout.mono}>{orderSourceLabel(order)}</span>}
         actions={
           <>
-            <ButtonLink variant="secondary" icon={<EditIcon />} to={paths.order(order.namespace, order.name, 'edit')}>Edit</ButtonLink>
-            <Button variant="danger" icon={<TrashIcon />} onClick={() => setConfirmDelete(true)}>Delete</Button>
+            <ButtonLink variant="secondary" icon={<EditIcon />} to={paths.order(order.namespace, order.name, 'edit')} disabledReason={editDenied}>Edit</ButtonLink>
+            <Button variant="danger" icon={<TrashIcon />} onClick={() => setConfirmDelete(true)} disabledReason={deleteDenied}>Delete</Button>
           </>
         }
       />

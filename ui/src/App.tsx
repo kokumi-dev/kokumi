@@ -5,6 +5,7 @@ import { router } from './routes/router'
 import { AppContext, type AppInfo } from './appContext'
 import { logout, onAuthChange, refresh, getTokenTTL, isAuthed, consumeFragmentToken } from './api/auth'
 import { getWhoAmI } from './api/client'
+import { mergeCapabilities, type Capability } from './api/capabilities'
 
 interface Info {
   name: string
@@ -17,8 +18,8 @@ function App() {
   const [ready, setReady] = useState(false)
   const [authed, setAuthed] = useState(() => isAuthed())
   const [bootRefreshDone, setBootRefreshDone] = useState(false)
-  // null = unknown; admin-only routes wait for it instead of redirecting.
-  const [isAdmin, setIsAdmin] = useState<boolean | null>(null)
+  // null = unknown; guarded routes wait for it instead of redirecting.
+  const [capabilities, setCapabilities] = useState<ReadonlySet<Capability> | null>(null)
 
   // Keep authed in sync with token changes (login/logout/401/OIDC fragment).
   // Registered before the mount effect so consumeFragmentToken() updates it via this subscription, not a direct setState.
@@ -27,13 +28,16 @@ function App() {
   useEffect(() => {
     if (!authed) {
       // Defer to a microtask to avoid a synchronous setState in the effect body.
-      void Promise.resolve().then(() => setIsAdmin(null))
+      void Promise.resolve().then(() => setCapabilities(null))
       return
     }
     const fetchWhoAmI = () => {
       getWhoAmI()
-        .then((w) => setIsAdmin(w.isAdmin))
-        .catch(() => setIsAdmin(false))
+        .then((w) => setCapabilities((prev) => mergeCapabilities(prev, w.capabilities, w.undetermined)))
+        // Fail closed on the first load, but keep the last known set when a
+        // refetch fails, so a transient error does not bounce the user off a
+        // guarded page and discard unsaved input.
+        .catch(() => setCapabilities((prev) => prev ?? new Set()))
     }
     fetchWhoAmI()
     window.addEventListener('focus', fetchWhoAmI)
@@ -102,10 +106,10 @@ function App() {
     () => ({
       operatorName: info?.name,
       operatorVersion: info?.version,
-      isAdmin,
+      capabilities,
       onLogout: () => void logout(),
     }),
-    [info, isAdmin],
+    [info, capabilities],
   )
 
   // Wait until /api/v1/info resolves. If we have no valid token, hold off

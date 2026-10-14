@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { listApprovals, submitApproval } from '../../api/client'
 import type { Approval, ApprovalDecision, Preparation } from '../../api/types'
 import { Button } from '../ui'
+import { useDeniedReason } from '../../hooks/useCapability'
 import Section from '../layout/Section'
 import EmptyState from '../layout/EmptyState'
 import styles from './ApprovalPanel.module.css'
@@ -19,6 +20,7 @@ export default function ApprovalPanel({ preparation: prep }: { preparation: Prep
   const [error, setError] = useState<string | null>(null)
   const [comment, setComment] = useState('')
   const [submitting, setSubmitting] = useState<ApprovalDecision | null>(null)
+  const approveDenied = useDeniedReason('preparations:approve')
 
   const load = useCallback(() => {
     listApprovals(prep.namespace, prep.name)
@@ -88,13 +90,13 @@ export default function ApprovalPanel({ preparation: prep }: { preparation: Prep
               value={comment}
               onChange={(e) => setComment(e.target.value)}
               placeholder="Optional review comment"
-              disabled={submitting !== null}
+              disabled={submitting !== null || !!approveDenied}
             />
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <Button variant="danger" onClick={() => handleVote('Reject')} disabled={submitting !== null}>
+              <Button variant="danger" onClick={() => handleVote('Reject')} disabled={submitting !== null} disabledReason={approveDenied}>
                 {submitting === 'Reject' ? '…' : 'Request changes'}
               </Button>
-              <Button variant="promote" onClick={() => handleVote('Approve')} disabled={submitting !== null}>
+              <Button variant="promote" onClick={() => handleVote('Approve')} disabled={submitting !== null} disabledReason={approveDenied}>
                 {submitting === 'Approve' ? '…' : 'Approve'}
               </Button>
             </div>
