@@ -2,6 +2,7 @@ import { Link } from 'react-router'
 import type { Order } from '../../api/types'
 import { useOrders } from '../../hooks/useOrders'
 import { matchesFilter, useFilterParam } from '../../hooks/useFilterParam'
+import { useDeniedReason } from '../../hooks/useCapability'
 import PageHeader from '../../components/layout/PageHeader'
 import Section from '../../components/layout/Section'
 import DataTable from '../../components/layout/DataTable'
@@ -18,6 +19,7 @@ import layout from '../../components/layout/layout.module.css'
 export default function OrdersList() {
   const orders = useOrders()
   const [query, setQuery] = useFilterParam()
+  const createDenied = useDeniedReason('orders:create')
 
   const filtered = (orders ?? []).filter((o) =>
     matchesFilter(query, o.name, o.namespace, o.menuRef?.name, o.source?.oci, o.source?.pantryRef?.name, o.source?.version),
@@ -28,7 +30,7 @@ export default function OrdersList() {
       <PageHeader
         title="Orders"
         subtitle="What to render, how to configure it, and where it gets promoted"
-        actions={<ButtonLink variant="primary" icon={<PlusIcon />} to={paths.newOrder()}>New Order</ButtonLink>}
+        actions={<ButtonLink variant="primary" icon={<PlusIcon />} to={paths.newOrder()} disabledReason={createDenied}>New Order</ButtonLink>}
       />
 
       <Section
@@ -41,7 +43,7 @@ export default function OrdersList() {
         ) : filtered.length === 0 ? (
           <EmptyState
             text={query ? 'No orders match your filter' : 'No orders yet'}
-            action={!query && <ButtonLink variant="secondary" size="sm" to={paths.newOrder()}>Create your first Order</ButtonLink>}
+            action={!query && <ButtonLink variant="secondary" size="sm" to={paths.newOrder()} disabledReason={createDenied}>Create your first Order</ButtonLink>}
           />
         ) : (
           <DataTable<Order>

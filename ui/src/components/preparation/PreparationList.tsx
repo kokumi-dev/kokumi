@@ -8,6 +8,7 @@ import PromoteDialog from './PromoteDialog'
 import { paths } from '../../routes/paths'
 import { shortDigest } from '../../utils/format'
 import { approvalLabel, promoteLabel } from '../../utils/preparations'
+import { useDeniedReason } from '../../hooks/useCapability'
 import layout from '../layout/layout.module.css'
 import styles from './PreparationList.module.css'
 
@@ -24,6 +25,7 @@ interface Props {
  */
 export default function PreparationList({ preparations, mode }: Props) {
   const [promoting, setPromoting] = useState<{ prep: Preparation; action: 'Promote' | 'Rollback' } | null>(null)
+  const promoteDenied = useDeniedReason('preparations:promote')
   const active = preparations.find((p) => p.isActive)
 
   if (preparations.length === 0) {
@@ -81,6 +83,7 @@ export default function PreparationList({ preparations, mode }: Props) {
                     icon={action === 'Rollback' ? <RollbackIcon /> : <PromoteIcon />}
                     onClick={() => setPromoting({ prep, action })}
                     disabled={blockedByApproval}
+                    disabledReason={promoteDenied}
                     title={blockedByApproval ? approval?.message ?? 'Approval required' : undefined}
                   >
                     {action}

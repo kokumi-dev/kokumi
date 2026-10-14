@@ -12,6 +12,12 @@ interface CommonProps {
   icon?: ReactNode
   /** Stretch to the container width. */
   block?: boolean
+  /**
+   * Marks the action unavailable and explains why in a tooltip. Unlike
+   * `disabled`, the control stays focusable so keyboard and screen-reader
+   * users can discover the reason.
+   */
+  disabledReason?: string
 }
 
 interface ButtonProps extends CommonProps, ButtonHTMLAttributes<HTMLButtonElement> {
@@ -29,13 +35,26 @@ export function Button({
   size = 'md',
   icon,
   block,
+  disabledReason,
   className,
   type = 'button',
+  title,
+  onClick,
+  disabled,
   children,
   ...rest
 }: ButtonProps) {
   return (
-    <button type={type} className={buttonClass(variant, size, block, className)} {...rest}>
+    <button
+      type={type}
+      className={buttonClass(variant, size, block, className)}
+      // disabledReason takes over from disabled so the control stays focusable.
+      disabled={disabledReason ? undefined : disabled}
+      aria-disabled={disabledReason ? true : undefined}
+      title={disabledReason ?? title}
+      onClick={disabledReason ? (e) => e.preventDefault() : onClick}
+      {...rest}
+    >
       {icon && <span className={styles.icon}>{icon}</span>}
       {children}
     </button>
@@ -45,11 +64,25 @@ export function Button({
 interface ButtonLinkProps extends CommonProps, LinkProps {}
 
 /** A router link styled as a button, for navigation actions. */
-export function ButtonLink({ variant = 'secondary', size = 'md', icon, block, className, children, ...rest }: ButtonLinkProps) {
-  return (
-    <Link className={buttonClass(variant, size, block, className)} {...rest}>
+export function ButtonLink({ variant = 'secondary', size = 'md', icon, block, disabledReason, className, children, ...rest }: ButtonLinkProps) {
+  const content = (
+    <>
       {icon && <span className={styles.icon}>{icon}</span>}
       {children}
+    </>
+  )
+  if (disabledReason) {
+    // Without an href the link cannot navigate; role and tabIndex keep it
+    // announced and focusable as an unavailable link.
+    return (
+      <a role="link" aria-disabled="true" tabIndex={0} title={disabledReason} className={buttonClass(variant, size, block, className)}>
+        {content}
+      </a>
+    )
+  }
+  return (
+    <Link className={buttonClass(variant, size, block, className)} {...rest}>
+      {content}
     </Link>
   )
 }

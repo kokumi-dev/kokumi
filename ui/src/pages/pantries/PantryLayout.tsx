@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Outlet, useNavigate, useParams } from 'react-router'
 import { deletePantry } from '../../api/client'
 import { usePantries } from '../../hooks/usePantries'
+import { useDeniedReason } from '../../hooks/useCapability'
 import PageHeader from '../../components/layout/PageHeader'
 import ResourceNotFound from '../../components/layout/ResourceNotFound'
 import Badge from '../../components/shared/Badge'
@@ -15,6 +16,8 @@ export default function PantryLayout() {
   const navigate = useNavigate()
   const pantries = usePantries()
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const editDenied = useDeniedReason('pantries:update')
+  const deleteDenied = useDeniedReason('pantries:delete')
 
   const pantry = pantries?.find((p) => p.namespace === namespace && p.name === name)
   if (!pantry) {
@@ -32,8 +35,8 @@ export default function PantryLayout() {
         subtitle={<span className={layout.mono}>{pantry.url}</span>}
         actions={
           <>
-            <ButtonLink variant="secondary" icon={<EditIcon />} to={paths.pantry(pantry.namespace, pantry.name, 'edit')}>Edit</ButtonLink>
-            <Button variant="danger" icon={<TrashIcon />} onClick={() => setConfirmDelete(true)}>Delete</Button>
+            <ButtonLink variant="secondary" icon={<EditIcon />} to={paths.pantry(pantry.namespace, pantry.name, 'edit')} disabledReason={editDenied}>Edit</ButtonLink>
+            <Button variant="danger" icon={<TrashIcon />} onClick={() => setConfirmDelete(true)} disabledReason={deleteDenied}>Delete</Button>
           </>
         }
       />

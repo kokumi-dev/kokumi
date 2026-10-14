@@ -102,7 +102,7 @@ func handleSubmitApproval(deps *apiDeps) http.HandlerFunc {
 			respondError(w, http.StatusUnauthorized, "authentication required")
 			return
 		}
-		if id.Provider != providerOIDC || id.Issuer == "" {
+		if !id.isPersonalLogin() {
 			respondError(w, http.StatusForbidden, "approvals require a personal OIDC login; the shared admin account cannot approve")
 			return
 		}

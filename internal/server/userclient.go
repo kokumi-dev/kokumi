@@ -177,32 +177,26 @@ func (u *userClient) delete(ctx context.Context, obj client.Object, resource str
 // authorized reports whether any mapped SA may perform verb on the named
 // delivery.kokumi.dev object. The check is never cached.
 func (u *userClient) authorized(ctx context.Context, verb, resource, namespace, name string) (bool, error) {
-	for _, sa := range u.sas {
-		allowed, err := u.imp.checkAccess(ctx, sa.Name, verb, resource, namespace, name)
-		if err != nil {
-			return false, err
-		}
-		if allowed {
-			return true, nil
-		}
-	}
-	return false, nil
+	sa, err := firstAllowed(u.sas, func(saName string) (bool, error) {
+		return u.imp.checkAccess(ctx, saName, verb, resource, namespace, name)
+	})
+	return sa != "", err
 }
 
 // readerFor returns a client.Reader restricted to the first mapped SA that can
 // read the resource in the namespace (used for helper paths like credential
 // resolution). Returns errNotAuthorized when no mapped SA is permitted.
 func (u *userClient) readerFor(ctx context.Context, verb, resource, namespace string) (client.Reader, error) {
-	for _, sa := range u.sas {
-		allowed, err := u.imp.authorizedFor(ctx, sa.Name, verb, resource, namespace)
-		if err != nil {
-			return nil, err
-		}
-		if allowed {
-			return u.imp.clientFor(sa.Name)
-		}
+	sa, err := firstAllowed(u.sas, func(saName string) (bool, error) {
+		return u.imp.authorizedFor(ctx, saName, verb, resource, namespace, "")
+	})
+	if err != nil {
+		return nil, err
 	}
-	return nil, fmt.Errorf("%w to %s %s", errNotAuthorized, verb, resource)
+	if sa == "" {
+		return nil, fmt.Errorf("%w to %s %s", errNotAuthorized, verb, resource)
+	}
+	return u.imp.clientFor(sa)
 }
 
 // respondForbiddenOrError maps operation errors to HTTP responses: RBAC

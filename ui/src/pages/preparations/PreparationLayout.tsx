@@ -3,6 +3,7 @@ import { Outlet, useParams } from 'react-router'
 import { useOrders } from '../../hooks/useOrders'
 import { useMenus } from '../../hooks/useMenus'
 import { usePreparations } from '../../hooks/usePreparations'
+import { useCan, useDeniedReason } from '../../hooks/useCapability'
 import PageHeader from '../../components/layout/PageHeader'
 import ResourceNotFound from '../../components/layout/ResourceNotFound'
 import Badge from '../../components/shared/Badge'
@@ -19,6 +20,8 @@ export default function PreparationLayout() {
   const orders = useOrders()
   const menus = useMenus()
   const [promoting, setPromoting] = useState(false)
+  const promoteDenied = useDeniedReason('preparations:promote')
+  const canEditOrders = useCan('orders:update')
 
   const prep = preparations?.find((p) => p.namespace === namespace && p.name === name)
   if (!prep) {
@@ -39,7 +42,7 @@ export default function PreparationLayout() {
   const active = siblings.find((p) => p.isActive)
   const order = orders?.find((o) => o.namespace === prep.namespace && o.name === prep.order)
   const menu = order?.menuRef ? menus?.find((m) => m.namespace === order.namespace && m.name === order.menuRef?.name) : undefined
-  const editsAllowed = !!order && (order.menuRef ? !!menu && menu.overrides.patches.policy !== 'None' : true)
+  const editsAllowed = canEditOrders && !!order && (order.menuRef ? !!menu && menu.overrides.patches.policy !== 'None' : true)
 
   const action = promoteLabel(prep.createdAt, active?.createdAt)
   const blockedByApproval = !!prep.approval && !prep.approval.approved
@@ -69,6 +72,7 @@ export default function PreparationLayout() {
             icon={action === 'Rollback' ? <RollbackIcon /> : <PromoteIcon />}
             onClick={() => setPromoting(true)}
             disabled={blockedByApproval}
+            disabledReason={promoteDenied}
             title={blockedByApproval ? prep.approval?.message ?? 'Approval required' : undefined}
           >
             {action}

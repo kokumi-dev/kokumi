@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 import type { Order, Preparation } from '../../api/types'
 import { useOrders } from '../../hooks/useOrders'
 import { usePreparations } from '../../hooks/usePreparations'
+import { useDeniedReason } from '../../hooks/useCapability'
 import { shortDigest } from '../../utils/format'
 import { approvalLabel } from '../../utils/preparations'
 import { paths } from '../../routes/paths'
@@ -25,6 +26,7 @@ export default function OpenPromotions() {
   const orders = useOrders()
   const preparations = usePreparations()
   const [promoting, setPromoting] = useState<Preparation | null>(null)
+  const promoteDenied = useDeniedReason('preparations:promote')
 
   if (orders === null || preparations === null) return <EmptyState text="Loading…" />
 
@@ -97,6 +99,7 @@ export default function OpenPromotions() {
                   icon={<PromoteIcon />}
                   onClick={() => setPromoting(r.latest)}
                   disabled={blocked}
+                  disabledReason={promoteDenied}
                   title={blocked ? r.latest.approval?.message ?? 'Approval required' : undefined}
                 >
                   Promote

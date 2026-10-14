@@ -1,6 +1,6 @@
 import { Navigate, createBrowserRouter } from 'react-router'
 import AppLayout from '../components/layout/AppLayout'
-import RequireAdmin from '../components/layout/RequireAdmin'
+import RequireCapability from '../components/layout/RequireCapability'
 import Dashboard from '../pages/Dashboard'
 import Settings from '../pages/Settings'
 import NotFound from '../pages/NotFound'
@@ -40,8 +40,8 @@ export const router = createBrowserRouter([
       { index: true, element: <Dashboard /> },
 
       { path: 'orders', element: <OrdersList /> },
-      { path: 'orders/new', element: <OrderEditor /> },
-      { path: 'orders/:namespace/:name/edit', element: <OrderEditor /> },
+      { path: 'orders/new', element: <RequireCapability anyOf={['orders:create']}><OrderEditor /></RequireCapability> },
+      { path: 'orders/:namespace/:name/edit', element: <RequireCapability anyOf={['orders:update']}><OrderEditor /></RequireCapability> },
       {
         path: 'orders/:namespace/:name',
         element: <OrderLayout />,
@@ -71,8 +71,8 @@ export const router = createBrowserRouter([
       { path: 'servings/:namespace/:name', element: <ServingDetail /> },
 
       { path: 'menus', element: <MenusList /> },
-      { path: 'menus/new', element: <MenuEditor /> },
-      { path: 'menus/:namespace/:name/edit', element: <MenuEditor /> },
+      { path: 'menus/new', element: <RequireCapability anyOf={['menus:create']}><MenuEditor /></RequireCapability> },
+      { path: 'menus/:namespace/:name/edit', element: <RequireCapability anyOf={['menus:update']}><MenuEditor /></RequireCapability> },
       {
         path: 'menus/:namespace/:name',
         element: <MenuLayout />,
@@ -83,8 +83,8 @@ export const router = createBrowserRouter([
       },
 
       { path: 'pantries', element: <PantriesList /> },
-      { path: 'pantries/new', element: <PantryEditor /> },
-      { path: 'pantries/:namespace/:name/edit', element: <PantryEditor /> },
+      { path: 'pantries/new', element: <RequireCapability anyOf={['pantries:create']}><PantryEditor /></RequireCapability> },
+      { path: 'pantries/:namespace/:name/edit', element: <RequireCapability anyOf={['pantries:update']}><PantryEditor /></RequireCapability> },
       {
         path: 'pantries/:namespace/:name',
         element: <PantryLayout />,
@@ -95,7 +95,10 @@ export const router = createBrowserRouter([
       },
 
       { path: 'settings', element: <Navigate to="/settings/general" replace /> },
-      { path: 'settings/:tab', element: <RequireAdmin><Settings /></RequireAdmin> },
+      {
+        path: 'settings/:tab',
+        element: <RequireCapability anyOf={['settings.general:update', 'settings.auth:update']}><Settings /></RequireCapability>,
+      },
 
       { path: '*', element: <NotFound /> },
     ],
