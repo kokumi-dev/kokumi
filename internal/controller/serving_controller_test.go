@@ -251,60 +251,65 @@ var _ = Describe("Serving Controller", func() {
 			Expect(s.Status.ObservedPreparationName).To(Equal(preparationName))
 		})
 
-		It("does not report Deployed while the Application is healthy at an older revision", func() {
-			const v2Digest = "sha256:aaaaaaaaaabbbbbbbbbbccccccccccddddddddddeeeeeeeeeeffffffffffffff"
+		DescribeTable("reports a promoted Preparation as Deploying while the Application is still at an older revision",
+			func(oldHealth string) {
+				const v2Digest = "sha256:aaaaaaaaaabbbbbbbbbbccccccccccddddddddddeeeeeeeeeeffffffffffffff"
 
-			By("deploying and syncing to the desired revision")
-			_, err := newReconciler().Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
-			Expect(err).NotTo(HaveOccurred())
-			setAppStatus("Synced", fakeDigest, "Healthy", "")
-			_, err = newReconciler().Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(getServing().Status.DeployedDigest).To(Equal(fakeDigest))
+				By("deploying and syncing to the desired revision")
+				_, err := newReconciler().Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+				Expect(err).NotTo(HaveOccurred())
+				setAppStatus("Synced", fakeDigest, "Healthy", "")
+				_, err = newReconciler().Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(getServing().Status.DeployedDigest).To(Equal(fakeDigest))
+				setAppStatus("Synced", fakeDigest, oldHealth, "old revision is "+oldHealth)
 
-			By("pointing the Serving at a new preparation digest")
-			s := getServing()
-			s.Spec.PreparationName = preparationName + "-v2"
-			Expect(k8sClient.Update(ctx, s)).To(Succeed())
+				By("pointing the Serving at a new preparation digest")
+				s := getServing()
+				s.Spec.PreparationName = preparationName + "-v2"
+				Expect(k8sClient.Update(ctx, s)).To(Succeed())
 
-			preparationV2 := &deliveryv1alpha1.Preparation{
-				Name:      preparationName + "-v2",
-				Namespace: testNamespace,
-				Spec: deliveryv1alpha1.PreparationSpec{
-					OrderName: orderName,
-					Source: deliveryv1alpha1.OrderSource{
-						OCI:        testOCIRef,
-						BaseDigest: fakeDigest,
+				preparationV2 := &deliveryv1alpha1.Preparation{
+					Name:      preparationName + "-v2",
+					Namespace: testNamespace,
+					Spec: deliveryv1alpha1.PreparationSpec{
+						OrderName: orderName,
+						Source: deliveryv1alpha1.OrderSource{
+							OCI:        testOCIRef,
+							BaseDigest: fakeDigest,
+						},
+						Renderer: deliveryv1alpha1.Renderer{
+							Type:    deliveryv1alpha1.RenderTypeManifest,
+							Version: "v1.0.0",
+							Builder: testBuilderID,
+						},
+						ConfigHash: "sha256:abc123",
+						Artifact: deliveryv1alpha1.Artifact{
+							OCIRef: "oci://registry.kokumi.svc.cluster.local:5000/preparation/test-resource@" + v2Digest,
+							Digest: v2Digest,
+						},
 					},
-					Renderer: deliveryv1alpha1.Renderer{
-						Type:    deliveryv1alpha1.RenderTypeManifest,
-						Version: "v1.0.0",
-						Builder: testBuilderID,
-					},
-					ConfigHash: "sha256:abc123",
-					Artifact: deliveryv1alpha1.Artifact{
-						OCIRef: "oci://registry.kokumi.svc.cluster.local:5000/preparation/test-resource@" + v2Digest,
-						Digest: v2Digest,
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, preparationV2)).To(Succeed())
-			DeferCleanup(func() {
-				_ = k8sClient.Delete(ctx, preparationV2)
-			})
-			markPreparationReady(ctx, client.ObjectKeyFromObject(preparationV2))
+				}
+				Expect(k8sClient.Create(ctx, preparationV2)).To(Succeed())
+				DeferCleanup(func() {
+					_ = k8sClient.Delete(ctx, preparationV2)
+				})
+				markPreparationReady(ctx, client.ObjectKeyFromObject(preparationV2))
 
-			By("reconciling while the Application is still healthy at the old revision")
-			_, err = newReconciler().Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
-			Expect(err).NotTo(HaveOccurred())
+				By("reconciling while the Application is still at the old revision")
+				_, err = newReconciler().Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+				Expect(err).NotTo(HaveOccurred())
 
-			s = getServing()
-			cond := apimeta.FindStatusCondition(s.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)
-			Expect(cond).NotTo(BeNil())
-			Expect(cond.Reason).To(Equal("Deploying"),
-				"must not report Deployed while the Application is healthy at an older revision")
-			Expect(s.Status.ObservedPreparationName).To(Equal(preparationName + "-v2"))
-		})
+				s = getServing()
+				cond := apimeta.FindStatusCondition(s.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)
+				Expect(cond).NotTo(BeNil())
+				Expect(cond.Reason).To(Equal("Deploying"),
+					"the health of the old revision must not be reported for the promoted Preparation")
+				Expect(s.Status.ObservedPreparationName).To(Equal(preparationName + "-v2"))
+			},
+			Entry("healthy", "Healthy"),
+			Entry("degraded", "Degraded"),
+		)
 
 		It("does not deploy a promoted Preparation until it is ready", func() {
 			const v2Digest = "sha256:bbbbbbbbbbccccccccccddddddddddeeeeeeeeeeffffffffffaaaaaaaaaaaaaa"
@@ -385,6 +390,35 @@ var _ = Describe("Serving Controller", func() {
 			Expect(cond.Reason).To(Equal("DeploymentFailed"))
 			Expect(cond.Message).To(ContainSubstring("pod crashed"))
 		})
+
+		DescribeTable("does not rewrite the status of a Serving that stays degraded",
+			func(healthyFirst bool) {
+				_, err := newReconciler().Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+				Expect(err).NotTo(HaveOccurred())
+				if healthyFirst {
+					setAppStatus("Synced", fakeDigest, "Healthy", "")
+					_, err = newReconciler().Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+					Expect(err).NotTo(HaveOccurred())
+				}
+				setAppStatus("Synced", fakeDigest, "Degraded", "hpa unhealthy")
+				_, err = newReconciler().Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+				Expect(err).NotTo(HaveOccurred())
+
+				before := getServing()
+				cond := apimeta.FindStatusCondition(before.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)
+				Expect(cond).NotTo(BeNil())
+				Expect(cond.Reason).To(Equal("DeploymentFailed"))
+				Expect(before.Status.ObservedPreparationName).To(Equal(preparationName))
+
+				By("reconciling again without any change")
+				_, err = newReconciler().Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(getServing().ResourceVersion).To(Equal(before.ResourceVersion),
+					"an unchanged degraded Serving must not be written, every write re-triggers the reconcile")
+			},
+			Entry("while rolling out", false),
+			Entry("after it was deployed", true),
+		)
 
 		It("refuses to update a pre-existing Argo CD Application that is missing the opt-in annotation", func() {
 			By("creating an Argo CD Application out-of-band without the opt-in annotation")

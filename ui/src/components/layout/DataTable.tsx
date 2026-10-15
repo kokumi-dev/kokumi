@@ -1,4 +1,4 @@
-import { Fragment, useId, type MouseEvent, type ReactNode } from 'react'
+import { Fragment, useId, useState, type MouseEvent, type ReactNode } from 'react'
 import { useNavigate } from 'react-router'
 import { Chevron, IconButton } from '../ui'
 import styles from './layout.module.css'
@@ -28,7 +28,7 @@ export interface RowExpansion<T> {
    * Child rows of an open row: <tr> elements with a leading cell under the
    * toggle column, then one cell per column. They share the table's columns
    * and headers, so assistive technology reads them like any other row.
-   * Only called for open rows.
+   * Only called for open rows. They fade in when the user opens the row.
    */
   render: (row: T) => ReactNode
   /**
@@ -50,6 +50,20 @@ interface Props<T> {
 export default function DataTable<T>({ rows, columns, rowKey, rowHref, expand }: Props<T>) {
   const navigate = useNavigate()
   const regionId = useId()
+  // Rows the user has just opened. Their open animations run only while they
+  // are listed here, so React re-inserting a row's nodes when the rows change
+  // order does not replay them.
+  const [opening, setOpening] = useState<ReadonlySet<string>>(() => new Set())
+
+  function setRowOpening(key: string, on: boolean) {
+    setOpening((prev) => {
+      if (prev.has(key) === on) return prev
+      const next = new Set(prev)
+      if (on) next.add(key)
+      else next.delete(key)
+      return next
+    })
+  }
 
   function handleRowClick(e: MouseEvent<HTMLTableRowElement>, row: T) {
     if (!rowHref) return
@@ -75,10 +89,12 @@ export default function DataTable<T>({ rows, columns, rowKey, rowHref, expand }:
           </thead>
           {/* Each row has its own body, so the rows it opens form the next one. */}
           {rows.map((row, index) => {
+            const key = rowKey(row)
             const open = expand?.isOpen(row) ?? false
+            const animate = open && opening.has(key)
             const id = `${regionId}-${index}`
             return (
-              <Fragment key={rowKey(row)}>
+              <Fragment key={key}>
                 <tbody>
                   <tr
                     className={[rowHref ? styles.rowLink : '', open ? styles.rowOpen : ''].filter(Boolean).join(' ') || undefined}
@@ -92,11 +108,16 @@ export default function DataTable<T>({ rows, columns, rowKey, rowHref, expand }:
                         className={`${styles.toggleCell} ${open && expand.connected ? styles.toggleConnected : ''}`}
                         onClick={(e) => {
                           e.stopPropagation()
+                          setRowOpening(key, !open)
                           expand.onToggle(row)
                         }}
                       >
                         <IconButton
-                          className={`${styles.toggle} ${open ? styles.toggleOpen : ''}`}
+                          className={[styles.toggle, open ? styles.toggleOpen : '', animate ? styles.toggleOpening : ''].filter(Boolean).join(' ')}
+                          // The pulse outlasts the reveal; when it ends, the row stops animating.
+                          onAnimationEnd={(e) => {
+                            if (e.target === e.currentTarget) setRowOpening(key, false)
+                          }}
                           aria-label={expand.toggleLabel(row, open)}
                           aria-expanded={open}
                           aria-controls={id}
@@ -116,7 +137,11 @@ export default function DataTable<T>({ rows, columns, rowKey, rowHref, expand }:
                     ))}
                   </tr>
                 </tbody>
-                {expand && open && <tbody id={id}>{expand.render(row)}</tbody>}
+                {expand && open && (
+                  <tbody id={id} className={animate ? styles.revealing : undefined}>
+                    {expand.render(row)}
+                  </tbody>
+                )}
               </Fragment>
             )
           })}

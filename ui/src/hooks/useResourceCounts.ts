@@ -12,5 +12,5 @@ export interface ResourceCounts {
  * the first SSE event is received.
  */
 export function useResourceCounts(): ResourceCounts | null {
-  return useSSEEvent<ResourceCounts>('/api/v1/events', 'counts')
+  return useSSEEvent<ResourceCounts>('counts')
 }

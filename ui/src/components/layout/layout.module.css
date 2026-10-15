@@ -257,7 +257,31 @@
 .table .toggleOpen {
   color: var(--color-text-on-light);
   box-shadow: inset 0 0 0 var(--tree-line) var(--tree-color);
+}
+
+/*
+ * The open animations run only while the user has just opened a row, never
+ * on mount: React re-inserts a row's nodes when the rows change order, and
+ * the browser restarts animations on re-inserted nodes.
+ */
+.table .toggleOpening {
   animation: toggle-open 0.45s ease-out;
+}
+
+.table .revealing > tr > td {
+  animation: reveal 0.18s ease-out;
+}
+
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .table .toggleOpen:focus-visible {
@@ -279,7 +303,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .table .toggleOpen {
+  .table .toggleOpening,
+  .table .revealing > tr > td {
     animation: none;
   }
 }

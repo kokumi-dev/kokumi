@@ -39,7 +39,17 @@ const (
 	eventServings     = "servings"
 	eventProducts     = "products"
 	eventPantries     = "pantries"
+	// eventHeartbeat carries no data; it only shows the stream is alive.
+	eventHeartbeat = "heartbeat"
 )
+
+// sseHeartbeatInterval is how often an SSE stream sends a heartbeat. It stays
+// well below the 60 s idle timeout of common proxies such as nginx.
+const sseHeartbeatInterval = 15 * time.Second
+
+// refreshInterval bounds how often resource snapshots are rebuilt. A burst of
+// informer events within it produces a single snapshot.
+const refreshInterval = 100 * time.Millisecond
 
 // newScheme builds a runtime Scheme with the types the server needs.
 func newScheme() *runtime.Scheme {
@@ -175,36 +185,37 @@ func startK8sWatcher(
 			return
 		}
 
-		if err := h.publish(eventCounts, Counts{
-			Orders:       len(orderList.Items),
-			Preparations: len(prepList.Items),
-			Servings:     len(servingList.Items),
-			Products:     len(productList.Items),
-			Pantries:     len(pantryList.Items),
-		}); err != nil {
-			logger.Error(err, "Failed to publish counts event")
+		// Lists are published before the lists that refer to them: Orders name
+		// their Product and active Preparation, Products and Orders name
+		// Pantries. A client that applies events in arrival order then never
+		// shows a reference to an item it has not received yet.
+		snapshots := []struct {
+			eventType string
+			payload   any
+		}{
+			{eventPantries, pantriesFromList(*pantryList)},
+			{eventProducts, productsToDTO(productList.Items)},
+			{eventPreparations, enrichPreparations(prepList.Items, servingList.Items)},
+			{eventServings, servingsToDTO(servingList.Items)},
+			{eventOrders, enrichOrders(orderList.Items, servingList.Items)},
+			{eventCounts, Counts{
+				Orders:       len(orderList.Items),
+				Preparations: len(prepList.Items),
+				Servings:     len(servingList.Items),
+				Products:     len(productList.Items),
+				Pantries:     len(pantryList.Items),
+			}},
 		}
-
-		if err := h.publish(eventOrders, enrichOrders(orderList.Items, servingList.Items)); err != nil {
-			logger.Error(err, "Failed to publish orders event")
-		}
-
-		if err := h.publish(eventPreparations, enrichPreparations(prepList.Items, servingList.Items)); err != nil {
-			logger.Error(err, "Failed to publish preparations event")
-		}
-
-		if err := h.publish(eventServings, servingsToDTO(servingList.Items)); err != nil {
-			logger.Error(err, "Failed to publish servings event")
-		}
-
-		if err := h.publish(eventProducts, productsToDTO(productList.Items)); err != nil {
-			logger.Error(err, "Failed to publish products event")
-		}
-
-		if err := h.publish(eventPantries, pantriesFromList(*pantryList)); err != nil {
-			logger.Error(err, "Failed to publish pantries event")
+		for _, s := range snapshots {
+			if err := h.publish(s.eventType, s.payload); err != nil {
+				logger.Error(err, "Failed to publish SSE event", "type", s.eventType)
+			}
 		}
 	}
+
+	// Informer handlers only schedule a refresh; the snapshots are rebuilt
+	// sequentially, at most once per refreshInterval.
+	scheduleRefresh := coalesce(ctx, refreshInterval, refreshAll)
 
 	// Kitchen changes reload the authenticator (plus SSE refresh). Auth Secrets only
 	// affect authentication, so they get a dedicated handler that reloads without a
@@ -218,16 +229,16 @@ func startK8sWatcher(
 		return name == deps.authMgr.secretName() || name == deps.authMgr.oidcSecretName() || name == deps.authMgr.tokenSecretName()
 	}
 	kitchenHandler := toolscache.ResourceEventHandlerFuncs{
-		AddFunc:    func(_ any) { refreshAll(); deps.authMgr.refresh(ctx) },
-		UpdateFunc: func(_, _ any) { refreshAll(); deps.authMgr.refresh(ctx) },
-		DeleteFunc: func(_ any) { refreshAll(); deps.authMgr.refresh(ctx) },
+		AddFunc:    func(_ any) { scheduleRefresh(); deps.authMgr.refresh(ctx) },
+		UpdateFunc: func(_, _ any) { scheduleRefresh(); deps.authMgr.refresh(ctx) },
+		DeleteFunc: func(_ any) { scheduleRefresh(); deps.authMgr.refresh(ctx) },
 	}
 	secretHandler := newAuthSecretHandler(deps.authMgr, ctx, isAuthSecret)
 
 	if err := registerWatchers(
 		orderInformer, prepInformer, servingInformer, productInformer, pantryInformer,
 		kitchenInformer, secretInformer, saInformer,
-		refreshAll, kitchenHandler, secretHandler,
+		scheduleRefresh, kitchenHandler, secretHandler,
 	); err != nil {
 		return nil, err
 	}
@@ -244,10 +255,46 @@ func startK8sWatcher(
 		if !k8sCache.WaitForCacheSync(ctx) {
 			return
 		}
-		refreshAll()
+		scheduleRefresh()
 	}()
 
 	return deps, nil
+}
+
+// coalesce returns a non-blocking trigger for fn. fn runs in a single
+// goroutine, interval after the first trigger of a burst. Triggers while it
+// waits are covered by that run; triggers while it runs schedule exactly one
+// more run, so the last trigger is always followed by a complete run.
+func coalesce(ctx context.Context, interval time.Duration, fn func()) func() {
+	pending := make(chan struct{}, 1)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-pending:
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(interval):
+			}
+			// This run covers every trigger up to now; only triggers that
+			// arrive while fn runs schedule another one.
+			select {
+			case <-pending:
+			default:
+			}
+			fn()
+		}
+	}()
+	return func() {
+		select {
+		case pending <- struct{}{}:
+		default:
+			// A run is already scheduled.
+		}
+	}
 }
 
 // newAuthSecretHandler builds the Secret event handler that reloads auth
@@ -276,13 +323,13 @@ func newAuthSecretHandler(mgr *authManager, ctx context.Context, isAuthSecret fu
 // auth handlers onto Kitchen/Secret informers (split out to keep startK8sWatcher small).
 func registerWatchers(
 	order, prep, serving, product, pantry, kitchen, secret, sa cache.Informer,
-	refreshAll func(),
+	scheduleRefresh func(),
 	kitchenHandler, secretHandler toolscache.ResourceEventHandlerFuncs,
 ) error {
 	sseHandler := toolscache.ResourceEventHandlerFuncs{
-		AddFunc:    func(_ any) { refreshAll() },
-		UpdateFunc: func(_, _ any) { refreshAll() },
-		DeleteFunc: func(_ any) { refreshAll() },
+		AddFunc:    func(_ any) { scheduleRefresh() },
+		UpdateFunc: func(_, _ any) { scheduleRefresh() },
+		DeleteFunc: func(_ any) { scheduleRefresh() },
 	}
 	// ServiceAccount changes can alter identity mappings; no SSE refresh needed.
 	noopHandler := toolscache.ResourceEventHandlerFuncs{}

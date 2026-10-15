@@ -452,15 +452,19 @@ When a Serving is reconciled, the controller:
    approved, or its approvals are not sealed yet, the currently deployed
    Preparation stays active and the Serving's `Approved` condition explains
    why.
-3. Verifies the opt-in on any pre-existing Argo CD `Application` and
-   transitions the Serving to `Deploying`, recording the preparation as the
-   observed (active) one.
-4. Creates or updates the Argo CD `Application` in the `argocd` namespace,
+3. Creates or updates the Argo CD `Application` in the `argocd` namespace,
    pointing `spec.source.repoURL` at the Preparation's OCI artifact and
-   `spec.source.targetRevision` at its exact digest.
-5. Keeps the `Deploying` status until the Application reports `Healthy` and
-   is synced to the desired revision, then transitions the Serving to
-   `Deployed`. A degraded Application surfaces as `DeploymentFailed`.
+   `spec.source.targetRevision` at its exact digest. A pre-existing
+   Application without the opt-in annotation is never modified.
+4. Derives the Serving status from the Application and records the
+   preparation as the observed (active) one: `Deploying` until the
+   Application reports `Healthy` and is synced to the desired revision, then
+   `Deployed`. An Application that is degraded at the desired revision
+   surfaces as `DeploymentFailed`; the health of an older revision is not
+   reported for the new Preparation. The
+   status is written only when it changes, and the next reconcile is
+   triggered by a change to the Serving spec, its Order or Preparations, or
+   the Application's health or sync state.
 
 Rollback is promoting any previous Preparation. No re-rendering required.
 

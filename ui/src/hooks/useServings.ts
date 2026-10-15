@@ -6,5 +6,5 @@ import { useSSEEvent } from './useSSEEvent'
  * Servings. Returns null until the first event is received.
  */
 export function useServings(): Serving[] | null {
-  return useSSEEvent<Serving[]>('/api/v1/events', 'servings')
+  return useSSEEvent<Serving[]>('servings')
 }

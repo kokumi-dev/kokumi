@@ -6,5 +6,5 @@ import { useSSEEvent } from './useSSEEvent'
  * event is received.
  */
 export function usePreparations(): Preparation[] | null {
-  return useSSEEvent<Preparation[]>('/api/v1/events', 'preparations')
+  return useSSEEvent<Preparation[]>('preparations')
 }

@@ -7,5 +7,5 @@ import { useSSEEvent } from './useSSEEvent'
  * first event is received (i.e. the cache has synced after server start).
  */
 export function useOrders(): Order[] | null {
-  return useSSEEvent<Order[]>('/api/v1/events', 'orders')
+  return useSSEEvent<Order[]>('orders')
 }

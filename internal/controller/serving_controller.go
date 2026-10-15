@@ -130,45 +130,18 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 
 	desiredDigest := preparation.Spec.Artifact.Digest
 
-	if serving.Status.ObservedPreparationName == preparationName &&
-		serving.Status.DeployedDigest == desiredDigest &&
-		apimeta.IsStatusConditionTrue(serving.Status.Conditions, deliveryv1alpha1.ConditionTypeReady) {
-		deploymentStatus, err := r.Deployer.Status(ctx, serving)
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to get deployment status: %w", err)
-		}
-
-		if deploymentStatus.Phase == deployer.PhaseHealthy && deploymentStatus.Revision == desiredDigest {
-			logger.Info("Deployment is up-to-date", "preparation", preparationName)
-			return ctrl.Result{}, nil
-		}
-		logger.Info("Deployment drifted from desired state, redeploying", "preparation", preparationName, "phase", deploymentStatus.Phase)
-	}
-
-	// Validate the opt-in on any pre-existing deployment BEFORE transitioning
-	// the status to "Deploying". This avoids flapping between "Deploying" and
-	// "DeploymentFailed" on every reconcile pass when the opt-in is missing.
-	if err := r.Deployer.VerifyOptIn(ctx, serving); err != nil {
+	// Deploy is idempotent: it leaves a deployment that already points at the
+	// Preparation untouched and reverts drift otherwise.
+	if err := r.Deployer.Deploy(ctx, serving, preparation); err != nil {
 		if errors.Is(err, deployer.ErrOptInRequired) {
-			logger.Info("Cannot update deployment, opt-in required", "error", err.Error())
+			logger.Info("Could not update deployment, opt-in required", "error", err.Error())
 			if uerr := statusUpdater.Failed(ctx, serving, err); uerr != nil {
 				logger.Error(uerr, "Failed to update Serving status")
 			}
-			// Terminal for this generation: do not requeue. A change to the
-			// deployment (opt-in) or Serving will trigger a fresh event.
+			// Terminal for this generation: do not requeue. The deployer watch
+			// reports a change to the opt-in, and a spec change reports itself.
 			return ctrl.Result{}, nil
 		}
-		if uerr := statusUpdater.Failed(ctx, serving, fmt.Errorf("failed to check deployment opt-in: %w", err)); uerr != nil {
-			logger.Error(uerr, "Failed to update Serving status")
-		}
-		return ctrl.Result{}, err
-	}
-
-	if err := statusUpdater.Deploying(ctx, serving, preparationName); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	if err := r.Deployer.Deploy(ctx, serving, preparation); err != nil {
 		logger.Error(err, "Failed to deploy")
 		if uerr := statusUpdater.Failed(ctx, serving, fmt.Errorf("failed to deploy: %w", err)); uerr != nil {
 			logger.Error(uerr, "Failed to update Serving status")
@@ -176,30 +149,27 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 		return ctrl.Result{}, err
 	}
 
-	logger.Info("Successfully created/updated deployment", "preparation", preparationName)
-
 	deploymentStatus, err := r.Deployer.Status(ctx, serving)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to get deployment status: %w", err)
 	}
 
-	if deploymentStatus.Phase == deployer.PhaseDegraded {
-		if uerr := statusUpdater.Failed(ctx, serving, fmt.Errorf("deployment degraded: %s", deploymentStatus.Message)); uerr != nil {
-			logger.Error(uerr, "Failed to update Serving status")
-		}
-		return ctrl.Result{}, nil
+	// The status is derived from the observed deployment and written once per
+	// reconcile. An unchanged status is not written, so a Serving that stays
+	// degraded or progressing settles until the deployment changes. The health
+	// of another revision says nothing about this Preparation, so until the
+	// deployment reaches the desired revision the Serving is Deploying.
+	atDesired := deploymentStatus.Revision == desiredDigest
+	switch {
+	case atDesired && deploymentStatus.Phase == deployer.PhaseDegraded:
+		return ctrl.Result{}, statusUpdater.Degraded(ctx, serving, preparationName, deploymentStatus.Message)
+	case atDesired && deploymentStatus.Phase == deployer.PhaseHealthy:
+		return ctrl.Result{}, statusUpdater.Deployed(ctx, serving, preparationName, desiredDigest, "Successfully deployed component")
+	default:
+		logger.Info("Deployment not yet healthy at desired revision",
+			"preparation", preparationName, "phase", deploymentStatus.Phase, "revision", deploymentStatus.Revision)
+		return ctrl.Result{}, statusUpdater.Deploying(ctx, serving, preparationName)
 	}
-
-	if deploymentStatus.Phase == deployer.PhaseHealthy && deploymentStatus.Revision == desiredDigest {
-		if err := statusUpdater.Deployed(ctx, serving, preparationName, desiredDigest, "Successfully deployed component"); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{}, nil
-	}
-
-	logger.Info("Deployment not yet healthy at desired revision, staying in Deploying",
-		"preparation", preparationName, "phase", deploymentStatus.Phase, "revision", deploymentStatus.Revision)
-	return ctrl.Result{}, nil
 }
 
 // gate enforces the approval gate of the target Preparation for both
@@ -331,7 +301,8 @@ func enqueueServingForOrderName(_ context.Context, obj client.Object) []ctrl.Req
 // SetupWithManager sets up the controller with the Manager.
 func (r *ServingReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&deliveryv1alpha1.Serving{}).
+		// Status writes of the controller itself need no reconcile.
+		For(&deliveryv1alpha1.Serving{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&deliveryv1alpha1.Preparation{}, handler.EnqueueRequestsFromMapFunc(enqueueServingForOrderName)).
 		Watches(&deliveryv1alpha1.Order{},
 			handler.EnqueueRequestsFromMapFunc(enqueueServingForOrderName),

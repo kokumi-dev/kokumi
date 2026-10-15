@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"slices"
+	"strings"
+	"time"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -420,6 +422,26 @@ func destinationFromDTO(dto *OCIDestinationDTO) *deliveryv1alpha1.OCIDestination
 	return &deliveryv1alpha1.OCIDestination{OCI: dto.OCI, PantryRef: pantryRefFromDTO(dto.PantryRef)}
 }
 
+// compareKeys orders objects by namespace, then name. The informer cache lists
+// objects in random order, so every list response is sorted to keep rows in
+// place across snapshots.
+func compareKeys(aNamespace, aName, bNamespace, bName string) int {
+	return cmp.Or(strings.Compare(aNamespace, bNamespace), strings.Compare(aName, bName))
+}
+
+// compareNewestFirst orders timestamps newest first, with unset ones last.
+func compareNewestFirst(a, b *time.Time) int {
+	switch {
+	case a == nil && b == nil:
+		return 0
+	case a == nil:
+		return 1
+	case b == nil:
+		return -1
+	}
+	return b.Compare(*a)
+}
+
 // activePreparationFor returns the observed preparation name for the Order
 // identified by namespace/name from the provided list of Servings.
 // Returns an empty string when no matching Serving is found.
@@ -450,6 +472,7 @@ func enrichOrders(orders []deliveryv1alpha1.Order, servings []deliveryv1alpha1.S
 		}
 		out[i] = orderToDTO(r, activePrep)
 	}
+	slices.SortFunc(out, func(a, b OrderDTO) int { return compareKeys(a.Namespace, a.Name, b.Namespace, b.Name) })
 	return out
 }
 
@@ -470,15 +493,10 @@ func enrichPreparations(preps []deliveryv1alpha1.Preparation, servings []deliver
 		out[i] = preparationToDTO(p, isActive)
 	}
 
-	// Sort newest-first by CreatedAt so the latest preparation is always at the top.
+	// Sort newest-first so the latest preparation is always at the top.
+	// Creation timestamps have second precision, so ties fall back to the key.
 	slices.SortFunc(out, func(a, b PreparationDTO) int {
-		if a.CreatedAt == nil {
-			return 1
-		}
-		if b.CreatedAt == nil {
-			return -1
-		}
-		return b.CreatedAt.Compare(*a.CreatedAt)
+		return cmp.Or(compareNewestFirst(a.CreatedAt, b.CreatedAt), compareKeys(a.Namespace, a.Name, b.Namespace, b.Name))
 	})
 
 	return out
@@ -510,6 +528,7 @@ func servingsToDTO(servings []deliveryv1alpha1.Serving) []ServingDTO {
 	for i, s := range servings {
 		out[i] = servingToDTO(s)
 	}
+	slices.SortFunc(out, func(a, b ServingDTO) int { return compareKeys(a.Namespace, a.Name, b.Namespace, b.Name) })
 	return out
 }
 
@@ -554,6 +573,7 @@ func productsToDTO(products []deliveryv1alpha1.Product) []ProductDTO {
 	for i, p := range products {
 		out[i] = productToDTO(p)
 	}
+	slices.SortFunc(out, func(a, b ProductDTO) int { return compareKeys(a.Namespace, a.Name, b.Namespace, b.Name) })
 	return out
 }
 
@@ -642,5 +662,6 @@ func pantriesFromList(list deliveryv1alpha1.PantryList) []PantryDTO {
 	for i, p := range list.Items {
 		out[i] = pantryToDTO(p)
 	}
+	slices.SortFunc(out, func(a, b PantryDTO) int { return compareKeys(a.Namespace, a.Name, b.Namespace, b.Name) })
 	return out
 }

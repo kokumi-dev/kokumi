@@ -41,6 +41,20 @@ func (u *ServingUpdater) Deployed(ctx context.Context, serving *deliveryv1alpha1
 	})
 }
 
+// Degraded marks the Serving as failed because its deployment of
+// preparationName reports an unhealthy state.
+func (u *ServingUpdater) Degraded(ctx context.Context, serving *deliveryv1alpha1.Serving, preparationName, healthMsg string) error {
+	msg := "deployment degraded"
+	if healthMsg != "" {
+		msg += ": " + healthMsg
+	}
+	return u.set(ctx, serving, func(latest *deliveryv1alpha1.Serving) {
+		latest.Status.ObservedGeneration = latest.Generation
+		latest.Status.ObservedPreparationName = preparationName
+		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(latest.Generation, metav1.ConditionFalse, "DeploymentFailed", msg))
+	})
+}
+
 // Pending marks the Serving as waiting for a prerequisite.
 func (u *ServingUpdater) Pending(ctx context.Context, serving *deliveryv1alpha1.Serving, msg string) error {
 	return u.set(ctx, serving, func(latest *deliveryv1alpha1.Serving) {

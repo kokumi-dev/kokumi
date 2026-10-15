@@ -60,19 +60,28 @@ func (d *ArgoCDDeployer) WatchObject() client.Object {
 }
 
 // WatchPredicate filters Application update events to those where the
-// health, sync status, or synced revision changed.
+// health, sync status, synced revision, or opt-in annotation changed. The
+// annotation is part of it so that opting a pre-existing Application in
+// resumes the Serving that was refused it.
 func (d *ArgoCDDeployer) WatchPredicate() predicate.Predicate {
 	return predicate.Funcs{
 		UpdateFunc: func(e event.UpdateEvent) bool {
-			oldHealth, _, _ := unstructured.NestedString(e.ObjectOld.(*unstructured.Unstructured).Object, "status", "health", "status")
-			newHealth, _, _ := unstructured.NestedString(e.ObjectNew.(*unstructured.Unstructured).Object, "status", "health", "status")
-			oldSync, _, _ := unstructured.NestedString(e.ObjectOld.(*unstructured.Unstructured).Object, "status", "sync", "status")
-			newSync, _, _ := unstructured.NestedString(e.ObjectNew.(*unstructured.Unstructured).Object, "status", "sync", "status")
-			oldRevision, _, _ := unstructured.NestedString(e.ObjectOld.(*unstructured.Unstructured).Object, "status", "sync", "revision")
-			newRevision, _, _ := unstructured.NestedString(e.ObjectNew.(*unstructured.Unstructured).Object, "status", "sync", "revision")
-			return oldHealth != newHealth || oldSync != newSync || oldRevision != newRevision
+			return watchedState(e.ObjectOld) != watchedState(e.ObjectNew)
 		},
 	}
+}
+
+// watchedState is the part of an Application that the Serving status and the
+// opt-in check depend on.
+func watchedState(obj client.Object) [4]string {
+	app, ok := obj.(*unstructured.Unstructured)
+	if !ok {
+		return [4]string{}
+	}
+	health, _, _ := unstructured.NestedString(app.Object, "status", "health", "status")
+	sync, _, _ := unstructured.NestedString(app.Object, "status", "sync", "status")
+	revision, _, _ := unstructured.NestedString(app.Object, "status", "sync", "revision")
+	return [4]string{health, sync, revision, app.GetAnnotations()[deliveryv1alpha1.AnnotationAllowedOrder]}
 }
 
 // EnqueueRequests maps an Argo CD Application event to a reconcile request
@@ -90,22 +99,6 @@ func (d *ArgoCDDeployer) EnqueueRequests(_ context.Context, obj client.Object) [
 		Namespace: servingNamespace,
 		Name:      servingName,
 	}}
-}
-
-// VerifyOptIn looks up the Argo CD Application that this Serving would manage
-// and verifies the opt-in annotation.
-func (d *ArgoCDDeployer) VerifyOptIn(ctx context.Context, serving *deliveryv1alpha1.Serving) error {
-	existing := newArgoApp()
-
-	err := d.Get(ctx, client.ObjectKey{Namespace: argocdNamespace, Name: serving.Name}, existing)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		return fmt.Errorf("failed to get existing Application: %w", err)
-	}
-
-	return assertAllowedOrderAnnotation(existing, serving.Spec.OrderName)
 }
 
 // assertAllowedOrderAnnotation returns ErrOptInRequired (wrapped with a
