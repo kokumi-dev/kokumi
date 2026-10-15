@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { Pantry, PantryFormData } from '../../api/types'
 import { emptyPantryForm, pantryToFormData } from '../../api/types'
 import { Button, SegmentedControl } from '../ui'
+import { useNamespaceCan } from '../../hooks/useCapability'
 import styles from './PantryForm.module.css'
 
 interface Props {
@@ -24,6 +25,11 @@ export default function PantryForm({ pantry, onCancel, onSubmit, onDirtyChange }
 
   const isEdit = Boolean(pantry)
   const isDirty = JSON.stringify(form) !== JSON.stringify(initialForm)
+  // Credentials are a Secret in the Pantry's namespace, written with the
+  // user's identity; the permission is granted per namespace.
+  const canStoreCredentials = useNamespaceCan(form.namespace, 'pantries.credentials:update')
+  const storesCredentials = credMode === 'direct' && !!(form.username || form.password)
+  const credentialsDenied = storesCredentials && canStoreCredentials === false
 
   useEffect(() => {
     onDirtyChange?.(isDirty)
@@ -157,6 +163,13 @@ export default function PantryForm({ pantry, onCancel, onSubmit, onDirtyChange }
               {isEdit && (
                 <span className={styles.hint}>Leave username/password blank to keep existing credentials.</span>
               )}
+              {canStoreCredentials === false && (
+                <span className={credentialsDenied ? styles.error : styles.hint}>
+                  You may not store credentials in the namespace <code>{form.namespace}</code>. A platform
+                  admin grants this by binding the ClusterRole <code>kokumi-pantry-credentials</code> in
+                  that namespace. You can reference an existing Secret instead.
+                </span>
+              )}
             </>
           ) : (
             <div className={styles.fieldGroup}>
@@ -181,7 +194,7 @@ export default function PantryForm({ pantry, onCancel, onSubmit, onDirtyChange }
       </div>
       <div className={styles.formActions}>
         <Button variant="secondary" onClick={onCancel} disabled={submitting}>Cancel</Button>
-        <Button type="submit" variant="primary" disabled={submitting || (isEdit && !isDirty)}>
+        <Button type="submit" variant="primary" disabled={submitting || (isEdit && !isDirty) || credentialsDenied}>
           {submitting ? 'Saving…' : isEdit ? 'Save changes' : 'Create Pantry'}
         </Button>
       </div>

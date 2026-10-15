@@ -66,3 +66,50 @@ func handleWhoami(deps *apiDeps, namespace string) http.HandlerFunc {
 		respondJSON(w, http.StatusOK, resp)
 	}
 }
+
+// namespaceCapabilitiesResponse is the JSON body for
+// GET /api/v1/namespaces/{namespace}/capabilities.
+type namespaceCapabilitiesResponse struct {
+	Namespace string `json:"namespace"`
+	// Capabilities are sorted and never null; see namespacedCapabilityCatalog.
+	Capabilities []Capability `json:"capabilities"`
+	// Undetermined lists the capabilities whose RBAC checks failed, sorted
+	// and never null.
+	Undetermined []Capability `json:"undetermined"`
+}
+
+// handleNamespaceCapabilities handles
+// GET /api/v1/namespaces/{namespace}/capabilities. It reports the
+// capabilities that hold per namespace, which whoami does not cover.
+func handleNamespaceCapabilities(deps *apiDeps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if deps == nil {
+			unavailable(w)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+
+		namespace := r.PathValue("namespace")
+		resp := namespaceCapabilitiesResponse{Namespace: namespace, Capabilities: []Capability{}, Undetermined: []Capability{}}
+
+		id := identityFromRequest(r)
+		if id == nil {
+			respondJSON(w, http.StatusOK, resp)
+			return
+		}
+
+		uc, err := deps.resolveUserClient(r)
+		if err != nil {
+			respondJSON(w, http.StatusOK, resp)
+			return
+		}
+
+		resp.Capabilities, resp.Undetermined, err = uc.capabilities(r.Context(), id, namespacedCapabilityCatalog(namespace))
+		if err != nil {
+			deps.logger.Error(err, "Could not evaluate all namespaced capabilities",
+				"subject", id.Subject, "namespace", namespace, "undetermined", resp.Undetermined)
+		}
+
+		respondJSON(w, http.StatusOK, resp)
+	}
+}

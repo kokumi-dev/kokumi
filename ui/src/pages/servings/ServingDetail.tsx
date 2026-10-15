@@ -34,6 +34,7 @@ export default function ServingDetail() {
   const inSync = !!target && target === serving.observedPreparation
   const argoURL = argoAppURL(argoBase, serving.name)
   const gate = serving.conditions?.find((c) => c.type === 'Approved')
+  const verified = serving.conditions?.find((c) => c.type === 'Verified')
 
   const prepLink = (prepName?: string) =>
     prepName ? (
@@ -72,6 +73,11 @@ export default function ServingDetail() {
               show: !!serving.deployedDigest,
             },
             { label: 'Approval gate', value: gate?.reason ?? '—', show: !!gate },
+            {
+              label: 'Signatures',
+              value: verified?.status === 'True' ? 'Verified in the registry' : `${verified?.reason}: ${verified?.message}`,
+              show: !!verified,
+            },
             { label: 'Created', value: formatDate(serving.createdAt) },
           ]}
         />

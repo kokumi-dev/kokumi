@@ -1,0 +1,43 @@
+---
+# The signing key signs every artifact and attestation Kokumi writes; whoever
+# can replace it can forge trusted signatures. Only the kokumi controller,
+# which generates it, and cluster admins may create, change or delete it.
+#
+# A cluster admin is whoever may use the custom verb "manage-signing-key" on
+# kitchens: cluster-admin and system:masters can, the kokumi roles cannot,
+# because they list their verbs. Grant the verb to delegate key rotation. The
+# namespace controller may delete the key with the kokumi-signing namespace.
+# Reads are restricted by RBAC: the key lives in the kokumi-signing
+# namespace, where nobody but the controller is granted access. The names
+# assume the default install (namespace "kokumi", name prefix "kokumi-").
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: signing-key-integrity
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: kokumi-signing
+    resourceRules:
+    - apiGroups: [""]
+      apiVersions: ["v1"]
+      operations: ["CREATE", "UPDATE", "DELETE"]
+      resources: ["secrets"]
+      resourceNames: ["kokumi-signing-key"]
+  variables:
+  - name: controller
+    expression: "'system:serviceaccount:kokumi:kokumi-controller-manager'"
+  - name: namespaceController
+    expression: "'system:serviceaccount:kube-system:namespace-controller'"
+  - name: clusterAdmin
+    expression: >-
+      authorizer.group('delivery.kokumi.dev').resource('kitchens').namespace('kokumi').name('default')
+      .check('manage-signing-key').allowed()
+  validations:
+  - expression: >-
+      request.userInfo.username == variables.controller || variables.clusterAdmin ||
+      (request.operation == 'DELETE' && request.userInfo.username == variables.namespaceController)
+    message: "The signing key can only be written by the kokumi controller and cluster admins (verb manage-signing-key on kitchens)"
+    reason: Forbidden

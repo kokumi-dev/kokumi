@@ -12,6 +12,7 @@ import (
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/attestation"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/signing"
 )
 
 // AttestationPredicateType identifies the kokumi approval predicate.
@@ -48,9 +49,10 @@ type Submission struct {
 	Reason        string                            `json:"reason"`
 }
 
-// Archive records the sealed approvals of prep as an OCI referrer of its
-// artifact and returns the attestation reference. Retries are idempotent.
-func Archive(ctx context.Context, c oci.Client, prep *deliveryv1alpha1.Preparation, approvals []deliveryv1alpha1.Approval) (deliveryv1alpha1.ApprovalAttestation, error) {
+// Archive signs the sealed approvals of prep, attaches them as an OCI
+// referrer of its artifact, and returns the attestation reference. Retries
+// are idempotent.
+func Archive(ctx context.Context, c oci.Client, signer *signing.Signer, prep *deliveryv1alpha1.Preparation, approvals []deliveryv1alpha1.Approval) (deliveryv1alpha1.ApprovalAttestation, error) {
 	statement, err := buildAttestation(prep, approvals)
 	if err != nil {
 		return deliveryv1alpha1.ApprovalAttestation{}, err
@@ -59,7 +61,7 @@ func Archive(ctx context.Context, c oci.Client, prep *deliveryv1alpha1.Preparati
 	if err != nil {
 		return deliveryv1alpha1.ApprovalAttestation{}, fmt.Errorf("parsing Preparation artifact reference: %w", err)
 	}
-	digest, err := attestation.Push(ctx, c, subject, oci.ApprovalsArtifactType, statement, prep.Status.Approval.SealedTime.Time)
+	digest, err := attestation.Push(ctx, c, signer, subject, AttestationPredicateType, statement, prep.Status.Approval.SealedTime.Time)
 	if err != nil {
 		return deliveryv1alpha1.ApprovalAttestation{}, err
 	}

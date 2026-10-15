@@ -19,10 +19,13 @@ package controller
 import (
 	"context"
 	stderrors "errors"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/oras-project/oras-go/v3/registry/remote/credentials"
 	"github.com/spf13/afero"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -31,11 +34,37 @@ import (
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
+	"github.com/kokumi-dev/kokumi/internal/attestation"
 	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/resolve"
+	"github.com/kokumi-dev/kokumi/internal/signing"
+	"github.com/kokumi-dev/kokumi/internal/signing/signingtest"
+	signingsource "github.com/kokumi-dev/kokumi/internal/signing/source"
 	"github.com/kokumi-dev/kokumi/internal/status"
 )
+
+// unlistableClient is a FakeClient whose registry cannot list referrers.
+type unlistableClient struct {
+	*oci.FakeClient
+}
+
+func (unlistableClient) ListReferrers(context.Context, oci.Reference, string) ([]oci.Referrer, error) {
+	return nil, stderrors.New("registry unreachable")
+}
+
+// fakeSourceVerifier records the policies it is asked to verify and answers
+// with signer or err.
+type fakeSourceVerifier struct {
+	policies []signingsource.Policy
+	signer   *signingsource.Signer
+	err      error
+}
+
+func (f *fakeSourceVerifier) Verify(_ context.Context, _ oci.Reference, _ credentials.Store, policy signingsource.Policy) (*signingsource.Signer, error) {
+	f.policies = append(f.policies, policy)
+	return f.signer, f.err
+}
 
 // unresolvableClient is a FakeClient whose registry cannot resolve tags.
 type unresolvableClient struct {
@@ -52,23 +81,32 @@ var _ = Describe("Product Controller", func() {
 	ctx := context.Background()
 
 	var (
-		fake *oci.FakeClient
-		r    *ProductReconciler
+		fake     *oci.FakeClient
+		verifier *fakeSourceVerifier
+		r        *ProductReconciler
 	)
 
 	BeforeEach(func() {
 		fs := afero.NewMemMapFs()
 		fake = oci.NewFakeClient(fs)
+		verifier = &fakeSourceVerifier{}
 		r = &ProductReconciler{
 			Client:         k8sClient,
 			Scheme:         k8sClient.Scheme(),
 			Store:          artifact.NewStore(fake, fs, ""),
 			PantryResolver: credential.NewKubeResolver(k8sClient),
+			OCIClient:      fake,
+			Signing:        testSigning,
+			SourceVerifier: verifier,
 		}
 	})
 
+	reconcileProductResult := func(name string) (reconcile.Result, error) {
+		return r.Reconcile(ctx, reconcile.Request{Namespace: ns, Name: name})
+	}
+
 	reconcileProduct := func(name string) error {
-		_, err := r.Reconcile(ctx, reconcile.Request{Namespace: ns, Name: name})
+		_, err := reconcileProductResult(name)
 		return err
 	}
 
@@ -85,6 +123,19 @@ var _ = Describe("Product Controller", func() {
 	create := func(name string, spec deliveryv1alpha1.ProductSpec) {
 		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Product{Name: name, Namespace: ns, Spec: spec})).To(Succeed())
 		DeferCleanup(func() { deleteTestProduct(ctx, name) })
+	}
+
+	sourceVerifiedOf := func(name string) *metav1.Condition {
+		return meta.FindStatusCondition(getProduct(name).Status.Conditions, deliveryv1alpha1.ConditionTypeSourceVerified)
+	}
+
+	// signSource signs the source at testOCIRef, resolved by the fake to
+	// oci.FakeDigest, as a Kokumi installation with signer's key would.
+	signSource := func(signer *signing.Signer) {
+		ref, err := oci.Parse(testOCIRef + "@" + oci.FakeDigest)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = attestation.Sign(ctx, fake, signer, ref, time.Date(2026, 10, 12, 9, 14, 3, 0, time.UTC))
+		Expect(err).NotTo(HaveOccurred())
 	}
 
 	It("allows Orders no changes unless overrides say otherwise", func() {
@@ -126,6 +177,158 @@ var _ = Describe("Product Controller", func() {
 		Expect(readyOf(name).Status).To(Equal(metav1.ConditionTrue))
 		Expect(readyOf(name).Reason).To(Equal("Resolved"))
 		Expect(fake.Copies).To(BeEmpty())
+		Expect(product.Status.Source.Verified).To(BeNil(), "an unsigned source is not verified")
+		Expect(sourceVerifiedOf(name)).To(BeNil(), "and need not be")
+	})
+
+	It("verifies a source signed by a key the Kitchen trusts", func() {
+		const name = "product-signed-by-kokumi"
+		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion}})
+		signSource(testSigner)
+
+		Expect(reconcileProduct(name)).To(Succeed())
+
+		Expect(getProduct(name).Status.Source.Verified).To(Equal(&deliveryv1alpha1.SourceVerification{
+			Provider: deliveryv1alpha1.VerificationProviderCosign, KeyID: testSigner.KeyID(),
+		}))
+		Expect(sourceVerifiedOf(name).Status).To(Equal(metav1.ConditionTrue))
+		Expect(readyOf(name).Status).To(Equal(metav1.ConditionTrue))
+		Expect(verifier.policies).To(BeEmpty(), "cosign is only used for spec.source.verify")
+	})
+
+	It("does not verify a source signed by an untrusted key", func() {
+		const name = "product-signed-by-stranger"
+		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion}})
+		signSource(signingtest.NewSigner(GinkgoT()))
+
+		Expect(reconcileProduct(name)).To(Succeed())
+
+		Expect(getProduct(name).Status.Source.Verified).To(BeNil())
+		Expect(sourceVerifiedOf(name)).To(BeNil())
+		Expect(readyOf(name).Status).To(Equal(metav1.ConditionTrue))
+	})
+
+	It("renders nothing from an unverified source when the Kitchen requires verification", func() {
+		const name = "product-must-verify"
+		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion}})
+		state, err := testSigning.State(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		state.RequireSourceVerification = true
+		r.Signing = signing.NewStaticProvider(state)
+
+		result, err := reconcileProductResult(name)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.RequeueAfter).To(BeNumerically(">", 0), "a source may be signed later")
+
+		Expect(readyOf(name).Status).To(Equal(metav1.ConditionFalse))
+		Expect(readyOf(name).Reason).To(Equal(deliveryv1alpha1.ReasonVerificationRequired))
+		Expect(sourceVerifiedOf(name).Reason).To(Equal(deliveryv1alpha1.ReasonVerificationRequired))
+		Expect(getProduct(name).Status.Source).To(BeNil(), "an unverified source is never published")
+		Expect(resolve.ProductReady(getProduct(name))).To(BeFalse())
+
+		By("publishing it once a trusted key signed it")
+		signSource(testSigner)
+		Expect(reconcileProduct(name)).To(Succeed())
+		Expect(resolve.ProductReady(getProduct(name))).To(BeTrue())
+		Expect(sourceVerifiedOf(name).Status).To(Equal(metav1.ConditionTrue))
+	})
+
+	It("verifies spec.source.verify with every public key of the Secret", func() {
+		const (
+			name       = "product-verify-keys"
+			secretName = "product-verify-keys"
+		)
+		secret := &corev1.Secret{Name: secretName, Namespace: ns, Data: map[string][]byte{
+			"cosign.pub":  testSigner.PublicKeyPEM(),
+			"release.pub": testSigner.PublicKeyPEM(),
+			"README":      []byte("not a key"),
+		}}
+		Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+		DeferCleanup(func() { _ = k8sClient.Delete(ctx, secret) })
+		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{
+			OCI: testOCIRef, Version: testVersion,
+			Verify: &deliveryv1alpha1.OCISourceVerification{SecretRef: &corev1.LocalObjectReference{Name: secretName}},
+		}})
+		verifier.signer = &signingsource.Signer{KeyID: "key-id"}
+
+		Expect(reconcileProduct(name)).To(Succeed())
+
+		Expect(verifier.policies).To(HaveLen(1))
+		Expect(verifier.policies[0].Keys).To(HaveLen(2))
+		Expect(verifier.policies[0].Keys[0].Name).To(Equal("cosign.pub"))
+		Expect(getProduct(name).Status.Source.Verified).To(Equal(&deliveryv1alpha1.SourceVerification{
+			Provider: deliveryv1alpha1.VerificationProviderCosign, KeyID: "key-id",
+		}))
+		Expect(sourceVerifiedOf(name).Status).To(Equal(metav1.ConditionTrue))
+	})
+
+	It("records the keyless signer and does not publish a source that fails to verify", func() {
+		const name = "product-verify-keyless"
+		create(name, deliveryv1alpha1.ProductSpec{
+			Source: deliveryv1alpha1.OCISource{
+				OCI: testOCIRef, Version: testVersion,
+				Verify: &deliveryv1alpha1.OCISourceVerification{MatchOIDCIdentity: []deliveryv1alpha1.OIDCIdentityMatch{{
+					Issuer: "^https://token\\.actions\\.githubusercontent\\.com$", Subject: "^https://github\\.com/example/.*$",
+				}}},
+			},
+			Vendor: &deliveryv1alpha1.OCIDestination{},
+		})
+		verifier.err = stderrors.New("no matching signatures")
+
+		result, err := reconcileProductResult(name)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+		Expect(readyOf(name).Reason).To(Equal(deliveryv1alpha1.ReasonVerificationError))
+		Expect(sourceVerifiedOf(name).Status).To(Equal(metav1.ConditionFalse))
+		Expect(getProduct(name).Status.Source).To(BeNil())
+		Expect(fake.Copies).To(BeEmpty(), "an unverified source is not vendored")
+
+		By("vendoring it with its signatures once it verifies")
+		verifier.err = nil
+		verifier.signer = &signingsource.Signer{Issuer: "https://token.actions.githubusercontent.com", Subject: "https://github.com/example/release.yml@refs/tags/v1"}
+		Expect(reconcileProduct(name)).To(Succeed())
+		Expect(getProduct(name).Status.Source.Verified.Subject).To(Equal(verifier.signer.Subject))
+		Expect(fake.Copies).To(HaveLen(1))
+		Expect(fake.Copies[0].Options.IncludeReferrers).To(BeTrue())
+		Expect(fake.Copies[0].Source.Digest).To(Equal(oci.FakeDigest), "the verified digest is copied, not the tag")
+	})
+
+	It("keeps the recorded verification while the registry cannot be read", func() {
+		const name = "product-signed-registry-down"
+		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion}})
+		signSource(testSigner)
+		Expect(reconcileProduct(name)).To(Succeed())
+		Expect(getProduct(name).Status.Source.Verified).NotTo(BeNil())
+
+		r.OCIClient = unlistableClient{fake}
+		Expect(reconcileProduct(name)).To(Succeed())
+		Expect(getProduct(name).Status.Source.Verified.KeyID).To(Equal(testSigner.KeyID()))
+		Expect(sourceVerifiedOf(name).Status).To(Equal(metav1.ConditionTrue))
+
+		By("retrying instead when the Kitchen requires verification")
+		state, err := testSigning.State(ctx)
+		Expect(err).NotTo(HaveOccurred())
+		state.RequireSourceVerification = true
+		r.Signing = signing.NewStaticProvider(state)
+		Expect(reconcileProduct(name)).To(MatchError(ContainSubstring("registry unreachable")))
+		Expect(sourceVerifiedOf(name).Status).To(Equal(metav1.ConditionTrue), "the status is left alone")
+	})
+
+	It("withdraws the verification when the trust no longer holds", func() {
+		const name = "product-trust-withdrawn"
+		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion}})
+		other := signingtest.NewSigner(GinkgoT())
+		signSource(other)
+		r.Signing = signingtest.NewProvider(GinkgoT(), testSigner, other)
+
+		Expect(reconcileProduct(name)).To(Succeed())
+		Expect(getProduct(name).Status.Source.Verified.KeyID).To(Equal(other.KeyID()))
+
+		By("removing the key from the trusted keys")
+		r.Signing = testSigning
+		Expect(reconcileProduct(name)).To(Succeed())
+		Expect(getProduct(name).Status.Source.Verified).To(BeNil())
+		Expect(sourceVerifiedOf(name)).To(BeNil())
 	})
 
 	It("vendors the source and publishes the copy", func() {

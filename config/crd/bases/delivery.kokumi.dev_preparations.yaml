@@ -33,10 +33,10 @@ spec:
       name: Digest
       priority: 1
       type: string
-    - jsonPath: .spec.artifact.signed
+    - jsonPath: .status.conditions[?(@.type=='Signed')].status
       name: Signed
       priority: 1
-      type: boolean
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -105,10 +105,6 @@ spec:
                     maxLength: 2048
                     pattern: ^oci://.*@sha256:[a-f0-9]{64}$
                     type: string
-                  signed:
-                    description: signed indicates whether the artifact has been cryptographically
-                      signed
-                    type: boolean
                 required:
                 - digest
                 - ociRef
@@ -341,13 +337,14 @@ spec:
                 type: object
               attestations:
                 description: |-
-                  attestations lists the latest attestation of each type that records how
-                  the artifact was produced. The approvals attestation is not listed
-                  here; it is recorded in approval.attestation.
+                  attestations lists the latest attestation of each type that signs the
+                  artifact or records how it was produced. The approvals attestation is
+                  not listed here; it is recorded in approval.attestation.
                 items:
                   description: |-
                     AttestationReference references an OCI referrer that carries evidence
-                    about how the Preparation's artifact was produced.
+                    about the Preparation's artifact: a Sigstore bundle signed by the Kitchen
+                    key.
                   properties:
                     digest:
                       description: digest is the manifest digest of the attestation.
@@ -362,6 +359,7 @@ spec:
                     type:
                       description: type is the kind of evidence the attestation carries.
                       enum:
+                      - Signature
                       - Provenance
                       type: string
                   required:

@@ -136,7 +136,14 @@ The installation ships three identity ServiceAccounts in the install namespace:
 | -------------- | ---------------- | ------------------------ | ------- |
 | `kokumi-admin` | `kokumi-server-role` (full CRUD incl. `kitchens`) | `kokumi.dev/identity-groups: "kokumi-admin"` | Full access; also used by the built-in admin login |
 | `kokumi-editor` | `kokumi-server-editor-role` (CRUD, no `kitchens`) | `kokumi.dev/identity-groups: "kokumi-editor"` | Editors |
-| `kokumi-viewer` | `kokumi-server-viewer-role` (read-only) | `kokumi.dev/identity-groups: "kokumi-viewer"` | Read-only users; cannot read Secrets |
+| `kokumi-viewer` | `kokumi-server-viewer-role` (read-only) | `kokumi.dev/identity-groups: "kokumi-viewer"` | Read-only users |
+
+None of the built-in roles grants access to Secrets. They are bound
+cluster-wide, which would include the `kokumi-signing` namespace, and the key
+that signs every Kokumi artifact is a Secret there: an identity that could
+read or replace it could forge trusted signatures. See
+[Pantry credentials](#pantry-credentials) for granting Secret access per
+namespace, and [Signing](../signing/) for how the key is protected.
 
 The built-in admin login always acts as `kokumi-admin`, regardless of the
 annotations. Additionally, OIDC users are matched against the default
@@ -152,11 +159,39 @@ kubectl -n kokumi annotate sa kokumi-editor \
   kokumi.dev/identity-groups=devops --overwrite
 ```
 
-Editors and admins can manage **Pantry credential Secrets** (docker-registry
-`Secret` objects the UI creates when a Pantry is saved with direct
-credentials, and reads when previewing an Order whose source references that
-Pantry). Viewers cannot read Secrets: previewing a Pantry-backed Order will
-return 403, while plain-OCI previews work without Secret access.
+## Pantry credentials
+
+The UI stores **Pantry credentials** as docker-registry Secrets in the Pantry's
+namespace when a Pantry is saved with direct credentials, and reads them when
+previewing a Product or Order whose source references that Pantry. It does
+both with the user's identity, so the user needs Secret access in that
+namespace. The built-in roles grant none.
+
+Platform admins grant it per tenant namespace by binding the
+`kokumi-pantry-credentials` ClusterRole (`get`, `create` and `patch` on
+`secrets`) with a RoleBinding:
+
+```bash
+kubectl -n team-a create rolebinding kokumi-pantry-credentials \
+  --clusterrole=kokumi-pantry-credentials \
+  --serviceaccount=kokumi:kokumi-editor
+```
+
+{{< callout type="warning" >}}
+Never bind `kokumi-pantry-credentials` with a ClusterRoleBinding, in the
+`kokumi-signing` namespace, or in the install namespace. `kokumi-signing` holds
+the artifact signing key. The install namespace holds the Secrets of the
+Kitchen's `auth` settings: the session token signing key, the admin password
+hash and the OIDC client secret. Reading or patching them lets a user forge
+sessions or take over login. Treat the install namespace as admin-only, as
+Argo CD does with its own namespace, and keep Pantries with credentials in
+tenant namespaces.
+{{< /callout >}}
+
+Without the binding, Pantries can still reference an existing Secret by name
+(`spec.secretRef`), and previews of plain OCI sources work. The Pantry form
+shows whether the user may store credentials in the selected namespace, from
+the namespaced capability `pantries.credentials:update`.
 
 ## UI capabilities
 
@@ -175,13 +210,22 @@ answer.
 | ---------- | ---------------------------------------- | -- |
 | `settings.general:update` | `update` the `kitchens/default` object in the install namespace | Settings, General tab |
 | `settings.auth:update` | `update` the `kitchens/default` object in the install namespace | Settings, Authentication tab |
+| `settings.signing:update` | `update` the `kitchens/default` object in the install namespace | Settings, Signing tab |
 | `orders:create` / `orders:update` / `orders:delete` | `create` / `update` / `delete` `orders` | New, Edit, Delete Order; edits on rendered files |
 | `products:create` / `products:update` / `products:delete` | `create` / `update` / `delete` `products` | New, Edit, Delete Product |
 | `pantries:create` / `pantries:update` / `pantries:delete` | `create` / `patch` / `delete` `pantries` | New, Edit, Delete Pantry |
 | `preparations:promote` | `create` and `update` `servings` | Promote and Rollback |
 | `preparations:approve` | `approve` `preparations`, and the user signed in with OIDC | Approve and Request changes |
 
-Except for the settings, capabilities are evaluated **across all namespaces**:
+One capability holds per namespace and is reported by
+`GET /api/v1/namespaces/{namespace}/capabilities`:
+
+| Capability | Granted when a mapped ServiceAccount may | UI |
+| ---------- | ---------------------------------------- | -- |
+| `pantries.credentials:update` | `get`, `create` and `patch` `secrets` in the namespace | Direct credentials in the Pantry form |
+
+Except for the settings and the namespaced capability, capabilities are
+evaluated **across all namespaces**:
 a permission granted only by a namespaced `RoleBinding` does not enable the
 action in the UI. This matches the live event stream, which only serves users
 who may list resources cluster-wide. The settings capabilities share one RBAC
@@ -205,7 +249,8 @@ resources**. It can only:
   the trust boundary: treat access to this ServiceAccount as cluster-admin
   equivalent for kokumi resources,
 - read ServiceAccounts (mapping resolution),
-- read Secrets in the install namespace (login/OIDC config),
+- read Secrets in the install namespace (login/OIDC config). It cannot read
+  the signing key, which lives in the `kokumi-signing` namespace,
 - read (get/list/watch) kokumi resources to power the live UI event stream:
   the hub must be able to see all events in order to filter them per user
   (each connected user only receives events for resources their mapped

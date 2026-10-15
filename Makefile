@@ -92,8 +92,8 @@ setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
 	esac
 
 .PHONY: test-e2e
-test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
-	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -ginkgo.v
+test-e2e: setup-test-e2e manifests generate fmt vet cosign ## Run the e2e tests. Expected an isolated environment using Kind.
+	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) COSIGN="$(COSIGN)" go test -tags=e2e ./test/e2e/ -v -ginkgo.v
 	$(MAKE) cleanup-test-e2e
 
 .PHONY: cleanup-test-e2e
@@ -146,8 +146,8 @@ kind-load-image: ## Load image into Kind cluster if it exists
 	fi
 
 .PHONY: push-artifacts
-push-artifacts: ## Pushes artifacts to local local registry
-	bash ./hack/push-artifacts.sh
+push-artifacts: cosign ## Pushes artifacts to local local registry
+	COSIGN="$(COSIGN)" bash ./hack/push-artifacts.sh
 
 .PHONY: oidc
 oidc: ## Install local Dex OIDC (sidecar in kokumi-server) and wire Kitchen auth. See hack/oidc/README.md
@@ -233,6 +233,8 @@ build-installer: manifests generate kustomize ## Generate a consolidated YAML wi
 	cd config/manager && "$(KUSTOMIZE)" edit set image controller=${IMG}
 	cd config/server && "$(KUSTOMIZE)" edit set image server=${IMG}
 	"$(KUSTOMIZE)" build config/default > dist/install.yaml
+	echo "---" >> dist/install.yaml
+	"$(KUSTOMIZE)" build config/signing >> dist/install.yaml
 
 ##@ Deployment
 
@@ -254,11 +256,13 @@ uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified 
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd config/manager && "$(KUSTOMIZE)" edit set image controller=${IMG}
 	cd config/server && "$(KUSTOMIZE)" edit set image server=${IMG}
+	"$(KUSTOMIZE)" build config/signing | "$(KUBECTL)" apply -f -
 	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" apply -f -
 
 .PHONY: undeploy
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" delete --ignore-not-found=$(ignore-not-found) -f -
+	"$(KUSTOMIZE)" build config/signing | "$(KUBECTL)" delete --ignore-not-found=$(ignore-not-found) -f -
 
 ##@ Dependencies
 
@@ -274,6 +278,7 @@ KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
+COSIGN ?= $(LOCALBIN)/cosign
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.8.1
@@ -290,6 +295,7 @@ ENVTEST_K8S_VERSION ?= $(shell v='$(call gomodver,k8s.io/api)'; \
   printf '%s\n' "$$v" | sed -E 's/^v?[0-9]+\.([0-9]+).*/1.\1/')
 
 GOLANGCI_LINT_VERSION ?= v2.14.0
+COSIGN_VERSION ?= v3.1.3
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
 $(KUSTOMIZE): $(LOCALBIN)
@@ -313,6 +319,11 @@ setup-envtest: envtest ## Download the binaries required for ENVTEST in the loca
 envtest: $(ENVTEST) ## Download setup-envtest locally if necessary.
 $(ENVTEST): $(LOCALBIN)
 	$(call go-install-tool,$(ENVTEST),sigs.k8s.io/controller-runtime/tools/setup-envtest,$(ENVTEST_VERSION))
+
+.PHONY: cosign
+cosign: $(COSIGN) ## Download cosign locally if necessary.
+$(COSIGN): $(LOCALBIN)
+	$(call go-install-tool,$(COSIGN),github.com/sigstore/cosign/v3/cmd/cosign,$(COSIGN_VERSION))
 
 .PHONY: golangci-lint
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.

@@ -29,7 +29,7 @@ func PingRegistry(ctx context.Context, host string, credStore credentials.Store)
 		return fmt.Errorf("create registry client for %q: %w", host, err)
 	}
 
-	reg.PlainHTTP = isPlainHTTP(host)
+	reg.PlainHTTP = IsPlainHTTP(host)
 	reg.RepositoryListPageSize = 1
 
 	if credStore != nil {

@@ -1,0 +1,36 @@
+---
+# The Kitchen controller generates the signing key here. It reads Secrets
+# through its cluster-wide role (role.yaml); creating them it may only here
+# and in the install namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kokumi-signing-key-creator
+  namespace: kokumi-signing
+  labels:
+    app.kubernetes.io/name: kokumi
+    app.kubernetes.io/managed-by: kustomize
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kokumi-signing-key-creator
+  namespace: kokumi-signing
+  labels:
+    app.kubernetes.io/name: kokumi
+    app.kubernetes.io/managed-by: kustomize
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kokumi-signing-key-creator
+subjects:
+- kind: ServiceAccount
+  name: kokumi-controller-manager
+  namespace: kokumi

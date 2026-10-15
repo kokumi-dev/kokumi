@@ -3,6 +3,9 @@ set -euo pipefail
 
 PKG_VERSION="${PKG_VERSION:-0.1.0}"
 REPO="${REPO:-localhost:5000}"
+COSIGN="${COSIGN:-cosign}"
+# The testdata signed with hack/testdata/cosign.key, for the verified sample.
+SIGNED_PACKAGE="${SIGNED_PACKAGE:-external-secrets}"
 
 if ! GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null); then
   echo "Not inside a git repository"
@@ -67,3 +70,23 @@ for manifests_dir in "$WORK_DIR"/*; do
       --annotation "org.opencontainers.image.revision=${GIT_REVISION}"
   )
 done
+
+# Sign one package with the testdata key, offline and without a transparency
+# log, as a publisher signs a release. The verified sample Product trusts the
+# key through spec.source.verify.
+digest="$(oras resolve "${REPO}/kokumi-dev/testdata/${SIGNED_PACKAGE}:${PKG_VERSION}")"
+echo "Signing package: ${SIGNED_PACKAGE}@${digest}"
+case "$REPO" in
+  localhost:*|127.0.0.1:*)
+    # The local registry is anonymous; keep cosign away from credential
+    # helpers that may prompt on the host.
+    export DOCKER_CONFIG="$WORK_DIR/docker-config"
+    mkdir -p "$DOCKER_CONFIG"
+    echo '{}' > "$DOCKER_CONFIG/config.json"
+    ;;
+esac
+COSIGN_PASSWORD="" "$COSIGN" sign --yes \
+  --key "${GIT_ROOT}/hack/testdata/cosign.key" \
+  --use-signing-config=false --tlog-upload=false \
+  --allow-http-registry \
+  "${REPO}/kokumi-dev/testdata/${SIGNED_PACKAGE}@${digest}"

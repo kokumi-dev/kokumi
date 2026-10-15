@@ -27,6 +27,9 @@ spec:
     - jsonPath: .spec.source.version
       name: Version
       type: string
+    - jsonPath: .status.conditions[?(@.type=='SourceVerified')].status
+      name: Verified
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -280,6 +283,94 @@ spec:
                     required:
                     - name
                     type: object
+                  verify:
+                    description: |-
+                      verify requires the artifact the version resolves to to carry a
+                      trusted signature, by key or keyless against an expected signer
+                      identity. A source that does not verify is not rendered.
+                    properties:
+                      matchOIDCIdentity:
+                        description: |-
+                          matchOIDCIdentity verifies keyless signatures whose certificate was
+                          issued to one of the listed identities.
+                        items:
+                          description: |-
+                            OIDCIdentityMatch matches the identity of a keyless signer. Both fields are
+                            RE2 regular expressions and are not anchored.
+                          properties:
+                            issuer:
+                              description: |-
+                                issuer matches the OIDC issuer of the signer's certificate, for
+                                example "^https://token\.actions\.githubusercontent\.com$".
+                              maxLength: 1024
+                              minLength: 1
+                              type: string
+                            subject:
+                              description: |-
+                                subject matches the subject of the signer's certificate, for example
+                                the workflow that released the artifact.
+                              maxLength: 1024
+                              minLength: 1
+                              type: string
+                          required:
+                          - issuer
+                          - subject
+                          type: object
+                        maxItems: 16
+                        minItems: 1
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      provider:
+                        default: cosign
+                        description: provider is the signature format. Only "cosign"
+                          is supported.
+                        enum:
+                        - cosign
+                        type: string
+                      secretRef:
+                        description: |-
+                          secretRef names a Secret in the Product's namespace holding public
+                          keys. Every key whose name ends in ".pub" is tried; one verifying
+                          signature suffices. Signatures are verified offline, without a
+                          transparency log.
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
+                      trustedRootSecretRef:
+                        description: |-
+                          trustedRootSecretRef names a Secret in the Product's namespace whose
+                          key "trusted_root.json" holds the Sigstore trusted root keyless
+                          signatures are verified against. When unset, the Sigstore public-good
+                          instance is used through TUF, which needs network access; set it in
+                          air-gapped clusters.
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
+                    type: object
+                    x-kubernetes-validations:
+                    - message: exactly one of secretRef or matchOIDCIdentity must
+                        be set
+                      rule: has(self.secretRef) != has(self.matchOIDCIdentity)
+                    - message: trustedRootSecretRef is only used with matchOIDCIdentity
+                      rule: '!has(self.trustedRootSecretRef) || has(self.matchOIDCIdentity)'
                   version:
                     description: |-
                       version is the semantic version or tag of the artifact
@@ -429,6 +520,37 @@ spec:
                         type: string
                     required:
                     - name
+                    type: object
+                  verified:
+                    description: |-
+                      verified records who signed the source, when its signature verified:
+                      through spec.source.verify, or by a key the Kitchen trusts. Absent
+                      when the source was not verified.
+                    properties:
+                      issuer:
+                        description: issuer is the OIDC issuer of the keyless signer's
+                          certificate.
+                        maxLength: 2048
+                        type: string
+                      keyID:
+                        description: |-
+                          keyID identifies the public key that verified the signature: the
+                          base64-encoded SHA-256 of its DER encoding. Set for key-based
+                          verification.
+                        maxLength: 64
+                        type: string
+                      provider:
+                        description: provider is the signature format that verified.
+                        enum:
+                        - cosign
+                        type: string
+                      subject:
+                        description: subject is the subject of the keyless signer's
+                          certificate.
+                        maxLength: 2048
+                        type: string
+                    required:
+                    - provider
                     type: object
                   version:
                     description: version is the tag of the source artifact.

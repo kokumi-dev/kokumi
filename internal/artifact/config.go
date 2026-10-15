@@ -63,6 +63,22 @@ type ConfigSource struct {
 	// PantryRef names the Pantry the source was resolved through, if any.
 	// It is recorded for restore and is not part of the intent.
 	PantryRef string `json:"pantryRef,omitempty"`
+	// Verified records who signed the source, when the Product verified its
+	// signature. It is not part of the intent.
+	Verified *ConfigVerification `json:"verified,omitempty"`
+}
+
+// ConfigVerification records the signer whose signature on a source
+// verified.
+type ConfigVerification struct {
+	// Provider is the signature format that verified, "cosign".
+	Provider string `json:"provider"`
+	// KeyID identifies the public key of a key-based signature.
+	KeyID string `json:"keyID,omitempty"`
+	// Issuer is the OIDC issuer of a keyless signer.
+	Issuer string `json:"issuer,omitempty"`
+	// Subject is the identity of a keyless signer.
+	Subject string `json:"subject,omitempty"`
 }
 
 // ConfigDestination is where a rendered artifact was pushed.

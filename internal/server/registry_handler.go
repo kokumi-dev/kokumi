@@ -207,7 +207,7 @@ func ociClientForPantryRef(ctx context.Context, deps *apiDeps, r *http.Request, 
 	if err != nil {
 		return deps.ociClient
 	}
-	reader, err := uc.readerFor(ctx, "get", "secrets", pantryNamespace)
+	reader, err := uc.readerFor(ctx, "get", secretsResource, pantryNamespace)
 	if err != nil {
 		return deps.ociClient
 	}

@@ -67,3 +67,17 @@
   font-size: 0.85rem;
   color: var(--color-danger);
 }
+
+.verified {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--color-success);
+  overflow-wrap: anywhere;
+}
+
+.unverified {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--color-danger);
+  overflow-wrap: anywhere;
+}

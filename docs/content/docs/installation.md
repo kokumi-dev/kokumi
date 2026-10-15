@@ -74,6 +74,21 @@ rotate the credentials Secret, manage the token signing key
 (`kokumi-server-tokens`), and configure the admin account via the `Kitchen`
 resource.
 
+## Signing key
+
+On its first start the controller generates the key that signs every
+artifact, in the Secret `kokumi-signing-key` in the `kokumi-signing`
+namespace. To bring your own key instead,
+create the Secret before installing:
+
+```bash
+kubectl create namespace kokumi-signing
+cosign generate-key-pair k8s://kokumi-signing/kokumi-signing-key
+```
+
+See the [Operator Guide — Signing](../operator-guide/signing/) for how the key
+is protected and rotated.
+
 ## Pin a specific version
 
 <!-- x-release-please-start-version -->

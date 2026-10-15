@@ -19,6 +19,7 @@ import type {
   ProductFormData,
   ProductPreviewRequest,
   Render,
+  SourceVerify,
 } from '../../api/types'
 import { emptyProductForm, overridePolicies, productToFormData } from '../../api/types'
 import { getChartInfo, listOCITags, previewProduct, previewProductFiles } from '../../api/client'
@@ -55,12 +56,59 @@ function destinationToYaml(dest: OCIDestination): Record<string, unknown> {
   return {}
 }
 
-function formToYaml(data: ProductFormData): string {
-  const doc: Record<string, unknown> = {
-    source: data.source.pantryRef
-      ? { pantryRef: { name: data.source.pantryRef.name }, version: data.source.version }
-      : { oci: data.source.oci ?? '', version: data.source.version },
+/** The verification of a source as written in YAML, in the shape of the Product spec. */
+function verifyToYaml(v: SourceVerify): Record<string, unknown> {
+  const doc: Record<string, unknown> = {}
+  if (v.secretRef) doc.secretRef = { name: v.secretRef }
+  if (v.matchOIDCIdentity?.length) doc.matchOIDCIdentity = v.matchOIDCIdentity.map((m) => ({ issuer: m.issuer, subject: m.subject }))
+  if (v.trustedRootSecretRef) doc.trustedRootSecretRef = { name: v.trustedRootSecretRef }
+  return doc
+}
+
+function verifyFromYaml(raw: unknown): SourceVerify | undefined {
+  if (raw === undefined || raw === null) return undefined
+  if (!isMapping(raw)) throw new Error('source.verify must be a mapping')
+  assertKnownKeys(raw, ['provider', 'secretRef', 'matchOIDCIdentity', 'trustedRootSecretRef'], 'source.verify')
+  if (raw.provider !== undefined && raw.provider !== 'cosign') throw new Error('source.verify.provider must be cosign')
+  const name = (ref: unknown, path: string): string | undefined => {
+    if (ref === undefined || ref === null) return undefined
+    if (!isMapping(ref)) throw new Error(`${path} must be a mapping with a name`)
+    assertKnownKeys(ref, ['name'], path)
+    return String(ref.name ?? '')
   }
+  const identities = raw.matchOIDCIdentity
+  if (identities !== undefined && identities !== null && !Array.isArray(identities)) {
+    throw new Error('source.verify.matchOIDCIdentity must be a list')
+  }
+  return {
+    secretRef: name(raw.secretRef, 'source.verify.secretRef'),
+    matchOIDCIdentity: (identities ?? []).map((m: unknown, i: number) => {
+      const entry = isMapping(m) ? m : {}
+      assertKnownKeys(entry, ['issuer', 'subject'], `source.verify.matchOIDCIdentity[${i}]`)
+      return { issuer: String(entry.issuer ?? ''), subject: String(entry.subject ?? '') }
+    }),
+    trustedRootSecretRef: name(raw.trustedRootSecretRef, 'source.verify.trustedRootSecretRef'),
+  }
+}
+
+/** Why the verification cannot be saved: it needs exactly one of keys or identities. */
+function verifyError(v?: SourceVerify): string | null {
+  if (!v) return null
+  const keyed = !!v.secretRef?.trim()
+  const keyless = (v.matchOIDCIdentity?.length ?? 0) > 0
+  if (keyed === keyless) return 'Verify the source by a key Secret or by signer identities'
+  if (v.matchOIDCIdentity?.some((m) => !m.issuer.trim() || !m.subject.trim())) {
+    return 'Every signer identity needs an issuer and a subject'
+  }
+  return null
+}
+
+function formToYaml(data: ProductFormData): string {
+  const source: Record<string, unknown> = data.source.pantryRef
+    ? { pantryRef: { name: data.source.pantryRef.name }, version: data.source.version }
+    : { oci: data.source.oci ?? '', version: data.source.version }
+  if (data.source.verify) source.verify = verifyToYaml(data.source.verify)
+  const doc: Record<string, unknown> = { source }
   if (data.vendor) doc.vendor = destinationToYaml(data.vendor)
   if (data.render?.helm) {
     const h = data.render.helm
@@ -165,12 +213,13 @@ function yamlToPartialForm(text: string): Omit<ProductFormData, 'name' | 'namesp
 
   // Source — exactly one of oci or pantryRef
   const src = isMapping(doc.source) ? doc.source : {}
-  assertKnownKeys(src, ['oci', 'pantryRef', 'version'], 'source')
+  assertKnownKeys(src, ['oci', 'pantryRef', 'version', 'verify'], 'source')
   const srcPantryRef = src.pantryRef as Record<string, string> | undefined
   const version = String(src.version ?? '')
+  const verify = verifyFromYaml(src.verify)
   const source: OCISource = srcPantryRef?.name
-    ? { pantryRef: { name: srcPantryRef.name }, version }
-    : { oci: String(src.oci ?? ''), version }
+    ? { pantryRef: { name: srcPantryRef.name }, version, verify }
+    : { oci: String(src.oci ?? ''), version, verify }
 
   // Vendor — present means vendoring; {} is the in-cluster registry
   let vendor: OCIDestination | undefined
@@ -264,10 +313,25 @@ export default function ProductForm({ product, onCancel, onSubmit, onDirtyChange
         return
       }
     }
-    const invalid = overridesError(data.overrides)
+    const invalid = overridesError(data.overrides) ?? verifyError(data.source.verify)
     if (invalid) {
       setSubmitError(invalid)
       return
+    }
+    if (data.source.verify) {
+      // Empty optional fields are sent as absent.
+      const { secretRef, matchOIDCIdentity, trustedRootSecretRef } = data.source.verify
+      data = {
+        ...data,
+        source: {
+          ...data.source,
+          verify: {
+            secretRef: secretRef?.trim() || undefined,
+            matchOIDCIdentity: matchOIDCIdentity?.length ? matchOIDCIdentity.map((m) => ({ issuer: m.issuer.trim(), subject: m.subject.trim() })) : undefined,
+            trustedRootSecretRef: trustedRootSecretRef?.trim() || undefined,
+          },
+        },
+      }
     }
     setSaving(true)
     setSubmitError(null)
@@ -361,6 +425,7 @@ function FormView({ formData, isEdit, onChange }: FormViewProps) {
   const pantries = usePantries()
 
   const [isVendorOpen, setIsVendorOpen] = useState(!!formData.vendor)
+  const [isVerifyOpen, setIsVerifyOpen] = useState(!!formData.source.verify)
 
   // Source type: 'oci' = direct URL, 'pantry' = named Pantry provides the URL
   const [sourceMode, setSourceMode] = useState<'oci' | 'pantry'>(
@@ -475,6 +540,12 @@ function FormView({ formData, isEdit, onChange }: FormViewProps) {
     if (oci) fetchChartInfo(oci, version)
   }
 
+  const verify = formData.source.verify
+  const verifySummary = verify
+    ? verify.secretRef
+      ? `keys in ${verify.secretRef}`
+      : `${verify.matchOIDCIdentity?.length ?? 0} signer identit${(verify.matchOIDCIdentity?.length ?? 0) === 1 ? 'y' : 'ies'}`
+    : undefined
   const vendorSummary = formData.vendor &&
     (formData.vendor.oci || (formData.vendor.pantryRef?.name ? `pantry: ${formData.vendor.pantryRef.name}` : 'in-cluster registry'))
 
@@ -519,8 +590,8 @@ function FormView({ formData, isEdit, onChange }: FormViewProps) {
             setField(
               'source',
               m === 'oci'
-                ? { oci: '', version: formData.source.version }
-                : { pantryRef: { name: '' }, version: formData.source.version },
+                ? { oci: '', version: formData.source.version, verify: formData.source.verify }
+                : { pantryRef: { name: '' }, version: formData.source.version, verify: formData.source.verify },
             )
           }}
         />
@@ -546,7 +617,7 @@ function FormView({ formData, isEdit, onChange }: FormViewProps) {
                 value={formData.source.pantryRef?.name ?? ''}
                 onChange={(e) => {
                   const name = e.target.value
-                  setField('source', { pantryRef: { name }, version: formData.source.version })
+                  setField('source', { pantryRef: { name }, version: formData.source.version, verify: formData.source.verify })
                   if (name) {
                     const p = (pantries ?? []).find((p) => p.name === name && p.namespace === formData.namespace)
                     if (p?.url) fetchTags(p.url, name, formData.namespace)
@@ -623,6 +694,14 @@ function FormView({ formData, isEdit, onChange }: FormViewProps) {
         />
       </div>
 
+      {/* Source verification (collapsible) */}
+      <Disclosure label="Verify source" summary={verifySummary} open={isVerifyOpen} onOpenChange={setIsVerifyOpen}>
+        <VerifyEditor
+          verify={formData.source.verify}
+          onChange={(verify) => setField('source', { ...formData.source, verify })}
+        />
+      </Disclosure>
+
       {/* Vendor (collapsible) */}
       <Disclosure label="Vendor" summary={vendorSummary} open={isVendorOpen} onOpenChange={setIsVendorOpen}>
         <div className={styles.formGrid} style={{ gap: 10, marginTop: 4 }}>
@@ -644,6 +723,133 @@ function FormView({ formData, isEdit, onChange }: FormViewProps) {
           )}
         </div>
       </Disclosure>
+    </div>
+  )
+}
+
+// ── VerifyEditor ──────────────────────────────────────────────────────────────
+
+type VerifyMode = 'none' | 'keys' | 'keyless'
+
+function verifyMode(v?: SourceVerify): VerifyMode {
+  if (!v) return 'none'
+  return v.matchOIDCIdentity?.length ? 'keyless' : 'keys'
+}
+
+interface VerifyEditorProps {
+  verify?: SourceVerify
+  onChange: (v: SourceVerify | undefined) => void
+}
+
+/**
+ * VerifyEditor edits how the source's signature is verified: by the public
+ * keys in a Secret, or keyless against expected signer identities, as Flux's
+ * OCIRepository does.
+ */
+function VerifyEditor({ verify, onChange }: VerifyEditorProps) {
+  const mode = verifyMode(verify)
+  const identities = verify?.matchOIDCIdentity ?? []
+
+  function setIdentity(index: number, change: Partial<{ issuer: string; subject: string }>) {
+    onChange({ ...verify, matchOIDCIdentity: identities.map((m, i) => (i === index ? { ...m, ...change } : m)) })
+  }
+
+  return (
+    <div className={styles.formGrid} style={{ gap: 10, marginTop: 4 }}>
+      <SegmentedControl
+        aria-label="Verify source"
+        segments={[
+          { id: 'none', label: 'Not required' },
+          { id: 'keys', label: 'Public keys' },
+          { id: 'keyless', label: 'Keyless' },
+        ]}
+        value={mode}
+        onChange={(m) => {
+          if (m === 'none') onChange(undefined)
+          else if (m === 'keys') onChange({ secretRef: '' })
+          else onChange({ matchOIDCIdentity: [{ issuer: '', subject: '' }] })
+        }}
+      />
+      {mode === 'none' && (
+        <span className={styles.hint}>
+          A source signed by a key the Kitchen trusts still verifies. When the
+          Kitchen requires verification, an unverified source is not rendered.
+        </span>
+      )}
+      {mode === 'keys' && (
+        <div className={styles.fieldGroup}>
+          <label className={styles.label}>Secret with public keys</label>
+          <input
+            className={styles.input}
+            value={verify?.secretRef ?? ''}
+            onChange={(e) => onChange({ secretRef: e.target.value })}
+            placeholder="podinfo-keys"
+          />
+          <span className={styles.hint}>
+            A Secret in the Product&apos;s namespace. Every key ending in <code>.pub</code> is
+            tried; one verifying signature suffices.
+          </span>
+        </div>
+      )}
+      {mode === 'keyless' && (
+        <>
+          {identities.map((m, i) => (
+            <div key={i} className={styles.row2}>
+              <div className={styles.fieldGroup}>
+                <label className={styles.label}>Issuer</label>
+                <input
+                  className={styles.input}
+                  value={m.issuer}
+                  onChange={(e) => setIdentity(i, { issuer: e.target.value })}
+                  placeholder="^https://token\.actions\.githubusercontent\.com$"
+                />
+              </div>
+              <div className={styles.fieldGroup}>
+                <label className={styles.label}>Subject</label>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input
+                    className={styles.input}
+                    value={m.subject}
+                    onChange={(e) => setIdentity(i, { subject: e.target.value })}
+                    placeholder="^https://github\.com/org/repo/\.github/workflows/release\.yml@refs/tags/.*$"
+                  />
+                  <IconButton
+                    aria-label="Remove signer identity"
+                    disabled={identities.length === 1}
+                    onClick={() => onChange({ ...verify, matchOIDCIdentity: identities.filter((_, j) => j !== i) })}
+                  >
+                    <CloseIcon />
+                  </IconButton>
+                </div>
+              </div>
+            </div>
+          ))}
+          <div>
+            <Button
+              variant="secondary"
+              onClick={() => onChange({ ...verify, matchOIDCIdentity: [...identities, { issuer: '', subject: '' }] })}
+            >
+              <PlusIcon /> Add signer identity
+            </Button>
+          </div>
+          <span className={styles.hint}>
+            Both fields are regular expressions; one matching signer suffices.
+          </span>
+          <div className={styles.fieldGroup}>
+            <label className={styles.label}>Trusted root Secret (optional)</label>
+            <input
+              className={styles.input}
+              value={verify?.trustedRootSecretRef ?? ''}
+              onChange={(e) => onChange({ ...verify, trustedRootSecretRef: e.target.value || undefined })}
+              placeholder="sigstore-root"
+            />
+            <span className={styles.hint}>
+              Holds the Sigstore <code>trusted_root.json</code>. Without it the public
+              Sigstore instance is used, which needs network access.
+            </span>
+          </div>
+        </>
+      )}
     </div>
   )
 }

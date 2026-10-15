@@ -21,14 +21,17 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/sigstore/cosign/v3/pkg/cosign"
 	"golang.org/x/crypto/bcrypt"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/signing"
 )
 
 // Secret data keys expected by the server's authenticator builder.
@@ -39,6 +42,9 @@ const (
 	secretKeySigningKey   = "signing-key"
 	tokenSecretName       = deliveryv1alpha1.DefaultTokenSigningKeySecretName
 	userTokenSecretName   = "my-gitops-key"
+	signingKeySecretName  = deliveryv1alpha1.SigningKeySecretName
+	// testSigningNamespace holds the signing key, apart from the Kitchen.
+	testSigningNamespace = "test-signing"
 )
 
 var _ = Describe("Kitchen Controller", func() {
@@ -77,11 +83,7 @@ var _ = Describe("Kitchen Controller", func() {
 		})
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
-			controllerReconciler := &KitchenReconciler{
-				Client:    k8sClient,
-				Scheme:    k8sClient.Scheme(),
-				Namespace: testNamespace,
-			}
+			controllerReconciler := newKitchenReconciler()
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
@@ -94,10 +96,21 @@ var _ = Describe("Kitchen Controller", func() {
 })
 
 func newKitchenReconciler() *KitchenReconciler {
-	return &KitchenReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Namespace: testNamespace}
+	return &KitchenReconciler{
+		Client:           k8sClient,
+		Scheme:           k8sClient.Scheme(),
+		Namespace:        testNamespace,
+		SigningNamespace: testSigningNamespace,
+		Signing:          signing.NewProvider(k8sClient, testNamespace, testSigningNamespace),
+	}
 }
 
 func reconcileSingleton(ctx context.Context) {
+	ns := &corev1.Namespace{Name: testSigningNamespace}
+	if err := k8sClient.Create(ctx, ns); err != nil && !errors.IsAlreadyExists(err) {
+		Expect(err).NotTo(HaveOccurred())
+	}
+
 	_, err := newKitchenReconciler().Reconcile(ctx, reconcile.Request{
 		Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace,
 	})
@@ -346,5 +359,138 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Message).To(ContainSubstring(userTokenSecretName))
+	})
+})
+
+func getSecret(ctx context.Context, namespace, name string) *corev1.Secret {
+	secret := &corev1.Secret{}
+	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, secret)).To(Succeed())
+	return secret
+}
+
+// cosignKeyData returns signing key Secret data as "cosign generate-key-pair
+// k8s://" writes it.
+func cosignKeyData(password string) map[string][]byte {
+	keys, err := cosign.GenerateKeyPair(func(bool) ([]byte, error) { return []byte(password), nil })
+	Expect(err).NotTo(HaveOccurred())
+	return map[string][]byte{
+		signing.SecretPrivateKey: keys.PrivateBytes,
+		signing.SecretPassword:   []byte(password),
+		signing.SecretPublicKey:  keys.PublicBytes,
+	}
+}
+
+var _ = Describe("Kitchen signing key", func() {
+	ctx := context.Background()
+
+	BeforeEach(func() {
+		for _, name := range []string{testNamespace, testSigningNamespace} {
+			ns := &corev1.Namespace{Name: name}
+			if err := k8sClient.Create(ctx, ns); err != nil && !errors.IsAlreadyExists(err) {
+				Expect(err).NotTo(HaveOccurred())
+			}
+		}
+		// Other specs reconcile the Kitchen, which generates a key.
+		_ = k8sClient.Delete(ctx, &corev1.Secret{Name: signingKeySecretName, Namespace: testSigningNamespace})
+		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Kitchen{Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace})).To(Succeed())
+	})
+
+	AfterEach(func() {
+		_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Kitchen{Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace})
+		_ = k8sClient.Delete(ctx, &corev1.Secret{Name: signingKeySecretName, Namespace: testSigningNamespace})
+	})
+
+	It("generates the key in cosign's layout and publishes its public half", func() {
+		reconcileSingleton(ctx)
+
+		secret := getSecret(ctx, testSigningNamespace, signingKeySecretName)
+		key, err := signing.LoadKey(secret.Data)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = cosign.LoadPrivateKey(secret.Data[signing.SecretPrivateKey], secret.Data[signing.SecretPassword], nil)
+		Expect(err).NotTo(HaveOccurred(), "stock cosign can read the generated key")
+
+		kitchen := getKitchen(ctx)
+		Expect(kitchen.Status.Signing).NotTo(BeNil())
+		Expect(kitchen.Status.Signing.KeyID).To(Equal(key.ID()))
+		Expect(kitchen.Status.Signing.PublicKey).To(Equal(string(secret.Data[signing.SecretPublicKey])))
+		Expect(apimeta.IsStatusConditionTrue(kitchen.Status.Conditions, deliveryv1alpha1.ConditionTypeSigningKeyReady)).To(BeTrue())
+		Expect(readyCondition(kitchen).Status).To(Equal(metav1.ConditionTrue))
+
+		By("keeping the key on the next reconcile")
+		reconcileSingleton(ctx)
+		Expect(getSecret(ctx, testSigningNamespace, signingKeySecretName).Data).To(Equal(secret.Data))
+	})
+
+	It("keeps a key brought by a cluster admin", func() {
+		data := cosignKeyData("chosen-by-admin")
+		Expect(k8sClient.Create(ctx, &corev1.Secret{Name: signingKeySecretName, Namespace: testSigningNamespace, Data: data})).To(Succeed())
+
+		reconcileSingleton(ctx)
+
+		Expect(getSecret(ctx, testSigningNamespace, signingKeySecretName).Data).To(Equal(data))
+		Expect(getKitchen(ctx).Status.Signing.PublicKey).To(Equal(string(data[signing.SecretPublicKey])))
+	})
+
+	It("refuses a malformed key", func() {
+		data := cosignKeyData("secret")
+		data[signing.SecretPassword] = []byte("wrong")
+		Expect(k8sClient.Create(ctx, &corev1.Secret{Name: signingKeySecretName, Namespace: testSigningNamespace, Data: data})).To(Succeed())
+
+		reconcileSingleton(ctx)
+
+		kitchen := getKitchen(ctx)
+		cond := apimeta.FindStatusCondition(kitchen.Status.Conditions, deliveryv1alpha1.ConditionTypeSigningKeyReady)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(deliveryv1alpha1.ReasonKeyInvalid))
+		Expect(readyCondition(kitchen).Status).To(Equal(metav1.ConditionFalse))
+		Expect(kitchen.Status.Signing).To(BeNil())
+	})
+
+	It("stops using a deleted key that cannot be generated again", func() {
+		// A namespace is never removed in envtest; while it terminates, no
+		// Secret can be created in it.
+		const keyNamespace = "test-signing-terminating"
+		Expect(k8sClient.Create(ctx, &corev1.Namespace{Name: keyNamespace})).To(Succeed())
+		reconciler := newKitchenReconciler()
+		reconciler.SigningNamespace = keyNamespace
+		reconciler.Signing = signing.NewProvider(k8sClient, testNamespace, keyNamespace)
+		request := reconcile.Request{Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace}
+
+		_, err := reconciler.Reconcile(ctx, request)
+		Expect(err).NotTo(HaveOccurred())
+		published := getKitchen(ctx).Status.Signing
+
+		Expect(k8sClient.Delete(ctx, &corev1.Secret{Name: signingKeySecretName, Namespace: keyNamespace})).To(Succeed())
+		Expect(k8sClient.Delete(ctx, &corev1.Namespace{Name: keyNamespace})).To(Succeed())
+
+		_, err = reconciler.Reconcile(ctx, request)
+		Expect(err).To(HaveOccurred(), "requeues to retry generating the key")
+
+		kitchen := getKitchen(ctx)
+		cond := apimeta.FindStatusCondition(kitchen.Status.Conditions, deliveryv1alpha1.ConditionTypeSigningKeyReady)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(deliveryv1alpha1.ReasonKeyMissing))
+		Expect(readyCondition(kitchen).Status).To(Equal(metav1.ConditionFalse))
+		Expect(kitchen.Status.Signing).To(Equal(published), "artifacts signed by the old key still verify")
+
+		_, err = reconciler.Signing.State(ctx)
+		Expect(err).To(MatchError(signing.ErrKeyNotReady), "nothing is signed with the deleted key")
+	})
+
+	It("refuses a trusted key that is not a public key", func() {
+		kitchen := getKitchen(ctx)
+		kitchen.Spec.Signing = &deliveryv1alpha1.KitchenSigning{TrustedKeys: []deliveryv1alpha1.TrustedKey{{
+			Name:      "broken",
+			PublicKey: "-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n",
+		}}}
+		Expect(k8sClient.Update(ctx, kitchen)).To(Succeed())
+
+		reconcileSingleton(ctx)
+
+		cond := apimeta.FindStatusCondition(getKitchen(ctx).Status.Conditions, deliveryv1alpha1.ConditionTypeSigningKeyReady)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Reason).To(Equal(deliveryv1alpha1.ReasonTrustedKeyInvalid))
 	})
 })

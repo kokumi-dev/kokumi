@@ -83,10 +83,6 @@ type Artifact struct {
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	Digest string `json:"digest"`
-
-	// signed indicates whether the artifact has been cryptographically signed
-	// +optional
-	Signed bool `json:"signed,omitempty"`
 }
 
 // GitSource records the SCM provenance of the base artifact that produced this
@@ -215,8 +211,8 @@ type ApprovalVote struct {
 	SubmittedTime metav1.MicroTime `json:"submittedTime"`
 }
 
-// ApprovalAttestation references the OCI referrer artifact that records the
-// sealed approvals of a Preparation.
+// ApprovalAttestation references the OCI referrer that records the sealed
+// approvals of a Preparation: a Sigstore bundle signed by the Kitchen key.
 type ApprovalAttestation struct {
 	// ociRef is the full OCI reference of the attestation including digest.
 	// +required
@@ -271,16 +267,20 @@ type PreparationApprovalStatus struct {
 }
 
 // AttestationType identifies the kind of evidence an attestation carries.
-// +kubebuilder:validation:Enum=Provenance
+// +kubebuilder:validation:Enum=Signature;Provenance
 type AttestationType string
 
 const (
+	// AttestationTypeSignature is the signature of the artifact
+	// (predicate https://sigstore.dev/cosign/sign/v1).
+	AttestationTypeSignature AttestationType = "Signature"
 	// AttestationTypeProvenance is the SLSA provenance of the artifact.
 	AttestationTypeProvenance AttestationType = "Provenance"
 )
 
 // AttestationReference references an OCI referrer that carries evidence
-// about how the Preparation's artifact was produced.
+// about the Preparation's artifact: a Sigstore bundle signed by the Kitchen
+// key.
 type AttestationReference struct {
 	// type is the kind of evidence the attestation carries.
 	// +required
@@ -310,9 +310,9 @@ type PreparationStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// attestations lists the latest attestation of each type that records how
-	// the artifact was produced. The approvals attestation is not listed
-	// here; it is recorded in approval.attestation.
+	// attestations lists the latest attestation of each type that signs the
+	// artifact or records how it was produced. The approvals attestation is
+	// not listed here; it is recorded in approval.attestation.
 	// +listType=map
 	// +listMapKey=type
 	// +kubebuilder:validation:MaxItems=16
@@ -332,7 +332,7 @@ type PreparationStatus struct {
 // +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].reason`
 // +kubebuilder:printcolumn:name="Approved",type=string,JSONPath=`.status.conditions[?(@.type=='Approved')].reason`
 // +kubebuilder:printcolumn:name="Digest",type=string,JSONPath=`.spec.artifact.digest`,priority=1
-// +kubebuilder:printcolumn:name="Signed",type=boolean,JSONPath=`.spec.artifact.signed`,priority=1
+// +kubebuilder:printcolumn:name="Signed",type=string,JSONPath=`.status.conditions[?(@.type=='Signed')].status`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 // +kubebuilder:resource:shortName=prep
 // +kubebuilder:selectablefield:JSONPath=`.spec.orderName`

@@ -275,7 +275,7 @@ func createDockerConfigSecret(ctx context.Context, uc *userClient, ns, name, reg
 		},
 	}
 
-	return uc.create(ctx, secret, "secrets")
+	return uc.create(ctx, secret, secretsResource)
 }
 
 // upsertDockerConfigSecret creates or updates a kubernetes.io/dockerconfigjson Secret.
@@ -297,7 +297,7 @@ func upsertDockerConfigSecret(ctx context.Context, uc *userClient, ns, name, reg
 			Type:      corev1.SecretTypeDockerConfigJson,
 			Data:      map[string][]byte{corev1.DockerConfigJsonKey: data},
 		}
-		return uc.create(ctx, newSecret, "secrets")
+		return uc.create(ctx, newSecret, secretsResource)
 	}
 	if getErr != nil {
 		return getErr
@@ -305,7 +305,7 @@ func upsertDockerConfigSecret(ctx context.Context, uc *userClient, ns, name, reg
 
 	patch := client.MergeFrom(secret.DeepCopy())
 	secret.Data = map[string][]byte{corev1.DockerConfigJsonKey: data}
-	return uc.patch(ctx, &secret, patch, "secrets")
+	return uc.patch(ctx, &secret, patch, secretsResource)
 }
 
 // buildDockerConfigJSON produces a minimal .dockerconfigjson payload for a

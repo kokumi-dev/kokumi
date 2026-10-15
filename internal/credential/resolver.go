@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/oras-project/oras-go/v3/registry/remote/credentials"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -40,6 +41,10 @@ type PantryResolver interface {
 
 	// ClientForPantry returns an authenticated client for given pantry.
 	ClientForPantry(ctx context.Context, namespace, pantryName string) (oci.Client, error)
+
+	// CredentialsForPantry returns the registry credentials of the given
+	// pantry, or nil when it has none.
+	CredentialsForPantry(ctx context.Context, namespace, pantryName string) (credentials.Store, error)
 }
 
 // KubeResolver resolves Pantry CRD references into OCI URLs and authenticated
@@ -101,9 +106,28 @@ func (kr *KubeResolver) ClientForPantry(ctx context.Context, namespace, pantryNa
 	return c, nil
 }
 
+// CredentialsForPantry returns the registry credentials of the named Pantry,
+// or nil when it has no secretRef.
+func (kr *KubeResolver) CredentialsForPantry(ctx context.Context, namespace, pantryName string) (credentials.Store, error) {
+	_, store, err := kr.credentialsForPantry(ctx, namespace, pantryName)
+	return store, err
+}
+
 // resolveForPantry fetches the named Pantry and its credential Secret, returning
 // an authenticated ORAS client. Returns a nil client when no secretRef is set.
 func (kr *KubeResolver) resolveForPantry(ctx context.Context, namespace, pantryName string) (*deliveryv1alpha1.Pantry, oci.Client, error) {
+	pantry, credStore, err := kr.credentialsForPantry(ctx, namespace, pantryName)
+	if err != nil || credStore == nil {
+		return pantry, nil, err
+	}
+
+	return pantry, oci.NewAuthenticatedORASClient(credStore), nil
+}
+
+// credentialsForPantry fetches the named Pantry and the credentials in its
+// Secret. Returns nil credentials when no secretRef is set or the Secret
+// holds no docker config.
+func (kr *KubeResolver) credentialsForPantry(ctx context.Context, namespace, pantryName string) (*deliveryv1alpha1.Pantry, credentials.Store, error) {
 	var pantry deliveryv1alpha1.Pantry
 	if err := kr.Reader.Get(ctx, types.NamespacedName{
 		Namespace: namespace,
@@ -134,5 +158,5 @@ func (kr *KubeResolver) resolveForPantry(ctx context.Context, namespace, pantryN
 		return nil, nil, fmt.Errorf("parse credentials for Pantry %q: %w", pantryName, err)
 	}
 
-	return &pantry, oci.NewAuthenticatedORASClient(credStore), nil
+	return &pantry, credStore, nil
 }

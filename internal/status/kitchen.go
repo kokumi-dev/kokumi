@@ -36,6 +36,27 @@ func (u *KitchenUpdater) Failed(ctx context.Context, kitchen *deliveryv1alpha1.K
 	})
 }
 
+// SigningKeyReady publishes the public half of the signing key and marks it
+// ready.
+func (u *KitchenUpdater) SigningKeyReady(ctx context.Context, kitchen *deliveryv1alpha1.Kitchen, signing deliveryv1alpha1.KitchenSigningStatus) error {
+	return u.set(ctx, kitchen, func(latest *deliveryv1alpha1.Kitchen) {
+		latest.Status.Signing = &signing
+		meta.SetStatusCondition(&latest.Status.Conditions, newTypedCondition(deliveryv1alpha1.ConditionTypeSigningKeyReady, latest.Generation,
+			metav1.ConditionTrue, deliveryv1alpha1.ReasonKeyReady, "Signing key "+signing.KeyID+" loaded"))
+	})
+}
+
+// SigningKeyFailed records that the signing key cannot be used, for reason.
+// The published public key is kept, since artifacts it signed still verify.
+func (u *KitchenUpdater) SigningKeyFailed(ctx context.Context, kitchen *deliveryv1alpha1.Kitchen, reason string, err error) error {
+	return u.set(ctx, kitchen, func(latest *deliveryv1alpha1.Kitchen) {
+		latest.Status.ObservedGeneration = latest.Generation
+		meta.SetStatusCondition(&latest.Status.Conditions, newTypedCondition(deliveryv1alpha1.ConditionTypeSigningKeyReady, latest.Generation,
+			metav1.ConditionFalse, reason, err.Error()))
+		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(latest.Generation, metav1.ConditionFalse, reason, err.Error()))
+	})
+}
+
 func (u *KitchenUpdater) set(ctx context.Context, kitchen *deliveryv1alpha1.Kitchen, mutate func(*deliveryv1alpha1.Kitchen)) error {
 	return setCondition(ctx, u.client, kitchen, mutate)
 }

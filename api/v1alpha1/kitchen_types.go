@@ -31,6 +31,21 @@ const (
 	DefaultTokenSigningKeySecretName = "kokumi-server-tokens"
 )
 
+// The signing key lives in a namespace of its own under a fixed name, so that
+// RBAC and admission can keep everyone but the controller and cluster admins
+// away from it without restricting Secrets anywhere else.
+const (
+	// SigningKeyNamespace is the namespace of the signing key Secret.
+	SigningKeyNamespace = "kokumi-signing"
+
+	// SigningKeySecretName is the Secret holding the key that signs every
+	// artifact and attestation Kokumi writes, in the layout of cosign's
+	// k8s:// key reference: "cosign.key" (encrypted PEM), "cosign.password"
+	// and "cosign.pub". The Kitchen controller generates it when it does not
+	// exist.
+	SigningKeySecretName = "kokumi-signing-key"
+)
+
 // KitchenSpec defines the desired state of Kitchen
 type KitchenSpec struct {
 	// ArgoCDURL is the base URL of the Argo CD instance used to build deep
@@ -45,6 +60,48 @@ type KitchenSpec struct {
 	// provider is configured and the server runs without authentication.
 	// +optional
 	Auth *KitchenAuth `json:"auth,omitempty"`
+
+	// signing configures which keys Kokumi trusts besides its own signing
+	// key, and whether the source of every Product must verify.
+	// +optional
+	Signing *KitchenSigning `json:"signing,omitempty"`
+}
+
+// KitchenSigning configures the trust of the Kitchen. The signing key itself
+// is the Secret named by SigningKeySecretName.
+type KitchenSigning struct {
+	// trustedKeys lists public keys Kokumi trusts for its own artifacts in
+	// addition to the current signing key: the key used before a rotation,
+	// or the key of another installation whose releases are imported.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	// +kubebuilder:validation:MaxItems=16
+	TrustedKeys []TrustedKey `json:"trustedKeys,omitempty"`
+
+	// requireSourceVerification requires the source of every Product to
+	// verify, either through the Product's spec.source.verify or by a
+	// signature from a key the Kitchen trusts. A Product whose source does
+	// not verify is not ready, and its Orders render nothing.
+	// +optional
+	RequireSourceVerification bool `json:"requireSourceVerification,omitempty"`
+}
+
+// TrustedKey is a public key Kokumi trusts for its own artifacts.
+type TrustedKey struct {
+	// name identifies the key, for example "before-2026-10".
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
+	Name string `json:"name"`
+
+	// publicKey is the PEM-encoded public key, as in cosign.pub.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=4096
+	// +kubebuilder:validation:XValidation:rule="self.startsWith('-----BEGIN PUBLIC KEY-----')",message="must be a PEM-encoded public key"
+	PublicKey string `json:"publicKey"`
 }
 
 // KitchenAuth groups the authentication configuration for the Kitchen server.
@@ -179,13 +236,37 @@ type KitchenStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// signing publishes the public half of the signing key. Absent until the
+	// controller has loaded the key.
+	// +optional
+	Signing *KitchenSigningStatus `json:"signing,omitempty"`
+}
+
+// KitchenSigningStatus is the public half of the Kitchen signing key.
+type KitchenSigningStatus struct {
+	// keyID identifies the key: the base64-encoded SHA-256 of its DER
+	// public key, as recorded in the hint of every bundle it signs.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=64
+	KeyID string `json:"keyID"`
+
+	// publicKey is the PEM-encoded public key, as in cosign.pub. It verifies
+	// every artifact and attestation Kokumi writes, for example with
+	// "cosign verify --key".
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=4096
+	PublicKey string `json:"publicKey"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
 // +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].reason`
-// +kubebuilder:printcolumn:name="Argo CD URL",type=string,JSONPath=`.spec.argoCDURL`
+// +kubebuilder:printcolumn:name="Key ID",type=string,JSONPath=`.status.signing.keyID`
+// +kubebuilder:printcolumn:name="Argo CD URL",type=string,JSONPath=`.spec.argoCDURL`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Kitchen is the Schema for the kitchens API

@@ -37,17 +37,23 @@ import (
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/approval"
+	"github.com/kokumi-dev/kokumi/internal/attestation"
 	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/index"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/provenance"
+	"github.com/kokumi-dev/kokumi/internal/signing"
 	"github.com/kokumi-dev/kokumi/internal/status"
 )
 
-// PreparationReconciler reconciles a Preparation object. It attaches the
-// provenance of the Preparation's artifact, aggregates the Preparation's
-// Approvals, and seals them into an OCI attestation once a Serving targets
-// the approved Preparation.
+// signingKeyRetryInterval is how often a Preparation retries while the
+// Kitchen signing key is not ready.
+const signingKeyRetryInterval = 10 * time.Second
+
+// PreparationReconciler reconciles a Preparation object. It signs the
+// Preparation's artifact and attaches its provenance, aggregates the
+// Preparation's Approvals, and seals them into a signed OCI attestation once
+// a Serving targets the approved Preparation.
 type PreparationReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -56,6 +62,8 @@ type PreparationReconciler struct {
 	// OCIClient is used when the Order's destination has no credentials.
 	OCIClient      oci.Client
 	PantryResolver credential.PantryResolver
+	// Signing signs the artifact and its attestations with the Kitchen key.
+	Signing *signing.Provider
 }
 
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=preparations,verbs=get;list;watch;create;update;patch;delete
@@ -104,13 +112,15 @@ func (r *PreparationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	return r.reconcilePreparation(ctx, preparation)
 }
 
-// reconcilePreparation attaches the provenance of the Preparation's artifact,
-// which makes it ready, then aggregates its Approvals and seals them into an
-// OCI attestation once a Serving targets the approved Preparation.
+// reconcilePreparation signs the Preparation's artifact and attaches its
+// provenance, which makes it ready, then aggregates its Approvals and seals
+// them into a signed OCI attestation once a Serving targets the approved
+// Preparation.
 func (r *PreparationReconciler) reconcilePreparation(ctx context.Context, preparation *deliveryv1alpha1.Preparation) (ctrl.Result, error) {
-	if !apimeta.IsStatusConditionTrue(preparation.Status.Conditions, deliveryv1alpha1.ConditionTypeProvenanceAttached) {
+	if !apimeta.IsStatusConditionTrue(preparation.Status.Conditions, deliveryv1alpha1.ConditionTypeSigned) ||
+		!apimeta.IsStatusConditionTrue(preparation.Status.Conditions, deliveryv1alpha1.ConditionTypeProvenanceAttached) {
 		// The status update triggers the next reconcile.
-		return ctrl.Result{}, r.attachProvenance(ctx, preparation)
+		return r.attachEvidence(ctx, preparation)
 	}
 
 	approvals, err := index.ApprovalsForPreparation(ctx, r.Client, preparation)
@@ -128,7 +138,7 @@ func (r *PreparationReconciler) reconcilePreparation(ctx context.Context, prepar
 
 	if approval.IsSealed(preparation) {
 		if preparation.Status.Approval.Attestation == nil {
-			return ctrl.Result{}, r.archive(ctx, preparation)
+			return r.archive(ctx, preparation)
 		}
 		return ctrl.Result{}, nil
 	}
@@ -140,7 +150,7 @@ func (r *PreparationReconciler) reconcilePreparation(ctx context.Context, prepar
 	if err != nil || !targeted {
 		return ctrl.Result{}, err
 	}
-	return ctrl.Result{}, r.seal(ctx, preparation)
+	return r.seal(ctx, preparation)
 }
 
 // isPromotionTarget reports whether the Order's Serving converges to prep.
@@ -154,125 +164,170 @@ func (r *PreparationReconciler) isPromotionTarget(ctx context.Context, prep *del
 
 // seal locks the votes of prep using a fresh read from the API server, then
 // archives them. Votes submitted later are ignored.
-func (r *PreparationReconciler) seal(ctx context.Context, prep *deliveryv1alpha1.Preparation) error {
+func (r *PreparationReconciler) seal(ctx context.Context, prep *deliveryv1alpha1.Preparation) (ctrl.Result, error) {
 	updater := status.NewPreparationUpdater(r.Client)
 
 	approvals, err := index.ApprovalsForPreparation(ctx, r.APIReader, prep)
 	if err != nil {
-		return fmt.Errorf("failed to list Approvals: %w", err)
+		return ctrl.Result{}, fmt.Errorf("failed to list Approvals: %w", err)
 	}
 	res := approval.Evaluate(prep, approvals)
 	if !res.Approved {
-		return updater.Approval(ctx, prep, res)
+		return ctrl.Result{}, updater.Approval(ctx, prep, res)
 	}
 
 	if err := updater.Seal(ctx, prep, res, approval.NewSealTime(time.Now())); err != nil {
-		return fmt.Errorf("failed to seal Approvals: %w", err)
+		return ctrl.Result{}, fmt.Errorf("failed to seal Approvals: %w", err)
 	}
 	log.FromContext(ctx).Info("Sealed Approvals", "preparation", prep.Name, "approvedCount", res.Status.ApprovedCount)
 
 	return r.archive(ctx, prep)
 }
 
-// archive records the sealed votes as an OCI attestation of the Preparation.
-func (r *PreparationReconciler) archive(ctx context.Context, prep *deliveryv1alpha1.Preparation) error {
+// archive records the sealed votes as a signed OCI attestation of the
+// Preparation.
+func (r *PreparationReconciler) archive(ctx context.Context, prep *deliveryv1alpha1.Preparation) (ctrl.Result, error) {
 	updater := status.NewPreparationUpdater(r.Client)
+
+	state, err := r.Signing.State(ctx)
+	if err != nil {
+		log.FromContext(ctx).Info("Waiting for the signing key to archive Approvals", "preparation", prep.Name, "reason", err.Error())
+		if uerr := updater.ArchiveFailed(ctx, prep, err); uerr != nil {
+			return ctrl.Result{}, uerr
+		}
+		return ctrl.Result{RequeueAfter: signingKeyRetryInterval}, nil
+	}
 
 	approvals, err := index.ApprovalsForPreparation(ctx, r.APIReader, prep)
 	if err != nil {
-		return fmt.Errorf("failed to list Approvals: %w", err)
+		return ctrl.Result{}, fmt.Errorf("failed to list Approvals: %w", err)
 	}
 
 	destClient, err := r.destinationClient(ctx, prep)
 	if err != nil {
-		return err
+		return ctrl.Result{}, err
 	}
 
-	attestation, err := approval.Archive(ctx, destClient, prep, approvals)
+	archived, err := approval.Archive(ctx, destClient, state.Signer, prep, approvals)
 	if err != nil {
 		if uerr := updater.ArchiveFailed(ctx, prep, err); uerr != nil {
 			log.FromContext(ctx).Error(uerr, "Failed to update Preparation status")
 		}
-		return fmt.Errorf("failed to archive Approvals: %w", err)
+		return ctrl.Result{}, fmt.Errorf("failed to archive Approvals: %w", err)
 	}
-	if err := updater.Archived(ctx, prep, attestation); err != nil {
-		return fmt.Errorf("failed to record approval attestation: %w", err)
+	if err := updater.Archived(ctx, prep, archived); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to record approval attestation: %w", err)
 	}
-	log.FromContext(ctx).Info("Recorded approval attestation", "preparation", prep.Name, "attestation", attestation.OCIRef)
-	return nil
+	log.FromContext(ctx).Info("Recorded approval attestation", "preparation", prep.Name, "attestation", archived.OCIRef)
+	return ctrl.Result{}, nil
+}
+
+// destinationClient returns the client for the registry holding prep's
+// artifact.
+func (r *PreparationReconciler) destinationClient(ctx context.Context, prep *deliveryv1alpha1.Preparation) (oci.Client, error) {
+	return destinationClient(ctx, r.Client, r.PantryResolver, r.OCIClient, prep)
 }
 
 // destinationClient returns the client for the registry holding prep's
 // artifact. It uses the credentials of the Order's destination; a deleted
 // Order falls back to the anonymous client.
-func (r *PreparationReconciler) destinationClient(ctx context.Context, prep *deliveryv1alpha1.Preparation) (oci.Client, error) {
+func destinationClient(ctx context.Context, reader client.Reader, resolver credential.PantryResolver, anonymous oci.Client, prep *deliveryv1alpha1.Preparation) (oci.Client, error) {
 	order := &deliveryv1alpha1.Order{}
-	if err := r.Get(ctx, client.ObjectKey{Namespace: prep.Namespace, Name: prep.Spec.OrderName}, order); err != nil && !apierrors.IsNotFound(err) {
+	if err := reader.Get(ctx, client.ObjectKey{Namespace: prep.Namespace, Name: prep.Spec.OrderName}, order); err != nil && !apierrors.IsNotFound(err) {
 		return nil, fmt.Errorf("failed to get Order %q: %w", prep.Spec.OrderName, err)
 	}
 
-	_, destClient, err := r.PantryResolver.ResolveDestination(ctx, order.Spec.Destination, "", prep.Namespace)
+	_, destClient, err := resolver.ResolveDestination(ctx, order.Spec.Destination, "", prep.Namespace)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve destination credentials: %w", err)
 	}
 
-	return cmp.Or(destClient, r.OCIClient), nil
+	return cmp.Or(destClient, anonymous), nil
 }
 
-// attachProvenance records the provenance of prep's artifact as an OCI
-// attestation and marks prep ready. The statement is rebuilt from the
-// artifact's config blob, so retries push the same referrer.
-func (r *PreparationReconciler) attachProvenance(ctx context.Context, prep *deliveryv1alpha1.Preparation) error {
+// attachEvidence signs prep's artifact and attaches its provenance as signed
+// OCI attestations, then marks prep ready. Both statements are rebuilt from
+// the artifact's config blob and signed deterministically, so retries find
+// the referrers they pushed before.
+func (r *PreparationReconciler) attachEvidence(ctx context.Context, prep *deliveryv1alpha1.Preparation) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
 	updater := status.NewPreparationUpdater(r.Client)
 
-	attestation, err := r.pushProvenance(ctx, prep)
+	state, err := r.Signing.State(ctx)
 	if err != nil {
-		uerr := updater.ProvenanceFailed(ctx, prep, err)
-
-		// Terminal: the artifact is immutable, so a retry would read the
-		// same config. Only a failed status write is retried.
-		if errors.Is(err, provenance.ErrInvalidConfig) {
-			log.FromContext(ctx).Error(err, "Could not attach provenance", "preparation", prep.Name)
-			return uerr
+		logger.Info("Waiting for the signing key", "preparation", prep.Name, "reason", err.Error())
+		if uerr := updater.SignFailed(ctx, prep, deliveryv1alpha1.ReasonSigningKeyNotReady, err); uerr != nil {
+			return ctrl.Result{}, uerr
 		}
-
-		if uerr != nil {
-			log.FromContext(ctx).Error(uerr, "Failed to update Preparation status")
-		}
-		return fmt.Errorf("failed to attach provenance: %w", err)
+		return ctrl.Result{RequeueAfter: signingKeyRetryInterval}, nil
 	}
 
-	if err := updater.ProvenanceAttached(ctx, prep, attestation); err != nil {
-		return fmt.Errorf("failed to record provenance attestation: %w", err)
-	}
-	log.FromContext(ctx).Info("Attached provenance", "preparation", prep.Name, "attestation", attestation.OCIRef)
-
-	return nil
-}
-
-// pushProvenance pushes the provenance attestation of prep's artifact and
-// returns its reference.
-func (r *PreparationReconciler) pushProvenance(ctx context.Context, prep *deliveryv1alpha1.Preparation) (deliveryv1alpha1.AttestationReference, error) {
 	subject, err := oci.Parse(prep.Spec.Artifact.OCIRef)
 	if err != nil {
-		return deliveryv1alpha1.AttestationReference{}, fmt.Errorf("parsing Preparation artifact reference: %w", err)
+		return ctrl.Result{}, fmt.Errorf("parsing Preparation artifact reference: %w", err)
 	}
 
 	destClient, err := r.destinationClient(ctx, prep)
 	if err != nil {
-		return deliveryv1alpha1.AttestationReference{}, err
+		return ctrl.Result{}, err
 	}
 
-	digest, err := provenance.Attach(ctx, destClient, subject)
+	cfg, err := provenance.ReadConfig(ctx, destClient, subject)
 	if err != nil {
-		return deliveryv1alpha1.AttestationReference{}, err
+		// Terminal for an invalid config: the artifact is immutable, so a
+		// retry would read the same config. Only a failed status write is
+		// retried.
+		uerr := updater.SignFailed(ctx, prep, deliveryv1alpha1.ReasonSignFailed, err)
+		if errors.Is(err, provenance.ErrInvalidConfig) {
+			logger.Error(err, "Could not sign artifact", "preparation", prep.Name)
+			return ctrl.Result{}, uerr
+		}
+		if uerr != nil {
+			logger.Error(uerr, "Failed to update Preparation status")
+		}
+		return ctrl.Result{}, fmt.Errorf("failed to read artifact config: %w", err)
+	}
+	created, _ := cfg.Created() // validated by ReadConfig
+
+	signatureDigest, err := attestation.Sign(ctx, destClient, state.Signer, subject, created)
+	if err != nil {
+		if uerr := updater.SignFailed(ctx, prep, deliveryv1alpha1.ReasonSignFailed, err); uerr != nil {
+			logger.Error(uerr, "Failed to update Preparation status")
+		}
+		return ctrl.Result{}, fmt.Errorf("failed to sign artifact: %w", err)
 	}
 
+	provenanceDigest, err := provenance.Attach(ctx, destClient, state.Signer, subject, cfg)
+	if err != nil {
+		uerr := updater.ProvenanceFailed(ctx, prep, err)
+		if errors.Is(err, provenance.ErrInvalidConfig) {
+			logger.Error(err, "Could not attach provenance", "preparation", prep.Name)
+			return ctrl.Result{}, uerr
+		}
+		if uerr != nil {
+			logger.Error(uerr, "Failed to update Preparation status")
+		}
+		return ctrl.Result{}, fmt.Errorf("failed to attach provenance: %w", err)
+	}
+
+	signature := attestationReference(deliveryv1alpha1.AttestationTypeSignature, subject, signatureDigest)
+	provenanceRef := attestationReference(deliveryv1alpha1.AttestationTypeProvenance, subject, provenanceDigest)
+	if err := updater.EvidenceAttached(ctx, prep, signature, provenanceRef); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to record attestations: %w", err)
+	}
+	logger.Info("Signed artifact", "preparation", prep.Name, "keyID", state.Signer.KeyID(),
+		"signature", signature.OCIRef, "provenance", provenanceRef.OCIRef)
+
+	return ctrl.Result{}, nil
+}
+
+// attestationReference references the referrer with digest of subject.
+func attestationReference(attestationType deliveryv1alpha1.AttestationType, subject oci.Reference, digest string) deliveryv1alpha1.AttestationReference {
 	return deliveryv1alpha1.AttestationReference{
-		Type:   deliveryv1alpha1.AttestationTypeProvenance,
+		Type:   attestationType,
 		OCIRef: fmt.Sprintf("oci://%s@%s", subject.RepositoryReference(), digest),
 		Digest: digest,
-	}, nil
+	}
 }
 
 // reconcileDelete removes the finalizer from the Preparation, allowing garbage collection.

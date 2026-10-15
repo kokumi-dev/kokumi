@@ -5,27 +5,33 @@ import { Disclosure } from '../ui'
 import Section from '../layout/Section'
 import EmptyState from '../layout/EmptyState'
 import { formatDate } from '../../utils/format'
+import { keyLabel, useSigningKeys } from '../../hooks/useSigningKeys'
 import styles from './EvidencePanel.module.css'
 
-const knownTypes: Record<string, string> = {
-  'application/vnd.kokumi.provenance.v1+json': 'Provenance',
-  'application/vnd.kokumi.approvals.v1+json': 'Approvals',
+const knownPredicates: Record<string, string> = {
+  'https://sigstore.dev/cosign/sign/v1': 'Signature',
+  'https://slsa.dev/provenance/v1': 'Provenance',
+  'https://kokumi.dev/attestations/approval/v1': 'Approvals',
 }
 
 /**
- * A short name for an attestation. Only attestations Kokumi recorded get one;
- * anything else shows its artifactType, whatever it claims to be.
+ * A short name for an attestation. Only verified attestations get one;
+ * anything else shows the predicate type or artifactType it claims.
  */
 function typeLabel(a: Attestation): string {
-  return (a.recorded && knownTypes[a.artifactType]) || a.artifactType
+  if (a.verification.verified && a.predicateType && knownPredicates[a.predicateType]) {
+    return knownPredicates[a.predicateType]
+  }
+  return a.predicateType || a.artifactType
 }
 
 /**
  * AttestationPanel lists the OCI referrers attached to a Preparation's
- * artifact, read live from the registry. Only the ones Kokumi recorded come
- * with their payload.
+ * artifact, read live from the registry, and whether each verifies against
+ * the keys Kokumi trusts. Only verified ones come with their statement.
  */
 export default function AttestationPanel({ preparation: prep }: { preparation: Preparation }) {
+  const keys = useSigningKeys()
   const [attestations, setAttestations] = useState<Attestation[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [open, setOpen] = useState<string | null>(null)
@@ -62,9 +68,14 @@ export default function AttestationPanel({ preparation: prep }: { preparation: P
                 <span className={styles.itemMeta}>{formatDate(a.createdAt)}</span>
               </div>
               <span className={styles.mono}>{a.digest}</span>
-              {!a.recorded ? (
-                <p className={styles.note}>Not recorded by Kokumi; its content is not shown.</p>
-              ) : a.payload !== undefined ? (
+              {a.verification.verified ? (
+                <span className={styles.verified}>Verified: signed by {keyLabel(keys, a.verification.keyID ?? '')}</span>
+              ) : (
+                <span className={styles.unverified}>
+                  Not verified{a.verification.error ? `: ${a.verification.error}` : ''}. Its content is not shown.
+                </span>
+              )}
+              {a.verification.verified && a.payload !== undefined && (
                 <Disclosure
                   tone="inline"
                   label="Statement"
@@ -73,8 +84,6 @@ export default function AttestationPanel({ preparation: prep }: { preparation: P
                 >
                   <pre className={styles.code}>{JSON.stringify(a.payload, null, 2)}</pre>
                 </Disclosure>
-              ) : (
-                <p className={styles.note}>The payload is too large or not JSON and is not shown.</p>
               )}
             </div>
           ))}

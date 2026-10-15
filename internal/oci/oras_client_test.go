@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func Test_isPlainHTTP(t *testing.T) {
+func Test_IsPlainHTTP(t *testing.T) {
 	tests := []struct {
 		ref  string
 		want bool
@@ -33,7 +33,7 @@ func Test_isPlainHTTP(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.ref, func(t *testing.T) {
-			require.Equal(t, tc.want, isPlainHTTP(tc.ref))
+			require.Equal(t, tc.want, IsPlainHTTP(tc.ref))
 		})
 	}
 }

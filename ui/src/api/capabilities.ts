@@ -7,6 +7,7 @@
 export const capabilities = [
   'settings.general:update',
   'settings.auth:update',
+  'settings.signing:update',
   'orders:create',
   'orders:update',
   'orders:delete',
@@ -26,6 +27,7 @@ export type Capability = typeof capabilities[number]
 export const deniedReasons: Record<Capability, string> = {
   'settings.general:update': 'You are not allowed to change the general settings',
   'settings.auth:update': 'You are not allowed to change the authentication settings',
+  'settings.signing:update': 'You are not allowed to change the signing settings',
   'orders:create': 'You are not allowed to create Orders',
   'orders:update': 'You are not allowed to edit Orders',
   'orders:delete': 'You are not allowed to delete Orders',
@@ -54,3 +56,14 @@ export function mergeCapabilities(
     capabilities.filter((c) => names.includes(c) || (undetermined.includes(c) && (prev?.has(c) ?? false))),
   )
 }
+
+/**
+ * Capabilities that hold per namespace, reported by
+ * GET /api/v1/namespaces/{namespace}/capabilities. Keep in sync with
+ * namespacedCapabilityCatalog in internal/server/capabilities.go.
+ */
+export const namespacedCapabilities = [
+  'pantries.credentials:update',
+] as const
+
+export type NamespacedCapability = typeof namespacedCapabilities[number]

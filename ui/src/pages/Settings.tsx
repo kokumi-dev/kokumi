@@ -10,32 +10,37 @@ import { useAppInfo } from '../appContext'
 import type { Capability } from '../api/capabilities'
 import {
   getSettings,
+  getSigning,
   saveSettings,
   saveAuthSettings,
+  saveSigningSettings,
 } from '../api/client'
-import type { AuthSettings, Settings } from '../api/client'
+import type { AuthSettings, Settings, SigningInfo, SigningSettings, TrustedKey } from '../api/client'
+import { settingsTabs, type SettingsTab } from '../routes/paths'
 
-const tabs = ['general', 'authentication'] as const
-type Tab = typeof tabs[number]
+const tabs = settingsTabs
+type Tab = SettingsTab
 
 /** Capability a tab requires; tabs the user lacks it for are hidden. */
 const tabCapability: Record<Tab, Capability> = {
   general: 'settings.general:update',
   authentication: 'settings.auth:update',
+  signing: 'settings.signing:update',
 }
 
 const tabLabel: Record<Tab, string> = {
   general: 'General',
   authentication: 'Authentication',
+  signing: 'Signing',
 }
 
 const maxClaimLength = 253
 
 /**
- * Settings shows the operator configuration of the Kitchen singleton in two
- * tabs: General (Argo CD URL) and Authentication (admin user, OIDC, token
- * signing key). Each tab is only shown with its capability; the server still
- * enforces RBAC on every write.
+ * Settings shows the operator configuration of the Kitchen singleton in three
+ * tabs: General (Argo CD URL), Authentication (admin user, OIDC) and Signing
+ * (public key, trusted keys, source verification). Each tab is only shown
+ * with its capability; the server still enforces RBAC on every write.
  */
 export default function Settings() {
   const params = useParams()
@@ -97,6 +102,8 @@ export default function Settings() {
         <p className={styles.fieldHint}>Loading…</p>
       ) : tab === 'general' ? (
         <GeneralTab key={`g-${settingsRev}`} argoCDURL={settings?.argoCDURL ?? ''} onSaved={handleSaved} />
+      ) : tab === 'signing' ? (
+        <SigningTab key={`s-${settingsRev}`} signing={settings?.signing} onSaved={handleSaved} />
       ) : (
         <AuthenticationTab key={`a-${settingsRev}`} auth={settings?.auth} onSaved={handleSaved} />
       )}
@@ -517,6 +524,254 @@ function AuthenticationTab({ auth, onSaved }: { auth?: AuthSettings; onSaved: (s
             <p className={styles.fieldHint}>
               Holds the HMAC key that signs all session tokens (key
               "signing-key"). Created with a generated key when missing.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {error && <p className={styles.fieldError}>{error}</p>}
+
+      <div className={styles.fieldRow}>
+        <Button variant="primary" onClick={handleSave} disabled={submitting}>
+          Save
+        </Button>
+        {saved && <span className={styles.savedMsg}>Saved ✓</span>}
+      </div>
+    </div>
+  )
+}
+
+// ── Signing tab ──────────────────────────────────────────────────────────────
+
+/** Matches the name pattern of a trusted key. */
+const trustedKeyNamePattern = /^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$/
+const maxTrustedKeys = 16
+
+/**
+ * SigningTab shows the public key Kokumi signs with and the commands that
+ * verify its artifacts, and edits which further keys Kokumi trusts and
+ * whether every Product source must verify.
+ */
+function SigningTab({ signing, onSaved }: { signing?: SigningSettings; onSaved: (s: Settings) => void }) {
+  const [info, setInfo] = useState<SigningInfo | null>(null)
+  const [infoError, setInfoError] = useState<string | null>(null)
+  const [trustedKeys, setTrustedKeys] = useState<TrustedKey[]>(signing?.trustedKeys ?? [])
+  const [requireVerification, setRequireVerification] = useState(signing?.requireSourceVerification ?? false)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    getSigning()
+      .then((s) => { if (!cancelled) setInfo(s) })
+      .catch((e) => { if (!cancelled) setInfoError((e as Error).message) })
+    return () => {
+      cancelled = true
+      if (savedTimer.current) clearTimeout(savedTimer.current)
+    }
+  }, [])
+
+  function updateKey(index: number, change: Partial<TrustedKey>) {
+    setTrustedKeys((prev) => prev.map((k, i) => (i === index ? { ...k, ...change } : k)))
+    setSaved(false)
+  }
+
+  function removeKey(index: number) {
+    setTrustedKeys((prev) => prev.filter((_, i) => i !== index))
+    setSaved(false)
+  }
+
+  function addKey(key: TrustedKey) {
+    setTrustedKeys((prev) => [...prev, key])
+    setSaved(false)
+  }
+
+  function validate(): string | null {
+    if (trustedKeys.length > maxTrustedKeys) return `At most ${maxTrustedKeys} trusted keys`
+    const names = new Set<string>()
+    for (const k of trustedKeys) {
+      if (!trustedKeyNamePattern.test(k.name) || k.name.length > 63) {
+        return `Key name "${k.name}" must be lowercase letters, digits, "-" and ".", at most 63 characters`
+      }
+      if (names.has(k.name)) return `Key name "${k.name}" is used twice`
+      names.add(k.name)
+      if (!k.publicKey.trim().startsWith('-----BEGIN PUBLIC KEY-----')) {
+        return `Key "${k.name}" must be a PEM-encoded public key`
+      }
+    }
+    return null
+  }
+
+  function handleSave() {
+    const problem = validate()
+    if (problem) {
+      setError(problem)
+      return
+    }
+    setError(null)
+    setSubmitting(true)
+    saveSigningSettings({
+      trustedKeys: trustedKeys.map((k) => ({ name: k.name.trim(), publicKey: k.publicKey.trim() + '\n' })),
+      requireSourceVerification: requireVerification,
+    })
+      .then((s) => {
+        setSaved(true)
+        savedTimer.current = setTimeout(() => setSaved(false), 2000)
+        onSaved(s)
+      })
+      .catch((e) => setError((e as Error).message))
+      .finally(() => setSubmitting(false))
+  }
+
+  function downloadPublicKey(publicKey: string) {
+    const url = URL.createObjectURL(new Blob([publicKey], { type: 'application/x-pem-file' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'kokumi.pub'
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const current = info?.current
+  const currentTrusted = current != null && trustedKeys.some((k) => k.publicKey.trim() === current.publicKey.trim())
+
+  return (
+    <div className={styles.groupStack}>
+      <div className={styles.section}>
+        <div className={styles.sectionHeader}>
+          <span className={styles.sectionTitle}>Signing Key</span>
+        </div>
+        <div className={styles.sectionBody}>
+          <div className={styles.settingsSection}>
+            {infoError && <p className={styles.fieldError}>Failed to load the signing key: {infoError}</p>}
+            {info && !info.ready && (
+              <p className={styles.fieldError}>The signing key is not ready{info.message ? `: ${info.message}` : ''}</p>
+            )}
+            {current ? (
+              <>
+                <div className={styles.fieldRow}>
+                  <span className={styles.fieldLabel}>Key ID</span>
+                  <code>{current.keyID}</code>
+                </div>
+                <pre className={styles.codeBlock}>{current.publicKey}</pre>
+                <div className={styles.fieldRow}>
+                  <Button variant="secondary" onClick={() => downloadPublicKey(current.publicKey)}>
+                    Download kokumi.pub
+                  </Button>
+                </div>
+                <p className={styles.fieldHint}>
+                  Every artifact and attestation Kokumi writes is signed with
+                  this key. Anyone can verify an artifact offline with the
+                  stock cosign CLI:
+                </p>
+                <pre className={styles.codeBlock}>{[
+                  `kubectl -n kokumi get kitchen default -o jsonpath='{.status.signing.publicKey}' > kokumi.pub`,
+                  'cosign verify --key kokumi.pub --insecure-ignore-tlog=true <registry>/<repository>@<digest>',
+                  'cosign verify-attestation --key kokumi.pub --insecure-ignore-tlog=true --type slsaprovenance1 <registry>/<repository>@<digest>',
+                ].join('\n')}</pre>
+              </>
+            ) : (
+              !infoError && <p className={styles.fieldHint}>Loading…</p>
+            )}
+            <p className={styles.fieldHint}>
+              The private key lives in the Secret <code>kokumi-signing-key</code> in
+              the namespace <code>kokumi-signing</code>,
+              which only the controller and cluster admins can read or write.
+              To rotate it, trust the current key below, save, and delete the
+              Secret as a cluster admin; the controller generates a new key.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className={styles.section}>
+        <div className={styles.sectionHeader}>
+          <span className={styles.sectionTitle}>Trusted Keys</span>
+        </div>
+        <div className={styles.sectionBody}>
+          <div className={styles.settingsSection}>
+            <p className={styles.fieldHint}>
+              Further public keys whose signatures Kokumi trusts for its own
+              artifacts: the key used before a rotation, or the key of another
+              installation whose releases are imported.
+            </p>
+            {trustedKeys.length === 0 && <p className={styles.fieldHint}>No further keys are trusted.</p>}
+            {trustedKeys.map((k, i) => (
+              <div key={i} className={styles.settingsSection}>
+                <div className={styles.fieldRow}>
+                  <label className={styles.fieldLabel} htmlFor={`trusted-key-name-${i}`}>Name</label>
+                  <input
+                    id={`trusted-key-name-${i}`}
+                    className={styles.fieldInput}
+                    type="text"
+                    placeholder="before-2026-10"
+                    value={k.name}
+                    disabled={submitting}
+                    onChange={(e) => updateKey(i, { name: e.target.value })}
+                  />
+                  <Button variant="secondary" onClick={() => removeKey(i)} disabled={submitting}>
+                    Remove
+                  </Button>
+                </div>
+                <div className={styles.fieldRow}>
+                  <label className={styles.fieldLabel} htmlFor={`trusted-key-pem-${i}`}>Public key</label>
+                  <textarea
+                    id={`trusted-key-pem-${i}`}
+                    className={styles.fieldTextarea}
+                    rows={5}
+                    placeholder={'-----BEGIN PUBLIC KEY-----\n…\n-----END PUBLIC KEY-----'}
+                    value={k.publicKey}
+                    disabled={submitting}
+                    onChange={(e) => updateKey(i, { publicKey: e.target.value })}
+                  />
+                </div>
+              </div>
+            ))}
+            <div className={styles.fieldRow}>
+              <Button
+                variant="secondary"
+                onClick={() => addKey({ name: '', publicKey: '' })}
+                disabled={submitting || trustedKeys.length >= maxTrustedKeys}
+              >
+                Add key
+              </Button>
+              {current && !currentTrusted && (
+                <Button
+                  variant="secondary"
+                  onClick={() => addKey({ name: `before-${new Date().toISOString().slice(0, 10)}`, publicKey: current.publicKey })}
+                  disabled={submitting || trustedKeys.length >= maxTrustedKeys}
+                >
+                  Trust the current key
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className={styles.section}>
+        <div className={styles.sectionHeader}>
+          <span className={styles.sectionTitle}>Source Verification</span>
+        </div>
+        <div className={styles.sectionBody}>
+          <div className={styles.settingsSection}>
+            <div className={styles.fieldRow}>
+              <label className={styles.fieldLabel} htmlFor="require-source-verification">Required</label>
+              <Toggle
+                id="require-source-verification"
+                checked={requireVerification}
+                disabled={submitting}
+                label="Every Product source must verify"
+                onChange={(v) => { setRequireVerification(v); setSaved(false) }}
+              />
+            </div>
+            <p className={styles.fieldHint}>
+              A source verifies through the Product&apos;s own verification
+              settings, or by a signature from a key trusted here. A Product
+              whose source does not verify is not ready, and its Orders render
+              nothing.
             </p>
           </div>
         </div>

@@ -385,7 +385,6 @@ func (r *OrderReconciler) createPreparation(
 			Artifact: deliveryv1alpha1.Artifact{
 				OCIRef: destRef.OCIString(),
 				Digest: destRef.Digest,
-				Signed: false,
 			},
 			CommitMessage:  commitMessage,
 			ParentDigest:   parentDigest,
@@ -435,6 +434,14 @@ func artifactConfig(order *deliveryv1alpha1.Order, effective *resolve.EffectiveS
 
 	if effective.Source.PantryRef != nil {
 		config.Source.PantryRef = effective.Source.PantryRef.Name
+	}
+	if verified := effective.SourceVerified; verified != nil {
+		config.Source.Verified = &artifact.ConfigVerification{
+			Provider: string(verified.Provider),
+			KeyID:    verified.KeyID,
+			Issuer:   verified.Issuer,
+			Subject:  verified.Subject,
+		}
 	}
 	if order.Spec.Destination != nil && order.Spec.Destination.PantryRef != nil {
 		config.Destination.PantryRef = order.Spec.Destination.PantryRef.Name

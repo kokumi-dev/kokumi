@@ -66,6 +66,7 @@ var publicAPIPaths = map[string]struct{}{
 	"/api/v1/auth/oidc/start":    {},
 	"/api/v1/auth/oidc/callback": {},
 	"/api/v1/info":               {},
+	"/api/v1/signing":            {},
 }
 
 // newAuthenticator builds an authenticator with default token lifetimes.

@@ -268,7 +268,7 @@ func resolveSourceAs(ctx context.Context, uc *userClient, src deliveryv1alpha1.O
 	if src.PantryRef == nil {
 		return src, nil, nil
 	}
-	reader, err := uc.readerFor(ctx, "get", "secrets", ns)
+	reader, err := uc.readerFor(ctx, "get", secretsResource, ns)
 	if err != nil {
 		return deliveryv1alpha1.OCISource{}, nil, err
 	}

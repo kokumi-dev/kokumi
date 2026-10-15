@@ -22,9 +22,18 @@ who may update the Kitchen (see
 > called `default`, and the server only reads and writes that one. If you
 > create a Kitchen with any other name, Kokumi ignores it.
 
-The one setting today is the Argo CD base URL. It is stored as
-`spec.argoCDURL` on the Kitchen and used to build deep links to applications on
-the Servings page. Leave it empty if you do not want Argo CD links.
+The Settings page has three tabs, each shown only to users with its
+capability:
+
+- **General**: the Argo CD base URL, stored as `spec.argoCDURL` and used to
+  build deep links to applications on the Servings page. Leave it empty if you
+  do not want Argo CD links.
+- **Authentication**: the admin account and OIDC, stored in `spec.auth`. See
+  [Authentication](../../operator-guide/authentication/).
+- **Signing**: the public key Kokumi signs with, the cosign commands that
+  verify its artifacts, the further keys it trusts, and whether every Product
+  source must verify, stored in `spec.signing`. See
+  [Signing](../../operator-guide/signing/).
 
 ## Setting the Argo CD URL
 

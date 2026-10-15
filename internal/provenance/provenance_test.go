@@ -12,7 +12,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kokumi-dev/kokumi/internal/artifact"
+	"github.com/kokumi-dev/kokumi/internal/attestation"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/signing/signingtest"
 )
 
 var update = flag.Bool("update", false, "update golden files")
@@ -30,6 +32,11 @@ func testConfig() *artifact.Config {
 			OCI:     "oci://ghcr.io/stefanprodan/charts/podinfo",
 			Version: "6.10.2",
 			Digest:  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			Verified: &artifact.ConfigVerification{
+				Provider: "cosign",
+				Issuer:   "https://token.actions.githubusercontent.com",
+				Subject:  "https://github.com/stefanprodan/podinfo/.github/workflows/release.yml@refs/tags/6.10.2",
+			},
 		},
 		Destination: artifact.ConfigDestination{OCI: "oci://registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod"},
 		Product:     &artifact.ConfigProduct{Namespace: "shop", Name: "podinfo", ConfigHash: "sha256:77e0"},
@@ -88,6 +95,15 @@ func TestStatement_product(t *testing.T) {
 	require.Equal(t, cfg.ConfigHash, params.ConfigHash, "the hash of the stored intent, not the Product's own hash")
 }
 
+func TestStatement_unverifiedSource(t *testing.T) {
+	cfg := testConfig()
+	cfg.Source.Verified = nil
+
+	statement, err := Statement(testSubject(t), cfg)
+	require.NoError(t, err)
+	require.NotContains(t, string(statement), "annotations")
+}
+
 func TestStatement_rejectsUnresolvedSource(t *testing.T) {
 	cfg := testConfig()
 	cfg.Source.Digest = ""
@@ -99,6 +115,7 @@ func TestStatement_rejectsUnresolvedSource(t *testing.T) {
 func TestAttach(t *testing.T) {
 	ctx := context.Background()
 	subject := testSubject(t)
+	signer := signingtest.NewSigner(t)
 
 	data, err := json.Marshal(testConfig())
 	require.NoError(t, err)
@@ -109,20 +126,27 @@ func TestAttach(t *testing.T) {
 		Options: oci.PushOptions{Config: data, ConfigMediaType: oci.PreparationConfigMediaType},
 	}}}
 
-	first, err := Attach(ctx, client, subject)
+	cfg, err := ReadConfig(ctx, client, subject)
+	require.NoError(t, err)
+
+	first, err := Attach(ctx, client, signer, subject, cfg)
 	require.NoError(t, err)
 	require.Len(t, client.Referrers, 1)
 
 	referrer := client.Referrers[0].Artifact
-	require.Equal(t, oci.ProvenanceArtifactType, referrer.ArtifactType)
-	require.Equal(t, oci.InTotoStatementMediaType, referrer.MediaType)
+	require.Equal(t, oci.SigstoreBundleMediaType, referrer.ArtifactType)
+	require.Equal(t, PredicateType, referrer.Annotations[oci.AnnotationBundlePredicateType])
 	require.Equal(t, "2026-10-12T09:14:03Z", referrer.Annotations["org.opencontainers.image.created"])
 
-	t.Run("attaching again yields the same referrer", func(t *testing.T) {
-		second, err := Attach(ctx, client, subject)
+	evidence, err := attestation.Find(ctx, client, signer.TrustSet(), subject, PredicateType)
+	require.NoError(t, err)
+	require.Equal(t, first, evidence.Digest)
+
+	t.Run("attaching again reuses the referrer", func(t *testing.T) {
+		second, err := Attach(ctx, client, signer, subject, cfg)
 		require.NoError(t, err)
 		require.Equal(t, first, second)
-		require.Equal(t, client.Referrers[0].Artifact, client.Referrers[1].Artifact)
+		require.Len(t, client.Referrers, 1)
 	})
 
 	t.Run("an artifact without a Kokumi config is rejected", func(t *testing.T) {
@@ -132,7 +156,7 @@ func TestAttach(t *testing.T) {
 			Options: oci.PushOptions{Config: []byte("{}"), ConfigMediaType: "application/vnd.oci.empty.v1+json"},
 		}}}
 
-		_, err := Attach(ctx, plain, subject)
+		_, err := ReadConfig(ctx, plain, subject)
 		require.ErrorIs(t, err, ErrInvalidConfig)
 		require.Empty(t, plain.Referrers)
 	})

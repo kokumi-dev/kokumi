@@ -28,6 +28,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -54,6 +55,19 @@ const registryServiceName = "kokumi-registry"
 
 // metricsRoleBindingName is the name of the RBAC that will be created to allow get the metrics data
 const metricsRoleBindingName = "kokumi-metrics-binding"
+
+// signingKeySecretName is the Secret holding the Kitchen signing key, in
+// signingKeyNamespace.
+const (
+	signingKeySecretName = "kokumi-signing-key"
+	signingKeyNamespace  = "kokumi-signing"
+)
+
+// inClusterRegistry is the bundled registry as the controller reaches it.
+const inClusterRegistry = "kokumi-registry.kokumi.svc.cluster.local:5000"
+
+// signingNamespace holds the Products and Orders of the signing specs.
+const signingNamespace = "e2e-signing"
 
 var _ = Describe("Manager", Ordered, func() {
 	var controllerPodName string
@@ -89,6 +103,10 @@ var _ = Describe("Manager", Ordered, func() {
 	AfterAll(func() {
 		By("cleaning up the curl pod for metrics")
 		cmd := exec.Command("kubectl", "delete", "pod", "curl-metrics", "-n", namespace)
+		_, _ = utils.Run(cmd)
+
+		By("removing the signing namespace")
+		cmd = exec.Command("kubectl", "delete", "ns", signingNamespace, "--ignore-not-found", "--timeout=2m")
 		_, _ = utils.Run(cmd)
 
 		By("undeploying the controller-manager")
@@ -306,9 +324,9 @@ var _ = Describe("Manager", Ordered, func() {
 
 			By("attaching a referrer")
 			referrerDigest, err := client.PushReferrer(ctx, subject, oci.ReferrerArtifact{
-				ArtifactType: oci.ProvenanceArtifactType,
-				MediaType:    oci.InTotoStatementMediaType,
-				Payload:      []byte(`{"_type":"https://in-toto.io/Statement/v1"}`),
+				ArtifactType: oci.SigstoreBundleMediaType,
+				MediaType:    oci.SigstoreBundleMediaType,
+				Payload:      []byte(`{}`),
 			})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -327,7 +345,7 @@ var _ = Describe("Manager", Ordered, func() {
 			Expect(json.NewDecoder(resp.Body).Decode(&index)).To(Succeed())
 			Expect(index.Manifests).To(HaveLen(1))
 			Expect(index.Manifests[0].Digest).To(Equal(referrerDigest))
-			Expect(index.Manifests[0].ArtifactType).To(Equal(oci.ProvenanceArtifactType))
+			Expect(index.Manifests[0].ArtifactType).To(Equal(oci.SigstoreBundleMediaType))
 
 			By("finding no referrers tag schema fallback tag")
 			repository := subject
@@ -335,6 +353,206 @@ var _ = Describe("Manager", Ordered, func() {
 			tags, err := client.ListTags(ctx, repository)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(tags).To(ConsistOf("1.0.0"))
+		})
+
+		It("should sign every Preparation so that stock cosign verifies it offline", func() {
+			cosign := cosignBinary()
+			host := forwardRegistry()
+
+			By("pushing a source to the bundled registry")
+			pushSource(host, "e2e/source")
+
+			By("rendering an Order of a Product of it")
+			createNamespace(signingNamespace)
+			apply(fmt.Sprintf(`
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Product
+metadata:
+  name: signed
+  namespace: %[1]s
+spec:
+  source:
+    oci: oci://%[2]s/e2e/source
+    version: "1.0.0"
+---
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Order
+metadata:
+  name: signed
+  namespace: %[1]s
+spec:
+  productRef:
+    name: signed
+  destination:
+    oci: oci://%[2]s/e2e/rendered
+`, signingNamespace, inClusterRegistry))
+
+			var digest string
+			Eventually(func(g Gomega) {
+				out, err := utils.Run(exec.Command("kubectl", "get", "preparations", "-n", signingNamespace,
+					"-l", "delivery.kokumi.dev/order=signed", "-o",
+					`jsonpath={range .items[*]}{.spec.artifact.digest} {.status.conditions[?(@.type=='Signed')].status} {.status.conditions[?(@.type=='Ready')].status}{"\n"}{end}`))
+				g.Expect(err).NotTo(HaveOccurred())
+				fields := strings.Fields(out)
+				g.Expect(fields).To(HaveLen(3), "one Preparation: "+out)
+				g.Expect(fields[1:]).To(Equal([]string{"True", "True"}), "signed and ready")
+				digest = fields[0]
+			}, 3*time.Minute).Should(Succeed())
+
+			By("reading the public key the Kitchen publishes")
+			publicKey, err := utils.Run(exec.Command("kubectl", "get", "kitchen", "default", "-n", namespace,
+				"-o", "jsonpath={.status.signing.publicKey}"))
+			Expect(err).NotTo(HaveOccurred())
+			keyFile := filepath.Join(GinkgoT().TempDir(), "kokumi.pub")
+			Expect(os.WriteFile(keyFile, []byte(publicKey), 0o600)).To(Succeed())
+
+			ref := fmt.Sprintf("%s/e2e/rendered@%s", host, digest)
+
+			By("verifying the signature with cosign")
+			_, err = utils.Run(exec.Command(cosign, "verify", "--key", keyFile,
+				"--insecure-ignore-tlog=true", "--allow-http-registry", ref))
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying the provenance with cosign")
+			_, err = utils.Run(exec.Command(cosign, "verify-attestation", "--key", keyFile,
+				"--insecure-ignore-tlog=true", "--allow-http-registry", "--type", "slsaprovenance1", ref))
+			Expect(err).NotTo(HaveOccurred())
+
+			By("not verifying it with another key")
+			otherKey := generateCosignKey()
+			_, err = utils.Run(exec.Command(cosign, "verify", "--key", otherKey,
+				"--insecure-ignore-tlog=true", "--allow-http-registry", ref))
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should render a source only once its signature verifies", func() {
+			cosign := cosignBinary()
+			host := forwardRegistry()
+
+			By("pushing an unsigned source")
+			source := pushSource(host, "e2e/verified-source")
+			createNamespace(signingNamespace)
+
+			projectDir, err := utils.GetProjectDir()
+			Expect(err).NotTo(HaveOccurred())
+			publicKey, err := os.ReadFile(filepath.Join(projectDir, "hack", "testdata", "cosign.pub"))
+			Expect(err).NotTo(HaveOccurred())
+
+			By("requiring a signature by the testdata key")
+			apply(fmt.Sprintf(`
+apiVersion: v1
+kind: Secret
+metadata:
+  name: testdata-signing-key
+  namespace: %[1]s
+stringData:
+  cosign.pub: |
+%[3]s
+---
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Product
+metadata:
+  name: verified
+  namespace: %[1]s
+spec:
+  source:
+    oci: oci://%[2]s/e2e/verified-source
+    version: "1.0.0"
+    verify:
+      secretRef:
+        name: testdata-signing-key
+`, signingNamespace, inClusterRegistry, indent(string(publicKey), "    ")))
+
+			sourceVerified := func() string {
+				out, _ := utils.Run(exec.Command("kubectl", "get", "product", "verified", "-n", signingNamespace, "-o",
+					`jsonpath={.status.conditions[?(@.type=='SourceVerified')].status}/{.status.conditions[?(@.type=='Ready')].status}`))
+				return out
+			}
+			Eventually(sourceVerified).Should(Equal("False/False"), "an unsigned source is not ready")
+
+			By("signing the source")
+			GinkgoT().Setenv("COSIGN_PASSWORD", "")
+			_, err = utils.Run(exec.Command(cosign, "sign", "--yes",
+				"--key", filepath.Join(projectDir, "hack", "testdata", "cosign.key"),
+				"--use-signing-config=false", "--tlog-upload=false", "--allow-http-registry",
+				fmt.Sprintf("%s/e2e/verified-source@%s", host, source)))
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying it again, without waiting for the retry interval")
+			_, err = utils.Run(exec.Command("kubectl", "annotate", "product", "verified", "-n", signingNamespace,
+				"e2e.kokumi.dev/retry="+time.Now().Format(time.RFC3339Nano), "--overwrite"))
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(sourceVerified).Should(Equal("True/True"))
+		})
+
+		It("should keep the signing key away from everyone but the controller and cluster admins", func() {
+			By("waiting for the controller to generate the key in its own namespace")
+			Eventually(func() error {
+				_, err := utils.Run(exec.Command("kubectl", "get", "secret", signingKeySecretName, "-n", signingKeyNamespace))
+				return err
+			}).Should(Succeed())
+
+			By("checking that the built-in identities cannot read or change it")
+			for _, sa := range []string{"kokumi-admin", "kokumi-editor", "kokumi-viewer", "kokumi-server"} {
+				for _, verb := range []string{"get", "list", "patch", "delete"} {
+					out, _ := utils.Run(exec.Command("kubectl", "auth", "can-i", verb,
+						"secret/"+signingKeySecretName, "-n", signingKeyNamespace,
+						"--as=system:serviceaccount:"+namespace+":"+sa))
+					Expect(strings.TrimSpace(out)).To(Equal("no"), "%s may %s the signing key", sa, verb)
+				}
+			}
+
+			By("checking that the server still reads its auth Secrets in the install namespace")
+			out, _ := utils.Run(exec.Command("kubectl", "auth", "can-i", "list", "secrets", "-n", namespace,
+				"--as=system:serviceaccount:"+namespace+":kokumi-server"))
+			Expect(strings.TrimSpace(out)).To(Equal("yes"))
+
+			By("granting a ServiceAccount Secret write access in the signing namespace")
+			apply(fmt.Sprintf(`
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: e2e-secret-writer
+  namespace: %[1]s
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: e2e-secret-writer
+  namespace: %[2]s
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: e2e-secret-writer
+  namespace: %[2]s
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: e2e-secret-writer
+subjects:
+- kind: ServiceAccount
+  name: e2e-secret-writer
+  namespace: %[1]s
+`, namespace, signingKeyNamespace))
+
+			By("checking that admission still refuses it the key")
+			Eventually(func(g Gomega) {
+				out, err := utils.Run(exec.Command("kubectl", "patch", "secret", signingKeySecretName, "-n", signingKeyNamespace,
+					"--as=system:serviceaccount:"+namespace+":e2e-secret-writer",
+					"--type=merge", "-p", `{"metadata":{"labels":{"forged":"true"}}}`))
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(err.Error() + out).To(ContainSubstring("signing key can only be written"))
+			}).Should(Succeed())
+
+			By("letting a cluster admin change it")
+			_, err := utils.Run(exec.Command("kubectl", "label", "secret", signingKeySecretName, "-n", signingKeyNamespace,
+				"e2e.kokumi.dev/checked-by=cluster-admin", "--overwrite"))
+			Expect(err).NotTo(HaveOccurred())
 		})
 
 		// +kubebuilder:scaffold:e2e-webhooks-checks
@@ -376,6 +594,64 @@ func forwardRegistry() string {
 	}, time.Minute, time.Second).Should(Succeed())
 
 	return host
+}
+
+// cosignBinary returns the cosign CLI the e2e tests verify with.
+func cosignBinary() string {
+	if cosign := os.Getenv("COSIGN"); cosign != "" {
+		return cosign
+	}
+	return "cosign"
+}
+
+// generateCosignKey generates a cosign key pair and returns the public key
+// file.
+func generateCosignKey() string {
+	dir := GinkgoT().TempDir()
+	GinkgoT().Setenv("COSIGN_PASSWORD", "")
+	cmd := exec.Command(cosignBinary(), "generate-key-pair", "--output-key-prefix", filepath.Join(dir, "other"))
+	_, err := utils.Run(cmd)
+	Expect(err).NotTo(HaveOccurred())
+	return filepath.Join(dir, "other.pub")
+}
+
+// pushSource pushes a manifest bundle as repository:1.0.0 to the registry
+// at host and returns its digest.
+func pushSource(host, repository string) string {
+	dir := GinkgoT().TempDir()
+	Expect(os.WriteFile(filepath.Join(dir, "manifest.yaml"),
+		[]byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: e2e\ndata:\n  key: value\n"), 0o600)).To(Succeed())
+
+	ref, err := oci.Parse(host + "/" + repository + ":1.0.0")
+	Expect(err).NotTo(HaveOccurred())
+	digest, err := oci.NewORASClient().Push(context.Background(), ref, dir, oci.PushOptions{})
+	Expect(err).NotTo(HaveOccurred())
+	return digest
+}
+
+// createNamespace creates name unless it exists.
+func createNamespace(name string) {
+	out, err := utils.Run(exec.Command("kubectl", "create", "ns", name))
+	if err != nil {
+		Expect(out).To(ContainSubstring("AlreadyExists"))
+	}
+}
+
+// apply applies the manifests in yaml.
+func apply(yaml string) {
+	file := filepath.Join(GinkgoT().TempDir(), "manifests.yaml")
+	Expect(os.WriteFile(file, []byte(yaml), 0o600)).To(Succeed())
+	_, err := utils.Run(exec.Command("kubectl", "apply", "-f", file))
+	Expect(err).NotTo(HaveOccurred())
+}
+
+// indent prefixes every line of text with prefix.
+func indent(text, prefix string) string {
+	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	for i, line := range lines {
+		lines[i] = prefix + line
+	}
+	return strings.Join(lines, "\n")
 }
 
 // serviceAccountToken returns a token for the specified service account in the given namespace.

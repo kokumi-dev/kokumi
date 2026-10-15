@@ -402,9 +402,22 @@ export interface AuthSettings {
   tokenSigningKeySecretRef?: SecretRef
 }
 
+/** A public key Kokumi trusts for its own artifacts besides its signing key. */
+export interface TrustedKey {
+  name: string
+  publicKey: string
+}
+
+export interface SigningSettings {
+  trustedKeys: TrustedKey[]
+  /** Every Product source must verify. */
+  requireSourceVerification: boolean
+}
+
 export interface Settings {
   argoCDURL: string
   auth?: AuthSettings
+  signing: SigningSettings
 }
 
 export function getSettings(): Promise<Settings> {
@@ -427,6 +440,38 @@ export function saveAuthSettings(auth: AuthSettings): Promise<Settings> {
   })
 }
 
+// saveSigningSettings replaces the whole signing subtree.
+export function saveSigningSettings(signing: SigningSettings): Promise<Settings> {
+  return request<Settings>('/settings', {
+    method: 'PUT',
+    body: JSON.stringify({ signing }),
+  })
+}
+
+// ── Signing (public keys; readable without login) ─────────────────────────────
+
+/** A public key that verifies Kokumi's signatures. */
+export interface SigningKey {
+  /** "current" for the signing key, else the trusted key's name. */
+  name: string
+  /** Missing for a trusted key that does not parse. */
+  keyID: string
+  publicKey: string
+}
+
+export interface SigningInfo {
+  /** The key Kokumi signs with; absent until the controller loaded it. */
+  current?: SigningKey
+  ready: boolean
+  message?: string
+  trustedKeys: SigningKey[]
+  requireSourceVerification: boolean
+}
+
+export function getSigning(): Promise<SigningInfo> {
+  return request<SigningInfo>('/signing')
+}
+
 // ── WhoAmI (identity + capabilities that decide which features are offered) ──
 
 export interface WhoAmI {
@@ -443,4 +488,15 @@ export interface WhoAmI {
 
 export function getWhoAmI(): Promise<WhoAmI> {
   return request<WhoAmI>('/whoami')
+}
+
+/** Capabilities that hold per namespace, which whoami does not report. */
+export interface NamespaceCapabilities {
+  namespace: string
+  capabilities: string[]
+  undetermined?: string[]
+}
+
+export function getNamespaceCapabilities(namespace: string): Promise<NamespaceCapabilities> {
+  return request<NamespaceCapabilities>(`/namespaces/${encodeURIComponent(namespace)}/capabilities`)
 }

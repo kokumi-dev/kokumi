@@ -12,6 +12,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 )
 
 // impersonator builds and caches per-ServiceAccount clients that impersonate
@@ -111,7 +113,7 @@ func (imp *impersonator) checkAccess(ctx context.Context, saName, verb, resource
 	review := &authorizationv1.SelfSubjectAccessReview{
 		Spec: authorizationv1.SelfSubjectAccessReviewSpec{
 			ResourceAttributes: &authorizationv1.ResourceAttributes{
-				Group:     "delivery.kokumi.dev",
+				Group:     apiGroupOf(resource),
 				Resource:  resource,
 				Verb:      verb,
 				Namespace: namespace,
@@ -123,6 +125,21 @@ func (imp *impersonator) checkAccess(ctx context.Context, saName, verb, resource
 		return false, fmt.Errorf("SelfSubjectAccessReview as %s: %w", saName, err)
 	}
 	return review.Status.Allowed, nil
+}
+
+// secretsResource is the core API resource of Secrets.
+const secretsResource = "secrets"
+
+// coreResources are the core API resources the server accesses as the user.
+// Every other resource it accesses is a delivery.kokumi.dev resource.
+var coreResources = map[string]bool{secretsResource: true}
+
+// apiGroupOf returns the API group of resource.
+func apiGroupOf(resource string) string {
+	if coreResources[resource] {
+		return ""
+	}
+	return deliveryv1alpha1.SchemeGroupVersion.Group
 }
 
 // errNotAuthorized is returned when no mapped ServiceAccount is permitted the

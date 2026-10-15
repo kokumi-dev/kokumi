@@ -25,13 +25,18 @@ import (
 	. "github.com/onsi/gomega"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/approval"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
+	"github.com/kokumi-dev/kokumi/internal/attestation"
 	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/provenance"
+	"github.com/kokumi-dev/kokumi/internal/signing"
 )
 
 var _ = Describe("Preparation Controller", func() {
@@ -95,9 +100,10 @@ var _ = Describe("Preparation Controller", func() {
 				APIReader:      k8sClient,
 				OCIClient:      fakeOCI,
 				PantryResolver: credential.NewKubeResolver(k8sClient),
+				Signing:        testSigning,
 			}
 
-			// Finalizer, provenance, approvals: one reconcile each.
+			// Finalizer, signed evidence, approvals: one reconcile each.
 			for range 3 {
 				_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 					NamespacedName: typeNamespacedName,
@@ -108,6 +114,7 @@ var _ = Describe("Preparation Controller", func() {
 			By("reporting that no approval is required without a policy")
 			Expect(k8sClient.Get(ctx, typeNamespacedName, preparation)).To(Succeed())
 			Expect(apimeta.IsStatusConditionTrue(preparation.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)).To(BeTrue())
+			Expect(apimeta.IsStatusConditionTrue(preparation.Status.Conditions, deliveryv1alpha1.ConditionTypeSigned)).To(BeTrue())
 			Expect(apimeta.IsStatusConditionTrue(preparation.Status.Conditions, deliveryv1alpha1.ConditionTypeProvenanceAttached)).To(BeTrue())
 			cond := apimeta.FindStatusCondition(preparation.Status.Conditions, deliveryv1alpha1.ConditionTypeApproved)
 			Expect(cond).NotTo(BeNil())
@@ -125,16 +132,23 @@ var _ = Describe("Preparation Controller", func() {
 		release := []string{testApproverGroup}
 		key := types.NamespacedName{Namespace: testNamespace, Name: prepName}
 
-		var fakeOCI *oci.FakeClient
-		reconcilePrep := func() error {
+		var (
+			fakeOCI *oci.FakeClient
+			signer  *signing.Provider
+		)
+		reconcilePrepResult := func() (reconcile.Result, error) {
 			r := &PreparationReconciler{
 				Client:         k8sClient,
 				Scheme:         k8sClient.Scheme(),
 				APIReader:      k8sClient,
 				OCIClient:      fakeOCI,
 				PantryResolver: credential.NewKubeResolver(k8sClient),
+				Signing:        signer,
 			}
-			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+			return r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		}
+		reconcilePrep := func() error {
+			_, err := reconcilePrepResult()
 			return err
 		}
 		getPrep := func() *deliveryv1alpha1.Preparation {
@@ -164,13 +178,14 @@ var _ = Describe("Preparation Controller", func() {
 				&deliveryv1alpha1.ApprovalPolicy{RequiredApprovals: required, AllowedGroups: release})
 			seedArtifact(fakeOCI, prep.Spec.Artifact.OCIRef, digest)
 			Expect(reconcilePrep()).To(Succeed()) // adds the finalizer
-			Expect(reconcilePrep()).To(Succeed()) // attaches provenance, marks Ready
+			Expect(reconcilePrep()).To(Succeed()) // signs, attaches provenance, marks Ready
 			Expect(reconcilePrep()).To(Succeed())
 			return getPrep()
 		}
 
 		BeforeEach(func() {
 			fakeOCI = oci.NewFakeClient(nil)
+			signer = testSigning
 			DeferCleanup(func() {
 				deleteApprovalsOfOrder(ctx, orderName)
 				_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Serving{Name: orderName, Namespace: testNamespace})
@@ -183,38 +198,105 @@ var _ = Describe("Preparation Controller", func() {
 			})
 		})
 
-		It("attaches provenance exactly once and only then becomes ready", func() {
+		It("signs and attaches provenance exactly once and only then becomes ready", func() {
 			prep := createTestPreparation(ctx, prepName, orderName, digest, nil)
 
-			By("staying not ready while the registry rejects the attestation")
+			By("staying not ready while the registry rejects the attestations")
 			seedArtifact(fakeOCI, prep.Spec.Artifact.OCIRef, digest)
 			Expect(reconcilePrep()).To(Succeed()) // adds the finalizer
 			fakeOCI.PushReferrerErr = errors.New("registry unavailable")
 			Expect(reconcilePrep()).To(MatchError(ContainSubstring("registry unavailable")))
 			prep = getPrep()
 			Expect(apimeta.IsStatusConditionTrue(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)).To(BeFalse())
-			cond := apimeta.FindStatusCondition(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeProvenanceAttached)
+			cond := apimeta.FindStatusCondition(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeSigned)
 			Expect(cond).NotTo(BeNil())
-			Expect(cond.Reason).To(Equal(deliveryv1alpha1.ReasonProvenanceAttachFailed))
+			Expect(cond.Reason).To(Equal(deliveryv1alpha1.ReasonSignFailed))
 			Expect(prep.Status.Attestations).To(BeEmpty())
 
-			By("becoming ready once the attestation is recorded")
+			By("becoming ready once both attestations are recorded")
 			fakeOCI.PushReferrerErr = nil
 			Expect(reconcilePrep()).To(Succeed())
 			prep = getPrep()
+			Expect(apimeta.IsStatusConditionTrue(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeSigned)).To(BeTrue())
 			Expect(apimeta.IsStatusConditionTrue(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeProvenanceAttached)).To(BeTrue())
 			Expect(apimeta.IsStatusConditionTrue(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)).To(BeTrue())
-			Expect(prep.Status.Attestations).To(HaveLen(1))
-			Expect(prep.Status.Attestations[0].Type).To(Equal(deliveryv1alpha1.AttestationTypeProvenance))
-			pushed := referrersOfType(fakeOCI, oci.ProvenanceArtifactType)
-			Expect(pushed).To(HaveLen(1))
-			Expect(pushed[0].Subject.OCIString()).To(Equal(prep.Spec.Artifact.OCIRef))
-			Expect(prep.Status.Attestations[0].Digest).To(Equal(pushed[0].Digest))
+			Expect(prep.Status.Attestations).To(HaveLen(2))
+			Expect(fakeOCI.Referrers).To(HaveLen(2))
+
+			subject, err := oci.Parse(prep.Spec.Artifact.OCIRef)
+			Expect(err).NotTo(HaveOccurred())
+			for _, want := range []struct {
+				attestationType deliveryv1alpha1.AttestationType
+				predicateType   string
+			}{
+				{deliveryv1alpha1.AttestationTypeSignature, attestation.SignaturePredicateType},
+				{deliveryv1alpha1.AttestationTypeProvenance, provenance.PredicateType},
+			} {
+				evidence, err := attestation.Find(ctx, fakeOCI, testSigner.TrustSet(), subject, want.predicateType)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(attestationDigest(prep, want.attestationType)).To(Equal(evidence.Digest))
+			}
 
 			By("pushing nothing new on later reconciles")
 			Expect(reconcilePrep()).To(Succeed())
 			Expect(reconcilePrep()).To(Succeed())
-			Expect(fakeOCI.Referrers).To(HaveLen(1))
+			Expect(fakeOCI.Referrers).To(HaveLen(2))
+		})
+
+		It("reuses the referrers it pushed when the status write was lost", func() {
+			prep := createTestPreparation(ctx, prepName, orderName, digest, nil)
+			seedArtifact(fakeOCI, prep.Spec.Artifact.OCIRef, digest)
+			Expect(reconcilePrep()).To(Succeed()) // adds the finalizer
+			Expect(reconcilePrep()).To(Succeed())
+			first := getPrep().Status.Attestations
+
+			By("forgetting the recorded evidence, as after a crash before the status write")
+			prep = getPrep()
+			prep.Status.Attestations = nil
+			prep.Status.Conditions = nil
+			Expect(k8sClient.Status().Update(ctx, prep)).To(Succeed())
+
+			Expect(reconcilePrep()).To(Succeed())
+			Expect(getPrep().Status.Attestations).To(Equal(first))
+			Expect(fakeOCI.Referrers).To(HaveLen(2), "the same referrers are found, not pushed again")
+		})
+
+		It("signs a Preparation that was ready before signing existed", func() {
+			prep := createTestPreparation(ctx, prepName, orderName, digest, nil)
+			seedArtifact(fakeOCI, prep.Spec.Artifact.OCIRef, digest)
+			Expect(reconcilePrep()).To(Succeed()) // adds the finalizer
+
+			prep = getPrep()
+			apimeta.SetStatusCondition(&prep.Status.Conditions, metav1.Condition{
+				Type: deliveryv1alpha1.ConditionTypeProvenanceAttached, Status: metav1.ConditionTrue, Reason: deliveryv1alpha1.ReasonProvenanceAttached,
+			})
+			apimeta.SetStatusCondition(&prep.Status.Conditions, metav1.Condition{
+				Type: deliveryv1alpha1.ConditionTypeReady, Status: metav1.ConditionTrue, Reason: testReadyReason,
+			})
+			Expect(k8sClient.Status().Update(ctx, prep)).To(Succeed())
+
+			Expect(reconcilePrep()).To(Succeed())
+			prep = getPrep()
+			Expect(apimeta.IsStatusConditionTrue(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeSigned)).To(BeTrue())
+			Expect(prep.Status.Attestations).To(HaveLen(2), "the provenance is attached again as a signed bundle")
+		})
+
+		It("waits for the signing key", func() {
+			prep := createTestPreparation(ctx, prepName, orderName, digest, nil)
+			seedArtifact(fakeOCI, prep.Spec.Artifact.OCIRef, digest)
+			signer = signing.NewProvider(k8sClient, testNamespace, "no-signing-key")
+
+			Expect(reconcilePrep()).To(Succeed()) // adds the finalizer
+			result, err := reconcilePrepResult()
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+
+			prep = getPrep()
+			cond := apimeta.FindStatusCondition(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeSigned)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Reason).To(Equal(deliveryv1alpha1.ReasonSigningKeyNotReady))
+			Expect(apimeta.FindStatusCondition(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeReady).Reason).To(Equal(deliveryv1alpha1.ReasonAwaitingSignature))
+			Expect(fakeOCI.Referrers).To(BeEmpty())
 		})
 
 		It("stays not ready and retries while the artifact cannot be read", func() {
@@ -241,9 +323,9 @@ var _ = Describe("Preparation Controller", func() {
 			Expect(reconcilePrep()).To(Succeed(), "the artifact is immutable, so the failure is terminal")
 			prep = getPrep()
 			Expect(apimeta.IsStatusConditionTrue(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)).To(BeFalse())
-			cond := apimeta.FindStatusCondition(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeProvenanceAttached)
+			cond := apimeta.FindStatusCondition(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeSigned)
 			Expect(cond).NotTo(BeNil())
-			Expect(cond.Reason).To(Equal(deliveryv1alpha1.ReasonProvenanceAttachFailed))
+			Expect(cond.Reason).To(Equal(deliveryv1alpha1.ReasonSignFailed))
 			Expect(fakeOCI.Referrers).To(BeEmpty())
 		})
 
@@ -281,16 +363,22 @@ var _ = Describe("Preparation Controller", func() {
 			Expect(prep.Status.Approval.SealedTime).NotTo(BeNil())
 			Expect(prep.Status.Approval.Attestation).NotTo(BeNil())
 			Expect(apimeta.IsStatusConditionTrue(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeApprovalsSealed)).To(BeTrue())
-			approvals := referrersOfType(fakeOCI, oci.ApprovalsArtifactType)
+			approvals := referrersOfPredicate(fakeOCI, approval.AttestationPredicateType)
 			Expect(approvals).To(HaveLen(1))
 			Expect(approvals[0].Subject.OCIString()).To(Equal(prep.Spec.Artifact.OCIRef))
-			Expect(string(approvals[0].Artifact.Payload)).To(ContainSubstring(`"subject":"alice"`))
+
+			subject, err := oci.Parse(prep.Spec.Artifact.OCIRef)
+			Expect(err).NotTo(HaveOccurred())
+			evidence, err := attestation.Find(ctx, fakeOCI, testSigner.TrustSet(), subject, approval.AttestationPredicateType)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(evidence.Digest).To(Equal(prep.Status.Approval.Attestation.Digest))
+			Expect(string(evidence.Statement)).To(ContainSubstring(`"subject":"alice"`))
 
 			By("ignoring votes after the seal")
 			createTestApproval(ctx, prep, "alice", release, deliveryv1alpha1.ApprovalDecisionReject)
 			Expect(reconcilePrep()).To(Succeed())
 			Expect(approvedReason(getPrep())).To(Equal(deliveryv1alpha1.ReasonApproved))
-			Expect(referrersOfType(fakeOCI, oci.ApprovalsArtifactType)).To(HaveLen(1), "the attestation is pushed exactly once")
+			Expect(referrersOfPredicate(fakeOCI, approval.AttestationPredicateType)).To(HaveLen(1), "the attestation is pushed exactly once")
 		})
 
 		It("retries archiving without resealing when the registry push fails", func() {
@@ -337,15 +425,27 @@ func seedArtifact(fake *oci.FakeClient, ociRef, digest string) {
 	})
 }
 
-// referrersOfType returns the referrers of the given artifact type pushed to fake.
-func referrersOfType(fake *oci.FakeClient, artifactType string) []oci.PushedReferrer {
+// referrersOfPredicate returns the Sigstore bundle referrers of the given
+// predicate type pushed to fake.
+func referrersOfPredicate(fake *oci.FakeClient, predicateType string) []oci.PushedReferrer {
 	var referrers []oci.PushedReferrer
 	for _, r := range fake.Referrers {
-		if r.Artifact.ArtifactType == artifactType {
+		if r.Artifact.ArtifactType == oci.SigstoreBundleMediaType && r.Artifact.Annotations[oci.AnnotationBundlePredicateType] == predicateType {
 			referrers = append(referrers, r)
 		}
 	}
 	return referrers
+}
+
+// attestationDigest returns the digest of the attestation of type
+// recorded on prep.
+func attestationDigest(prep *deliveryv1alpha1.Preparation, attestationType deliveryv1alpha1.AttestationType) string {
+	for _, a := range prep.Status.Attestations {
+		if a.Type == attestationType {
+			return a.Digest
+		}
+	}
+	return ""
 }
 
 // createTestPreparation creates a Preparation for orderName with the given

@@ -27,7 +27,8 @@ SHA-256 digest. Once a Preparation reaches `Ready`, it never changes.
   artifact by digest.
 - Drift is unambiguous. Compare the deployed digest to the desired digest.
   Any difference is a concrete, actionable signal.
-- Artifacts can be signed, attested, and audited independently of the cluster.
+- Every artifact and attestation is signed with the Kitchen key, so anyone can
+  verify and audit it offline with stock `cosign`, independently of the cluster.
 
 ### Separation of rendering from deployment
 
@@ -128,10 +129,11 @@ spec:
         .spec.template.spec.terminationGracePeriodSeconds: "30"
 ```
 
-The Product controller resolves the source tag to a digest and publishes it in
-`status.source` (OCI URL, version, digest, and an optional Pantry reference
-for pull credentials). Orders pull the source by that digest, only once the
-Product is `Ready` for its current generation. Every variant of a Product
+The Product controller resolves the source tag to a digest, verifies its
+signature when required (see [Source verification](#source-verification)), and
+publishes it in `status.source` (OCI URL, version, digest, the verified signer,
+and an optional Pantry reference for pull credentials). Orders pull the source
+by that digest, only once the Product is `Ready` for its current generation. Every variant of a Product
 therefore renders the same artifact, even if the upstream tag is moved. The
 Product resolves the tag again only when its source or vendor configuration,
 or the URL of a Pantry they use, changes; the new digest renders a new
@@ -181,11 +183,60 @@ targets match, the paths of all of them are allowed. An Order that sets
 anything else fails with a `ProcessingFailed` condition naming the offending
 value or patch.
 
+#### Source verification
+
+A Product can require its source to carry a trusted signature before any of
+its Orders renders it. `spec.source.verify` has the shape of Flux's
+`OCIRepository.spec.verify` and is verified with the cosign library, which
+reads Sigstore bundles as well as the legacy `sha256-<hex>.sig` signatures
+many upstream artifacts still carry:
+
+```yaml
+spec:
+  source:
+    oci: oci://ghcr.io/stefanprodan/charts/podinfo
+    version: "6.10.2"
+    verify:
+      provider: cosign                 # the only provider; the default
+      secretRef:                       # every key ending in .pub is tried
+        name: podinfo-keys
+      # or keyless, against the identity that signed the release:
+      # matchOIDCIdentity:             # RE2 regular expressions, not anchored
+      # - issuer: ^https://token\.actions\.githubusercontent\.com$
+      #   subject: ^https://github\.com/stefanprodan/podinfo/\.github/workflows/release\.yml@refs/tags/.*$
+      # trustedRootSecretRef:          # key trusted_root.json; required air-gapped
+      #   name: sigstore-root
+```
+
+- Key-based signatures verify offline, without a transparency log.
+- Keyless signatures verify against the Sigstore trusted root in
+  `trustedRootSecretRef`, or against the Sigstore public-good instance through
+  TUF when it is unset, which needs network access.
+- A source without `verify` that carries a signature by a key the Kitchen
+  trusts verifies too: releases of this Kokumi installation or, once its key
+  is trusted, of another one.
+- The result is the `SourceVerified` condition, with reason `Succeeded`,
+  `VerificationError` or `VerificationRequired`, and `status.source.verified`,
+  which names the key ID or the keyless issuer and subject. The condition is
+  absent when nothing was verified and nothing had to be.
+- A Product whose source does not verify is not `Ready`, publishes no new
+  source, and none of its Orders render. It is verified again every few
+  minutes and whenever the trusted keys change.
+- The Kitchen's `spec.signing.requireSourceVerification` makes verification
+  mandatory for every Product.
+
+Every Order copies the verified signer into its artifact's config blob as
+`source.verified`, and the signed provenance repeats it, so the registry
+records who published each rendered input.
+
 #### Vendoring
 
 A Product can **vendor** its source: copy the artifact (Helm chart or manifest
 bundle) unchanged to another OCI registry, for example to prepare an
-air-gapped installation. Orders then render from the vendored copy:
+air-gapped installation. The source is copied by the digest that verified,
+together with its referrers, so the copy keeps the publisher's signatures and
+attestations and still verifies against the publisher's key. Orders then
+render from the vendored copy:
 
 ```yaml
 spec:
@@ -313,9 +364,10 @@ kokumi-registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod
 │        kokumi.dev/parent: sha256:c1…
 │        kokumi.dev/approval-policy: {…}
 │
-├─ referrers of sha256:c3…
-│   ├─ application/vnd.kokumi.provenance.v1+json   SLSA v1 provenance (in-toto)
-│   └─ application/vnd.kokumi.approvals.v1+json    written on promotion
+├─ referrers of sha256:c3…  (Sigstore bundles, application/vnd.dev.sigstore.bundle.v0.3+json)
+│   ├─ predicate https://sigstore.dev/cosign/sign/v1              signature
+│   ├─ predicate https://slsa.dev/provenance/v1                   SLSA v1 provenance
+│   └─ predicate https://kokumi.dev/attestations/approval/v1      written on promotion
 │
 └─ tag 6.10.2 → sha256:c3…
 ```
@@ -332,7 +384,10 @@ fetching a blob.
   "commitMessage": "bump replicas to 3",
   "createdTime": "2026-10-12T09:14:03Z",
   "parent": "sha256:c1…",
-  "source": { "oci": "oci://ghcr.io/stefanprodan/charts/podinfo", "version": "6.10.2", "digest": "sha256:aa…" },
+  "source": {
+    "oci": "oci://ghcr.io/stefanprodan/charts/podinfo", "version": "6.10.2", "digest": "sha256:aa…",
+    "verified": { "provider": "cosign", "issuer": "https://token.actions.githubusercontent.com", "subject": "https://github.com/…" }
+  },
   "destination": { "oci": "oci://kokumi-registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod" },
   "product": { "namespace": "shop", "name": "podinfo", "configHash": "sha256:77e0…" },
   "renderer": { "type": "Helm", "version": "v4.3.0", "builder": "ghcr.io/kokumi-dev/kokumi@sha256:bb…" },
@@ -370,9 +425,11 @@ copied to. Do not put secrets into Helm values or patches. Pull access to a
 destination repository equals read access to the intent of every Preparation
 in it.
 
-The reverse holds for writing. Artifacts are not signed yet, so intent and
-lineage read from the registry are only as trustworthy as push access to the
-repository.
+Anyone who can push to the repository can push an artifact that looks like a
+Preparation. The signature of a Preparation's artifact covers its manifest,
+and with it the config blob, the rendered layer and the annotations: trust
+intent and lineage read from the registry only once the signature verifies
+against the Kitchen key.
 {{< /callout >}}
 
 #### Lineage
@@ -407,30 +464,41 @@ The controller determines `builder` once at start-up: the `KOKUMI_BUILDER_ID`
 environment variable if set, otherwise the image ID of its own Pod, otherwise
 `kokumi@<version>`. It is self-reported.
 
-After the artifact is pushed, the Preparation controller attaches a
-[SLSA v1 provenance](https://slsa.dev/spec/v1.0/provenance) statement as an
-OCI referrer and records it in `status.attestations`. The statement is built
-entirely from the config blob, so it can be rebuilt at any time with identical
-bytes. Its `builder.id` is `https://kokumi.dev/builders/controller/v1`;
-`builder.version` names the controller image and the rendering engine, and
-the source is listed by its OCI URL and digest.
+After the artifact is pushed, the Preparation controller signs it and attaches
+a [SLSA v1 provenance](https://slsa.dev/spec/v1.0/provenance) statement, both
+as OCI referrers in the format `cosign` v3 writes: a Sigstore bundle holding a
+DSSE envelope over an in-toto statement, signed with the
+[Kitchen key](operator-guide/signing/). It records both in
+`status.attestations` (types `Signature` and `Provenance`) and sets the
+`Signed` and `ProvenanceAttached` conditions.
 
-A Preparation becomes `Ready` only once the `ProvenanceAttached` condition is
-true, and only a `Ready` Preparation is served, under both promotion modes:
-promoting one that is not ready is refused, and the Serving keeps the current
-deployment. An artifact whose config blob cannot be read as a Kokumi config
-never gets provenance and is never ready.
+- The signature is the statement `cosign sign` writes (predicate type
+  `https://sigstore.dev/cosign/sign/v1`).
+- The provenance is built entirely from the config blob. Its `builder.id` is
+  `https://kokumi.dev/builders/controller/v1`; `builder.version` names the
+  controller image and the rendering engine, and the source is listed by its
+  OCI URL, digest and verified signer.
+- Signing is deterministic (RFC 6979), so a retried push yields the same
+  referrer, and an existing referrer with the same statement is reused.
 
-The Attestations view lists every referrer of the artifact live from the
-registry. Anyone who can push to the repository can attach one, so the view
-marks the ones Kokumi recorded and shows the content of only those.
+A Preparation becomes `Ready` only once it is `Signed` and `ProvenanceAttached`,
+and only a `Ready` Preparation is served, under both promotion modes: promoting
+one that is not ready is refused, and the Serving keeps the current
+deployment. An artifact whose config blob cannot be read as a Kokumi config is
+never signed and never ready.
+
+Anyone can verify a Preparation offline with the stock cosign CLI:
 
 ```bash
-oras discover kokumi-registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod@sha256:c3…
+kubectl -n kokumi get kitchen default -o jsonpath='{.status.signing.publicKey}' > kokumi.pub
+cosign verify --key kokumi.pub --insecure-ignore-tlog=true <registry>/shop/podinfo-prod@sha256:c3…
+cosign verify-attestation --key kokumi.pub --insecure-ignore-tlog=true --type slsaprovenance1 <registry>/shop/podinfo-prod@sha256:c3…
 ```
 
-Provenance is not signed yet. Until it is, it documents how an artifact was
-produced for supply-chain tooling; it does not prove it.
+The Attestations view lists every referrer of the artifact live from the
+registry and verifies each against the keys the Kitchen trusts. Anyone who can
+push to the repository can attach a referrer, so the view shows the statement
+of verified referrers only.
 
 ### Serving
 
@@ -452,11 +520,20 @@ When a Serving is reconciled, the controller:
    approved, or its approvals are not sealed yet, the currently deployed
    Preparation stays active and the Serving's `Approved` condition explains
    why.
-3. Creates or updates the Argo CD `Application` in the `argocd` namespace,
+3. Verifies the evidence of the artifact **in the registry**, not in the
+   Preparation's status: a signature by a trusted key, a signed provenance
+   that names this Serving's Order (an artifact rendered for another Order
+   cannot be deployed here), and, when an approval policy applies, signed
+   approvals with result `Approved`. Otherwise the current deployment stays,
+   and the `Verified` condition reports `SignatureMissing` or
+   `SignatureInvalid`. Argo CD verifies no OCI signatures, so this is the only
+   check, and Argo CD pulls exactly the digest that was verified. Results are
+   cached per digest until the trusted keys change.
+4. Creates or updates the Argo CD `Application` in the `argocd` namespace,
    pointing `spec.source.repoURL` at the Preparation's OCI artifact and
    `spec.source.targetRevision` at its exact digest. A pre-existing
    Application without the opt-in annotation is never modified.
-4. Derives the Serving status from the Application and records the
+5. Derives the Serving status from the Application and records the
    preparation as the observed (active) one: `Deploying` until the
    Application reports `Healthy` and is synced to the desired revision, then
    `Deployed`. An Application that is degraded at the desired revision
@@ -493,10 +570,11 @@ spec:
   deployed as soon as it is approved; an older approved Preparation is never
   deployed in its place. In Manual mode a human still has to press Promote.
 - When an approved Preparation is promoted, its votes are **sealed**: they are
-  locked in `status.approval` and pushed as an in-toto attestation
-  (`application/vnd.kokumi.approvals.v1+json`) that references the
+  locked in `status.approval` and pushed as a signed attestation (predicate
+  type `https://kokumi.dev/attestations/approval/v1`) that references the
   Preparation's artifact as an OCI referrer. Votes submitted later are ignored.
-  List the attestation with `oras discover <artifact>`.
+  Verify it with `cosign verify-attestation --key kokumi.pub
+  --insecure-ignore-tlog=true --type https://kokumi.dev/attestations/approval/v1 <artifact>`.
 
 #### Who may vote and how identity is protected
 
@@ -508,8 +586,9 @@ spec:
 - The `approval-integrity` ValidatingAdmissionPolicy accepts new Approvals
   only from the `kokumi-server` ServiceAccount, rejects every update, and
   rejects deletes except by the namespace controller. The `status-integrity`
-  policy lets only the kokumi controller write Approval, Preparation and
-  Serving status (the Serving's target Preparation triggers sealing).
+  policy lets only the kokumi controller write the status of every Kokumi
+  resource: the Serving's target Preparation triggers sealing, and the
+  Product's status decides which source its Orders render.
 - Approvals are kept even when their Preparation or Order is deleted, so the
   history stays visible:
 
