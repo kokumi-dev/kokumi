@@ -6,5 +6,5 @@ import { useSSEEvent } from './useSSEEvent'
  * Pantries. Returns null until the first event is received.
  */
 export function usePantries(): Pantry[] | null {
-  return useSSEEvent<Pantry[]>('/api/v1/events', 'pantries')
+  return useSSEEvent<Pantry[]>('pantries')
 }

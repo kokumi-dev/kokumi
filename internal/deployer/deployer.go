@@ -11,7 +11,7 @@ import (
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 )
 
-// ErrOptInRequired is returned by VerifyOptIn when a pre-existing deployment
+// ErrOptInRequired is returned by Deploy when a pre-existing deployment
 // exists but is not opted in for management by this Serving's Order. It is a
 // terminal condition for the current generation: the reconciler surfaces it
 // in the Serving status without requeueing.
@@ -55,15 +55,11 @@ type DeploymentStatus struct {
 // Deployer deploys the artifact of a Preparation for a Serving.
 type Deployer interface {
 
-	// VerifyOptIn checks whether a pre-existing deployment for the Serving
-	// may be managed by this Serving's Order. It returns nil when there is
-	// no deployment yet (the create path is always allowed) or when the
-	// deployment is opted in. Otherwise it returns an error wrapping
-	// ErrOptInRequired.
-	VerifyOptIn(ctx context.Context, serving *deliveryv1alpha1.Serving) error
-
 	// Deploy creates or updates the deployment for the Serving so that it
-	// points at the Preparation's artifact.
+	// points at the Preparation's artifact. It leaves a deployment that
+	// already matches untouched. A pre-existing deployment that is not opted
+	// in for this Serving's Order is never modified; Deploy then returns an
+	// error wrapping ErrOptInRequired.
 	Deploy(ctx context.Context, serving *deliveryv1alpha1.Serving, preparation *deliveryv1alpha1.Preparation) error
 
 	// Status reports the current state of the deployment belonging to the

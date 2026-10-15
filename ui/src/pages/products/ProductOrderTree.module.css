@@ -5,28 +5,6 @@
  * below the open toggle. `tr.row > td` outranks the table's own `.table td`
  * rules, which also reach these cells.
  */
-tr.row > td {
-  animation: reveal 0.18s ease-out;
-}
-
-@keyframes reveal {
-  from {
-    opacity: 0;
-    transform: translateY(-3px);
-  }
-
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  tr.row > td {
-    animation: none;
-  }
-}
-
 .orderRow {
   cursor: pointer;
 }

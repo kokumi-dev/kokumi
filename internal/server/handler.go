@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/kokumi-dev/kokumi/internal/version"
 )
@@ -46,7 +47,11 @@ func handleInfo(authMgr *authManager) http.HandlerFunc {
 // checks (via SelfSubjectAccessReview as the user's mapped ServiceAccounts)
 // whether the user may list the resource the event describes. Users without
 // list permission for a resource receive no events for it.
-func handleEventsStream(h *hub, deps *apiDeps) http.HandlerFunc {
+//
+// A heartbeat event every heartbeat interval keeps a quiet stream alive
+// through proxies that close idle connections, and lets the client tell a
+// quiet stream from a dead one.
+func handleEventsStream(h *hub, deps *apiDeps, heartbeat time.Duration) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
@@ -87,24 +92,31 @@ func handleEventsStream(h *hub, deps *apiDeps) http.HandlerFunc {
 			eventPantries:     "pantries",
 		}
 
-		ch := h.subscribe()
-		defer h.unsubscribe(ch)
+		sub := h.subscribe()
+		defer h.unsubscribe(sub)
+
+		ticker := time.NewTicker(heartbeat)
+		defer ticker.Stop()
 
 		for {
 			select {
-			case ev, ok := <-ch:
-				if !ok {
+			case <-ticker.C:
+				if _, err := fmt.Fprintf(w, "event: %s\ndata: {}\n\n", eventHeartbeat); err != nil {
 					return
 				}
-				res, isResourceEvent := eventResource[ev.Type]
-				if isResourceEvent && !readable[res] {
-					continue
-				}
-				if ev.Type == eventCounts && !allReadable {
-					continue
-				}
-				if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Type, ev.Data); err != nil {
-					return
+				flusher.Flush()
+			case <-sub.ready():
+				for _, ev := range sub.drain() {
+					res, isResourceEvent := eventResource[ev.Type]
+					if isResourceEvent && !readable[res] {
+						continue
+					}
+					if ev.Type == eventCounts && !allReadable {
+						continue
+					}
+					if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Type, ev.Data); err != nil {
+						return
+					}
 				}
 				flusher.Flush()
 			case <-r.Context().Done():

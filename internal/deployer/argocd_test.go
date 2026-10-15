@@ -14,6 +14,7 @@ import (
 
 const (
 	testSyncSynced   = "Synced"
+	testOrderName    = "my-order"
 	testHealthStatus = "Healthy"
 )
 
@@ -93,6 +94,44 @@ var _ = Describe("ArgoCDDeployer", func() {
 				"a revision change must re-trigger reconciliation even when health and sync status are unchanged")
 		})
 
+		DescribeTable("passes update events where the opt-in annotation changed",
+			func(before, after map[string]string) {
+				predicate := NewArgoCD(nil).WatchPredicate()
+
+				oldApp := newApp(nil)
+				oldApp.Object["status"] = appStatus("sha256:same")
+				oldApp.SetAnnotations(before)
+				newApp := newApp(nil)
+				newApp.Object["status"] = appStatus("sha256:same")
+				newApp.SetAnnotations(after)
+
+				Expect(predicate.Update(event.UpdateEvent{
+					ObjectOld: oldApp,
+					ObjectNew: newApp,
+				})).To(BeTrue(), "a Serving refused for a missing opt-in must resume once the Application opts in")
+			},
+			Entry("added", nil, map[string]string{deliveryv1alpha1.AnnotationAllowedOrder: testOrderName}),
+			Entry("changed",
+				map[string]string{deliveryv1alpha1.AnnotationAllowedOrder: "other-order"},
+				map[string]string{deliveryv1alpha1.AnnotationAllowedOrder: testOrderName}),
+			Entry("removed", map[string]string{deliveryv1alpha1.AnnotationAllowedOrder: testOrderName}, nil),
+		)
+
+		It("filters update events where only unrelated annotations changed", func() {
+			predicate := NewArgoCD(nil).WatchPredicate()
+
+			oldApp := newApp(nil)
+			oldApp.Object["status"] = appStatus("sha256:same")
+			newApp := newApp(nil)
+			newApp.Object["status"] = appStatus("sha256:same")
+			newApp.SetAnnotations(map[string]string{"argocd.argoproj.io/refresh": "normal"})
+
+			Expect(predicate.Update(event.UpdateEvent{
+				ObjectOld: oldApp,
+				ObjectNew: newApp,
+			})).To(BeFalse())
+		})
+
 		It("filters update events where nothing relevant changed", func() {
 			d := NewArgoCD(nil)
 			predicate := d.WatchPredicate()
@@ -113,16 +152,16 @@ var _ = Describe("ArgoCDDeployer", func() {
 		It("accepts a matching annotation", func() {
 			app := newApp(nil)
 			app.SetAnnotations(map[string]string{
-				deliveryv1alpha1.AnnotationAllowedOrder: "my-order",
+				deliveryv1alpha1.AnnotationAllowedOrder: testOrderName,
 			})
 
-			Expect(assertAllowedOrderAnnotation(app, "my-order")).To(Succeed())
+			Expect(assertAllowedOrderAnnotation(app, testOrderName)).To(Succeed())
 		})
 
 		It("rejects a missing annotation with ErrOptInRequired", func() {
 			app := newApp(nil)
 
-			err := assertAllowedOrderAnnotation(app, "my-order")
+			err := assertAllowedOrderAnnotation(app, testOrderName)
 			Expect(err).To(MatchError(ErrOptInRequired))
 		})
 
@@ -132,7 +171,7 @@ var _ = Describe("ArgoCDDeployer", func() {
 				deliveryv1alpha1.AnnotationAllowedOrder: "other-order",
 			})
 
-			err := assertAllowedOrderAnnotation(app, "my-order")
+			err := assertAllowedOrderAnnotation(app, testOrderName)
 			Expect(err).To(MatchError(ErrOptInRequired))
 		})
 	})
