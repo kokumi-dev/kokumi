@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Outlet, useParams } from 'react-router'
 import { useOrders } from '../../hooks/useOrders'
-import { useMenus } from '../../hooks/useMenus'
+import { useProducts } from '../../hooks/useProducts'
 import { usePreparations } from '../../hooks/usePreparations'
 import { useCan, useDeniedReason } from '../../hooks/useCapability'
 import PageHeader from '../../components/layout/PageHeader'
@@ -11,6 +11,7 @@ import { Button, PromoteIcon, RollbackIcon, TabNav } from '../../components/ui'
 import PromoteDialog from '../../components/preparation/PromoteDialog'
 import { paths } from '../../routes/paths'
 import { promoteLabel } from '../../utils/preparations'
+import { allowsPatches, productOf } from '../../utils/products'
 import type { PreparationContext } from './preparationContext'
 import layout from '../../components/layout/layout.module.css'
 
@@ -18,7 +19,7 @@ export default function PreparationLayout() {
   const { namespace = '', name = '' } = useParams()
   const preparations = usePreparations()
   const orders = useOrders()
-  const menus = useMenus()
+  const products = useProducts()
   const [promoting, setPromoting] = useState(false)
   const promoteDenied = useDeniedReason('preparations:promote')
   const canEditOrders = useCan('orders:update')
@@ -41,8 +42,9 @@ export default function PreparationLayout() {
   const parent = prep.parentDigest ? siblings.find((p) => p.artifact.digest === prep.parentDigest) : undefined
   const active = siblings.find((p) => p.isActive)
   const order = orders?.find((o) => o.namespace === prep.namespace && o.name === prep.order)
-  const menu = order?.menuRef ? menus?.find((m) => m.namespace === order.namespace && m.name === order.menuRef?.name) : undefined
-  const editsAllowed = canEditOrders && !!order && (order.menuRef ? !!menu && menu.overrides.patches.policy !== 'None' : true)
+  // Until the Product has loaded, deny edits (fail closed).
+  const product = order && productOf(products, order)
+  const editsAllowed = canEditOrders && !!product && allowsPatches(product)
 
   const action = promoteLabel(prep.createdAt, active?.createdAt)
   const blockedByApproval = !!prep.approval && !prep.approval.approved

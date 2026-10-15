@@ -16,5 +16,7 @@
 .pending  { background: var(--color-warning-bg); color: var(--color-warning); }
 .processing { background: var(--color-warning-bg); color: var(--color-warning); }
 .deploying  { background: var(--color-warning-bg); color: var(--color-warning); }
+.waiting    { background: var(--color-warning-bg); color: var(--color-warning); }
+.deleting   { background: var(--color-warning-bg); color: var(--color-warning); }
 .failed   { background: var(--color-danger-bg);  color: var(--color-danger); }
 .unknown  { background: var(--color-fill-strong); color: var(--color-text-muted-light); }

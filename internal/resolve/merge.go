@@ -1,118 +1,80 @@
-/*
-Copyright 2026.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
 package resolve
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"maps"
+	"slices"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 )
 
-// mergeRender merges the Menu's base Helm render config with the Order's overrides.
-func mergeRender(menu *deliveryv1alpha1.Menu, order *deliveryv1alpha1.Order) (*deliveryv1alpha1.Render, error) {
-	baseRender := menu.Spec.Render
-	if baseRender == nil {
-		if order.Spec.Render != nil && order.Spec.Render.Helm != nil && order.Spec.Render.Helm.Values != nil {
-			if menu.Spec.Overrides.Values.Policy == deliveryv1alpha1.OverridePolicyNone {
-				return nil, fmt.Errorf("values overrides are not allowed by Menu %q", menu.Name)
-			}
-		}
-		return baseRender, nil
-	}
+// mergeRender deep-merges the Order's Helm values over the Product's render
+// config. The render type always comes from the Product.
+func mergeRender(product *deliveryv1alpha1.Product, order *deliveryv1alpha1.Order) (*deliveryv1alpha1.Render, error) {
+	result := product.Spec.Render.DeepCopy()
 
-	result := baseRender.DeepCopy()
-
-	// If no consumer Helm overrides, return base as-is.
-	if order.Spec.Render == nil || order.Spec.Render.Helm == nil || order.Spec.Render.Helm.Values == nil {
+	if order.Spec.Values == nil || len(order.Spec.Values.Raw) == 0 {
 		return result, nil
 	}
 
-	policy := menu.Spec.Overrides.Values
-
-	if policy.Policy == deliveryv1alpha1.OverridePolicyNone {
-		return nil, fmt.Errorf("values overrides are not allowed by Menu %q", menu.Name)
+	if result == nil || result.Helm == nil {
+		return nil, fmt.Errorf("values are only allowed when the Product renders with Helm; Product %q does not", product.Name)
 	}
 
-	// Parse consumer values.
-	var consumerValues map[string]any
-	if err := json.Unmarshal(order.Spec.Render.Helm.Values.Raw, &consumerValues); err != nil {
-		return nil, fmt.Errorf("failed to parse consumer Helm values: %w", err)
+	orderValues, err := decodeValues(order.Spec.Values.Raw)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse Order values: %w", err)
 	}
 
-	if policy.Policy == deliveryv1alpha1.OverridePolicyRestricted {
-		allowed := make(map[string]bool, len(policy.Allowed))
-		for _, p := range policy.Allowed {
-			allowed[p] = true
-		}
-		if err := validateValuePaths("", consumerValues, allowed); err != nil {
-			return nil, err
+	if err := validateValues(product.Spec.Overrides.Values, orderValues); err != nil {
+		return nil, fmt.Errorf("values not allowed by Product %q: %w", product.Name, err)
+	}
+
+	baseValues := map[string]any{}
+	if result.Helm.Values != nil && len(result.Helm.Values.Raw) > 0 {
+		if baseValues, err = decodeValues(result.Helm.Values.Raw); err != nil {
+			return nil, fmt.Errorf("failed to parse Product values: %w", err)
 		}
 	}
 
-	// Merge base values with consumer values (consumer wins).
-	var baseValues map[string]any
-	if result.Helm != nil && result.Helm.Values != nil {
-		if err := json.Unmarshal(result.Helm.Values.Raw, &baseValues); err != nil {
-			return nil, fmt.Errorf("failed to parse base Helm values: %w", err)
-		}
-	} else {
-		baseValues = make(map[string]any)
-	}
-
-	mergedValues := mergeMaps(baseValues, consumerValues)
-
-	raw, err := json.Marshal(mergedValues)
+	raw, err := json.Marshal(mergeMaps(baseValues, orderValues))
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal merged values: %w", err)
 	}
 
-	if result.Helm == nil {
-		result.Helm = &deliveryv1alpha1.HelmRender{}
-	}
 	result.Helm.Values = &apiextensionsv1.JSON{Raw: raw}
 
 	return result, nil
 }
 
-// mergePatches merges Menu base patches with Order consumer patches.
-func mergePatches(menu *deliveryv1alpha1.Menu, order *deliveryv1alpha1.Order) ([]deliveryv1alpha1.Patch, error) {
+// decodeValues decodes Helm values, keeping numbers as written: float64
+// would round large integers and change the rendered output.
+func decodeValues(raw []byte) (map[string]any, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+
+	var values map[string]any
+	if err := decoder.Decode(&values); err != nil {
+		return nil, err
+	}
+	return values, nil
+}
+
+// mergePatches merges the Order's patches over the Product's patches. Patches
+// on the same target are combined; the Order wins on the same path.
+func mergePatches(product *deliveryv1alpha1.Product, order *deliveryv1alpha1.Order) ([]deliveryv1alpha1.Patch, error) {
 	if len(order.Spec.Patches) == 0 {
-		return menu.Spec.Patches, nil
+		return product.Spec.Patches, nil
 	}
 
-	policy := menu.Spec.Overrides.Patches
-
-	if policy.Policy == deliveryv1alpha1.OverridePolicyNone {
-		return nil, fmt.Errorf("patch overrides are not allowed by Menu %q", menu.Name)
+	if err := validatePatches(product.Spec.Overrides.Patches, order.Spec.Patches); err != nil {
+		return nil, fmt.Errorf("patches not allowed by Product %q: %w", product.Name, err)
 	}
 
-	if policy.Policy == deliveryv1alpha1.OverridePolicyRestricted {
-		for _, cp := range order.Spec.Patches {
-			if err := validatePatchAllowed(cp, policy.Allowed); err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	// Build merged result: start with base patches, then apply consumer overrides.
 	type patchKey struct {
 		Kind, Name, Namespace string
 	}
@@ -120,16 +82,7 @@ func mergePatches(menu *deliveryv1alpha1.Menu, order *deliveryv1alpha1.Order) ([
 	merged := make(map[patchKey]map[string]string)
 	ordering := make([]patchKey, 0)
 
-	for _, p := range menu.Spec.Patches {
-		key := patchKey{p.Target.Kind, p.Target.Name, p.Target.Namespace}
-		if _, exists := merged[key]; !exists {
-			merged[key] = make(map[string]string)
-			ordering = append(ordering, key)
-		}
-		maps.Copy(merged[key], p.Set)
-	}
-
-	for _, p := range order.Spec.Patches {
+	for _, p := range slices.Concat(product.Spec.Patches, order.Spec.Patches) {
 		key := patchKey{p.Target.Kind, p.Target.Name, p.Target.Namespace}
 		if _, exists := merged[key]; !exists {
 			merged[key] = make(map[string]string)
@@ -153,6 +106,54 @@ func mergePatches(menu *deliveryv1alpha1.Menu, order *deliveryv1alpha1.Order) ([
 	return result, nil
 }
 
+// validateEdits checks the Order's edits against the Product's patch
+// overrides. Edits are never merged with the Product's patches; they are
+// applied after them.
+func validateEdits(product *deliveryv1alpha1.Product, order *deliveryv1alpha1.Order) error {
+	if err := validatePatches(product.Spec.Overrides.Patches, order.Spec.Edits); err != nil {
+		return fmt.Errorf("edits not allowed by Product %q: %w", product.Name, err)
+	}
+	return nil
+}
+
+// validateValues checks values against the Product's value overrides. Policy
+// None, like an unset policy, allows no values.
+func validateValues(overrides deliveryv1alpha1.ValueOverrides, values map[string]any) error {
+	if overrides.Policy == deliveryv1alpha1.OverridePolicyAll {
+		return nil
+	}
+
+	allowed := map[string]bool{}
+	if overrides.Policy == deliveryv1alpha1.OverridePolicyListed {
+		for _, p := range overrides.Paths {
+			allowed[p] = true
+		}
+	}
+
+	return validateValuePaths("", values, allowed)
+}
+
+// validatePatches checks patches against the Product's patch overrides.
+// Policy None, like an unset policy, allows no patches.
+func validatePatches(overrides deliveryv1alpha1.PatchOverrides, patches []deliveryv1alpha1.Patch) error {
+	if overrides.Policy == deliveryv1alpha1.OverridePolicyAll {
+		return nil
+	}
+
+	var allowed []deliveryv1alpha1.AllowedPatchTarget
+	if overrides.Policy == deliveryv1alpha1.OverridePolicyListed {
+		allowed = overrides.Targets
+	}
+
+	for _, patch := range patches {
+		if err := validatePatchAllowed(patch, allowed); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 // mergeMaps deep-merges src into dst, with src values taking precedence.
 func mergeMaps(dst, src map[string]any) map[string]any {
 	result := make(map[string]any, len(dst))
@@ -169,7 +170,7 @@ func mergeMaps(dst, src map[string]any) map[string]any {
 	return result
 }
 
-// validateValuePaths ensures all leaf keys in the consumer values map are in the allowed set.
+// validateValuePaths ensures all leaf keys in the values map are in the allowed set.
 func validateValuePaths(prefix string, values map[string]any, allowed map[string]bool) error {
 	for k, v := range values {
 		path := k
@@ -189,48 +190,44 @@ func validateValuePaths(prefix string, values map[string]any, allowed map[string
 	return nil
 }
 
-// validateEdits checks that the Order's edits comply with the Menu's patch override policy.
-// Edits are consumer-only (never inherited from Menu) but still governed by the same
-// PatchOverridePolicy.
-func validateEdits(menu *deliveryv1alpha1.Menu, order *deliveryv1alpha1.Order) error {
-	if len(order.Spec.Edits) == 0 {
-		return nil
+// validatePatchAllowed checks a patch against the allowed targets. An allowed
+// target without a namespace matches the resource in any namespace, as it does
+// when patching. The paths of all matching targets are allowed.
+func validatePatchAllowed(patch deliveryv1alpha1.Patch, allowed []deliveryv1alpha1.AllowedPatchTarget) error {
+	target := patch.Target
+	paths := map[string]bool{}
+	matched := false
+	for _, a := range allowed {
+		if a.Target.Kind != target.Kind || a.Target.Name != target.Name {
+			continue
+		}
+		if a.Target.Namespace != "" && a.Target.Namespace != target.Namespace {
+			continue
+		}
+		matched = true
+		for _, p := range a.Paths {
+			paths[p] = true
+		}
 	}
 
-	policy := menu.Spec.Overrides.Patches
-
-	if policy.Policy == deliveryv1alpha1.OverridePolicyNone {
-		return fmt.Errorf("edits are not allowed by Menu %q (patch policy is None)", menu.Name)
+	if !matched {
+		return fmt.Errorf("patch target %s is not allowed", describeTarget(target))
 	}
 
-	if policy.Policy == deliveryv1alpha1.OverridePolicyRestricted {
-		for _, e := range order.Spec.Edits {
-			if err := validatePatchAllowed(e, policy.Allowed); err != nil {
-				return fmt.Errorf("edit not allowed: %w", err)
-			}
+	for _, path := range slices.Sorted(maps.Keys(patch.Set)) {
+		if !paths[path] {
+			return fmt.Errorf("patch path %q on %s is not allowed", path, describeTarget(target))
 		}
 	}
 
 	return nil
 }
 
-// validatePatchAllowed checks if a consumer patch is permitted by the allowed list.
-func validatePatchAllowed(patch deliveryv1alpha1.Patch, allowed []deliveryv1alpha1.AllowedPatchTarget) error {
-	for _, a := range allowed {
-		if a.Target.Kind == patch.Target.Kind &&
-			a.Target.Name == patch.Target.Name &&
-			a.Target.Namespace == patch.Target.Namespace {
-			allowedPaths := make(map[string]bool, len(a.Paths))
-			for _, p := range a.Paths {
-				allowedPaths[p] = true
-			}
-			for path := range patch.Set {
-				if !allowedPaths[path] {
-					return fmt.Errorf("patch path %q on %s/%s is not allowed", path, patch.Target.Kind, patch.Target.Name)
-				}
-			}
-			return nil
-		}
+// describeTarget returns kind/name, or namespace/kind/name when the target is
+// namespaced.
+func describeTarget(target deliveryv1alpha1.PatchTarget) string {
+	if target.Namespace == "" {
+		return target.Kind + "/" + target.Name
 	}
-	return fmt.Errorf("patch target %s/%s is not allowed", patch.Target.Kind, patch.Target.Name)
+	return target.Namespace + "/" + target.Kind + "/" + target.Name
 }

@@ -4,9 +4,14 @@ const seg = (s: string) => encodeURIComponent(s)
 
 export const paths = {
   dashboard: () => '/',
+  products: () => '/products',
+  newProduct: () => '/products/new',
+  product: (ns: string, name: string, tab?: 'orders' | 'preview' | 'edit') =>
+    `/products/${seg(ns)}/${seg(name)}${tab ? `/${tab}` : ''}`,
   orders: () => '/orders',
-  newOrder: (menu?: { namespace: string; name: string }) =>
-    menu ? `/orders/new?menu=${seg(`${menu.namespace}/${menu.name}`)}` : '/orders/new',
+  /** Optionally preselects the Product the new Order is a variant of. */
+  newOrder: (product?: { namespace: string; name: string }) =>
+    product ? `/orders/new?product=${seg(`${product.namespace}/${product.name}`)}` : '/orders/new',
   order: (ns: string, name: string, tab?: 'preparations' | 'servings' | 'files' | 'edit') =>
     `/orders/${seg(ns)}/${seg(name)}${tab ? `/${tab}` : ''}`,
   preparations: () => '/preparations',
@@ -14,10 +19,6 @@ export const paths = {
     `/preparations/${seg(ns)}/${seg(name)}${tab ? `/${tab}` : ''}`,
   servings: () => '/servings',
   serving: (ns: string, name: string) => `/servings/${seg(ns)}/${seg(name)}`,
-  menus: () => '/menus',
-  newMenu: () => '/menus/new',
-  menu: (ns: string, name: string, tab?: 'orders' | 'edit') =>
-    `/menus/${seg(ns)}/${seg(name)}${tab ? `/${tab}` : ''}`,
   pantries: () => '/pantries',
   newPantry: () => '/pantries/new',
   pantry: (ns: string, name: string, tab?: 'tags' | 'edit') =>

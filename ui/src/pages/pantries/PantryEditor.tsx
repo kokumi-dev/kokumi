@@ -45,7 +45,7 @@ export default function PantryEditor() {
             : [{ label: 'Pantries', to: paths.pantries() }]
         }
         title={pantry ? 'Edit Pantry' : 'New Pantry'}
-        subtitle="Connect an OCI registry so Menus and Orders can pull from and push to it."
+        subtitle="Connect an OCI registry so Products and Orders can pull from and push to it."
       />
       <PantryForm
         key={pantry ? `${pantry.namespace}/${pantry.name}` : 'new'}

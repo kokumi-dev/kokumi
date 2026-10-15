@@ -13,16 +13,17 @@ import (
 // in the artifact's config blob.
 //
 // It deliberately leaves out everything that does not change what is rendered
-// or what must hold before it is served: the Menu reference, Pantry names and
+// or what must hold before it is served: the Product reference, Pantry names and
 // credentials, the promotion mode, and the commit message.
 type Intent struct {
 	// Source is the resolved source artifact.
 	Source IntentSource `json:"source"`
 	// Destination is the resolved OCI URL the artifact is pushed to.
 	Destination string `json:"destination"`
-	// Render is the render configuration after the Menu merge.
+	// Render is the render configuration after merging the Order over its
+	// Product.
 	Render *deliveryv1alpha1.Render `json:"render,omitempty"`
-	// Patches are the patches after the Menu merge.
+	// Patches are the patches after merging the Order over its Product.
 	Patches []deliveryv1alpha1.Patch `json:"patches,omitempty"`
 	// Edits are applied on top of the patches.
 	Edits []deliveryv1alpha1.Patch `json:"edits,omitempty"`
@@ -36,9 +37,9 @@ type IntentSource struct {
 	OCI string `json:"oci"`
 	// Version is the tag the source is resolved from.
 	Version string `json:"version"`
-	// Digest pins the source to the artifact a Menu pre-rendered, so that a
-	// Menu publishing a new artifact changes the intent. Empty otherwise.
-	Digest string `json:"digest,omitempty"`
+	// Digest pins the source to the artifact the Product resolved, so that
+	// the Product resolving a new artifact changes the intent.
+	Digest string `json:"digest"`
 }
 
 // IntentPromotion holds the promotion gates that are part of an Intent.
@@ -51,15 +52,11 @@ type IntentPromotion struct {
 // resolved source and destination URLs.
 func NewIntent(order *deliveryv1alpha1.Order, effective *EffectiveSpec, sourceOCI, destOCI string) Intent {
 	intent := Intent{
-		Source:      IntentSource{OCI: sourceOCI, Version: effective.Source.Version},
+		Source:      IntentSource{OCI: sourceOCI, Version: effective.Source.Version, Digest: effective.SourceDigest},
 		Destination: destOCI,
 		Render:      effective.Render,
 		Patches:     effective.Patches,
 		Edits:       effective.Edits,
-	}
-
-	if effective.Menu != nil {
-		intent.Source.Digest = effective.Menu.PreRenderedDigest
 	}
 
 	if policy := order.ApprovalPolicy(); policy != nil {

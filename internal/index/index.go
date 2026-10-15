@@ -2,6 +2,7 @@ package index
 
 import (
 	"context"
+	"slices"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -17,9 +18,9 @@ func Setup(ctx context.Context, indexer client.FieldIndexer) error {
 	}{
 		{&deliveryv1alpha1.Approval{}, FieldPreparationRefName, approvalPreparation},
 		{&deliveryv1alpha1.Preparation{}, FieldOrderName, preparationOrder},
-		{&deliveryv1alpha1.Order{}, FieldMenuRefName, orderMenu},
-		{&deliveryv1alpha1.Order{}, FieldSourcePantryRefName, orderSourcePantry},
+		{&deliveryv1alpha1.Order{}, FieldProductRefName, orderProduct},
 		{&deliveryv1alpha1.Order{}, FieldDestinationPantryRefName, orderDestinationPantry},
+		{&deliveryv1alpha1.Product{}, FieldPantryRefNames, productPantries},
 	}
 	for _, idx := range indexes {
 		if err := indexer.IndexField(ctx, idx.obj, idx.field, idx.extract); err != nil {
@@ -53,38 +54,45 @@ func PreparationsForOrder(ctx context.Context, r client.Reader, namespace, order
 	return preparations.Items, nil
 }
 
-// OrdersForMenu returns the Orders rendered from the named Menu. It requires
-// the cache indexes registered by Setup.
-func OrdersForMenu(ctx context.Context, r client.Reader, namespace, menuName string) ([]deliveryv1alpha1.Order, error) {
+// OrdersForProduct returns the Orders that are variants of the named Product.
+// It requires the cache indexes registered by Setup.
+func OrdersForProduct(ctx context.Context, r client.Reader, namespace, productName string) ([]deliveryv1alpha1.Order, error) {
 	orders := &deliveryv1alpha1.OrderList{}
 	if err := r.List(ctx, orders,
 		client.InNamespace(namespace),
-		client.MatchingFields{FieldMenuRefName: menuName},
+		client.MatchingFields{FieldProductRefName: productName},
 	); err != nil {
 		return nil, err
 	}
 	return orders.Items, nil
 }
 
-// OrdersForPantry returns the Orders whose source or destination references
-// the named Pantry. It requires the cache indexes registered by Setup.
+// OrdersForPantry returns the Orders whose destination references the named
+// Pantry. Orders follow their Product's source Pantry through the Product.
+// It requires the cache indexes registered by Setup.
 func OrdersForPantry(ctx context.Context, r client.Reader, namespace, pantryName string) ([]deliveryv1alpha1.Order, error) {
-	var orders []deliveryv1alpha1.Order
-	seen := map[string]struct{}{}
-	for _, field := range []string{FieldSourcePantryRefName, FieldDestinationPantryRefName} {
-		list := &deliveryv1alpha1.OrderList{}
-		if err := r.List(ctx, list, client.InNamespace(namespace), client.MatchingFields{field: pantryName}); err != nil {
-			return nil, err
-		}
-		for _, o := range list.Items {
-			if _, dup := seen[o.Name]; dup {
-				continue
-			}
-			seen[o.Name] = struct{}{}
-			orders = append(orders, o)
-		}
+	orders := &deliveryv1alpha1.OrderList{}
+	if err := r.List(ctx, orders,
+		client.InNamespace(namespace),
+		client.MatchingFields{FieldDestinationPantryRefName: pantryName},
+	); err != nil {
+		return nil, err
 	}
-	return orders, nil
+	return orders.Items, nil
+}
+
+// ProductsForPantry returns the Products whose source or vendor destination
+// references the named Pantry. It requires the cache indexes registered by
+// Setup.
+func ProductsForPantry(ctx context.Context, r client.Reader, namespace, pantryName string) ([]deliveryv1alpha1.Product, error) {
+	products := &deliveryv1alpha1.ProductList{}
+	if err := r.List(ctx, products,
+		client.InNamespace(namespace),
+		client.MatchingFields{FieldPantryRefNames: pantryName},
+	); err != nil {
+		return nil, err
+	}
+	return products.Items, nil
 }
 
 func approvalPreparation(obj client.Object) []string {
@@ -103,20 +111,27 @@ func preparationOrder(obj client.Object) []string {
 	return []string{preparation.Spec.OrderName}
 }
 
-func orderMenu(obj client.Object) []string {
+func orderProduct(obj client.Object) []string {
 	order, ok := obj.(*deliveryv1alpha1.Order)
-	if !ok || order.Spec.MenuRef == nil {
+	if !ok {
 		return nil
 	}
-	return []string{order.Spec.MenuRef.Name}
+	return []string{order.Spec.ProductRef.Name}
 }
 
-func orderSourcePantry(obj client.Object) []string {
-	order, ok := obj.(*deliveryv1alpha1.Order)
-	if !ok || order.Spec.Source == nil || order.Spec.Source.PantryRef == nil {
+func productPantries(obj client.Object) []string {
+	product, ok := obj.(*deliveryv1alpha1.Product)
+	if !ok {
 		return nil
 	}
-	return []string{order.Spec.Source.PantryRef.Name}
+	var names []string
+	if ref := product.Spec.Source.PantryRef; ref != nil {
+		names = append(names, ref.Name)
+	}
+	if vendor := product.Spec.Vendor; vendor != nil && vendor.PantryRef != nil && !slices.Contains(names, vendor.PantryRef.Name) {
+		names = append(names, vendor.PantryRef.Name)
+	}
+	return names
 }
 
 func orderDestinationPantry(obj client.Object) []string {

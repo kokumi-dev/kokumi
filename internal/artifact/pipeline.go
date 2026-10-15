@@ -58,12 +58,12 @@ type RenderRequest struct {
 	// annotation linking to the preceding artifact in a promotion chain.
 	ParentDigest string
 	// ExtraAnnotations are merged into the pushed manifest annotations
-	// (e.g. kokumi.dev/prerendered) and may override computed ones.
+	// (e.g. kokumi.dev/approval-policy) and may override computed ones.
 	ExtraAnnotations map[string]string
 	// ArtifactType is the artifactType of the pushed manifest.
 	ArtifactType string
 	// Config is pushed as the artifact's config blob. The caller fills what
-	// it knows (Order, ConfigHash, Menu, Renderer, Intent, Pantry names);
+	// it knows (Order, ConfigHash, Product, Renderer, Intent, Pantry names);
 	// Render fills the source, destination, parent, commit message, and
 	// creation time.
 	Config Config
@@ -89,12 +89,10 @@ func (p *Pipeline) Render(ctx context.Context, req RenderRequest) (*RenderResult
 	srcClient := cmp.Or(req.SourceClient, p.store.client)
 	dstClient := cmp.Or(req.DestClient, p.store.client)
 
-	sourceRef, err := parseTagged(req.Source.OCI, req.Source.Version)
+	sourceRef, err := req.Source.ref()
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse source ref: %w", err)
 	}
-
-	sourceRef.Digest = req.Source.Digest
 
 	destRef, err := parseTagged(req.Destination.OCI, req.Source.Version)
 	if err != nil {
@@ -231,7 +229,7 @@ func (p *Pipeline) PreviewManifest(ctx context.Context, req PreviewRequest) ([]b
 func (p *Pipeline) preview(ctx context.Context, req PreviewRequest) ([]File, error) {
 	srcClient := cmp.Or(req.SourceClient, p.store.client)
 
-	sourceRef, err := parseTagged(req.Source.OCI, req.Source.Version)
+	sourceRef, err := req.Source.ref()
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse source ref: %w", err)
 	}
@@ -247,6 +245,17 @@ func (p *Pipeline) preview(ctx context.Context, req PreviewRequest) ([]File, err
 	}
 
 	return listFiles(p.store.fs, pulled.dir)
+}
+
+// ref returns the reference the source is pulled by: its digest when pinned,
+// its version tag otherwise.
+func (s Source) ref() (oci.Reference, error) {
+	ref, err := parseTagged(s.OCI, s.Version)
+	if err != nil {
+		return oci.Reference{}, err
+	}
+	ref.Digest = s.Digest
+	return ref, nil
 }
 
 // parseTagged parses an OCI URL and applies the given tag.

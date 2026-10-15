@@ -27,7 +27,7 @@ type Counts struct {
 	Orders       int `json:"orders"`
 	Preparations int `json:"preparations"`
 	Servings     int `json:"servings"`
-	Menus        int `json:"menus"`
+	Products     int `json:"products"`
 	Pantries     int `json:"pantries"`
 }
 
@@ -37,7 +37,7 @@ const (
 	eventOrders       = "orders"
 	eventPreparations = "preparations"
 	eventServings     = "servings"
-	eventMenus        = "menus"
+	eventProducts     = "products"
 	eventPantries     = "pantries"
 )
 
@@ -122,7 +122,7 @@ func startK8sWatcher(
 	orderInformer := informers.order
 	prepInformer := informers.prep
 	servingInformer := informers.serving
-	menuInformer := informers.menu
+	productInformer := informers.product
 	pantryInformer := informers.pantry
 	kitchenInformer := informers.kitchen
 	secretInformer := informers.secret
@@ -163,9 +163,9 @@ func startK8sWatcher(
 			return
 		}
 
-		menuList := &deliveryv1alpha1.MenuList{}
-		if err := k8sCache.List(ctx, menuList); err != nil {
-			logger.Error(err, "Failed to list Menus from cache")
+		productList := &deliveryv1alpha1.ProductList{}
+		if err := k8sCache.List(ctx, productList); err != nil {
+			logger.Error(err, "Failed to list Products from cache")
 			return
 		}
 
@@ -179,7 +179,7 @@ func startK8sWatcher(
 			Orders:       len(orderList.Items),
 			Preparations: len(prepList.Items),
 			Servings:     len(servingList.Items),
-			Menus:        len(menuList.Items),
+			Products:     len(productList.Items),
 			Pantries:     len(pantryList.Items),
 		}); err != nil {
 			logger.Error(err, "Failed to publish counts event")
@@ -197,8 +197,8 @@ func startK8sWatcher(
 			logger.Error(err, "Failed to publish servings event")
 		}
 
-		if err := h.publish(eventMenus, menusToDTO(menuList.Items)); err != nil {
-			logger.Error(err, "Failed to publish menus event")
+		if err := h.publish(eventProducts, productsToDTO(productList.Items)); err != nil {
+			logger.Error(err, "Failed to publish products event")
 		}
 
 		if err := h.publish(eventPantries, pantriesFromList(*pantryList)); err != nil {
@@ -225,7 +225,7 @@ func startK8sWatcher(
 	secretHandler := newAuthSecretHandler(deps.authMgr, ctx, isAuthSecret)
 
 	if err := registerWatchers(
-		orderInformer, prepInformer, servingInformer, menuInformer, pantryInformer,
+		orderInformer, prepInformer, servingInformer, productInformer, pantryInformer,
 		kitchenInformer, secretInformer, saInformer,
 		refreshAll, kitchenHandler, secretHandler,
 	); err != nil {
@@ -275,7 +275,7 @@ func newAuthSecretHandler(mgr *authManager, ctx context.Context, isAuthSecret fu
 // registerWatchers wires the SSE-refresh handler onto resource informers and the
 // auth handlers onto Kitchen/Secret informers (split out to keep startK8sWatcher small).
 func registerWatchers(
-	order, prep, serving, menu, pantry, kitchen, secret, sa cache.Informer,
+	order, prep, serving, product, pantry, kitchen, secret, sa cache.Informer,
 	refreshAll func(),
 	kitchenHandler, secretHandler toolscache.ResourceEventHandlerFuncs,
 ) error {
@@ -295,7 +295,7 @@ func registerWatchers(
 		{order, sseHandler, "Order"},
 		{prep, sseHandler, "Preparation"},
 		{serving, sseHandler, "Serving"},
-		{menu, sseHandler, "Menu"},
+		{product, sseHandler, "Product"},
 		{pantry, sseHandler, "Pantry"},
 		{kitchen, kitchenHandler, "Kitchen"},
 		{secret, secretHandler, "Secret"},
@@ -313,7 +313,7 @@ type informers struct {
 	order   cache.Informer
 	prep    cache.Informer
 	serving cache.Informer
-	menu    cache.Informer
+	product cache.Informer
 	pantry  cache.Informer
 	kitchen cache.Informer
 	secret  cache.Informer
@@ -333,8 +333,8 @@ func getInformers(ctx context.Context, c cache.Cache) (informers, error) {
 	if out.serving, err = c.GetInformer(ctx, &deliveryv1alpha1.Serving{}); err != nil {
 		return out, fmt.Errorf("getting Serving informer: %w", err)
 	}
-	if out.menu, err = c.GetInformer(ctx, &deliveryv1alpha1.Menu{}); err != nil {
-		return out, fmt.Errorf("getting Menu informer: %w", err)
+	if out.product, err = c.GetInformer(ctx, &deliveryv1alpha1.Product{}); err != nil {
+		return out, fmt.Errorf("getting Product informer: %w", err)
 	}
 	if out.pantry, err = c.GetInformer(ctx, &deliveryv1alpha1.Pantry{}); err != nil {
 		return out, fmt.Errorf("getting Pantry informer: %w", err)

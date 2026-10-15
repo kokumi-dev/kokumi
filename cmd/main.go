@@ -235,16 +235,13 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "Order")
 		os.Exit(1)
 	}
-	if err := (&controller.MenuReconciler{
+	if err := (&controller.ProductReconciler{
 		Client:         mgr.GetClient(),
 		Scheme:         mgr.GetScheme(),
 		Store:          artifactStore,
-		Pipeline:       artifactPipeline,
 		PantryResolver: credential.NewKubeResolver(mgr.GetClient()),
-		OCIClient:      ociClient,
-		BuilderID:      builderID,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "Menu")
+		setupLog.Error(err, "Failed to create controller", "controller", "Product")
 		os.Exit(1)
 	}
 	if err := (&controller.PantryReconciler{

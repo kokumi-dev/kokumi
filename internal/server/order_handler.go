@@ -101,26 +101,25 @@ func handleCreateOrder(deps *apiDeps) http.HandlerFunc {
 			req.Namespace = namespace.Default
 		}
 
+		if req.ProductRef.Name == "" {
+			respondError(w, http.StatusBadRequest, "productRef.name is required")
+			return
+		}
+
 		order := &deliveryv1alpha1.Order{
 			Name:      req.Name,
 			Namespace: req.Namespace,
 			Spec: deliveryv1alpha1.OrderSpec{
-				Render:  renderFromDTO(req.Render),
-				Patches: patchesFromDTO(req.Patches),
-				Edits:   patchesFromDTO(req.Edits),
+				ProductRef:  deliveryv1alpha1.ProductRef{Name: req.ProductRef.Name},
+				Values:      valuesFromDTO(req.Values),
+				Destination: destinationFromDTO(req.Destination),
+				Patches:     patchesFromDTO(req.Patches),
+				Edits:       patchesFromDTO(req.Edits),
 				Promotion: &deliveryv1alpha1.PromotionSpec{
 					Mode:      deliveryv1alpha1.PromotionMode(req.Mode),
 					Approvals: approvalPolicyFromDTO(req.Approvals),
 				},
 			},
-		}
-
-		order.Spec.Destination = destinationFromDTO(req.Destination)
-
-		if req.MenuRef != nil {
-			order.Spec.MenuRef = &deliveryv1alpha1.MenuRef{Name: req.MenuRef.Name}
-		} else {
-			order.Spec.Source = sourceFromDTO(req.Source)
 		}
 
 		if req.CommitMessage != nil {
@@ -178,22 +177,13 @@ func handleUpdateOrder(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		order.Spec.Render = renderFromDTO(req.Render)
+		order.Spec.Values = valuesFromDTO(req.Values)
+		order.Spec.Destination = destinationFromDTO(req.Destination)
 		order.Spec.Patches = patchesFromDTO(req.Patches)
 		order.Spec.Edits = patchesFromDTO(req.Edits)
 		order.Spec.Promotion = &deliveryv1alpha1.PromotionSpec{
 			Mode:      deliveryv1alpha1.PromotionMode(req.Mode),
 			Approvals: approvalPolicyFromDTO(req.Approvals),
-		}
-
-		order.Spec.Destination = destinationFromDTO(req.Destination)
-
-		if req.MenuRef != nil {
-			order.Spec.MenuRef = &deliveryv1alpha1.MenuRef{Name: req.MenuRef.Name}
-			order.Spec.Source = nil
-		} else {
-			order.Spec.Source = sourceFromDTO(req.Source)
-			order.Spec.MenuRef = nil
 		}
 
 		if req.CommitMessage != nil {

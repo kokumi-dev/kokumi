@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { getManifest, previewOrder } from '../../api/client'
-import type { Order, OrderFormData } from '../../api/types'
+import type { Order, OrderPreviewRequest } from '../../api/types'
 import { computeDiff, filterContext } from '../../utils/diff'
 import { filterCRDDocuments, hasCRDDocuments } from '../../utils/manifest'
 import { Button } from '../ui'
@@ -8,14 +8,15 @@ import DiffView from '../shared/DiffView'
 import styles from './DiffTab.module.css'
 
 interface Props {
-  formData: OrderFormData
+  request: OrderPreviewRequest
   order: Order
 }
 
 const DEBOUNCE_MS = 600
 const CONTEXT_SIZE = 5
 
-export default function DiffTab({ formData, order }: Props) {
+/** Diffs the active Preparation's manifest against a preview of the edited Order. */
+export default function DiffTab({ request, order }: Props) {
   const [loading, setLoading] = useState(false)
   const [before, setBefore] = useState<string | null>(null)
   const [after, setAfter] = useState<string | null>(null)
@@ -23,41 +24,39 @@ export default function DiffTab({ formData, order }: Props) {
   const [showFull, setShowFull] = useState(false)
   const [hideCRDs, setHideCRDs] = useState(true)
 
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
   const activePrepName = order.activePreparation ?? ''
+  // Keyed by content, so the caller may build a fresh request on every render.
+  const key = JSON.stringify(request)
 
   useEffect(() => {
     if (!activePrepName) return
-
-    if (timerRef.current !== null) {
-      clearTimeout(timerRef.current)
-    }
-
-    timerRef.current = setTimeout(() => {
+    const req = JSON.parse(key) as OrderPreviewRequest
+    let cancelled = false
+    const timer = setTimeout(() => {
       setLoading(true)
       setError(null)
       Promise.all([
         getManifest(order.namespace, activePrepName),
-        previewOrder(formData),
+        previewOrder(req),
       ])
         .then(([activeMani, previewMani]) => {
+          if (cancelled) return
           setBefore(activeMani)
           setAfter(previewMani)
           setLoading(false)
         })
         .catch((e: Error) => {
+          if (cancelled) return
           setError(e.message)
           setLoading(false)
         })
     }, DEBOUNCE_MS)
 
     return () => {
-      if (timerRef.current !== null) {
-        clearTimeout(timerRef.current)
-      }
+      cancelled = true
+      clearTimeout(timer)
     }
-  }, [formData, order.namespace, activePrepName])
+  }, [key, order.namespace, activePrepName])
 
   if (loading) {
     return <div className={styles.placeholder}>Loading diff…</div>

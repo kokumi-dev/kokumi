@@ -82,11 +82,11 @@ function IconPantry() {
   )
 }
 
-function IconMenu() {
+function IconProduct() {
   return (
     <svg className={styles.navIcon} viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="2" width="14" height="14" rx="2" />
-      <path d="M6 6h6M6 9h6M6 12h4" />
+      <path d="M9 1.5 16 5v8l-7 3.5L2 13V5l7-3.5Z" />
+      <path d="M2 5l7 3.5L16 5M9 8.5v8" />
     </svg>
   )
 }
@@ -101,8 +101,8 @@ const sections: NavSection[] = [
   {
     label: 'Resources',
     items: [
+      { to: '/products',     label: 'Products',     icon: <IconProduct /> },
       { to: '/orders',       label: 'Orders',       icon: <IconOrder /> },
-      { to: '/menus',        label: 'Menus',        icon: <IconMenu /> },
       { to: '/pantries',     label: 'Pantries',     icon: <IconPantry /> },
       { to: '/preparations', label: 'Preparations', icon: <IconPreparation /> },
       { to: '/servings',     label: 'Servings',     icon: <IconServing /> },

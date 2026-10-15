@@ -1,28 +1,40 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
+import { Link } from 'react-router'
 import { load, dump } from 'js-yaml'
 import YamlEditor from '../shared/YamlEditor'
-import { Button, CloseIcon, Disclosure, IconButton, PlusIcon, SegmentedControl, TabButtons } from '../ui'
+import { Disclosure, TabButtons } from '../ui'
 import CommitBox from '../shared/CommitBox'
-import PreviewTab from './PreviewTab'
-import DiffTab from './DiffTab'
-import type { Order, OrderFormData, Patch, HelmRender, Menu, ChartInfo, FileLayout } from '../../api/types'
-import { emptyOrderForm, orderToFormData } from '../../api/types'
-import { objectToYaml, yamlToValues } from '../../utils/yaml'
-import { listOCITags, getChartInfo } from '../../api/client'
-import { cleanTags } from '../../api/ociTags'
-import { usePantries } from '../../hooks/usePantries'
+import PreviewTab from '../shared/PreviewTab'
 import DestinationEditor from '../shared/DestinationEditor'
-import styles from './OrderForm.module.css'
+import HelmValuesEditor from '../shared/HelmValuesEditor'
+import PatchesEditor from '../shared/PatchesEditor'
+import DiffTab from './DiffTab'
+import type { Order, OrderFormData, OrderPreviewRequest, OverridePolicy, Product } from '../../api/types'
+import { emptyOrderForm, orderToFormData } from '../../api/types'
+import { previewOrder, previewOrderFiles } from '../../api/client'
+import { useChartInfo } from '../../hooks/useChartInfo'
+import { assertKnownKeys, patchesFromYaml, patchesToYaml } from '../../utils/yaml'
+import {
+  allowedTargetLabel,
+  allowsPatches,
+  allowsValues,
+  describePatchesPolicy,
+  describeValuesPolicy,
+  patchesPolicy,
+  productSourceLabel,
+  valuesPolicy,
+} from '../../utils/products'
+import { paths } from '../../routes/paths'
+import styles from '../shared/Form.module.css'
+import layout from '../layout/layout.module.css'
 
 interface Props {
   /** When provided the form is in "edit" mode. */
   order?: Order
-  /** When provided, pre-fill menuRef and hide source fields. */
-  menuRef?: { name: string }
-  /** Full menu object — used to display override policy constraints. */
-  menu?: Menu
-  /** Available menus for the selector dropdown (create mode). */
-  menus?: Menu[]
+  /** Product preselected for a new Order. */
+  initialProduct?: { namespace: string; name: string }
+  /** All Products; the picker offers the ones in the Order's namespace. */
+  products: Product[]
   onCancel: () => void
   onSubmit: (data: OrderFormData, commitMessage: string) => Promise<void>
   /** Reports whether the form holds unsaved changes. */
@@ -37,102 +49,58 @@ function parseGroups(text: string): string[] {
   return [...new Set(text.split(',').map((g) => g.trim()).filter(Boolean))]
 }
 
-function formToYaml(data: OrderFormData): string {
+function hasValues(values: Record<string, unknown>): boolean {
+  return Object.keys(values).length > 0
+}
+
+/**
+ * The YAML view of the Order spec. Values are left out only when the Product
+ * is known not to render with Helm (helm is false, not undefined).
+ */
+function formToYaml(data: OrderFormData, helm: boolean | undefined): string {
   const doc: Record<string, unknown> = {
-    promotion: data.approvals ? { mode: data.mode, approvals: data.approvals } : { mode: data.mode },
+    productRef: { name: data.productRef.name },
   }
+  if (helm !== false && hasValues(data.values)) doc.values = data.values
+  if (data.patches.length > 0) doc.patches = patchesToYaml(data.patches)
   if (data.destination?.pantryRef?.name) {
     doc.destination = { pantryRef: { name: data.destination.pantryRef.name } }
   } else if (data.destination?.oci) {
     doc.destination = { oci: data.destination.oci }
   }
-  if (data.menuRef) {
-    doc.menuRef = { name: data.menuRef.name }
-  }
-  if (data.source) {
-    if (data.source.pantryRef?.name) {
-      doc.source = { pantryRef: { name: data.source.pantryRef.name }, version: data.source.version }
-    } else {
-      doc.source = { oci: data.source.oci ?? '', version: data.source.version }
-    }
-  }
-  if (data.render?.helm) {
-    const h = data.render.helm
-    const helmDoc: Record<string, unknown> = {}
-    if (h.releaseName) helmDoc.releaseName = h.releaseName
-    if (h.namespace) helmDoc.namespace = h.namespace
-    if (h.includeCRDs) helmDoc.includeCRDs = true
-    if (Object.keys(h.values).length > 0) helmDoc.values = h.values
-    doc.render = { helm: helmDoc }
-  } else if (data.render?.manifest) {
-    doc.render = { manifest: { layout: data.render.manifest.layout } }
-  }
-  if (data.patches.length > 0) {
-    doc.patches = data.patches.map((p) => ({
-      target: {
-        kind: p.target.kind,
-        name: p.target.name,
-        ...(p.target.namespace ? { namespace: p.target.namespace } : {}),
-      },
-      set: p.set,
-    }))
-  }
+  doc.promotion = data.approvals ? { mode: data.mode, approvals: data.approvals } : { mode: data.mode }
   return dump(doc, { lineWidth: 100 })
 }
 
-function assertKnownKeys(obj: Record<string, unknown> | undefined, allowed: string[], path: string) {
-  if (!obj) return
-  const unknown = Object.keys(obj).filter((k) => !allowed.includes(k))
-  if (unknown.length > 0) {
-    throw new Error(`unknown field ${unknown.map((k) => (path ? `${path}.${k}` : k)).join(', ')}`)
-  }
+interface ParseContext {
+  /** The Product of an existing Order, which cannot be changed. */
+  lockedProduct?: string
+  /** Whether the named Product renders with Helm; undefined when it is unknown. */
+  rendersWithHelm: (product: string) => boolean | undefined
 }
 
-function yamlToPartialForm(text: string): Omit<OrderFormData, 'name' | 'namespace'> {
+function yamlToPartialForm(text: string, ctx: ParseContext): Omit<OrderFormData, 'name' | 'namespace' | 'edits'> {
   const doc = load(text) as Record<string, unknown>
   if (!doc || typeof doc !== 'object') throw new Error('YAML must be a mapping')
-  assertKnownKeys(doc, ['source', 'destination', 'menuRef', 'render', 'patches', 'promotion'], '')
+  assertKnownKeys(doc, ['productRef', 'values', 'destination', 'patches', 'promotion'], '')
 
-  const src = doc.source as Record<string, unknown> | undefined
-  const dst = doc.destination as Record<string, unknown> | undefined
-  const rawMenuRef = doc.menuRef as Record<string, string> | undefined
-  const rawPatches = Array.isArray(doc.patches) ? (doc.patches as unknown[]) : []
-
-  const rawRender = doc.render as Record<string, unknown> | undefined
-  let render: OrderFormData['render']
-  if (rawRender?.helm) {
-    const h = rawRender.helm as Record<string, unknown>
-    render = {
-      helm: {
-        releaseName: (h.releaseName as string) ?? '',
-        namespace: (h.namespace as string) ?? '',
-        includeCRDs: Boolean(h.includeCRDs),
-        values: h.values && typeof h.values === 'object' && !Array.isArray(h.values)
-          ? (h.values as Record<string, unknown>)
-          : {},
-      },
-    }
-  } else if (rawRender?.manifest) {
-    const m = rawRender.manifest as Record<string, unknown>
-    render = {
-      manifest: {
-        layout: m.layout === 'Multi' ? 'Multi' : 'Single',
-      },
-    }
+  const rawProductRef = doc.productRef as Record<string, unknown> | undefined
+  assertKnownKeys(rawProductRef, ['name'], 'productRef')
+  const product = String(rawProductRef?.name ?? '')
+  if (ctx.lockedProduct !== undefined && product !== ctx.lockedProduct) {
+    throw new Error(`productRef cannot be changed: this Order is a variant of ${ctx.lockedProduct}`)
   }
 
-  // Resolve source — exactly one of oci or pantryRef
-  let source: OrderFormData['source']
-  if (src) {
-    const srcPantryRef = src.pantryRef as Record<string, string> | undefined
-    if (srcPantryRef?.name) {
-      source = { version: (src.version as string) ?? '', pantryRef: { name: srcPantryRef.name } }
-    } else {
-      source = { oci: (src.oci as string) ?? '', version: (src.version as string) ?? '' }
+  const rawValues = doc.values
+  if (rawValues !== undefined && rawValues !== null) {
+    if (typeof rawValues !== 'object' || Array.isArray(rawValues)) throw new Error('values must be a mapping')
+    if (ctx.rendersWithHelm(product) === false) {
+      throw new Error(`values are only valid when the Product renders with Helm, and ${product} does not`)
     }
   }
 
   // Resolve destination — at most one of oci or pantryRef
+  const dst = doc.destination as Record<string, unknown> | undefined
   let destination: OrderFormData['destination'] = {}
   if (dst) {
     const dstPantryRef = dst.pantryRef as Record<string, string> | undefined
@@ -158,10 +126,9 @@ function yamlToPartialForm(text: string): Omit<OrderFormData, 'name' | 'namespac
   }
 
   return {
-    menuRef: rawMenuRef?.name ? { name: rawMenuRef.name } : undefined,
-    source,
+    productRef: { name: product },
+    values: (rawValues as Record<string, unknown> | null | undefined) ?? {},
     destination,
-    render,
     mode: promotion?.mode === 'Automatic' ? 'Automatic' : 'Manual',
     approvals: rawApprovals
       ? {
@@ -171,88 +138,82 @@ function yamlToPartialForm(text: string): Omit<OrderFormData, 'name' | 'namespac
             : [],
         }
       : undefined,
-    edits: [],
-    patches: rawPatches.map((p) => {
-      const patch = p as Record<string, unknown>
-      const target = (patch.target ?? {}) as Record<string, string>
-      const set = (patch.set ?? {}) as Record<string, string>
-      return {
-        target: {
-          kind: target.kind ?? '',
-          name: target.name ?? '',
-          namespace: target.namespace,
-        },
-        set,
-      } satisfies Patch
-    }),
+    patches: patchesFromYaml(doc.patches),
   }
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function OrderForm({ order, menuRef, menu, menus, onCancel, onSubmit, onDirtyChange }: Props) {
+export default function OrderForm({ order, initialProduct, products, onCancel, onSubmit, onDirtyChange }: Props) {
   const isEdit = !!order
   const showDiffTab = isEdit && !!order?.activePreparation
   const [tab, setTab] = useState<Tab>('form')
-  const [selectedMenu, setSelectedMenu] = useState<Menu | null>(null)
-  const [formData, setFormData] = useState<OrderFormData>(() => {
-    if (order) return orderToFormData(order)
-    if (menuRef) {
-      const base = { ...emptyOrderForm(), namespace: menu?.namespace ?? emptyOrderForm().namespace, menuRef, source: undefined }
-      if (menu?.render?.helm) {
-        base.render = { helm: { releaseName: '', namespace: '', includeCRDs: false, values: {} } }
-      }
-      return base
-    }
-    return emptyOrderForm()
-  })
-  const [yamlText, setYamlText] = useState(() => formToYaml(formData))
+  const [formData, setFormData] = useState<OrderFormData>(() =>
+    order ? orderToFormData(order) : emptyOrderForm(initialProduct),
+  )
+
+  function productFor(data: OrderFormData): Product | undefined {
+    return products.find((p) => p.namespace === data.namespace && p.name === data.productRef.name)
+  }
+
+  /** Whether the Order's Product renders with Helm; undefined while it is unknown. */
+  function helmFor(data: OrderFormData): boolean | undefined {
+    const product = productFor(data)
+    return product ? !!product.render?.helm : undefined
+  }
+
+  /** Why no Order can be created for the picked Product; edits of existing Orders are fine. */
+  function deletingReason(data: OrderFormData): string | undefined {
+    const product = productFor(data)
+    return !isEdit && product?.deletionTimestamp
+      ? `Product ${product.name} is being deleted; pick another Product`
+      : undefined
+  }
+
+  const parseContext: ParseContext = {
+    lockedProduct: order?.productRef.name,
+    rendersWithHelm: (name) => helmFor({ ...formData, productRef: { name } }),
+  }
+
+  const [yamlText, setYamlText] = useState(() => formToYaml(formData, helmFor(formData)))
   const [yamlError, setYamlError] = useState<string | null>(null)
 
-  const [initialYaml] = useState(() => formToYaml(formData))
+  const [initialYaml] = useState(() => formToYaml(formData, helmFor(formData)))
   const [initialIdentity] = useState(() => `${formData.namespace}/${formData.name}`)
 
-  const effectiveMenu = menu ?? selectedMenu
+  /**
+   * The data as sent: values are dropped only for a Product known not to
+   * render with Helm, so an unknown Product keeps the Order's values.
+   */
+  function sendable(data: OrderFormData): OrderFormData {
+    return helmFor(data) === false ? { ...data, values: {} } : data
+  }
 
-  function handleMenuSelect(menuKey: string) {
-    if (!menuKey) {
-      setSelectedMenu(null)
-      setFormData((prev) => ({
-        ...prev,
-        menuRef: undefined,
-        source: prev.source ?? { oci: '', version: '' },
-      }))
-      return
+  function previewRequest(data: OrderFormData): OrderPreviewRequest | null {
+    if (!data.productRef.name) return null
+    const sent = sendable(data)
+    return {
+      namespace: sent.namespace,
+      name: sent.name,
+      productRef: sent.productRef,
+      values: hasValues(sent.values) ? sent.values : undefined,
+      patches: sent.patches,
+      edits: sent.edits,
     }
-    // Menus are namespaced and live in the Order's namespace.
-    const m = menus?.find(
-      (x) => `${x.namespace}/${x.name}` === menuKey,
-    )
-    if (!m) return
-    setSelectedMenu(m)
-    setFormData((prev) => ({
-      ...prev,
-      menuRef: { name: m.name },
-      source: undefined,
-      render: m.render?.helm
-        ? { helm: { releaseName: '', namespace: '', includeCRDs: false, values: {} } }
-        : prev.render,
-    }))
   }
 
   // ── Tab switching ──────────────────────────────────────────────────────────
 
-  function switchToYaml() {
-    setYamlText(formToYaml(formData))
-    setYamlError(null)
-    setTab('yaml')
-  }
-
   function selectTab(next: Tab) {
-    if (next === 'yaml') return switchToYaml()
+    if (next === 'yaml') {
+      setYamlText(formToYaml(formData, helmFor(formData)))
+      setYamlError(null)
+      setTab('yaml')
+      return
+    }
     if (tab === 'yaml') {
       try {
-        const partial = yamlToPartialForm(yamlText)
+        const partial = yamlToPartialForm(yamlText, parseContext)
         setFormData((prev) => ({ ...prev, ...partial }))
         setYamlError(null)
       } catch (e) {
@@ -269,74 +230,17 @@ export default function OrderForm({ order, menuRef, menu, menus, onCancel, onSub
     let data = formData
     if (tab === 'yaml') {
       try {
-        const partial = yamlToPartialForm(yamlText)
-        data = { ...formData, ...partial }
+        data = { ...formData, ...yamlToPartialForm(yamlText, parseContext) }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
         setYamlError(msg)
         throw new Error(`Fix the YAML before saving: ${msg}`, { cause: e })
       }
     }
-    await onSubmit(data, commitMessage)
-  }
-
-  // ── Form field helpers ─────────────────────────────────────────────────────
-
-  function setField<K extends keyof OrderFormData>(key: K, val: OrderFormData[K]) {
-    setFormData((prev) => ({ ...prev, [key]: val }))
-  }
-
-  function enableHelm() {
-    setFormData((prev) => ({
-      ...prev,
-      render: { helm: { releaseName: '', namespace: '', includeCRDs: false, values: {} } },
-    }))
-  }
-
-  function disableHelm() {
-    setFormData((prev) => ({ ...prev, render: undefined }))
-  }
-
-  function updateHelm(h: HelmRender) {
-    setFormData((prev) => ({ ...prev, render: { helm: h } }))
-  }
-
-  function setLayout(policy: FileLayout) {
-    setFormData((prev) => {
-      if (policy === 'Single') {
-        // Single is the default — omit the manifest block entirely.
-        if (!prev.render?.manifest) return prev
-        const rest = { ...prev.render }
-        delete rest.manifest
-        return { ...prev, render: Object.keys(rest).length > 0 ? rest : undefined }
-      }
-      return {
-        ...prev,
-        render: { ...(prev.render ?? {}), manifest: { layout: policy } },
-      }
-    })
-  }
-
-  function addPatch() {
-    setFormData((prev) => ({
-      ...prev,
-      patches: [...prev.patches, { target: { kind: '', name: '' }, set: {} }],
-    }))
-  }
-
-  function removePatch(idx: number) {
-    setFormData((prev) => ({
-      ...prev,
-      patches: prev.patches.filter((_, i) => i !== idx),
-    }))
-  }
-
-  function updatePatch(idx: number, patch: Patch) {
-    setFormData((prev) => {
-      const patches = [...prev.patches]
-      patches[idx] = patch
-      return { ...prev, patches }
-    })
+    if (!data.productRef.name) throw new Error('Pick the Product this Order is a variant of')
+    const deleting = deletingReason(data)
+    if (deleting) throw new Error(deleting)
+    await onSubmit(sendable(data), commitMessage)
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -344,13 +248,13 @@ export default function OrderForm({ order, menuRef, menu, menus, onCancel, onSub
   let isDirty: boolean
   if (tab === 'yaml') {
     try {
-      const partial = yamlToPartialForm(yamlText)
-      isDirty = formToYaml({ ...formData, ...partial }) !== initialYaml
+      const data = { ...formData, ...yamlToPartialForm(yamlText, parseContext) }
+      isDirty = formToYaml(data, helmFor(data)) !== initialYaml
     } catch {
       isDirty = true
     }
   } else {
-    isDirty = formToYaml(formData) !== initialYaml
+    isDirty = formToYaml(formData, helmFor(formData)) !== initialYaml
   }
   // Name/namespace are not part of the YAML view but still count as changes.
   if (`${formData.namespace}/${formData.name}` !== initialIdentity) isDirty = true
@@ -358,6 +262,8 @@ export default function OrderForm({ order, menuRef, menu, menus, onCancel, onSub
   useEffect(() => {
     onDirtyChange?.(isDirty)
   }, [isDirty, onDirtyChange])
+
+  const blocked = deletingReason(formData)
 
   return (
     <>
@@ -377,32 +283,28 @@ export default function OrderForm({ order, menuRef, menu, menus, onCancel, onSub
           <FormView
             formData={formData}
             isEdit={isEdit}
-            menu={effectiveMenu ?? undefined}
-            menus={menus}
-            hasPresetMenu={!!menuRef || !!menu}
-            onMenuSelect={handleMenuSelect}
-            onFieldChange={setField}
-            onEnableHelm={enableHelm}
-            onDisableHelm={disableHelm}
-            onUpdateHelm={updateHelm}
-            onSetLayout={setLayout}
-            onAddPatch={addPatch}
-            onRemovePatch={removePatch}
-            onUpdatePatch={updatePatch}
+            product={productFor(formData)}
+            products={products}
+            deletingReason={blocked}
+            onFieldChange={(key, val) => setFormData((prev) => ({ ...prev, [key]: val }))}
           />
         )}
         {tab === 'yaml' && (
-          <YamlView
-            yamlText={yamlText}
-            yamlError={yamlError}
-            onChange={(v) => { setYamlText(v); setYamlError(null) }}
-          />
+          <>
+            <YamlEditor value={yamlText} onChange={(v) => { setYamlText(v); setYamlError(null) }} />
+            {yamlError && <p className={styles.yamlError}>Parse error: {yamlError}</p>}
+          </>
         )}
         {tab === 'preview' && (
-          <PreviewTab formData={formData} />
+          <PreviewTab
+            request={previewRequest(formData)}
+            renderManifest={previewOrder}
+            renderFiles={previewOrderFiles}
+            placeholder="Pick a Product to preview the rendered manifest."
+          />
         )}
         {tab === 'diff' && showDiffTab && (
-          <DiffTab formData={formData} order={order!} />
+          <DiffTab request={previewRequest(formData)!} order={order!} />
         )}
       </div>
 
@@ -411,8 +313,8 @@ export default function OrderForm({ order, menuRef, menu, menus, onCancel, onSub
         submitLabel={isEdit ? 'Commit changes' : 'Create Order'}
         onCommit={handleCommit}
         onCancel={onCancel}
-        disabled={isEdit && !isDirty}
-        disabledReason="No changes to commit yet"
+        disabled={!!blocked || (isEdit && !isDirty)}
+        disabledReason={blocked ?? 'No changes to commit yet'}
       />
     </>
   )
@@ -423,136 +325,30 @@ export default function OrderForm({ order, menuRef, menu, menus, onCancel, onSub
 interface FormViewProps {
   formData: OrderFormData
   isEdit: boolean
-  menu?: Menu
-  menus?: Menu[]
-  hasPresetMenu: boolean
-  onMenuSelect: (menuName: string) => void
+  /** The selected Product, once it is loaded. */
+  product?: Product
+  products: Product[]
+  /** Set when the selected Product is being deleted and the Order is new. */
+  deletingReason?: string
   onFieldChange: <K extends keyof OrderFormData>(key: K, val: OrderFormData[K]) => void
-  onEnableHelm: () => void
-  onDisableHelm: () => void
-  onUpdateHelm: (h: HelmRender) => void
-  onSetLayout: (policy: FileLayout) => void
-  onAddPatch: () => void
-  onRemovePatch: (idx: number) => void
-  onUpdatePatch: (idx: number, p: Patch) => void
 }
 
-function FormView({
-  formData,
-  isEdit,
-  menu,
-  menus,
-  hasPresetMenu,
-  onMenuSelect,
-  onFieldChange,
-  onEnableHelm,
-  onDisableHelm,
-  onUpdateHelm,
-  onSetLayout,
-  onAddPatch,
-  onRemovePatch,
-  onUpdatePatch,
-}: FormViewProps) {
-  const valuesPolicy = menu?.overrides.values.policy
-  const patchesPolicy = menu?.overrides.patches.policy
-
-  const pantries = usePantries()
-
+function FormView({ formData, isEdit, product, products, deletingReason, onFieldChange }: FormViewProps) {
   const [isDestOpen, setIsDestOpen] = useState(
     !!(formData.destination?.oci || formData.destination?.pantryRef?.name),
   )
+  const [isPatchesOpen, setIsPatchesOpen] = useState(formData.patches.length > 0)
   const [groupsText, setGroupsText] = useState(formData.approvals?.allowedGroups.join(', ') ?? '')
-  const [isAdvancedOpen, setIsAdvancedOpen] = useState(
-    !!(formData.render?.helm || (formData.patches?.length ?? 0) > 0),
-  )
 
-  // Source type: 'oci' = direct URL, 'pantry' = named Pantry provides the URL
-  const [sourceMode, setSourceMode] = useState<'oci' | 'pantry'>(
-    formData.source?.pantryRef?.name ? 'pantry' : 'oci',
-  )
-
-  const [versionTags, setVersionTags] = useState<string[]>([])
-  const [versionTagsLoading, setVersionTagsLoading] = useState(false)
-  const lastFetchedTagsRef = useRef<string>('')
-  const tagsSeqRef = useRef(0)
-
-  const [chartInfo, setChartInfo] = useState<ChartInfo | null>(null)
-  const [chartInfoLoading, setChartInfoLoading] = useState(false)
-  const lastFetchedChartRef = useRef<string>('')
-  const chartSeqRef = useRef(0)
-
-  // Build the OCI ref for the current source — resolves pantry URL when in pantry mode.
-  function resolveOciRef(): string {
-    if (formData.source?.pantryRef?.name) {
-      const p = (pantries ?? []).find(
-        (p) => p.name === formData.source!.pantryRef!.name && p.namespace === formData.namespace,
-      )
-      return p?.url ?? ''
-    }
-    return formData.source?.oci ?? ''
-  }
-
-  function fetchTags(oci: string, pantryName?: string, pantryNs?: string) {
-    const resolvedPantryName = pantryName ?? formData.source?.pantryRef?.name
-    const resolvedPantryNs = pantryNs ?? formData.namespace
-    const dedupeKey = `${oci}|${resolvedPantryName ?? ''}`
-    if (!oci || dedupeKey === lastFetchedTagsRef.current) return
-    lastFetchedTagsRef.current = dedupeKey
-    const seq = ++tagsSeqRef.current
-    setVersionTagsLoading(true)
-    listOCITags(oci, resolvedPantryName, resolvedPantryNs)
-      .then((tags) => {
-        if (tagsSeqRef.current !== seq) return
-        // Drop cosign signature/attestation tags and sort semver-desc so the
-        // newest release appears first, matching the Pantry tag browser.
-        setVersionTags(cleanTags(tags))
-      })
-      .catch(() => { /* non-blocking: keep previous tags */ })
-      .finally(() => { if (tagsSeqRef.current === seq) setVersionTagsLoading(false) })
-  }
-
-  // On mount: load tags and chart info immediately if source is already
-  // populated (edit mode or pre-filled create).
-  useEffect(() => {
-    const oci = formData.source?.oci ?? ''
-    const version = formData.source?.version ?? ''
-    if (oci) fetchTags(oci)
-    if (oci && version) fetchChartInfo(oci, version)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  function handleOciBlur() {
-    const oci = resolveOciRef()
-    fetchTags(oci)
-    const version = formData.source?.version ?? ''
-    if (version) fetchChartInfo(oci, version)
-  }
-
-  function fetchChartInfo(oci: string, version: string) {
-    const key = `${oci}@${version}`
-    if (!oci || !version || key === lastFetchedChartRef.current) return
-    lastFetchedChartRef.current = key
-    const seq = ++chartSeqRef.current
-    setChartInfoLoading(true)
-    getChartInfo(oci, version, formData.source?.pantryRef?.name, formData.namespace)
-      .then((info) => {
-        if (chartSeqRef.current !== seq) return
-        setChartInfo(info)
-        // Auto-enable Helm rendering when the chart is identified as a Helm chart
-        // and Helm rendering has not been configured yet. Never auto-disable.
-        if (info.isHelm && !formData.render?.helm) {
-          onEnableHelm()
-        }
-      })
-      .catch(() => { if (chartSeqRef.current === seq) setChartInfo(null) })
-      .finally(() => { if (chartSeqRef.current === seq) setChartInfoLoading(false) })
-  }
-
-  function handleVersionSelect(version: string) {
-    onFieldChange('source', { ...(formData.source ?? { oci: '', version: '' }), version })
-    const oci = resolveOciRef()
-    if (oci) fetchChartInfo(oci, version)
-  }
+  const helm = !!product?.render?.helm
+  const chart = useChartInfo(helm ? product?.resolvedSource : undefined, formData.namespace)
+  // A new Order would hold up the deletion of its Product.
+  const candidates = products.filter((p) => p.namespace === formData.namespace && !p.deletionTimestamp)
+  // Values of an unknown Product are kept, so they stay visible; values a
+  // Product does not allow stay visible so they can be removed.
+  const withValues = hasValues(formData.values)
+  const showValues = product ? helm : withValues
+  const editValues = !product || allowsValues(product) || withValues
 
   return (
     <div className={styles.formGrid}>
@@ -565,7 +361,7 @@ function FormView({
             value={formData.name}
             onChange={(e) => onFieldChange('name', e.target.value)}
             readOnly={isEdit}
-            placeholder="my-order"
+            placeholder="my-app-dev"
           />
         </div>
         <div className={styles.fieldGroup}>
@@ -575,116 +371,84 @@ function FormView({
             value={formData.namespace}
             onChange={(e) => onFieldChange('namespace', e.target.value)}
             readOnly={isEdit}
-            placeholder="default"
+            placeholder="kokumi"
           />
         </div>
       </div>
 
-      {/* Menu selector (create mode, when menus are available and no preset menu) */}
-      {!isEdit && !hasPresetMenu && menus && menus.length > 0 && (
-        <div className={styles.fieldGroup}>
-          <label className={styles.label}>Order Mode</label>
-          <select
-            className={styles.input}
-            value={formData.menuRef?.name ?? ''}
-            onChange={(e) => onMenuSelect(e.target.value)}
-          >
-            <option value="">Standalone (manual source)</option>
-            {menus
-              .filter((m) => m.namespace === formData.namespace)
-              .map((m) => (
-                <option key={`${m.namespace}/${m.name}`} value={m.name}>
-                  Menu: {m.name}
-                </option>
-              ))}
-          </select>
-        </div>
-      )}
-
-      {/* Source or Menu Reference */}
-      {formData.menuRef ? (
-        <div className={styles.fieldGroup}>
-          <p className={styles.sectionTitle}>Menu Reference</p>
+      {/* Product — required, and fixed once the Order exists */}
+      <div className={styles.fieldGroup}>
+        <label className={styles.label}>Product</label>
+        {isEdit ? (
           <input
             className={`${styles.input} ${styles.inputDisabled}`}
-            value={formData.menuRef.name}
+            value={formData.productRef.name}
             readOnly
           />
-          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted-light)', marginTop: 4 }}>
-            Source and version are provided by the Menu
+        ) : (
+          <select
+            className={styles.input}
+            value={formData.productRef.name}
+            onChange={(e) => onFieldChange('productRef', { name: e.target.value })}
+          >
+            <option value="">— select a Product —</option>
+            {formData.productRef.name && (!product || deletingReason) && (
+              <option value={formData.productRef.name}>
+                {formData.productRef.name} ({product ? 'being deleted' : 'not found'})
+              </option>
+            )}
+            {candidates.map((p) => (
+              <option key={p.name} value={p.name}>{p.name}</option>
+            ))}
+          </select>
+        )}
+        {deletingReason ? (
+          <span className={styles.fieldError}>{deletingReason}.</span>
+        ) : product ? (
+          <span className={styles.hint}>
+            <span className={layout.mono}>{productSourceLabel(product)}</span>
+            {' · '}{helm ? 'Helm' : 'Manifests'}{' · '}
+            <Link className={layout.inlineLink} to={paths.product(product.namespace, product.name)}>Open Product</Link>
           </span>
-        </div>
-      ) : (
-        <>
-          <div className={styles.fieldGroup}>
-            <p className={styles.sectionTitle}>Source</p>
-            {/* Source mode toggle */}
-            <SegmentedControl
-              aria-label="Source"
-              segments={[
-                { id: 'oci', label: 'Direct OCI URL' },
-                { id: 'pantry', label: 'From Pantry' },
-              ]}
-              value={sourceMode}
-              onChange={(m) => {
-                setSourceMode(m)
-                onFieldChange(
-                  'source',
-                  m === 'oci'
-                    ? { oci: '', version: formData.source?.version ?? '', pantryRef: undefined }
-                    : { version: formData.source?.version ?? '', pantryRef: { name: '' } },
-                )
-              }}
-            />
-          </div>
-          <div className={styles.row2}>
-            <div className={styles.fieldGroup}>
-              {sourceMode === 'oci' ? (
-                <>
-                  <label className={styles.label}>OCI URL</label>
-                  <input
-                    className={styles.input}
-                    value={formData.source?.oci ?? ''}
-                    onChange={(e) => onFieldChange('source', { ...(formData.source ?? { oci: '', version: '' }), oci: e.target.value })}
-                    onBlur={handleOciBlur}
-                    placeholder="oci://ghcr.io/my-org/charts/app"
-                  />
-                </>
-              ) : (
-                <>
-                  <label className={styles.label}>Pantry</label>
-                  <select
-                    className={styles.input}
-                    value={formData.source?.pantryRef?.name ?? ''}
-                    onChange={(e) => {
-                      const name = e.target.value
-                      const version = formData.source?.version ?? ''
-                      onFieldChange('source', { version, pantryRef: { name } })
-                      if (name) {
-                        const p = (pantries ?? []).find((p) => p.name === name && p.namespace === formData.namespace)
-                        if (p?.url) fetchTags(p.url, name, formData.namespace)
-                      }
-                    }}
-                  >
-                    <option value="">— select a pantry —</option>
-                    {(pantries ?? []).filter((p) => p.namespace === formData.namespace).map((p) => (
-                      <option key={p.name} value={p.name}>{p.name}</option>
-                    ))}
-                  </select>
-                </>
-              )}
-            </div>
-            <div className={styles.fieldGroup}>
-              <label className={styles.label}>Version</label>
-              <VersionPicker
-                value={formData.source?.version ?? ''}
-                tags={versionTags}
-                loading={versionTagsLoading}
-                onChange={handleVersionSelect}
+        ) : !isEdit && candidates.length === 0 ? (
+          <span className={styles.hint}>
+            No Products in namespace {formData.namespace || '—'} yet.{' '}
+            <Link className={layout.inlineLink} to={paths.newProduct()}>Create a Product</Link>
+          </span>
+        ) : isEdit ? (
+          <span className={styles.hint}>This Product was not found; the Order cannot render until it exists.</span>
+        ) : (
+          <span className={styles.hint}>The Order is a variant of this Product and only holds what differs.</span>
+        )}
+      </div>
+
+      {/* Values — only for Products that render with Helm, or kept for an unknown one */}
+      {showValues && (
+        <div>
+          <p className={styles.sectionTitle}>Values</p>
+          <div className={editValues ? styles.helmCard : undefined}>
+            {product ? (
+              <PolicyBanner
+                policy={valuesPolicy(product)}
+                description={describeValuesPolicy(valuesPolicy(product))}
+                listed={product.overrides?.values?.paths ?? []}
+                clearHint={withValues ? 'remove these values to save the Order' : undefined}
               />
-            </div>
+            ) : (
+              <span className={styles.hint}>The Product was not found; the Order keeps these values as they are.</span>
+            )}
+            {editValues && (
+              <HelmValuesEditor
+                // A different Product brings different chart defaults.
+                key={product ? `${product.namespace}/${product.name}` : formData.productRef.name}
+                values={formData.values}
+                onChange={(v) => onFieldChange('values', v)}
+                chartInfo={chart.info}
+                chartInfoLoading={chart.loading}
+              />
+            )}
           </div>
-        </>
+        </div>
       )}
 
       {/* Destination (collapsible) */}
@@ -762,112 +526,26 @@ function FormView({
         </div>
       )}
 
-      {/* Advanced: Renderer + Patches (collapsible) */}
-      <Disclosure label="Advanced" open={isAdvancedOpen} onOpenChange={setIsAdvancedOpen}>
-        {/* Renderer */}
-        <div style={{ marginTop: 10 }}>
-          <p className={styles.sectionTitle}>Renderer</p>
-          {valuesPolicy === 'None' ? (
-            <div className={styles.policyBanner}>
-              <span className={styles.policyIcon}>🔒</span>
-              Value overrides are locked by the Menu
-            </div>
-          ) : (
-            <>
-              {!menu && (
-                <label className={styles.checkRow}>
-                  <input
-                    type="checkbox"
-                    checked={!!formData.render?.helm}
-                    onChange={(e) => (e.target.checked ? onEnableHelm() : onDisableHelm())}
-                  />
-                  Enable Helm rendering
-                </label>
-              )}
-              {valuesPolicy === 'Restricted' && menu?.overrides.values.allowed && (
-                <div className={styles.policyBanner}>
-                  <span className={styles.policyIcon}>📋</span>
-                  Allowed values:{' '}
-                  {menu.overrides.values.allowed.map((k) => (
-                    <span key={k} className={styles.policyChip}>{k}</span>
-                  ))}
-                </div>
-              )}
-              {valuesPolicy === 'All' && menu && (
-                <div className={styles.policyBannerOpen}>
-                  <span className={styles.policyIcon}>✓</span>
-                  All value overrides are allowed
-                </div>
-              )}
-              {formData.render?.helm && (
-                <div className={styles.helmSection}>
-                  <HelmRenderEditor
-                    helm={formData.render.helm}
-                    onUpdate={onUpdateHelm}
-                    chartInfo={chartInfo}
-                    chartInfoLoading={chartInfoLoading}
-                  />
-                </div>
-              )}
-              {!formData.render?.helm && !menu && (
-                <div className={styles.fieldGroup} style={{ marginTop: 10 }}>
-                  <label className={styles.label}>Manifest files</label>
-                  <select
-                    className={styles.input}
-                    value={formData.render?.manifest?.layout ?? 'Single'}
-                    onChange={(e) => onSetLayout(e.target.value as FileLayout)}
-                  >
-                    <option value="Single">Single manifest file</option>
-                    <option value="Multi">Keep separate files</option>
-                  </select>
-                </div>
-              )}
-            </>
+      {/* Patches (collapsible) */}
+      <Disclosure
+        label="Patches"
+        summary={formData.patches.length > 0 && `${formData.patches.length} patch${formData.patches.length === 1 ? '' : 'es'}`}
+        open={isPatchesOpen}
+        onOpenChange={setIsPatchesOpen}
+      >
+        <div className={styles.formGrid} style={{ gap: 10, marginTop: 4 }}>
+          {product && (
+            <PolicyBanner
+              policy={patchesPolicy(product)}
+              description={describePatchesPolicy(patchesPolicy(product))}
+              listed={(product.overrides?.patches?.targets ?? []).map(allowedTargetLabel)}
+              clearHint={formData.patches.length > 0 ? 'remove these patches to save the Order' : undefined}
+            />
           )}
-        </div>
-
-        {/* Patches */}
-        <div style={{ marginTop: 10 }}>
-          <p className={styles.sectionTitle}>Patches</p>
-          {patchesPolicy === 'None' ? (
-            <div className={styles.policyBanner}>
-              <span className={styles.policyIcon}>🔒</span>
-              Patch overrides are locked by the Menu
+          {(!product || allowsPatches(product) || formData.patches.length > 0) && (
+            <div>
+              <PatchesEditor patches={formData.patches} onChange={(p) => onFieldChange('patches', p)} />
             </div>
-          ) : (
-            <>
-              {patchesPolicy === 'Restricted' && menu?.overrides.patches.allowed && (
-                <div className={styles.policyBanner}>
-                  <span className={styles.policyIcon}>📋</span>
-                  Allowed patches:{' '}
-                  {menu.overrides.patches.allowed.map((a, i) => (
-                    <span key={i} className={styles.policyChip}>
-                      {a.target.kind}/{a.target.name}: {a.paths.join(', ')}
-                    </span>
-                  ))}
-                </div>
-              )}
-              {patchesPolicy === 'All' && menu && (
-                <div className={styles.policyBannerOpen}>
-                  <span className={styles.policyIcon}>✓</span>
-                  All patch overrides are allowed
-                </div>
-              )}
-              <div className={styles.patchList}>
-                {formData.patches.map((patch, idx) => (
-                  <PatchEditor
-                    key={idx}
-                    index={idx}
-                    patch={patch}
-                    onUpdate={(p) => onUpdatePatch(idx, p)}
-                    onRemove={() => onRemovePatch(idx)}
-                  />
-                ))}
-              </div>
-              <Button block className={styles.addPatch} icon={<PlusIcon />} onClick={onAddPatch}>
-                Add patch
-              </Button>
-            </>
           )}
         </div>
       </Disclosure>
@@ -875,488 +553,43 @@ function FormView({
   )
 }
 
-// ── PatchEditor ───────────────────────────────────────────────────────────────
+// ── PolicyBanner ──────────────────────────────────────────────────────────────
 
-interface PatchEditorProps {
-  index: number
-  patch: Patch
-  onUpdate: (p: Patch) => void
-  onRemove: () => void
+interface PolicyBannerProps {
+  policy: OverridePolicy
+  /** What the policy lets Orders do. */
+  description: string
+  /** What a Listed policy allows. */
+  listed: string[]
+  /** Asks to clear what a None policy rejects; shown when given. */
+  clearHint?: string
 }
 
-function PatchEditor({ index, patch, onUpdate, onRemove }: PatchEditorProps) {
-  const setEntries = Object.entries(patch.set)
-
-  function updateTarget(field: keyof Patch['target'], val: string) {
-    onUpdate({ ...patch, target: { ...patch.target, [field]: val } })
-  }
-
-  function addSetEntry() {
-    onUpdate({ ...patch, set: { ...patch.set, '': '' } })
-  }
-
-  function updateSetEntry(oldKey: string, newKey: string, val: string) {
-    const next: Record<string, string> = {}
-    for (const [k, v] of Object.entries(patch.set)) {
-      if (k === oldKey) {
-        next[newKey] = val
-      } else {
-        next[k] = v
-      }
-    }
-    onUpdate({ ...patch, set: next })
-  }
-
-  function removeSetEntry(key: string) {
-    const next = { ...patch.set }
-    delete next[key]
-    onUpdate({ ...patch, set: next })
-  }
-
-  return (
-    <div className={styles.patchCard}>
-      <div className={styles.patchCardHeader}>
-        <span className={styles.patchCardTitle}>Patch {index + 1}</span>
-        <IconButton tone="danger" onClick={onRemove} aria-label="Remove patch">
-          <CloseIcon />
-        </IconButton>
+/** What the Product lets this Order change in one category. */
+function PolicyBanner({ policy, description, listed, clearHint }: PolicyBannerProps) {
+  if (policy === 'All') {
+    return (
+      <div className={styles.policyBannerOpen}>
+        <span className={styles.policyIcon}>✓</span>
+        {description}
       </div>
-
-      <div className={styles.row2}>
-        <div className={styles.fieldGroup}>
-          <label className={styles.label}>Kind</label>
-          <input
-            className={styles.input}
-            value={patch.target.kind}
-            onChange={(e) => updateTarget('kind', e.target.value)}
-            placeholder="Deployment"
-          />
-        </div>
-        <div className={styles.fieldGroup}>
-          <label className={styles.label}>Name</label>
-          <input
-            className={styles.input}
-            value={patch.target.name}
-            onChange={(e) => updateTarget('name', e.target.value)}
-            placeholder="my-app"
-          />
-        </div>
-      </div>
-
-      <div className={styles.fieldGroup}>
-        <label className={styles.label}>Namespace (optional)</label>
-        <input
-          className={styles.input}
-          value={patch.target.namespace ?? ''}
-          onChange={(e) => updateTarget('namespace', e.target.value)}
-          placeholder="inherit from Order namespace"
-        />
-      </div>
-
-      <div>
-        <label className={styles.label}>Set (JSONPath → value)</label>
-        {setEntries.map(([k, v], i) => (
-          <div key={i} className={styles.setRow}>
-            <input
-              className={styles.setKey}
-              value={k}
-              onChange={(e) => updateSetEntry(k, e.target.value, v)}
-              placeholder=".spec.replicas"
-            />
-            <input
-              className={styles.setValue}
-              value={v}
-              onChange={(e) => updateSetEntry(k, k, e.target.value)}
-              placeholder="3"
-            />
-            <IconButton tone="danger" onClick={() => removeSetEntry(k)} aria-label="Remove key/value">
-              <CloseIcon />
-            </IconButton>
-          </div>
+    )
+  }
+  if (policy === 'Listed') {
+    return (
+      <div className={styles.policyBanner}>
+        <span className={styles.policyIcon}>📋</span>
+        {description}:{' '}
+        {listed.map((item) => (
+          <span key={item} className={styles.policyChip}>{item}</span>
         ))}
-        <Button variant="ghost" size="sm" icon={<PlusIcon />} onClick={addSetEntry}>
-          Add key/value
-        </Button>
       </div>
-    </div>
-  )
-}
-
-// ── HelmRenderEditor ──────────────────────────────────────────────────────────
-
-interface HelmRenderEditorProps {
-  helm: HelmRender
-  onUpdate: (h: HelmRender) => void
-  chartInfo: ChartInfo | null
-  chartInfoLoading: boolean
-}
-
-function HelmRenderEditor({ helm, onUpdate, chartInfo, chartInfoLoading }: HelmRenderEditorProps) {
-  const [valuesYaml, setValuesYaml] = useState(() => objectToYaml(helm.values))
-  const [valuesError, setValuesError] = useState<string | null>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
-
-  function handleValuesChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
-    const text = e.target.value
-    setValuesYaml(text)
-    try {
-      const values = yamlToValues(text)
-      setValuesError(null)
-      onUpdate({ ...helm, values })
-    } catch (err) {
-      setValuesError(err instanceof Error ? err.message : String(err))
-    }
+    )
   }
-
-  function jumpToPath(dotPath: string) {
-    const el = textareaRef.current
-    if (!el) return
-    const segments = dotPath.split('.')
-    const lines = valuesYaml.split('\n')
-    // Walk lines tracking indent depth; match each path segment in order.
-    let segIdx = 0
-    let charOffset = 0
-    let matchOffset = -1
-    let matchLength = 0
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i]
-      const trimmed = line.trimStart()
-      const expectedIndent = segIdx * 2
-      const actualIndent = line.length - trimmed.length
-      const seg = segments[segIdx]
-      if (
-        actualIndent === expectedIndent &&
-        trimmed.startsWith(`${seg}:`) &&
-        (trimmed.length === seg.length + 1 || trimmed[seg.length + 1] === ' ')
-      ) {
-        if (segIdx === segments.length - 1) {
-          matchOffset = charOffset
-          matchLength = line.length
-          break
-        }
-        segIdx++
-      } else if (actualIndent < segIdx * 2) {
-        // Went back up — restart from first segment
-        segIdx = 0
-        if (
-          actualIndent === 0 &&
-          trimmed.startsWith(`${segments[0]}:`) &&
-          (trimmed.length === segments[0].length + 1 || trimmed[segments[0].length + 1] === ' ')
-        ) {
-          segIdx = 1
-          if (segments.length === 1) {
-            matchOffset = charOffset
-            matchLength = line.length
-            break
-          }
-        }
-      }
-      charOffset += line.length + 1
-    }
-    if (matchOffset === -1) return
-    el.focus()
-    el.setSelectionRange(matchOffset, matchOffset + matchLength)
-    const lineIndex = valuesYaml.slice(0, matchOffset).split('\n').length - 1
-    const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 20
-    el.scrollTop = lineIndex * lineHeight - el.clientHeight / 3
-  }
-
-  const showReference =
-    chartInfoLoading || (chartInfo !== null && chartInfo.isHelm)
-
   return (
-    <div className={styles.helmCard}>
-      <div className={styles.row2}>
-        <div className={styles.fieldGroup}>
-          <label className={styles.label}>Release Name</label>
-          <input
-            className={styles.input}
-            value={helm.releaseName}
-            onChange={(e) => onUpdate({ ...helm, releaseName: e.target.value })}
-            placeholder="defaults to Order name"
-          />
-        </div>
-        <div className={styles.fieldGroup}>
-          <label className={styles.label}>Namespace</label>
-          <input
-            className={styles.input}
-            value={helm.namespace}
-            onChange={(e) => onUpdate({ ...helm, namespace: e.target.value })}
-            placeholder="defaults to Order namespace"
-          />
-        </div>
-      </div>
-
-      <label className={styles.checkRow}>
-        <input
-          type="checkbox"
-          checked={helm.includeCRDs}
-          onChange={(e) => onUpdate({ ...helm, includeCRDs: e.target.checked })}
-        />
-        Include CRDs
-      </label>
-
-      <div className={styles.fieldGroup}>
-        <label className={styles.label}>Values (YAML)</label>
-        <textarea
-          ref={textareaRef}
-          className={styles.valuesArea}
-          value={valuesYaml}
-          onChange={handleValuesChange}
-          placeholder={'replicaCount: 2\nimage:\n  tag: v1.0.0'}
-          spellCheck={false}
-        />
-        {valuesError && <p className={styles.valuesError}>{valuesError}</p>}
-      </div>
-
-      {showReference && (
-        <ChartReferencePanel
-          chartInfo={chartInfo}
-          loading={chartInfoLoading}
-          onJumpToPath={jumpToPath}
-        />
-      )}
-    </div>
-  )
-}
-
-// ── ChartReferencePanel ───────────────────────────────────────────────────────
-
-interface DefaultEntry {
-  path: string
-  value: string
-}
-
-/** Recursively flattens a nested object into dotted-path entries. */
-function flattenValues(obj: unknown, prefix = ''): DefaultEntry[] {
-  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) {
-    return prefix ? [{ path: prefix, value: String(obj ?? '') }] : []
-  }
-  const entries: DefaultEntry[] = []
-  for (const [key, val] of Object.entries(obj as Record<string, unknown>)) {
-    const path = prefix ? `${prefix}.${key}` : key
-    if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
-      entries.push(...flattenValues(val, path))
-    } else {
-      entries.push({ path, value: String(val ?? '') })
-    }
-  }
-  return entries
-}
-
-interface ChartReferencePanelProps {
-  chartInfo: ChartInfo | null
-  loading: boolean
-  onJumpToPath: (dotPath: string) => void
-}
-
-function ChartReferencePanel({ chartInfo, loading, onJumpToPath }: ChartReferencePanelProps) {
-  const [open, setOpen] = useState(false)
-  const [readmeOpen, setReadmeOpen] = useState(false)
-  const [query, setQuery] = useState('')
-
-  const defaultEntries: DefaultEntry[] = (() => {
-    if (!chartInfo?.isHelm || !chartInfo.defaultValues) return []
-    try {
-      const parsed = load(chartInfo.defaultValues)
-      return flattenValues(parsed)
-    } catch {
-      return []
-    }
-  })()
-
-  const filteredEntries = query
-    ? defaultEntries.filter((e) => e.path.toLowerCase().includes(query.toLowerCase()))
-    : defaultEntries
-
-  const headerLabel = chartInfo?.isHelm
-    ? `Chart Reference — ${chartInfo.name} ${chartInfo.chartVersion}`
-    : 'Chart Reference'
-
-  return (
-    <Disclosure
-      tone="inline"
-      className={styles.chartRef}
-      open={open}
-      onOpenChange={setOpen}
-      label={
-        loading ? (
-          <>
-            <span className={styles.chartRefSpinner} />
-            Loading chart info…
-          </>
-        ) : (
-          headerLabel
-        )
-      }
-    >
-      {!loading && chartInfo?.isHelm && (
-        <div className={styles.chartRefBody}>
-          {chartInfo.description && (
-            <p className={styles.chartRefDescription}>{chartInfo.description}</p>
-          )}
-
-          <input
-            type="search"
-            className={`${styles.input} ${styles.chartRefSearch}`}
-            placeholder="Search defaults… e.g. replicas or server.replicas"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            spellCheck={false}
-          />
-
-          {filteredEntries.length === 0 && (
-            <p className={styles.chartRefEmpty}>
-              {query ? 'No matching defaults.' : 'No default values.'}
-            </p>
-          )}
-
-          {filteredEntries.length > 0 && (
-            <ul className={styles.chartRefList} aria-label="Default values">
-              {filteredEntries.map((entry) => (
-                <li
-                  key={entry.path}
-                  className={styles.chartRefItem}
-                  onClick={() => onJumpToPath(entry.path)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') onJumpToPath(entry.path)
-                  }}
-                  title={`Jump to ${entry.path} in Values editor`}
-                >
-                  <span className={styles.chartRefPath}>{entry.path}</span>
-                  <span className={styles.chartRefValue}>{entry.value}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          {chartInfo.readme && (
-            <Disclosure
-              tone="inline"
-              className={styles.chartRefReadme}
-              label="README"
-              open={readmeOpen}
-              onOpenChange={setReadmeOpen}
-            >
-              <pre className={styles.chartRefReadmeContent}>{chartInfo.readme}</pre>
-            </Disclosure>
-          )}
-        </div>
-      )}
-    </Disclosure>
-  )
-}
-
-// ── YamlView ──────────────────────────────────────────────────────────────────
-
-interface YamlViewProps {
-  yamlText: string
-  yamlError: string | null
-  onChange: (v: string) => void
-}
-
-function YamlView({ yamlText, yamlError, onChange }: YamlViewProps) {
-  return (
-    <>
-      <YamlEditor value={yamlText} onChange={onChange} />
-      {yamlError && <p className={styles.yamlError}>Parse error: {yamlError}</p>}
-    </>
-  )
-}
-
-// ── VersionPicker ─────────────────────────────────────────────────────────────
-
-interface VersionPickerProps {
-  value: string
-  tags: string[]
-  loading: boolean
-  onChange: (value: string) => void
-}
-
-function VersionPicker({ value, tags, loading, onChange }: VersionPickerProps) {
-  const [open, setOpen] = useState(false)
-  const containerRef = useRef<HTMLDivElement>(null)
-  // Set to true when the user focuses the input while a fetch is in progress,
-  // so we can auto-open the dropdown once loading finishes.
-  const pendingOpenRef = useRef(false)
-
-  // Close dropdown when clicking outside.
-  useEffect(() => {
-    function handleMouseDown(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleMouseDown)
-    return () => document.removeEventListener('mousedown', handleMouseDown)
-  }, [])
-
-  // When loading finishes, open the dropdown if the user already focused the field.
-  useEffect(() => {
-    if (!loading && pendingOpenRef.current) {
-      pendingOpenRef.current = false
-      const id = setTimeout(() => setOpen(true), 0)
-      return () => clearTimeout(id)
-    }
-  }, [loading])
-
-  function handleSelect(tag: string) {
-    onChange(tag)
-    setOpen(false)
-  }
-
-  const filteredTags = value
-    ? tags.filter((t) => t.toLowerCase().includes(value.toLowerCase()))
-    : tags
-
-  const showDropdown = open && (filteredTags.length > 0 || loading)
-
-  return (
-    <div ref={containerRef} className={styles.versionPicker}>
-      <div className={styles.versionInputWrap}>
-        {loading && (
-          <div className={styles.versionLoadingOverlay} aria-hidden="true">
-            <span className={styles.versionSpinner} />
-            Fetching versions…
-          </div>
-        )}
-        <input
-          className={styles.input}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onFocus={() => {
-            if (loading) {
-              pendingOpenRef.current = true
-            } else {
-              setOpen(true)
-            }
-          }}
-          placeholder="1.0.0"
-          readOnly={loading}
-        />
-      </div>
-      {showDropdown && (
-        <ul className={styles.versionDropdown} role="listbox">
-          {loading && filteredTags.length === 0 && (
-            <li className={styles.versionDropdownItem} style={{ opacity: 0.6, cursor: 'default' }}>
-              Loading…
-            </li>
-          )}
-          {filteredTags.map((tag) => (
-            <li
-              key={tag}
-              className={`${styles.versionDropdownItem} ${tag === value ? styles.versionDropdownItemActive : ''}`}
-              role="option"
-              aria-selected={tag === value}
-              onMouseDown={(e) => { e.preventDefault(); handleSelect(tag) }}
-            >
-              {tag}
-            </li>
-          ))}
-        </ul>
-      )}
+    <div className={styles.policyBanner}>
+      <span className={styles.policyIcon}>🔒</span>
+      {description}{clearHint && `; ${clearHint}`}
     </div>
   )
 }

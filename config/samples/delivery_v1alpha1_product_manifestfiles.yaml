@@ -1,0 +1,20 @@
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Product
+metadata:
+  labels:
+    app.kubernetes.io/name: kokumi
+    app.kubernetes.io/managed-by: kustomize
+  name: external-dns
+spec:
+  source:
+    oci: oci://ghcr.io/kokumi-dev/testdata/external-dns
+    version: "0.1.0"
+
+  render:
+    manifest:
+      layout: Multi
+
+  # Orders of this Product may patch and edit anything.
+  overrides:
+    patches:
+      policy: All

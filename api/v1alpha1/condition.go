@@ -20,6 +20,20 @@ const (
 	ConditionTypeCounted = "Counted"
 )
 
+// Condition reasons used by Products and the Orders that reference them.
+const (
+	// ReasonProductNotFound reports on an Order that its Product does not exist.
+	ReasonProductNotFound = "ProductNotFound"
+	// ReasonProductNotReady reports on an Order that its Product has not
+	// resolved its source yet.
+	ReasonProductNotReady = "ProductNotReady"
+	// ReasonProductDeleting reports on an Order that its Product is being
+	// deleted.
+	ReasonProductDeleting = "ProductDeleting"
+	// ReasonInUse reports on a deleted Product that Orders still reference it.
+	ReasonInUse = "InUse"
+)
+
 // Condition reasons used by the approval gate.
 const (
 	ReasonApproved            = "Approved"

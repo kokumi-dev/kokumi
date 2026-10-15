@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router'
 import { getIntent } from '../../api/client'
 import type { ArtifactConfig, Preparation } from '../../api/types'
 import Section from '../layout/Section'
 import PropertyList from '../layout/PropertyList'
 import { formatDate } from '../../utils/format'
+import { paths } from '../../routes/paths'
 import layout from '../layout/layout.module.css'
 import styles from './EvidencePanel.module.css'
 
@@ -55,7 +57,15 @@ export default function IntentPanel({ preparation: prep }: { preparation: Prepar
             { label: 'Version', value: config.source.version },
             { label: 'Source digest', value: <span className={layout.mono}>{config.source.digest}</span> },
             { label: 'Destination', value: <span className={layout.mono}>{config.destination.oci}</span> },
-            { label: 'Menu', value: config.menu?.name, show: !!config.menu },
+            {
+              label: 'Product',
+              value: config.product && (
+                <Link className={layout.inlineLink} to={paths.product(config.product.namespace, config.product.name)}>
+                  {config.product.name}
+                </Link>
+              ),
+              show: !!config.product,
+            },
             { label: 'Parent', value: <span className={layout.mono}>{config.parent}</span>, show: !!config.parent },
             { label: 'Rendered', value: formatDate(config.createdTime) },
             { label: 'Config hash', value: <span className={layout.mono}>{config.configHash}</span>, show: !!config.configHash },

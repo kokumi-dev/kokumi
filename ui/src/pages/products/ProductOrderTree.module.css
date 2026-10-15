@@ -1,0 +1,194 @@
+/*
+ * The Orders of an expanded Product as branches of a tree: rows of the
+ * Products table below the Product's row, under its columns. The lines use
+ * the --tree-* properties of that table, so the trunk continues the line
+ * below the open toggle. `tr.row > td` outranks the table's own `.table td`
+ * rules, which also reach these cells.
+ */
+tr.row > td {
+  animation: reveal 0.18s ease-out;
+}
+
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  tr.row > td {
+    animation: none;
+  }
+}
+
+.orderRow {
+  cursor: pointer;
+}
+
+tr.orderRow:hover > td {
+  background: var(--color-fill-subtle);
+}
+
+/* Cell under the toggle column that carries the trunk and the branch. */
+tr.row > td.lead {
+  position: relative;
+  padding: 0;
+  overflow: visible;
+  cursor: default;
+}
+
+/* Trunk; it reaches over the row borders so it stays unbroken. */
+.lead::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  left: calc(var(--tree-x) - var(--tree-line) / 2);
+  width: var(--tree-line);
+  background: var(--tree-color);
+}
+
+tr:last-child > .lead::before {
+  bottom: calc(50% - var(--tree-line) / 2);
+}
+
+/* Branch towards the Order. */
+.lead::after {
+  content: '';
+  position: absolute;
+  top: calc(50% - var(--tree-line) / 2);
+  left: calc(var(--tree-x) - var(--tree-line) / 2);
+  right: 0;
+  height: var(--tree-line);
+  background: var(--tree-color);
+}
+
+.name {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.nameText {
+  min-width: 0;
+}
+
+/* Node at the end of a branch; filled while the Order runs something. */
+.node {
+  flex-shrink: 0;
+  width: 9px;
+  height: 9px;
+  margin-left: -12px;
+  border: var(--tree-line) solid var(--tree-color);
+  border-radius: 50%;
+  background: var(--color-bg-card);
+}
+
+.nodeLive {
+  border-color: var(--color-success);
+  background: var(--color-success);
+}
+
+.running {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Says what the cell holds, as it sits under the Products' Source column. */
+.label {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted-light);
+}
+
+.prep {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  color: var(--color-text-muted-light);
+}
+
+.muted {
+  color: var(--color-text-muted-light);
+}
+
+/* A newer Preparation waits for promotion. */
+.update {
+  flex-shrink: 0;
+  padding: 0 7px;
+  border-radius: 20px;
+  background: var(--color-accent-tint);
+  color: var(--color-accent);
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+tr.addRow > td {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.empty {
+  margin-right: 6px;
+  font-size: 0.8rem;
+  color: var(--color-text-muted-light);
+}
+
+.add {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-muted-light);
+}
+
+a.add:hover {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
+
+/* The next step of an empty Product stands out from its explanation. */
+a.addFirst {
+  color: var(--color-accent);
+}
+
+.addDisabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Placeholder while the version of the running Preparation loads. */
+.pending {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 0.75em;
+  border-radius: 4px;
+  background: var(--color-fill-strong);
+  vertical-align: middle;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pending {
+    animation: none;
+  }
+}

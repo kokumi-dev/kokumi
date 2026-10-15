@@ -6,10 +6,10 @@ resources:
 - bases/delivery.kokumi.dev_preparations.yaml
 - bases/delivery.kokumi.dev_servings.yaml
 - bases/delivery.kokumi.dev_orders.yaml
-- bases/delivery.kokumi.dev_menus.yaml
 - bases/delivery.kokumi.dev_pantries.yaml
 - bases/delivery.kokumi.dev_kitchens.yaml
 - bases/delivery.kokumi.dev_approvals.yaml
+- bases/delivery.kokumi.dev_products.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

@@ -10,12 +10,13 @@ import CommitBox from '../../components/shared/CommitBox'
 import { Button, Counter } from '../../components/ui'
 import { paths } from '../../routes/paths'
 import { formatDate } from '../../utils/format'
+import { objectToYaml } from '../../utils/yaml'
 import { useOrderContext } from './orderContext'
 import { useDeniedReason } from '../../hooks/useCapability'
 import layout from '../../components/layout/layout.module.css'
 
 export default function OrderOverview() {
-  const { order, preparations } = useOrderContext()
+  const { order, product, preparations } = useOrderContext()
   // Edits staged for removal; committed through the CommitBox below.
   const [pendingEdits, setPendingEdits] = useState<Patch[] | null>(null)
   const editDenied = useDeniedReason('orders:update')
@@ -76,34 +77,33 @@ export default function OrderOverview() {
         />
       </Section>
 
-      <Section title="Configuration">
+      <Section title="Configuration" description="What this variant changes on top of its Product">
         <PropertyList
           items={[
             {
-              label: 'Menu',
-              value: order.menuRef && (
-                <Link className={layout.inlineLink} to={paths.menu(order.namespace, order.menuRef.name)}>
-                  {order.menuRef.name}
+              label: 'Product',
+              value: (
+                <Link className={layout.inlineLink} to={paths.product(order.namespace, order.productRef.name)}>
+                  {order.productRef.name}
                 </Link>
               ),
-              show: !!order.menuRef,
             },
             {
               label: 'Source',
-              value: (
+              value: product && (
                 <span className={layout.mono}>
-                  {order.source?.pantryRef && !order.source.oci ? `pantry: ${order.source.pantryRef.name}` : order.source?.oci}
+                  {product.source.pantryRef?.name ? `pantry: ${product.source.pantryRef.name}` : product.source.oci}
                 </span>
               ),
-              show: !!order.source,
+              show: !!product,
             },
-            { label: 'Version', value: order.source?.version, show: !!order.source },
+            { label: 'Version', value: product?.source.version, show: !!product },
             { label: 'Destination', value: <span className={layout.mono}>{destination}</span> },
-            { label: 'Renderer', value: order.render?.helm ? 'Helm' : 'Manifest', show: !!order.render },
-            { label: 'Release name', value: order.render?.helm?.releaseName, show: !!order.render?.helm?.releaseName },
-            { label: 'Helm namespace', value: order.render?.helm?.namespace, show: !!order.render?.helm?.namespace },
-            { label: 'Include CRDs', value: order.render?.helm?.includeCRDs ? 'Yes' : 'No', show: !!order.render?.helm },
-            { label: 'File layout', value: order.render?.manifest?.layout, show: !!order.render?.manifest },
+            {
+              label: 'Values',
+              value: <pre className={layout.code}>{objectToYaml(order.values ?? {})}</pre>,
+              show: Object.keys(order.values ?? {}).length > 0,
+            },
             { label: 'Created', value: formatDate(order.createdAt) },
           ]}
         />

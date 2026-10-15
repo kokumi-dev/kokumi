@@ -25,12 +25,12 @@ export default function Dashboard() {
           </span>
         </div>
         <div className={styles.statCard}>
-          <span className={styles.statLabel}>Orders</span>
-          <span className={styles.statValue}>{counts?.orders ?? '—'}</span>
+          <span className={styles.statLabel}>Products</span>
+          <span className={styles.statValue}>{counts?.products ?? '—'}</span>
         </div>
         <div className={styles.statCard}>
-          <span className={styles.statLabel}>Menus</span>
-          <span className={styles.statValue}>{counts?.menus ?? '—'}</span>
+          <span className={styles.statLabel}>Orders</span>
+          <span className={styles.statValue}>{counts?.orders ?? '—'}</span>
         </div>
         <div className={styles.statCard}>
           <span className={styles.statLabel}>Preparations</span>

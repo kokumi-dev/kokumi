@@ -21,20 +21,11 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Ready')].reason
       name: Reason
       type: string
+    - jsonPath: .spec.productRef.name
+      name: Product
+      type: string
     - jsonPath: .status.latestPreparationName
       name: Latest Preparation
-      type: string
-    - jsonPath: .spec.menuRef.name
-      name: Menu
-      priority: 1
-      type: string
-    - jsonPath: .spec.source.oci
-      name: Source
-      priority: 1
-      type: string
-    - jsonPath: .spec.source.version
-      name: Version
-      priority: 1
       type: string
     - jsonPath: .spec.promotion.mode
       name: Promotion
@@ -46,7 +37,10 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: Order is the Schema for the orders API
+        description: |-
+          Order is the Schema for the orders API.
+          An Order is a variant of a Product, such as one environment of an
+          application.
         properties:
           apiVersion:
             description: |-
@@ -74,8 +68,9 @@ spec:
                   When omitted, the in-cluster registry is used automatically.
                 properties:
                   oci:
-                    description: oci is the OCI registry URL where configured manifests
-                      will be pushed
+                    description: |-
+                      oci is the OCI registry URL the artifact is pushed to.
+                      Mutually exclusive with pantryRef.
                     type: string
                     x-kubernetes-validations:
                     - message: must be a valid OCI URL
@@ -99,9 +94,8 @@ spec:
               edits:
                 description: |-
                   edits defines UI-driven field modifications applied after patches.
-                  Unlike patches, edits are never inherited from a Menu and are intended
-                  for interactive changes made through the web UI.
-                  When menuRef is set, edits are still subject to the Menu's patch override policy.
+                  They are intended for interactive changes made through the web UI and
+                  are subject to the Product's patch overrides.
                 items:
                   description: Patch defines a modification to apply to a resource
                   properties:
@@ -137,60 +131,63 @@ spec:
                   - target
                   type: object
                 type: array
-              menuRef:
+              patches:
                 description: |-
-                  menuRef references a Menu in the Order's namespace that provides the
-                  source, base configuration, and override constraints for this Order.
-                  Must not be set when source is used.
+                  patches are merged over the Product's patches, per target, before
+                  producing a Preparation. Subject to the Product's overrides.
+                items:
+                  description: Patch defines a modification to apply to a resource
+                  properties:
+                    set:
+                      additionalProperties:
+                        type: string
+                      description: |-
+                        set contains JSONPath expressions and their values to set
+                        Keys are JSONPath expressions (e.g., ".spec.replicas")
+                        Values are the desired values for those paths
+                      type: object
+                    target:
+                      description: target identifies which resource to patch
+                      properties:
+                        kind:
+                          description: kind specifies the Kubernetes resource kind
+                            to patch
+                          type: string
+                        name:
+                          description: name specifies the name of the resource to
+                            patch
+                          type: string
+                        namespace:
+                          description: namespace specifies the namespace of the resource
+                            (optional, defaults to same namespace as Order)
+                          type: string
+                      required:
+                      - kind
+                      - name
+                      type: object
+                  required:
+                  - set
+                  - target
+                  type: object
+                type: array
+              productRef:
+                description: |-
+                  productRef references the Product in the Order's namespace that this
+                  Order is a variant of. It cannot be changed after creation.
                 properties:
                   name:
                     description: |-
-                      name is the name of the Menu to use as a template. The Menu must exist
-                      in the same namespace as the Order.
+                      name is the name of the Product. The Product must exist in the same
+                      namespace as the Order.
+                    maxLength: 253
+                    minLength: 1
                     type: string
                 required:
                 - name
                 type: object
-              patches:
-                description: |-
-                  patches defines deterministic transformations applied to the source artifact
-                  before producing a Preparation.
-                  When menuRef is set, these patches are subject to the Menu's override policy.
-                items:
-                  description: Patch defines a modification to apply to a resource
-                  properties:
-                    set:
-                      additionalProperties:
-                        type: string
-                      description: |-
-                        set contains JSONPath expressions and their values to set
-                        Keys are JSONPath expressions (e.g., ".spec.replicas")
-                        Values are the desired values for those paths
-                      type: object
-                    target:
-                      description: target identifies which resource to patch
-                      properties:
-                        kind:
-                          description: kind specifies the Kubernetes resource kind
-                            to patch
-                          type: string
-                        name:
-                          description: name specifies the name of the resource to
-                            patch
-                          type: string
-                        namespace:
-                          description: namespace specifies the namespace of the resource
-                            (optional, defaults to same namespace as Order)
-                          type: string
-                      required:
-                      - kind
-                      - name
-                      type: object
-                  required:
-                  - set
-                  - target
-                  type: object
-                type: array
+                x-kubernetes-validations:
+                - message: productRef is immutable
+                  rule: self == oldSelf
               promotion:
                 description: promotion configures how new Preparations become active
                   Servings.
@@ -235,102 +232,16 @@ spec:
                     - Manual
                     type: string
                 type: object
-              render:
+              values:
                 description: |-
-                  render defines optional rendering configuration for the source artifact.
-                  When absent the source OCI artifact is treated as a pre-rendered manifest bundle.
-                  When render.helm is set the source must be a Helm chart in OCI format.
-                  When menuRef is set, the render type is inherited from the Menu and this
-                  field is used only for consumer value overrides (render.helm.values).
-                properties:
-                  helm:
-                    description: |-
-                      helm renders the source OCI artifact as a Helm chart.
-                      When set, the source must be a Helm chart in OCI format.
-                    properties:
-                      includeCRDs:
-                        default: false
-                        description: |-
-                          includeCRDs controls whether CRDs are included in the rendered output.
-                          Equivalent to helm template --include-crds.
-                        type: boolean
-                      namespace:
-                        description: |-
-                          namespace is the target namespace passed to helm template --namespace.
-                          Defaults to the Order's metadata.namespace when omitted.
-                        type: string
-                      releaseName:
-                        description: |-
-                          releaseName is the Helm release name passed to helm template.
-                          Defaults to the Order's metadata.name when omitted.
-                        type: string
-                      values:
-                        description: |-
-                          values holds inline Helm values merged last (highest priority).
-                          Equivalent to a final -f values.yaml pass.
-                        x-kubernetes-preserve-unknown-fields: true
-                    type: object
-                  manifest:
-                    description: manifest configures rendering of a raw manifest bundle
-                      source.
-                    properties:
-                      layout:
-                        default: Single
-                        description: |-
-                          layout controls whether the artifact's YAML files are merged into a
-                          single manifest.yaml (Single) or kept as separate files (Multi).
-                          Artifacts containing a kustomization.yaml are never merged.
-                        enum:
-                        - Single
-                        - Multi
-                        type: string
-                    type: object
+                  values holds Helm values deep-merged over the Product's
+                  render.helm.values; the Order's values win. Only valid when the
+                  Product renders with Helm, and subject to the Product's overrides.
                 type: object
-                x-kubernetes-validations:
-                - message: helm and manifest are mutually exclusive
-                  rule: '!(has(self.helm) && has(self.manifest))'
-              source:
-                description: |-
-                  source defines the immutable base artifact to render from.
-                  Must not be set when menuRef is used.
-                properties:
-                  oci:
-                    description: |-
-                      oci is the full OCI URL for the source manifests.
-                      Mutually exclusive with pantryRef.
-                    type: string
-                    x-kubernetes-validations:
-                    - message: must be a valid OCI URL
-                      rule: self == '' || (isURL(self) && url(self).getScheme() ==
-                        'oci')
-                  pantryRef:
-                    description: |-
-                      pantryRef references a Pantry resource whose URL is used as the source.
-                      Mutually exclusive with oci.
-                    properties:
-                      name:
-                        description: name is the name of the Pantry resource.
-                        type: string
-                    required:
-                    - name
-                    type: object
-                  version:
-                    description: |-
-                      version is the semantic version or tag of the artifact
-                      The controller will resolve this to a digest
-                    type: string
-                required:
-                - version
-                type: object
-                x-kubernetes-validations:
-                - message: exactly one of oci or pantryRef must be set
-                  rule: (has(self.oci) && !has(self.pantryRef)) || (!has(self.oci)
-                    && has(self.pantryRef))
+                x-kubernetes-preserve-unknown-fields: true
+            required:
+            - productRef
             type: object
-            x-kubernetes-validations:
-            - message: exactly one of source or menuRef must be set
-              rule: (has(self.source) && !has(self.menuRef)) || (!has(self.source)
-                && has(self.menuRef))
           status:
             description: status defines the observed state of Order
             properties:
@@ -403,8 +314,9 @@ spec:
                 type: string
               latestConfigHash:
                 description: |-
-                  latestConfigHash is a SHA-256 hash of the resolved source and destination
-                  OCI URLs plus version, menuRef, render, patches, and edits.
+                  latestConfigHash is a SHA-256 hash of the intent: the resolved source and
+                  destination OCI URLs plus version, render, patches, edits, and approval
+                  policy after merging the Order over its Product.
                 type: string
               latestPreparationName:
                 description: |-
@@ -420,6 +332,8 @@ spec:
         required:
         - spec
         type: object
+    selectableFields:
+    - jsonPath: .spec.productRef.name
     served: true
     storage: true
     subresources:

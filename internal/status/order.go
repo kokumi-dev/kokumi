@@ -39,6 +39,18 @@ func (u *OrderUpdater) Ready(ctx context.Context, order *deliveryv1alpha1.Order,
 	})
 }
 
+// Waiting marks the Order as blocked on its Product, with reason
+// ReasonProductNotFound, ReasonProductNotReady, or ReasonProductDeleting.
+// The latest config hash is
+// kept, so an unchanged intent does not render again once the Product is
+// back.
+func (u *OrderUpdater) Waiting(ctx context.Context, order *deliveryv1alpha1.Order, reason, msg string) error {
+	return u.set(ctx, order, func(latest *deliveryv1alpha1.Order) {
+		latest.Status.ObservedGeneration = latest.Generation
+		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(latest.Generation, metav1.ConditionFalse, reason, msg))
+	})
+}
+
 // Failed marks the Order as failed with the supplied error as the message.
 func (u *OrderUpdater) Failed(ctx context.Context, order *deliveryv1alpha1.Order, err error) error {
 	return u.set(ctx, order, func(latest *deliveryv1alpha1.Order) {

@@ -21,8 +21,7 @@ const ConfigSchemaVersion = 1
 type Config struct {
 	// SchemaVersion is the version of this schema.
 	SchemaVersion int `json:"schemaVersion"`
-	// Order identifies the Order the artifact was rendered for. Nil for
-	// artifacts pre-rendered by a Menu.
+	// Order identifies the Order the artifact was rendered for.
 	Order *ConfigObject `json:"order,omitempty"`
 	// ConfigHash is the SHA-256 of Intent, byte for byte as stored.
 	ConfigHash string `json:"configHash,omitempty"`
@@ -37,9 +36,8 @@ type Config struct {
 	Source ConfigSource `json:"source"`
 	// Destination is where the artifact was pushed.
 	Destination ConfigDestination `json:"destination"`
-	// Menu identifies the Menu the configuration was merged from. Nil for
-	// standalone Orders.
-	Menu *ConfigMenu `json:"menu,omitempty"`
+	// Product identifies the Product the Order is a variant of.
+	Product *ConfigProduct `json:"product,omitempty"`
 	// Renderer identifies what rendered the artifact.
 	Renderer ConfigRenderer `json:"renderer"`
 	// Intent is the canonical JSON of the merged configuration that
@@ -76,11 +74,11 @@ type ConfigDestination struct {
 	PantryRef string `json:"pantryRef,omitempty"`
 }
 
-// ConfigMenu identifies a Menu and the state it was in.
-type ConfigMenu struct {
+// ConfigProduct identifies a Product and the state it was in.
+type ConfigProduct struct {
 	Namespace string `json:"namespace"`
 	Name      string `json:"name"`
-	// ConfigHash is the Menu's config hash when the artifact was rendered.
+	// ConfigHash is the Product's config hash when the artifact was rendered.
 	ConfigHash string `json:"configHash,omitempty"`
 }
 

@@ -50,6 +50,10 @@ const (
 
 // Finalizer names registered on kokumi-managed resources.
 const (
-	// FinalizerOrder is the finalizer added to every Order.
+	// Finalizer is added to Orders and Preparations.
 	Finalizer = "delivery.kokumi.dev/finalizer"
+
+	// FinalizerProductProtection keeps a Product from being deleted while
+	// Orders still reference it, like kubernetes.io/pvc-protection.
+	FinalizerProductProtection = "delivery.kokumi.dev/product-protection"
 )

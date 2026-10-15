@@ -37,7 +37,7 @@ qualities that made GitOps worth adopting in the first place.
 **Kokumi** is a Kubernetes operator for structured, immutable release management.
 It draws a hard line between three concerns that most delivery systems conflate:
 
-- **Intent** — what should be built and how (the Order)
+- **Intent** — what should be built and how (a Product and its Orders)
 - **Artifact** — what was built, exactly (the Preparation)
 - **Activation** — what is currently running (the Serving)
 
@@ -76,14 +76,21 @@ Contributions are highly welcome! See the [Contribution Guide](https://kokumi.de
 
 Kokumi models delivery using four Kubernetes primitives.
 
+### Product
+
+A Product is the complete definition of an application: the source OCI
+artifact (a Helm chart or manifest bundle), how it is rendered, and its base
+values and patches. It describes _what should be built_ — not a running
+system. A Product can optionally mirror its source into another registry and
+restrict what its Orders may change.
+
 ### Order
 
-Order is the concrete execution request. An Order declares the source OCI
-artifact (a Helm chart or manifest bundle), optional patches, and rendering
-configuration. It describes _what should be built_ — not a running system.
-Every change to an Order triggers a new render cycle and produces a new
-Preparation automatically. Optionally, an Order can consume and parameterize
-a Menu template.
+An Order is a variant of exactly one Product, for example one environment
+such as `podinfo-dev` or `podinfo-prod`. It only declares what differs: Helm
+values, patches, where the rendered artifact is pushed, and how it is
+promoted. Every change to an Order or its Product triggers a new render cycle
+and produces a new Preparation automatically.
 
 ### Preparation
 
@@ -100,8 +107,3 @@ one specific Preparation and creates or updates an Argo CD `Application` that
 syncs that artifact into the cluster. Switching versions (upgrading or rolling
 back) means updating which Preparation the Serving references; the artifact
 does not change.
-
-### Menu
-
-Menu is the reusable delivery template. It represents the base structure that
-an Order can consume and parameterize per environment or rollout.

@@ -4,6 +4,12 @@ import RequireCapability from '../components/layout/RequireCapability'
 import Dashboard from '../pages/Dashboard'
 import Settings from '../pages/Settings'
 import NotFound from '../pages/NotFound'
+import ProductsList from '../pages/products/ProductsList'
+import ProductLayout from '../pages/products/ProductLayout'
+import ProductOverview from '../pages/products/ProductOverview'
+import ProductOrders from '../pages/products/ProductOrders'
+import ProductPreview from '../pages/products/ProductPreview'
+import ProductEditor from '../pages/products/ProductEditor'
 import OrdersList from '../pages/orders/OrdersList'
 import OrderLayout from '../pages/orders/OrderLayout'
 import OrderOverview from '../pages/orders/OrderOverview'
@@ -21,11 +27,6 @@ import PreparationIntent from '../pages/preparations/PreparationIntent'
 import PreparationAttestations from '../pages/preparations/PreparationAttestations'
 import ServingsList from '../pages/servings/ServingsList'
 import ServingDetail from '../pages/servings/ServingDetail'
-import MenusList from '../pages/menus/MenusList'
-import MenuLayout from '../pages/menus/MenuLayout'
-import MenuOverview from '../pages/menus/MenuOverview'
-import MenuOrders from '../pages/menus/MenuOrders'
-import MenuEditor from '../pages/menus/MenuEditor'
 import PantriesList from '../pages/pantries/PantriesList'
 import PantryLayout from '../pages/pantries/PantryLayout'
 import PantryOverview from '../pages/pantries/PantryOverview'
@@ -38,6 +39,19 @@ export const router = createBrowserRouter([
     element: <AppLayout />,
     children: [
       { index: true, element: <Dashboard /> },
+
+      { path: 'products', element: <ProductsList /> },
+      { path: 'products/new', element: <RequireCapability anyOf={['products:create']}><ProductEditor /></RequireCapability> },
+      { path: 'products/:namespace/:name/edit', element: <RequireCapability anyOf={['products:update']}><ProductEditor /></RequireCapability> },
+      {
+        path: 'products/:namespace/:name',
+        element: <ProductLayout />,
+        children: [
+          { index: true, element: <ProductOverview /> },
+          { path: 'orders', element: <ProductOrders /> },
+          { path: 'preview', element: <ProductPreview /> },
+        ],
+      },
 
       { path: 'orders', element: <OrdersList /> },
       { path: 'orders/new', element: <RequireCapability anyOf={['orders:create']}><OrderEditor /></RequireCapability> },
@@ -69,18 +83,6 @@ export const router = createBrowserRouter([
 
       { path: 'servings', element: <ServingsList /> },
       { path: 'servings/:namespace/:name', element: <ServingDetail /> },
-
-      { path: 'menus', element: <MenusList /> },
-      { path: 'menus/new', element: <RequireCapability anyOf={['menus:create']}><MenuEditor /></RequireCapability> },
-      { path: 'menus/:namespace/:name/edit', element: <RequireCapability anyOf={['menus:update']}><MenuEditor /></RequireCapability> },
-      {
-        path: 'menus/:namespace/:name',
-        element: <MenuLayout />,
-        children: [
-          { index: true, element: <MenuOverview /> },
-          { path: 'orders', element: <MenuOrders /> },
-        ],
-      },
 
       { path: 'pantries', element: <PantriesList /> },
       { path: 'pantries/new', element: <RequireCapability anyOf={['pantries:create']}><PantryEditor /></RequireCapability> },

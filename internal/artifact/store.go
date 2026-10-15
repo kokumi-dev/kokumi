@@ -3,6 +3,7 @@ package artifact
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 
@@ -77,15 +78,12 @@ func (s *Store) Copy(ctx context.Context, src Source, srcClient oci.Client, dst 
 }
 
 // ResolveDigest resolves the tag of the given source to its current digest.
-// The version tag is mandatory. When neither the given client nor the
-// store's default client is available, an empty digest is returned. Digest
-// resolution is best-effort for advertised sources.
+// The version tag is mandatory.
 func (s *Store) ResolveDigest(ctx context.Context, src Source, client oci.Client) (string, error) {
-	if client == nil && s.client == nil {
-		return "", nil //nolint:nilnil
-	}
-
 	c := cmp.Or(client, s.client)
+	if c == nil {
+		return "", errors.New("no OCI client to resolve the digest with")
+	}
 
 	ref, err := parseTagged(src.OCI, src.Version)
 	if err != nil {

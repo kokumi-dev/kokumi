@@ -79,9 +79,10 @@ type HelmRender struct {
 	// +kubebuilder:default=false
 	IncludeCRDs bool `json:"includeCRDs,omitempty"`
 
-	// values holds inline Helm values merged last (highest priority).
-	// Equivalent to a final -f values.yaml pass.
+	// values holds inline Helm values. On a Product they are the base values;
+	// an Order's spec.values are deep-merged over them.
 	// +optional
+	// +kubebuilder:validation:Type=object
 	// +kubebuilder:pruning:PreserveUnknownFields
 	Values *apiextensionsv1.JSON `json:"values,omitempty"`
 }
@@ -122,11 +123,12 @@ type Render struct {
 	Manifest *ManifestRender `json:"manifest,omitempty"`
 }
 
-// OCIDestination defines where the rendered, configured artifact
-// (Preparation) will be pushed as an OCI artifact
+// OCIDestination defines the OCI repository an artifact is pushed to.
+// When neither oci nor pantryRef is set, the in-cluster registry is used.
 // +kubebuilder:validation:XValidation:rule="!(has(self.oci) && has(self.pantryRef))",message="oci and pantryRef are mutually exclusive"
 type OCIDestination struct {
-	// oci is the OCI registry URL where configured manifests will be pushed
+	// oci is the OCI registry URL the artifact is pushed to.
+	// Mutually exclusive with pantryRef.
 	// +optional
 	// +kubebuilder:validation:XValidation:rule="self == '' || (isURL(self) && url(self).getScheme() == 'oci')",message="must be a valid OCI URL"
 	OCI string `json:"oci,omitempty"`
@@ -165,52 +167,47 @@ type Patch struct {
 	Set map[string]string `json:"set"`
 }
 
-// MenuRef references a Menu by name in the Order's namespace.
-type MenuRef struct {
-	// name is the name of the Menu to use as a template. The Menu must exist
-	// in the same namespace as the Order.
+// ProductRef references a Product by name in the Order's namespace.
+type ProductRef struct {
+	// name is the name of the Product. The Product must exist in the same
+	// namespace as the Order.
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
 	Name string `json:"name"`
 }
 
 // OrderSpec defines the desired state of Order.
-// Exactly one of source or menuRef must be set.
-// +kubebuilder:validation:XValidation:rule="(has(self.source) && !has(self.menuRef)) || (!has(self.source) && has(self.menuRef))",message="exactly one of source or menuRef must be set"
+// An Order is a variant of a Product: it renders the Product's source with
+// the Product's configuration plus the Order's own values, patches, and edits.
 type OrderSpec struct {
-	// source defines the immutable base artifact to render from.
-	// Must not be set when menuRef is used.
-	// +optional
-	Source *OCISource `json:"source,omitempty"`
+	// productRef references the Product in the Order's namespace that this
+	// Order is a variant of. It cannot be changed after creation.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="productRef is immutable"
+	ProductRef ProductRef `json:"productRef"`
 
-	// menuRef references a Menu in the Order's namespace that provides the
-	// source, base configuration, and override constraints for this Order.
-	// Must not be set when source is used.
+	// values holds Helm values deep-merged over the Product's
+	// render.helm.values; the Order's values win. Only valid when the
+	// Product renders with Helm, and subject to the Product's overrides.
 	// +optional
-	MenuRef *MenuRef `json:"menuRef,omitempty"`
-
-	// render defines optional rendering configuration for the source artifact.
-	// When absent the source OCI artifact is treated as a pre-rendered manifest bundle.
-	// When render.helm is set the source must be a Helm chart in OCI format.
-	// When menuRef is set, the render type is inherited from the Menu and this
-	// field is used only for consumer value overrides (render.helm.values).
-	// +optional
-	Render *Render `json:"render,omitempty"`
+	// +kubebuilder:validation:Type=object
+	// +kubebuilder:pruning:PreserveUnknownFields
+	Values *apiextensionsv1.JSON `json:"values,omitempty"`
 
 	// destination defines where the rendered Preparation artifact will be pushed.
 	// When omitted, the in-cluster registry is used automatically.
 	// +optional
 	Destination *OCIDestination `json:"destination,omitempty"`
 
-	// patches defines deterministic transformations applied to the source artifact
-	// before producing a Preparation.
-	// When menuRef is set, these patches are subject to the Menu's override policy.
+	// patches are merged over the Product's patches, per target, before
+	// producing a Preparation. Subject to the Product's overrides.
 	// +optional
 	Patches []Patch `json:"patches,omitempty"`
 
 	// edits defines UI-driven field modifications applied after patches.
-	// Unlike patches, edits are never inherited from a Menu and are intended
-	// for interactive changes made through the web UI.
-	// When menuRef is set, edits are still subject to the Menu's patch override policy.
+	// They are intended for interactive changes made through the web UI and
+	// are subject to the Product's patch overrides.
 	// +optional
 	Edits []Patch `json:"edits,omitempty"`
 
@@ -272,8 +269,9 @@ type OrderStatus struct {
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	LatestArtifactDigest string `json:"latestArtifactDigest,omitempty"`
 
-	// latestConfigHash is a SHA-256 hash of the resolved source and destination
-	// OCI URLs plus version, menuRef, render, patches, and edits.
+	// latestConfigHash is a SHA-256 hash of the intent: the resolved source and
+	// destination OCI URLs plus version, render, patches, edits, and approval
+	// policy after merging the Order over its Product.
 	// +optional
 	LatestConfigHash string `json:"latestConfigHash,omitempty"`
 
@@ -288,14 +286,15 @@ type OrderStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
 // +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].reason`
+// +kubebuilder:printcolumn:name="Product",type=string,JSONPath=`.spec.productRef.name`
 // +kubebuilder:printcolumn:name="Latest Preparation",type=string,JSONPath=`.status.latestPreparationName`
-// +kubebuilder:printcolumn:name="Menu",type=string,JSONPath=`.spec.menuRef.name`,priority=1
-// +kubebuilder:printcolumn:name="Source",type=string,JSONPath=`.spec.source.oci`,priority=1
-// +kubebuilder:printcolumn:name="Version",type=string,JSONPath=`.spec.source.version`,priority=1
 // +kubebuilder:printcolumn:name="Promotion",type=string,JSONPath=`.spec.promotion.mode`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
+// +kubebuilder:selectablefield:JSONPath=`.spec.productRef.name`
 
-// Order is the Schema for the orders API
+// Order is the Schema for the orders API.
+// An Order is a variant of a Product, such as one environment of an
+// application.
 type Order struct {
 	metav1.TypeMeta `json:",inline"`
 

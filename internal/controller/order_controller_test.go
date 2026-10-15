@@ -19,12 +19,14 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/spf13/afero"
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
@@ -55,6 +57,8 @@ var _ = Describe("Order Controller", func() {
 		order := &deliveryv1alpha1.Order{}
 
 		BeforeEach(func() {
+			createTestProduct(ctx, testProductName, deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion})
+
 			By("creating the custom resource for the Kind Order")
 			err := k8sClient.Get(ctx, typeNamespacedName, order)
 			if err != nil && errors.IsNotFound(err) {
@@ -62,12 +66,9 @@ var _ = Describe("Order Controller", func() {
 					Name:      resourceName,
 					Namespace: testNamespace,
 					Spec: deliveryv1alpha1.OrderSpec{
+						ProductRef: deliveryv1alpha1.ProductRef{Name: testProductName},
 						Promotion: &deliveryv1alpha1.PromotionSpec{
 							Mode: deliveryv1alpha1.PromotionModeManual,
-						},
-						Source: &deliveryv1alpha1.OCISource{
-							OCI:     testOCIRef,
-							Version: testVersion,
 						},
 						Destination: &deliveryv1alpha1.OCIDestination{
 							OCI: "oci://registry.kokumi.svc.cluster.local:5000/preparation/test-resource",
@@ -112,7 +113,7 @@ var _ = Describe("Order Controller", func() {
 		})
 	})
 
-	Context("When Order uses pantryRef", func() {
+	Context("When the Order or its Product uses a Pantry", func() {
 		const ns = testNamespace
 
 		ctx := context.Background()
@@ -160,14 +161,17 @@ var _ = Describe("Order Controller", func() {
 			})).To(Succeed())
 		}
 
-		createOrder := func(name string, source *deliveryv1alpha1.OCISource, dest *deliveryv1alpha1.OCIDestination) {
+		// createOrder creates an Order of its own Product, named after the
+		// Order, whose source resolves to source.
+		createOrder := func(name string, source deliveryv1alpha1.OCISource, dest *deliveryv1alpha1.OCIDestination) {
+			createTestProduct(ctx, name, source)
 			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Order{
 				Name: name, Namespace: ns,
 				Spec: deliveryv1alpha1.OrderSpec{
+					ProductRef: deliveryv1alpha1.ProductRef{Name: name},
 					Promotion: &deliveryv1alpha1.PromotionSpec{
 						Mode: deliveryv1alpha1.PromotionModeManual,
 					},
-					Source:      source,
 					Destination: dest,
 				},
 			})).To(Succeed())
@@ -182,6 +186,7 @@ var _ = Describe("Order Controller", func() {
 				_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Order{
 					Name: orderName, Namespace: ns,
 				})
+				deleteTestProduct(ctx, orderName)
 			}
 			if pantryName != "" {
 				_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Pantry{
@@ -202,7 +207,7 @@ var _ = Describe("Order Controller", func() {
 			defer cleanup(orderName, pantryName)
 
 			createPantry(pantryName, pantryURL, nil)
-			createOrder(orderName, &deliveryv1alpha1.OCISource{
+			createOrder(orderName, deliveryv1alpha1.OCISource{
 				PantryRef: &deliveryv1alpha1.PantryRef{Name: pantryName},
 				Version:   testVersion,
 			}, &deliveryv1alpha1.OCIDestination{
@@ -232,7 +237,7 @@ var _ = Describe("Order Controller", func() {
 			defer cleanup(orderName, pantryName)
 
 			createPantry(pantryName, firstURL, nil)
-			createOrder(orderName, &deliveryv1alpha1.OCISource{
+			createOrder(orderName, deliveryv1alpha1.OCISource{
 				PantryRef: &deliveryv1alpha1.PantryRef{Name: pantryName},
 				Version:   testVersion,
 			}, &deliveryv1alpha1.OCIDestination{
@@ -269,7 +274,7 @@ var _ = Describe("Order Controller", func() {
 			defer cleanup(orderName, pantryName)
 
 			createPantry(pantryName, pantryURL, nil)
-			createOrder(orderName, &deliveryv1alpha1.OCISource{
+			createOrder(orderName, deliveryv1alpha1.OCISource{
 				PantryRef: &deliveryv1alpha1.PantryRef{Name: pantryName},
 				Version:   testVersion,
 			}, &deliveryv1alpha1.OCIDestination{
@@ -294,7 +299,7 @@ var _ = Describe("Order Controller", func() {
 			defer cleanup(orderName, pantryName)
 
 			createPantry(pantryName, firstURL, nil)
-			createOrder(orderName, &deliveryv1alpha1.OCISource{
+			createOrder(orderName, deliveryv1alpha1.OCISource{
 				OCI:     "oci://registry.kokumi.svc.cluster.local:5000/order/app",
 				Version: testVersion,
 			}, &deliveryv1alpha1.OCIDestination{
@@ -338,7 +343,7 @@ var _ = Describe("Order Controller", func() {
 
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 			createPantry(pantryName, pantryURL, &corev1.LocalObjectReference{Name: secretName})
-			createOrder(orderName, &deliveryv1alpha1.OCISource{
+			createOrder(orderName, deliveryv1alpha1.OCISource{
 				PantryRef: &deliveryv1alpha1.PantryRef{Name: pantryName},
 				Version:   testVersion,
 			}, &deliveryv1alpha1.OCIDestination{
@@ -360,15 +365,15 @@ var _ = Describe("Order Controller", func() {
 			Expect(listPreparations(orderName).Items).To(HaveLen(1))
 		})
 
-		It("fails when the referenced Pantry is missing", func() {
+		It("fails when the destination Pantry is missing", func() {
 			const orderName = "order-missing-pantry"
 			defer cleanup(orderName, "")
 
-			createOrder(orderName, &deliveryv1alpha1.OCISource{
-				PantryRef: &deliveryv1alpha1.PantryRef{Name: "does-not-exist"},
-				Version:   testVersion,
+			createOrder(orderName, deliveryv1alpha1.OCISource{
+				OCI:     "oci://registry.kokumi.svc.cluster.local:5000/order/missing",
+				Version: testVersion,
 			}, &deliveryv1alpha1.OCIDestination{
-				OCI: "oci://registry.kokumi.svc.cluster.local:5000/preparation/missing",
+				PantryRef: &deliveryv1alpha1.PantryRef{Name: "does-not-exist"},
 			})
 
 			Expect(reconcileOrder(orderName)).NotTo(Succeed())
@@ -410,17 +415,19 @@ var _ = Describe("Order Controller", func() {
 				_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Order{
 					Name: orderName, Namespace: ns,
 				})
+				deleteTestProduct(ctx, orderName)
 			}()
 
+			createTestProduct(ctx, orderName, deliveryv1alpha1.OCISource{
+				OCI:     "oci://registry.kokumi.svc.cluster.local:5000/order/edit-revert",
+				Version: "0.1.0",
+			})
 			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Order{
 				Name: orderName, Namespace: ns,
 				Spec: deliveryv1alpha1.OrderSpec{
+					ProductRef: deliveryv1alpha1.ProductRef{Name: orderName},
 					Promotion: &deliveryv1alpha1.PromotionSpec{
 						Mode: deliveryv1alpha1.PromotionModeManual,
-					},
-					Source: &deliveryv1alpha1.OCISource{
-						OCI:     "oci://registry.kokumi.svc.cluster.local:5000/order/edit-revert",
-						Version: "0.1.0",
 					},
 					Destination: &deliveryv1alpha1.OCIDestination{
 						OCI: "oci://registry.kokumi.svc.cluster.local:5000/preparation/edit-revert",
@@ -459,8 +466,8 @@ var _ = Describe("Order Controller", func() {
 
 			order := getOrder()
 			order.Spec.Edits = []deliveryv1alpha1.Patch{{
-				Target: deliveryv1alpha1.PatchTarget{Kind: "Deployment", Name: "app"},
-				Set:    map[string]string{".spec.replicas": "3"},
+				Target: deliveryv1alpha1.PatchTarget{Kind: testDeploymentKind, Name: testDeploymentName},
+				Set:    map[string]string{testReplicasPath: "3"},
 			}}
 			Expect(k8sClient.Update(ctx, order)).To(Succeed())
 
@@ -625,7 +632,7 @@ var _ = Describe("Order Controller", func() {
 			Expect(config.Order.UID).To(Equal(order.UID))
 			Expect(config.ConfigHash).To(Equal(order.Status.LatestConfigHash))
 			Expect(config.Parent).To(BeEmpty())
-			Expect(config.Menu).To(BeNil())
+			Expect(config.Product.Name).To(Equal(testProductName))
 			Expect(config.Source.OCI).To(Equal(testOCIRef))
 			Expect(config.Source.Version).To(Equal(testVersion))
 			Expect(config.Source.Digest).To(HavePrefix("sha256:"))
@@ -665,72 +672,369 @@ var _ = Describe("Order Controller", func() {
 			Expect(fake.Pushes).To(HaveLen(1))
 		})
 
-		It("renders again when the Menu changes what is rendered", func() {
+		It("renders again when the Product changes what is rendered", func() {
 			const (
-				orderName = "order-of-menu"
-				menuName  = "menu-for-order"
+				orderName   = "order-of-product"
+				productName = "product-for-order"
 			)
-			menu := &deliveryv1alpha1.Menu{
-				Namespace: ns,
-				Name:      menuName,
-				Spec: deliveryv1alpha1.MenuSpec{
-					Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion},
-					Overrides: deliveryv1alpha1.OverridePolicy{
-						Values:  deliveryv1alpha1.ValueOverridePolicy{Policy: deliveryv1alpha1.OverridePolicyNone},
-						Patches: deliveryv1alpha1.PatchOverridePolicy{Policy: deliveryv1alpha1.OverridePolicyAll},
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, menu)).To(Succeed())
-			setMenuSource := func(version string) {
-				Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: menuName}, menu)).To(Succeed())
-				menu.Status.ConfigHash = "sha256:menu-" + version
-				menu.Status.Source = &deliveryv1alpha1.MenuSourceStatus{OCI: testOCIRef, Version: version}
-				Expect(k8sClient.Status().Update(ctx, menu)).To(Succeed())
-			}
-			setMenuSource(testVersion)
+			product := createTestProduct(ctx, productName, deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion})
 
 			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Order{
 				Name: orderName, Namespace: ns,
 				Spec: deliveryv1alpha1.OrderSpec{
-					MenuRef:   &deliveryv1alpha1.MenuRef{Name: menuName},
-					Promotion: &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
+					ProductRef: deliveryv1alpha1.ProductRef{Name: productName},
+					Promotion:  &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
 				},
 			})).To(Succeed())
 			DeferCleanup(func() {
 				cleanupOrder(orderName)
-				_ = k8sClient.Delete(ctx, menu)
+				deleteTestProduct(ctx, productName)
 			})
 
 			Expect(reconcileOrder(orderName)).To(Succeed())
 			Expect(listPreparations(orderName)).To(HaveLen(1))
 			config := lastConfig()
-			Expect(config.Menu.Name).To(Equal(menuName))
-			Expect(config.Menu.ConfigHash).To(Equal("sha256:menu-" + testVersion))
-			Expect(string(config.Intent)).NotTo(ContainSubstring("menuRef"))
+			Expect(config.Product.Name).To(Equal(productName))
+			Expect(config.Product.ConfigHash).To(Equal(product.Status.ConfigHash))
+			Expect(string(config.Intent)).NotTo(ContainSubstring("productRef"))
 
-			By("leaving the Order alone while the Menu is unchanged")
+			By("leaving the Order alone while the Product is unchanged")
 			Expect(reconcileOrder(orderName)).To(Succeed())
 			Expect(listPreparations(orderName)).To(HaveLen(1))
 
-			By("bumping the Menu's source version without touching the Order")
-			setMenuSource("0.2.0")
+			By("bumping the Product's source version without touching the Order")
+			resolveTestProduct(ctx, productName, testOCIRef, "0.2.0")
 			Expect(reconcileOrder(orderName)).To(Succeed())
 			Expect(listPreparations(orderName)).To(HaveLen(2))
 			Expect(lastConfig().Source.Version).To(Equal("0.2.0"))
 		})
 	})
+
+	Context("When the Product is missing or not ready", func() {
+		const (
+			ns          = testNamespace
+			orderName   = "order-waiting"
+			productName = "product-arriving-late"
+		)
+
+		ctx := context.Background()
+
+		var (
+			fake *oci.FakeClient
+			r    *OrderReconciler
+		)
+
+		BeforeEach(func() {
+			fake = oci.NewFakeClient(afero.NewMemMapFs())
+			r = newTestOrderReconciler(fake)
+
+			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Order{
+				Name: orderName, Namespace: ns,
+				Spec: deliveryv1alpha1.OrderSpec{
+					ProductRef: deliveryv1alpha1.ProductRef{Name: productName},
+					Promotion:  &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
+				},
+			})).To(Succeed())
+			DeferCleanup(func() {
+				_ = k8sClient.DeleteAllOf(ctx, &deliveryv1alpha1.Preparation{},
+					client.InNamespace(ns), client.MatchingLabels{deliveryv1alpha1.LabelOrder: orderName})
+				order := &deliveryv1alpha1.Order{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: orderName}, order); err == nil {
+					order.SetFinalizers(nil)
+					_ = k8sClient.Update(ctx, order)
+					_ = k8sClient.Delete(ctx, order)
+				}
+				deleteTestProduct(ctx, productName)
+			})
+		})
+
+		reconcileOrder := func() {
+			_, err := r.Reconcile(ctx, reconcile.Request{Namespace: ns, Name: orderName})
+			Expect(err).NotTo(HaveOccurred())
+		}
+
+		readyOf := func() *metav1.Condition {
+			order := &deliveryv1alpha1.Order{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: orderName}, order)).To(Succeed())
+			return meta.FindStatusCondition(order.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)
+		}
+
+		preparations := func() []deliveryv1alpha1.Preparation {
+			list := &deliveryv1alpha1.PreparationList{}
+			Expect(k8sClient.List(ctx, list, client.InNamespace(ns),
+				client.MatchingLabels{deliveryv1alpha1.LabelOrder: orderName})).To(Succeed())
+			return list.Items
+		}
+
+		It("waits for the Product and renders once it is ready", func() {
+			By("waiting while the Product does not exist")
+			reconcileOrder()
+			Expect(readyOf().Status).To(Equal(metav1.ConditionFalse))
+			Expect(readyOf().Reason).To(Equal(deliveryv1alpha1.ReasonProductNotFound))
+			Expect(preparations()).To(BeEmpty())
+
+			By("waiting while the Product has not resolved its source")
+			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Product{
+				Name: productName, Namespace: ns,
+				Spec: deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion}},
+			})).To(Succeed())
+			reconcileOrder()
+			Expect(readyOf().Reason).To(Equal(deliveryv1alpha1.ReasonProductNotReady))
+			Expect(preparations()).To(BeEmpty())
+
+			By("rendering once the Product is ready")
+			resolveTestProduct(ctx, productName, testOCIRef, testVersion)
+			reconcileOrder()
+			Expect(readyOf().Status).To(Equal(metav1.ConditionTrue))
+			Expect(preparations()).To(HaveLen(1))
+
+			By("pulling exactly the artifact the Product resolved")
+			Expect(fake.Pulls).To(HaveLen(1))
+			Expect(fake.Pulls[0].Digest).To(Equal(oci.FakeDigest))
+		})
+
+		It("waits while its Product is being deleted", func() {
+			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Product{
+				Name: productName, Namespace: ns,
+				// Keeps the deleted Product, as the protection finalizer does.
+				Finalizers: []string{deliveryv1alpha1.FinalizerProductProtection},
+				Spec:       deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion}},
+			})).To(Succeed())
+			resolveTestProduct(ctx, productName, testOCIRef, testVersion)
+			Expect(k8sClient.Delete(ctx, getTestProduct(ctx, productName))).To(Succeed())
+
+			reconcileOrder()
+			Expect(readyOf().Status).To(Equal(metav1.ConditionFalse))
+			Expect(readyOf().Reason).To(Equal(deliveryv1alpha1.ReasonProductDeleting))
+			Expect(preparations()).To(BeEmpty())
+		})
+
+		It("does not render again when the Product comes back unchanged", func() {
+			createTestProduct(ctx, productName, deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion})
+			reconcileOrder()
+			Expect(preparations()).To(HaveLen(1))
+
+			By("waiting while a Product spec change is not resolved yet")
+			product := &deliveryv1alpha1.Product{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: productName}, product)).To(Succeed())
+			product.Spec.Patches = []deliveryv1alpha1.Patch{{
+				Target: deliveryv1alpha1.PatchTarget{Kind: testDeploymentKind, Name: testDeploymentName},
+				Set:    map[string]string{testReplicasPath: "2"},
+			}}
+			Expect(k8sClient.Update(ctx, product)).To(Succeed())
+			reconcileOrder()
+			Expect(readyOf().Reason).To(Equal(deliveryv1alpha1.ReasonProductNotReady))
+
+			By("reverting the change and resolving the Product again")
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: productName}, product)).To(Succeed())
+			product.Spec.Patches = nil
+			Expect(k8sClient.Update(ctx, product)).To(Succeed())
+			resolveTestProduct(ctx, productName, testOCIRef, testVersion)
+			reconcileOrder()
+			Expect(readyOf().Status).To(Equal(metav1.ConditionTrue))
+			Expect(preparations()).To(HaveLen(1))
+		})
+	})
+
+	Context("When the Order breaks what its Product allows", func() {
+		const ns = testNamespace
+
+		ctx := context.Background()
+
+		create := func(orderName string, product *deliveryv1alpha1.Product, spec deliveryv1alpha1.OrderSpec) {
+			Expect(k8sClient.Create(ctx, product)).To(Succeed())
+			resolveTestProduct(ctx, product.Name, testOCIRef, testVersion)
+			spec.ProductRef = deliveryv1alpha1.ProductRef{Name: product.Name}
+			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Order{Name: orderName, Namespace: ns, Spec: spec})).To(Succeed())
+			DeferCleanup(func() {
+				order := &deliveryv1alpha1.Order{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: orderName}, order); err == nil {
+					order.SetFinalizers(nil)
+					_ = k8sClient.Update(ctx, order)
+					_ = k8sClient.Delete(ctx, order)
+				}
+				deleteTestProduct(ctx, product.Name)
+			})
+		}
+
+		expectRejected := func(orderName, message string) {
+			r := newTestOrderReconciler(oci.NewFakeClient(afero.NewMemMapFs()))
+			_, err := r.Reconcile(ctx, reconcile.Request{Namespace: ns, Name: orderName})
+			Expect(err).To(HaveOccurred())
+			Expect(stderrors.Is(err, reconcile.TerminalError(nil))).To(BeTrue(), "retrying does not help")
+
+			order := &deliveryv1alpha1.Order{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: orderName}, order)).To(Succeed())
+			ready := meta.FindStatusCondition(order.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)
+			Expect(ready.Status).To(Equal(metav1.ConditionFalse))
+			Expect(ready.Reason).To(Equal("ProcessingFailed"))
+			Expect(ready.Message).To(ContainSubstring(message))
+		}
+
+		It("rejects patches the Product does not allow", func() {
+			create("order-forbidden-patch", &deliveryv1alpha1.Product{
+				Name: "product-restricted", Namespace: ns,
+				Spec: deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion}},
+			}, deliveryv1alpha1.OrderSpec{
+				Patches: []deliveryv1alpha1.Patch{{
+					Target: deliveryv1alpha1.PatchTarget{Kind: testDeploymentKind, Name: testDeploymentName},
+					Set:    map[string]string{testReplicasPath: "3"},
+				}},
+			})
+
+			expectRejected("order-forbidden-patch", "patch target Deployment/app is not allowed")
+			Expect(getTestProduct(ctx, "product-restricted").Spec.Overrides.Patches.Policy).
+				To(Equal(deliveryv1alpha1.OverridePolicyNone), "Products allow no patches by default")
+		})
+
+		It("rejects values on a Product that does not render with Helm", func() {
+			create("order-values-no-helm", &deliveryv1alpha1.Product{
+				Name: "product-manifests", Namespace: ns,
+				Spec: deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion}},
+			}, deliveryv1alpha1.OrderSpec{
+				Values: &apiextensionsv1.JSON{Raw: []byte(`{"replicaCount":3}`)},
+			})
+
+			expectRejected("order-values-no-helm", "only allowed when the Product renders with Helm")
+		})
+	})
+
+	Context("When the Product of an Order is changed", func() {
+		It("rejects the change", func() {
+			ctx := context.Background()
+			order := &deliveryv1alpha1.Order{
+				Name: "order-immutable-product", Namespace: testNamespace,
+				Spec: deliveryv1alpha1.OrderSpec{ProductRef: deliveryv1alpha1.ProductRef{Name: "one"}},
+			}
+			Expect(k8sClient.Create(ctx, order)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, order) })
+
+			order.Spec.ProductRef.Name = "other"
+			err := k8sClient.Update(ctx, order)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("productRef is immutable"))
+		})
+	})
+
+	Context("When the values of an Order are not an object", func() {
+		It("rejects the Order", func() {
+			err := k8sClient.Create(context.Background(), &deliveryv1alpha1.Order{
+				Name: "order-values-string", Namespace: testNamespace,
+				Spec: deliveryv1alpha1.OrderSpec{
+					ProductRef: deliveryv1alpha1.ProductRef{Name: "one"},
+					Values:     &apiextensionsv1.JSON{Raw: []byte(`"replicaCount=3"`)},
+				},
+			})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("must be of type object"))
+		})
+	})
 })
 
-// createTestOrder creates an Order with the given promotion mode and optional
-// approval policy; an existing Order is left as is.
+const (
+	// testProductName is the Product the Orders of createTestOrder render from.
+	testProductName = "test-product"
+
+	testDeploymentKind = "Deployment"
+	testDeploymentName = "app"
+	testReplicasPath   = ".spec.replicas"
+)
+
+// newTestOrderReconciler returns an OrderReconciler pushing to fake.
+func newTestOrderReconciler(fake *oci.FakeClient) *OrderReconciler {
+	return &OrderReconciler{
+		Client:         k8sClient,
+		Scheme:         k8sClient.Scheme(),
+		Pipeline:       artifact.NewPipeline(artifact.NewStore(fake, afero.NewMemMapFs(), "")),
+		PantryResolver: credential.NewKubeResolver(k8sClient),
+		BuilderID:      testBuilderID,
+	}
+}
+
+// createTestProduct creates a Product with the given source, whose Orders
+// may change anything, and marks it resolved as the Product controller would;
+// an existing Product is only resolved again.
+func createTestProduct(ctx context.Context, name string, source deliveryv1alpha1.OCISource) *deliveryv1alpha1.Product {
+	product := &deliveryv1alpha1.Product{
+		Name:      name,
+		Namespace: testNamespace,
+		Spec: deliveryv1alpha1.ProductSpec{
+			Source: source,
+			Overrides: deliveryv1alpha1.Overrides{
+				Values:  deliveryv1alpha1.ValueOverrides{Policy: deliveryv1alpha1.OverridePolicyAll},
+				Patches: deliveryv1alpha1.PatchOverrides{Policy: deliveryv1alpha1.OverridePolicyAll},
+			},
+		},
+	}
+	if err := k8sClient.Create(ctx, product); err != nil && !errors.IsAlreadyExists(err) {
+		Expect(err).NotTo(HaveOccurred())
+	}
+
+	resolvedURL := source.OCI
+	if source.PantryRef != nil {
+		pantry := &deliveryv1alpha1.Pantry{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: source.PantryRef.Name}, pantry)).To(Succeed())
+		resolvedURL = pantry.Spec.URL
+	}
+
+	return resolveTestProduct(ctx, name, resolvedURL, source.Version)
+}
+
+// resolveTestProduct publishes the source at sourceOCI and sourceVersion,
+// resolved to oci.FakeDigest, in the Product's status, as the Product
+// controller does once it has resolved the current generation.
+func resolveTestProduct(ctx context.Context, name, sourceOCI, sourceVersion string) *deliveryv1alpha1.Product {
+	product := getTestProduct(ctx, name)
+
+	product.Status.ConfigHash = "sha256:product-" + sourceVersion
+	product.Status.Source = &deliveryv1alpha1.ProductSourceStatus{
+		OCI:       sourceOCI,
+		Version:   sourceVersion,
+		PantryRef: product.Spec.Source.PantryRef,
+		Digest:    oci.FakeDigest,
+	}
+	meta.SetStatusCondition(&product.Status.Conditions, metav1.Condition{
+		Type:               deliveryv1alpha1.ConditionTypeReady,
+		Status:             metav1.ConditionTrue,
+		Reason:             "Resolved",
+		Message:            "Source resolved",
+		ObservedGeneration: product.Generation,
+	})
+	Expect(k8sClient.Status().Update(ctx, product)).To(Succeed())
+
+	return product
+}
+
+// getTestProduct returns the named Product.
+func getTestProduct(ctx context.Context, name string) *deliveryv1alpha1.Product {
+	product := &deliveryv1alpha1.Product{}
+	Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: name}, product)).To(Succeed())
+	return product
+}
+
+// deleteTestProduct deletes the named Product, bypassing its protection.
+func deleteTestProduct(ctx context.Context, name string) {
+	product := &deliveryv1alpha1.Product{}
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: name}, product); err != nil {
+		return
+	}
+	product.SetFinalizers(nil)
+	_ = k8sClient.Update(ctx, product)
+	_ = k8sClient.Delete(ctx, product)
+}
+
+// createTestOrder creates an Order of the resolved Product testProductName
+// with the given promotion mode and optional approval policy; an existing
+// Order is left as is.
 func createTestOrder(ctx context.Context, name string, mode deliveryv1alpha1.PromotionMode, policy ...*deliveryv1alpha1.ApprovalPolicy) {
+	createTestProduct(ctx, testProductName, deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion})
+
 	order := &deliveryv1alpha1.Order{
 		Name:      name,
 		Namespace: testNamespace,
 		Spec: deliveryv1alpha1.OrderSpec{
-			Source:    &deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion},
-			Promotion: &deliveryv1alpha1.PromotionSpec{Mode: mode},
+			ProductRef: deliveryv1alpha1.ProductRef{Name: testProductName},
+			Promotion:  &deliveryv1alpha1.PromotionSpec{Mode: mode},
 		},
 	}
 	if len(policy) > 0 {

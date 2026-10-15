@@ -1,0 +1,22 @@
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Order
+metadata:
+  labels:
+    app.kubernetes.io/name: kokumi
+    app.kubernetes.io/managed-by: kustomize
+  name: podinfo-dev
+spec:
+  productRef:
+    name: podinfo
+
+  values:
+    ui:
+      message: "Hello from dev"
+    replicaCount: 1
+
+  destination:
+    oci: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/podinfo-dev
+
+  # Every change to the Product or this Order deploys right away.
+  promotion:
+    mode: Automatic

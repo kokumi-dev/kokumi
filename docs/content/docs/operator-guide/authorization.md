@@ -176,7 +176,7 @@ answer.
 | `settings.general:update` | `update` the `kitchens/default` object in the install namespace | Settings, General tab |
 | `settings.auth:update` | `update` the `kitchens/default` object in the install namespace | Settings, Authentication tab |
 | `orders:create` / `orders:update` / `orders:delete` | `create` / `update` / `delete` `orders` | New, Edit, Delete Order; edits on rendered files |
-| `menus:create` / `menus:update` / `menus:delete` | `create` / `update` / `delete` `menus` | New, Edit, Delete Menu |
+| `products:create` / `products:update` / `products:delete` | `create` / `update` / `delete` `products` | New, Edit, Delete Product |
 | `pantries:create` / `pantries:update` / `pantries:delete` | `create` / `patch` / `delete` `pantries` | New, Edit, Delete Pantry |
 | `preparations:promote` | `create` and `update` `servings` | Promote and Rollback |
 | `preparations:approve` | `approve` `preparations`, and the user signed in with OIDC | Approve and Request changes |

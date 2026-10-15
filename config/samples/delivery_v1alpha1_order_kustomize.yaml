@@ -6,9 +6,8 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: podinfo-kustomize
 spec:
-  source:
-    oci: oci://ghcr.io/stefanprodan/manifests/podinfo
-    version: "6.14.1"
+  productRef:
+    name: podinfo-kustomize
 
   patches:
     - target:

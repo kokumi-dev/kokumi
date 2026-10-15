@@ -11,12 +11,17 @@ import (
 	"github.com/spf13/afero"
 )
 
+// FakeDigest is the digest the FakeClient reports for every artifact it pulls
+// or resolves.
+const FakeDigest = "sha256:fdf90e00e76bf3f0d2e5042c4c4e6c42a6d38c1e2b4f5a7d8e9f0a1b2c3d4e5f"
+
 // FakeClient implements Client intended for testing. It records what is
 // pushed so that the read methods can serve it back. The zero value is usable
 // for everything but Pull, which needs the filesystem given to NewFakeClient.
 type FakeClient struct {
 	fs          afero.Fs
 	Annotations map[string]string
+	Pulls       []Reference
 	Pushes      []PushedArtifact
 	Copies      []CopiedRefs
 	Referrers   []PushedReferrer
@@ -64,16 +69,19 @@ func NewFakeClient(fs afero.Fs) *FakeClient {
 	return &FakeClient{fs: fs}
 }
 
-// Pull writes a minimal stub manifest.yaml into targetDir so that callers that
-// expect a manifest after pulling an artifact do not fail. It returns the
-// Annotations configured on the client (may be nil).
+// Pull records the reference and writes a minimal stub manifest.yaml into
+// targetDir so that callers that expect a manifest after pulling an artifact
+// do not fail. It returns FakeDigest and the Annotations configured on the
+// client (may be nil).
 func (c *FakeClient) Pull(ctx context.Context, ref Reference, targetDir string) (string, string, map[string]string, error) {
+	c.Pulls = append(c.Pulls, ref)
+
 	manifestPath := filepath.Join(targetDir, "manifest.yaml")
 	if err := afero.WriteFile(c.fs, manifestPath, []byte("---\n"), 0600); err != nil {
 		return "", "", nil, err
 	}
 
-	return "", "sha256:fdf90e00e76bf3f0d2e5042c4c4e6c42a6d38c1e2b4f5a7d8e9f0a1b2c3d4e5f", c.Annotations, nil
+	return "", FakeDigest, c.Annotations, nil
 }
 
 // Push records the push and returns a unique dest digest per call. Real ORAS
@@ -114,9 +122,9 @@ func (c *FakeClient) ListTags(_ context.Context, _ Reference) ([]string, error) 
 	return nil, nil
 }
 
-// Resolve returns a stable fake digest.
+// Resolve returns FakeDigest.
 func (c *FakeClient) Resolve(_ context.Context, _ Reference) (string, error) {
-	return "sha256:fdf90e00e76bf3f0d2e5042c4c4e6c42a6d38c1e2b4f5a7d8e9f0a1b2c3d4e5f", nil
+	return FakeDigest, nil
 }
 
 // Copy records the copy and returns nil.

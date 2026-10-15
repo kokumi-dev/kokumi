@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cmp"
 	"encoding/json"
 	"net/http"
 	"slices"
@@ -57,12 +58,30 @@ func conditionsToDTO(conditions []metav1.Condition) []ConditionDTO {
 	return out
 }
 
+// UI states that are not the reason of a Ready condition.
+const (
+	stateFailed   = "Failed"
+	stateWaiting  = "Waiting"
+	stateDeleting = "Deleting"
+)
+
+// waitingReasons are the Ready reasons of an Order that waits for its
+// Product rather than having failed.
+var waitingReasons = []string{
+	deliveryv1alpha1.ReasonProductNotFound,
+	deliveryv1alpha1.ReasonProductNotReady,
+	deliveryv1alpha1.ReasonProductDeleting,
+}
+
 // stateFromConditions derives a UI-friendly state string from a conditions slice.
 func stateFromConditions(conditions []metav1.Condition) string {
 	for _, c := range conditions {
 		if c.Type == deliveryv1alpha1.ConditionTypeReady {
 			if c.Status == metav1.ConditionFalse {
-				return "Failed"
+				if slices.Contains(waitingReasons, c.Reason) {
+					return stateWaiting
+				}
+				return stateFailed
 			}
 			return c.Reason
 		}
@@ -73,45 +92,16 @@ func stateFromConditions(conditions []metav1.Condition) string {
 // orderToDTO converts a Order CRD object and the name of its currently active
 // Preparation (from the linked Serving) into a OrderDTO.
 func orderToDTO(r deliveryv1alpha1.Order, activePreparation string) OrderDTO {
-	patches := make([]PatchDTO, len(r.Spec.Patches))
-	for i, p := range r.Spec.Patches {
-		patches[i] = PatchDTO{
-			Target: PatchTargetDTO{
-				Kind:      p.Target.Kind,
-				Name:      p.Target.Name,
-				Namespace: p.Target.Namespace,
-			},
-			Set: p.Set,
-		}
-	}
-
-	edits := make([]PatchDTO, len(r.Spec.Edits))
-	for i, e := range r.Spec.Edits {
-		edits[i] = PatchDTO{
-			Target: PatchTargetDTO{
-				Kind:      e.Target.Kind,
-				Name:      e.Target.Name,
-				Namespace: e.Target.Namespace,
-			},
-			Set: e.Set,
-		}
-	}
-
 	dto := OrderDTO{
-		Name:      r.Name,
-		Namespace: r.Namespace,
-		Labels:    r.Labels,
+		Name:       r.Name,
+		Namespace:  r.Namespace,
+		Labels:     r.Labels,
+		ProductRef: ProductRefDTO{Name: r.Spec.ProductRef.Name},
 		Destination: func() OCIDestinationDTO {
-			if r.Spec.Destination == nil {
-				return OCIDestinationDTO{}
+			if d := destinationToDTO(r.Spec.Destination); d != nil {
+				return *d
 			}
-			d := OCIDestinationDTO{OCI: r.Spec.Destination.OCI}
-			if r.Spec.Destination.PantryRef != nil {
-				d.PantryRef = &PantryRefDTO{
-					Name: r.Spec.Destination.PantryRef.Name,
-				}
-			}
-			return d
+			return OCIDestinationDTO{}
 		}(),
 		EffectiveDestination: func() string {
 			if r.Spec.Destination == nil {
@@ -126,9 +116,8 @@ func orderToDTO(r deliveryv1alpha1.Order, activePreparation string) OrderDTO {
 			}
 			return artifact.DefaultDestination(r.Namespace, r.Name)
 		}(),
-		Render:            renderToDTO(r.Spec.Render),
-		Patches:           patches,
-		Edits:             edits,
+		Patches:           patchesToDTO(r.Spec.Patches),
+		Edits:             patchesToDTO(r.Spec.Edits),
 		Mode:              string(r.EffectivePromotionMode()),
 		Approvals:         approvalPolicyToDTO(r.ApprovalPolicy()),
 		State:             stateFromConditions(r.Status.Conditions),
@@ -137,23 +126,8 @@ func orderToDTO(r deliveryv1alpha1.Order, activePreparation string) OrderDTO {
 		Conditions:        conditionsToDTO(r.Status.Conditions),
 	}
 
-	if r.Spec.Source != nil {
-		src := &OCISourceDTO{
-			OCI:     r.Spec.Source.OCI,
-			Version: r.Spec.Source.Version,
-		}
-		if r.Spec.Source.PantryRef != nil {
-			src.PantryRef = &PantryRefDTO{
-				Name: r.Spec.Source.PantryRef.Name,
-			}
-		}
-		dto.Source = src
-	}
-
-	if r.Spec.MenuRef != nil {
-		dto.MenuRef = &MenuRefDTO{
-			Name: r.Spec.MenuRef.Name,
-		}
+	if r.Spec.Values != nil {
+		dto.Values = r.Spec.Values.Raw
 	}
 
 	if !r.CreationTimestamp.IsZero() {
@@ -383,19 +357,58 @@ func patchesFromDTO(dtos []PatchDTO) []deliveryv1alpha1.Patch {
 	return patches
 }
 
-// sourceFromDTO converts an OCISourceDTO to an OCISource spec.
-// Returns nil when both oci and pantryRef are absent.
-func sourceFromDTO(dto OCISourceDTO) *deliveryv1alpha1.OCISource {
-	if dto.OCI == "" && dto.PantryRef == nil {
-		return nil
-	}
-	src := &deliveryv1alpha1.OCISource{OCI: dto.OCI, Version: dto.Version}
-	if dto.PantryRef != nil {
-		src.PantryRef = &deliveryv1alpha1.PantryRef{
-			Name: dto.PantryRef.Name,
+// patchesToDTO converts CRD patches to their DTO representation.
+func patchesToDTO(patches []deliveryv1alpha1.Patch) []PatchDTO {
+	out := make([]PatchDTO, len(patches))
+	for i, p := range patches {
+		out[i] = PatchDTO{
+			Target: PatchTargetDTO{
+				Kind:      p.Target.Kind,
+				Name:      p.Target.Name,
+				Namespace: p.Target.Namespace,
+			},
+			Set: p.Set,
 		}
 	}
-	return src
+	return out
+}
+
+// valuesFromDTO converts raw Helm values from a request body; empty and null
+// values convert to nil.
+func valuesFromDTO(raw json.RawMessage) *apiextensionsv1.JSON {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	return &apiextensionsv1.JSON{Raw: raw}
+}
+
+// pantryRefToDTO converts a PantryRef; nil stays nil.
+func pantryRefToDTO(ref *deliveryv1alpha1.PantryRef) *PantryRefDTO {
+	if ref == nil {
+		return nil
+	}
+	return &PantryRefDTO{Name: ref.Name}
+}
+
+// pantryRefFromDTO converts a PantryRefDTO; nil stays nil.
+func pantryRefFromDTO(dto *PantryRefDTO) *deliveryv1alpha1.PantryRef {
+	if dto == nil {
+		return nil
+	}
+	return &deliveryv1alpha1.PantryRef{Name: dto.Name}
+}
+
+// sourceToDTO converts an OCISource to its DTO representation.
+func sourceToDTO(src deliveryv1alpha1.OCISource) OCISourceDTO {
+	return OCISourceDTO{OCI: src.OCI, Version: src.Version, PantryRef: pantryRefToDTO(src.PantryRef)}
+}
+
+// destinationToDTO converts an OCIDestination; nil stays nil.
+func destinationToDTO(dest *deliveryv1alpha1.OCIDestination) *OCIDestinationDTO {
+	if dest == nil {
+		return nil
+	}
+	return &OCIDestinationDTO{OCI: dest.OCI, PantryRef: pantryRefToDTO(dest.PantryRef)}
 }
 
 // destinationFromDTO converts an OCIDestinationDTO pointer to an OCIDestination spec.
@@ -404,13 +417,7 @@ func destinationFromDTO(dto *OCIDestinationDTO) *deliveryv1alpha1.OCIDestination
 	if dto == nil || (dto.OCI == "" && dto.PantryRef == nil) {
 		return nil
 	}
-	dest := &deliveryv1alpha1.OCIDestination{OCI: dto.OCI}
-	if dto.PantryRef != nil {
-		dest.PantryRef = &deliveryv1alpha1.PantryRef{
-			Name: dto.PantryRef.Name,
-		}
-	}
-	return dest
+	return &deliveryv1alpha1.OCIDestination{OCI: dto.OCI, PantryRef: pantryRefFromDTO(dto.PantryRef)}
 }
 
 // activePreparationFor returns the observed preparation name for the Order
@@ -506,143 +513,103 @@ func servingsToDTO(servings []deliveryv1alpha1.Serving) []ServingDTO {
 	return out
 }
 
-// --- Menu Conversions ---
+// --- Product Conversions ---
 
-// menuToDTO converts a Menu CRD object into a MenuDTO.
-func menuToDTO(m deliveryv1alpha1.Menu) MenuDTO {
-	patches := make([]PatchDTO, len(m.Spec.Patches))
-	for i, p := range m.Spec.Patches {
-		patches[i] = PatchDTO{
-			Target: PatchTargetDTO{
-				Kind:      p.Target.Kind,
-				Name:      p.Target.Name,
-				Namespace: p.Target.Namespace,
-			},
-			Set: p.Set,
+// productToDTO converts a Product CRD object into a ProductDTO.
+func productToDTO(p deliveryv1alpha1.Product) ProductDTO {
+	dto := ProductDTO{
+		Name:       p.Name,
+		Namespace:  p.Namespace,
+		Source:     sourceToDTO(p.Spec.Source),
+		Vendor:     destinationToDTO(p.Spec.Vendor),
+		Render:     renderToDTO(p.Spec.Render),
+		Patches:    patchesToDTO(p.Spec.Patches),
+		Overrides:  overridesToDTO(p.Spec.Overrides),
+		State:      stateFromConditions(p.Status.Conditions),
+		Conditions: conditionsToDTO(p.Status.Conditions),
+	}
+	if p.DeletionTimestamp != nil {
+		t := p.DeletionTimestamp.UTC()
+		dto.DeletionTimestamp = &t
+		dto.State = stateDeleting
+	}
+	if src := p.Status.Source; src != nil {
+		dto.ResolvedSource = &ProductSourceStatusDTO{
+			OCI:       src.OCI,
+			Version:   src.Version,
+			PantryRef: pantryRefToDTO(src.PantryRef),
+			Digest:    src.Digest,
 		}
 	}
-
-	dto := MenuDTO{
-		Name:      m.Name,
-		Namespace: m.Namespace,
-		Source: OCISourceDTO{
-			OCI:     m.Spec.Source.OCI,
-			Version: m.Spec.Source.Version,
-		},
-		Vendor:    vendorSpecToDTO(m.Spec.Vendor),
-		Render:    renderToDTO(m.Spec.Render),
-		Patches:   patches,
-		Overrides: overridePolicyToDTO(m.Spec.Overrides),
-		Defaults: MenuDefaultsDTO{
-			Mode: string(m.Spec.Defaults.Mode),
-		},
-		State:      stateFromConditions(m.Status.Conditions),
-		Conditions: conditionsToDTO(m.Status.Conditions),
-	}
-	if !m.CreationTimestamp.IsZero() {
-		t := m.CreationTimestamp.UTC()
+	if !p.CreationTimestamp.IsZero() {
+		t := p.CreationTimestamp.UTC()
 		dto.CreatedAt = &t
 	}
 	return dto
 }
 
-// vendorSpecToDTO converts a Menu VendorSpec into its DTO representation.
-func vendorSpecToDTO(v *deliveryv1alpha1.VendorSpec) *VendorSpecDTO {
-	if v == nil {
-		return nil
-	}
-	dst := VendorDestinationDTO{OCI: v.Destination.OCI}
-	if v.Destination.PantryRef != nil {
-		dst.PantryRef = &PantryRefDTO{Name: v.Destination.PantryRef.Name}
-	}
-	mode := string(v.Mode)
-	if mode == "" {
-		mode = string(deliveryv1alpha1.VendorModeRender)
-	}
-	return &VendorSpecDTO{Mode: mode, Destination: dst}
-}
-
-// vendorSpecFromDTO converts a VendorSpecDTO into a Menu VendorSpec.
-// Returns nil when the DTO is nil. An empty destination is valid — the
-// controller resolves it to the in-cluster default registry.
-func vendorSpecFromDTO(dto *VendorSpecDTO) *deliveryv1alpha1.VendorSpec {
-	if dto == nil {
-		return nil
-	}
-	v := &deliveryv1alpha1.VendorSpec{
-		Mode: deliveryv1alpha1.VendorModeRender,
-	}
-	if dto.Mode != "" {
-		v.Mode = deliveryv1alpha1.VendorMode(dto.Mode)
-	}
-	v.Destination.OCI = dto.Destination.OCI
-	if dto.Destination.PantryRef != nil {
-		v.Destination.PantryRef = &deliveryv1alpha1.PantryRef{Name: dto.Destination.PantryRef.Name}
-	}
-	return v
-}
-
-// overridePolicyToDTO converts an OverridePolicy to its DTO representation.
-func overridePolicyToDTO(op deliveryv1alpha1.OverridePolicy) OverridePolicyDTO {
-	valDTO := ValueOverridePolicyDTO{
-		Policy:  string(op.Values.Policy),
-		Allowed: op.Values.Allowed,
-	}
-
-	allowedPatches := make([]AllowedPatchTargetDTO, len(op.Patches.Allowed))
-	for i, a := range op.Patches.Allowed {
-		allowedPatches[i] = AllowedPatchTargetDTO{
-			Target: PatchTargetDTO{
-				Kind:      a.Target.Kind,
-				Name:      a.Target.Name,
-				Namespace: a.Target.Namespace,
-			},
-			Paths: a.Paths,
-		}
-	}
-
-	return OverridePolicyDTO{
-		Values: valDTO,
-		Patches: PatchOverridePolicyDTO{
-			Policy:  string(op.Patches.Policy),
-			Allowed: allowedPatches,
-		},
-	}
-}
-
-// menusToDTO converts a slice of Menu CRD objects into MenuDTOs.
-func menusToDTO(menus []deliveryv1alpha1.Menu) []MenuDTO {
-	out := make([]MenuDTO, len(menus))
-	for i, m := range menus {
-		out[i] = menuToDTO(m)
+// productsToDTO converts a slice of Product CRD objects into ProductDTOs.
+func productsToDTO(products []deliveryv1alpha1.Product) []ProductDTO {
+	out := make([]ProductDTO, len(products))
+	for i, p := range products {
+		out[i] = productToDTO(p)
 	}
 	return out
 }
 
-// overridePolicyFromDTO converts an OverridePolicyDTO into the CRD type.
-func overridePolicyFromDTO(dto OverridePolicyDTO) deliveryv1alpha1.OverridePolicy {
-	allowed := make([]deliveryv1alpha1.AllowedPatchTarget, len(dto.Patches.Allowed))
-	for i, a := range dto.Patches.Allowed {
-		allowed[i] = deliveryv1alpha1.AllowedPatchTarget{
-			Target: deliveryv1alpha1.PatchTarget{
-				Kind:      a.Target.Kind,
-				Name:      a.Target.Name,
-				Namespace: a.Target.Namespace,
-			},
-			Paths: a.Paths,
-		}
+// productSpecFromDTO builds a ProductSpec from the fields of a create or
+// update request.
+func productSpecFromDTO(source OCISourceDTO, vendor *OCIDestinationDTO, render *RenderDTO, patches []PatchDTO, overrides OverridesDTO) deliveryv1alpha1.ProductSpec {
+	spec := deliveryv1alpha1.ProductSpec{
+		Source:    deliveryv1alpha1.OCISource{OCI: source.OCI, Version: source.Version, PantryRef: pantryRefFromDTO(source.PantryRef)},
+		Render:    renderFromDTO(render),
+		Patches:   patchesFromDTO(patches),
+		Overrides: overridesFromDTO(overrides),
 	}
+	// An empty vendor destination is valid: the controller vendors to the
+	// in-cluster registry.
+	if vendor != nil {
+		spec.Vendor = &deliveryv1alpha1.OCIDestination{OCI: vendor.OCI, PantryRef: pantryRefFromDTO(vendor.PantryRef)}
+	}
+	return spec
+}
 
-	return deliveryv1alpha1.OverridePolicy{
-		Values: deliveryv1alpha1.ValueOverridePolicy{
-			Policy:  deliveryv1alpha1.OverridePolicyType(dto.Values.Policy),
-			Allowed: dto.Values.Allowed,
+// overridesToDTO converts Overrides to its DTO representation. An unset
+// policy is reported as None, which is what it means.
+func overridesToDTO(o deliveryv1alpha1.Overrides) OverridesDTO {
+	dto := OverridesDTO{
+		Values: ValueOverridesDTO{
+			Policy: string(cmp.Or(o.Values.Policy, deliveryv1alpha1.OverridePolicyNone)),
+			Paths:  o.Values.Paths,
 		},
-		Patches: deliveryv1alpha1.PatchOverridePolicy{
-			Policy:  deliveryv1alpha1.OverridePolicyType(dto.Patches.Policy),
-			Allowed: allowed,
-		},
+		Patches: PatchOverridesDTO{Policy: string(cmp.Or(o.Patches.Policy, deliveryv1alpha1.OverridePolicyNone))},
 	}
+	for _, a := range o.Patches.Targets {
+		dto.Patches.Targets = append(dto.Patches.Targets, AllowedPatchTargetDTO{
+			Target: PatchTargetDTO{Kind: a.Target.Kind, Name: a.Target.Name, Namespace: a.Target.Namespace},
+			Paths:  a.Paths,
+		})
+	}
+	return dto
+}
+
+// overridesFromDTO converts an OverridesDTO into the CRD type. An empty
+// policy is left for the API server to default.
+func overridesFromDTO(dto OverridesDTO) deliveryv1alpha1.Overrides {
+	o := deliveryv1alpha1.Overrides{
+		Values: deliveryv1alpha1.ValueOverrides{
+			Policy: deliveryv1alpha1.OverridePolicy(dto.Values.Policy),
+			Paths:  dto.Values.Paths,
+		},
+		Patches: deliveryv1alpha1.PatchOverrides{Policy: deliveryv1alpha1.OverridePolicy(dto.Patches.Policy)},
+	}
+	for _, a := range dto.Patches.Targets {
+		o.Patches.Targets = append(o.Patches.Targets, deliveryv1alpha1.AllowedPatchTarget{
+			Target: deliveryv1alpha1.PatchTarget{Kind: a.Target.Kind, Name: a.Target.Name, Namespace: a.Target.Namespace},
+			Paths:  a.Paths,
+		})
+	}
+	return o
 }
 
 // pantryToDTO converts a Pantry CRD object into a PantryDTO.

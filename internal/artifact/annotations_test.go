@@ -82,13 +82,13 @@ func TestBuildAnnotations(t *testing.T) {
 			Extra: map[string]string{
 				ocispec.AnnotationDescription:     "overridden",
 				ocispec.AnnotationBaseImageDigest: "sha256:hijacked",
-				AnnotationPrerendered:             "true",
+				oci.AnnotationApprovalPolicy:      "{}",
 			},
 		})
 
 		assert.Equal(t, "overridden", annotations[ocispec.AnnotationDescription])
 		assert.Equal(t, "sha256:hijacked", annotations[ocispec.AnnotationBaseImageDigest])
-		assert.Equal(t, "true", annotations[AnnotationPrerendered])
+		assert.Equal(t, "{}", annotations[oci.AnnotationApprovalPolicy])
 	})
 }
 

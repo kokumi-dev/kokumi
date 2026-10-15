@@ -51,15 +51,6 @@ resources:
   controller: true
   domain: kokumi.dev
   group: delivery
-  kind: Menu
-  path: github.com/kokumi-dev/kokumi/api/v1alpha1
-  version: v1alpha1
-- api:
-    crdVersion: v1
-    namespaced: true
-  controller: true
-  domain: kokumi.dev
-  group: delivery
   kind: Pantry
   path: github.com/kokumi-dev/kokumi/api/v1alpha1
   version: v1alpha1
@@ -79,6 +70,15 @@ resources:
   domain: kokumi.dev
   group: delivery
   kind: Approval
+  path: github.com/kokumi-dev/kokumi/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: kokumi.dev
+  group: delivery
+  kind: Product
   path: github.com/kokumi-dev/kokumi/api/v1alpha1
   version: v1alpha1
 version: "3"
