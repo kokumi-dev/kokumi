@@ -1,155 +1,85 @@
-/*
-Copyright 2026.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
-
-// Package resolve computes the effective rendering spec for an Order by merging
-// Menu base configuration with Order-level overrides.
+// Package resolve computes the effective rendering spec of an Order by merging
+// the Order over its Product.
 // It is a pure transform layer: no I/O, no Kubernetes client calls.
 package resolve
 
 import (
 	"fmt"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 )
 
 // EffectiveSpec holds the resolved source, render config, patches, and edits
-// that the order service will use to process an Order.
+// that the Order controller renders.
 type EffectiveSpec struct {
-	Source  deliveryv1alpha1.OCISource
-	Render  *deliveryv1alpha1.Render
-	Patches []deliveryv1alpha1.Patch
-	Edits   []deliveryv1alpha1.Patch
-	// Menu identifies the Menu the spec was merged from. Nil for standalone
-	// Orders.
-	Menu *MenuIdentity
+	Source deliveryv1alpha1.OCISource
+	// SourceDigest pins Source to the digest the Product resolved, so that
+	// every variant of the Product renders the same artifact. Empty when
+	// rendering a Product spec that was not resolved, as in a preview.
+	SourceDigest string
+	Render       *deliveryv1alpha1.Render
+	Patches      []deliveryv1alpha1.Patch
+	Edits        []deliveryv1alpha1.Patch
+	// Product identifies the Product the spec was merged from.
+	Product ProductIdentity
 }
 
-// MenuIdentity identifies the Menu an EffectiveSpec was merged from.
-type MenuIdentity struct {
+// ProductIdentity identifies the Product an EffectiveSpec was merged from.
+type ProductIdentity struct {
 	Name string
-	// ConfigHash is the Menu's config hash at merge time.
+	// ConfigHash is the Product's config hash at merge time.
 	ConfigHash string
-	// PreRenderedDigest is the digest of the artifact the Menu rendered and
-	// published. Empty unless the Menu's source is pre-rendered. Orders
-	// render from exactly this artifact.
-	PreRenderedDigest string
 }
 
-// menuIdentity returns the identity of menu.
-func menuIdentity(menu *deliveryv1alpha1.Menu) *MenuIdentity {
-	identity := &MenuIdentity{Name: menu.Name, ConfigHash: menu.Status.ConfigHash}
-	if menu.Status.Source.PreRendered {
-		identity.PreRenderedDigest = menu.Status.Source.Digest
+// ProductReady reports whether Orders may render from product: its source is
+// resolved for the current generation and its Ready condition is True.
+func ProductReady(product *deliveryv1alpha1.Product) bool {
+	if product.Status.Source == nil {
+		return false
 	}
 
-	return identity
+	ready := meta.FindStatusCondition(product.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)
+
+	return ready != nil && ready.Status == metav1.ConditionTrue && ready.ObservedGeneration == product.Generation
 }
 
-// FromOrder builds an EffectiveSpec directly from a standalone Order
-// (one that has no menuRef). The Order's own fields are used as-is.
-func FromOrder(order *deliveryv1alpha1.Order) (*EffectiveSpec, error) {
-	if order.Spec.Source == nil {
-		return nil, fmt.Errorf("either source or menuRef must be set")
+// ForProduct builds the EffectiveSpec of an Order of product.
+// The Product's advertised source (status.source) is used as-is and pinned to
+// its digest; the Product's render config and patches are merged with the
+// Order's values and patches, which must be allowed by the Product's
+// overrides.
+func ForProduct(product *deliveryv1alpha1.Product, order *deliveryv1alpha1.Order) (*EffectiveSpec, error) {
+	if product.Status.Source == nil {
+		return nil, fmt.Errorf("product %q source is not resolved yet", product.Name)
 	}
 
-	return &EffectiveSpec{
-		Source:  *order.Spec.Source,
-		Render:  order.Spec.Render,
-		Patches: order.Spec.Patches,
-		Edits:   order.Spec.Edits,
-	}, nil
-}
-
-// ForMenu builds an EffectiveSpec for a Menu-based Order.
-// The Menu's advertised source (status.source) is used as-is; the Menu's base
-// config is merged with validated consumer overrides.
-// When the Menu's source is pre-rendered (vendor mode Render), the artifact is
-// treated as a plain manifest bundle: rendering config and Menu patches are
-// already baked into the artifact, value overrides are rejected, and only
-// consumer patches and edits are applied on top.
-func ForMenu(menu *deliveryv1alpha1.Menu, order *deliveryv1alpha1.Order) (*EffectiveSpec, error) {
-	if menu.Status.Source == nil {
-		return nil, fmt.Errorf("menu %q source is not resolved yet", menu.Name)
-	}
-
-	if menu.Status.Source.PreRendered {
-		return forPreRenderedMenu(menu, order)
-	}
-
-	mergedRender, err := mergeRender(menu, order)
+	render, err := mergeRender(product, order)
 	if err != nil {
-		return nil, fmt.Errorf("helm values override violation: %w", err)
+		return nil, err
 	}
 
-	mergedPatches, err := mergePatches(menu, order)
+	patches, err := mergePatches(product, order)
 	if err != nil {
-		return nil, fmt.Errorf("patch override violation: %w", err)
+		return nil, err
 	}
 
-	if err := validateEdits(menu, order); err != nil {
-		return nil, fmt.Errorf("edit override violation: %w", err)
+	if err := validateEdits(product, order); err != nil {
+		return nil, err
 	}
 
 	return &EffectiveSpec{
 		Source: deliveryv1alpha1.OCISource{
-			OCI:       menu.Status.Source.OCI,
-			Version:   menu.Status.Source.Version,
-			PantryRef: menu.Status.Source.PantryRef,
+			OCI:       product.Status.Source.OCI,
+			Version:   product.Status.Source.Version,
+			PantryRef: product.Status.Source.PantryRef,
 		},
-		Render:  mergedRender,
-		Patches: mergedPatches,
-		Edits:   order.Spec.Edits,
-		Menu:    menuIdentity(menu),
-	}, nil
-}
-
-// forPreRenderedMenu builds an EffectiveSpec for an Order consuming a
-// pre-rendered Menu artifact. The artifact already contains the rendered and
-// Menu-patched manifests, so rendering and Menu patches are dropped; consumer
-// Helm value overrides are impossible post-render and rejected; consumer
-// patches and edits still apply.
-func forPreRenderedMenu(menu *deliveryv1alpha1.Menu, order *deliveryv1alpha1.Order) (*EffectiveSpec, error) {
-	if order.Spec.Render != nil && order.Spec.Render.Helm != nil {
-		return nil, fmt.Errorf("helm rendering and values overrides are not allowed on pre-rendered Menu %q", menu.Name)
-	}
-
-	policy := menu.Spec.Overrides.Patches
-	if policy.Policy == deliveryv1alpha1.OverridePolicyRestricted {
-		for _, cp := range order.Spec.Patches {
-			if err := validatePatchAllowed(cp, policy.Allowed); err != nil {
-				return nil, fmt.Errorf("patch override violation: %w", err)
-			}
-		}
-	} else if policy.Policy == deliveryv1alpha1.OverridePolicyNone && len(order.Spec.Patches) > 0 {
-		return nil, fmt.Errorf("patch overrides are not allowed by Menu %q", menu.Name)
-	}
-
-	if err := validateEdits(menu, order); err != nil {
-		return nil, fmt.Errorf("edit override violation: %w", err)
-	}
-
-	return &EffectiveSpec{
-		Source: deliveryv1alpha1.OCISource{
-			OCI:       menu.Status.Source.OCI,
-			Version:   menu.Status.Source.Version,
-			PantryRef: menu.Status.Source.PantryRef,
-		},
-		Render:  nil,
-		Patches: order.Spec.Patches,
-		Edits:   order.Spec.Edits,
-		Menu:    menuIdentity(menu),
+		SourceDigest: product.Status.Source.Digest,
+		Render:       render,
+		Patches:      patches,
+		Edits:        order.Spec.Edits,
+		Product:      ProductIdentity{Name: product.Name, ConfigHash: product.Status.ConfigHash},
 	}, nil
 }

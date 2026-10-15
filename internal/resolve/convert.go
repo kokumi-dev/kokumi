@@ -26,24 +26,10 @@ func (e *EffectiveSpec) ToArtifactSpec() (*ArtifactSpec, error) {
 	}
 
 	return &ArtifactSpec{
-		Source:  artifact.Source{OCI: e.Source.OCI, Version: e.Source.Version},
+		Source:  artifact.Source{OCI: e.Source.OCI, Version: e.Source.Version, Digest: e.SourceDigest},
 		Render:  render,
 		Patches: toPatchSpecs(e.Patches),
 		Edits:   toPatchSpecs(e.Edits),
-	}, nil
-}
-
-// MenuArtifactSpec converts a Menu's render config and base patches into
-// pipeline inputs, used by the Menu vendor Render flow.
-func MenuArtifactSpec(menu *deliveryv1alpha1.Menu) (*ArtifactSpec, error) {
-	render, err := toRenderSpec(menu.Spec.Render)
-	if err != nil {
-		return nil, err
-	}
-
-	return &ArtifactSpec{
-		Render:  render,
-		Patches: toPatchSpecs(menu.Spec.Patches),
 	}, nil
 }
 

@@ -27,16 +27,16 @@ export interface Patch {
 }
 
 export interface HelmRender {
-  releaseName: string
-  namespace: string
-  includeCRDs: boolean
-  values: Record<string, unknown>
+  releaseName?: string
+  namespace?: string
+  includeCRDs?: boolean
+  values?: Record<string, unknown>
 }
 
 export type FileLayout = 'Single' | 'Multi'
 
 export interface ManifestRender {
-  layout: FileLayout
+  layout?: FileLayout
 }
 
 export interface Render {
@@ -52,19 +52,20 @@ export interface Condition {
   lastTransitionTime?: string
 }
 
-export interface MenuRef {
+export interface ProductRef {
   name: string
 }
 
+/** A variant of exactly one Product; only holds what differs from it. */
 export interface Order {
   name: string
   namespace: string
   labels?: Record<string, string>
-  source?: OCISource
-  menuRef?: MenuRef
+  productRef: ProductRef
+  /** Helm values; only valid when the Product renders with Helm. */
+  values?: Record<string, unknown>
   destination: OCIDestination
   effectiveDestination?: string
-  render?: Render
   patches?: Patch[]
   edits?: Patch[]
   mode: PromotionMode
@@ -75,6 +76,8 @@ export interface Order {
   conditions?: Condition[]
   createdAt?: string
 }
+
+export type PromotionMode = 'Automatic' | 'Manual'
 
 export interface ApprovalPolicy {
   requiredApprovals: number
@@ -192,7 +195,7 @@ export interface ArtifactConfig {
   parent?: string
   source: { oci: string; version: string; digest: string; pantryRef?: string }
   destination: { oci: string; pantryRef?: string }
-  menu?: { namespace: string; name: string; configHash?: string }
+  product?: { namespace: string; name: string; configHash?: string }
   renderer: Renderer
   intent?: unknown
 }
@@ -210,58 +213,69 @@ export interface Serving {
   createdAt?: string
 }
 
-// ── Menu types ────────────────────────────────────────────────────────────────
+// ── Product types ─────────────────────────────────────────────────────────────
 
-export interface ValueOverridePolicy {
-  policy: 'All' | 'Restricted' | 'None'
-  allowed?: string[]
+/** Which changes Orders may make in one category: none, only the listed ones, or any. */
+export type OverridePolicy = 'None' | 'Listed' | 'All'
+
+export const overridePolicies: readonly OverridePolicy[] = ['None', 'Listed', 'All']
+
+/** Reads a policy defensively: anything missing or unknown counts as None. */
+export function overridePolicy(policy: string | undefined): OverridePolicy {
+  return overridePolicies.find((p) => p === policy) ?? 'None'
 }
 
+/** A resource Orders may patch and edit; without a namespace it matches any namespace. */
 export interface AllowedPatchTarget {
   target: PatchTarget
+  /** JSONPaths Orders may set, e.g. .spec.replicas. */
   paths: string[]
 }
 
-export interface PatchOverridePolicy {
-  policy: 'All' | 'Restricted' | 'None'
-  allowed?: AllowedPatchTarget[]
+/** Which Helm values Orders may set. */
+export interface ValueOverrides {
+  policy: OverridePolicy
+  /** Exact dot paths, e.g. ui.message; only with policy Listed, and then not empty. */
+  paths?: string[]
 }
 
-export interface OverridePolicy {
-  values: ValueOverridePolicy
-  patches: PatchOverridePolicy
+/** Which patches and manifest edits Orders may set. */
+export interface PatchOverrides {
+  policy: OverridePolicy
+  /** Only with policy Listed, and then not empty. */
+  targets?: AllowedPatchTarget[]
 }
 
-export type PromotionMode = 'Automatic' | 'Manual'
-
-export interface MenuDefaults {
-  mode: PromotionMode
+/** What the Orders of a Product may change; each category defaults to None. */
+export interface Overrides {
+  values: ValueOverrides
+  patches: PatchOverrides
 }
 
-export interface Menu {
+/** The source a Product's Orders render from: the vendored copy when vendoring is set. */
+export interface ResolvedSource {
+  oci: string
+  version: string
+  pantryRef?: PantryRef
+  digest?: string
+}
+
+/** The complete definition of an application; its Orders are variants of it. */
+export interface Product {
   name: string
   namespace: string
   source: OCISource
-  vendor?: VendorSpec
+  /** Copies the source to this destination; {} is the in-cluster registry. */
+  vendor?: OCIDestination
   render?: Render
   patches?: Patch[]
-  overrides: OverridePolicy
-  defaults: MenuDefaults
+  overrides: Overrides
+  resolvedSource?: ResolvedSource
   state?: string
   conditions?: Condition[]
   createdAt?: string
-}
-
-export type VendorMode = 'Render' | 'Copy'
-
-export interface VendorDestination {
-  oci?: string
-  pantryRef?: { name: string }
-}
-
-export interface VendorSpec {
-  mode?: VendorMode
-  destination: VendorDestination
+  /** Set once the Product is deleted; it stays until its Orders are deleted. */
+  deletionTimestamp?: string
 }
 
 // ── Pantry types ──────────────────────────────────────────────────────────────
@@ -319,132 +333,115 @@ export interface ChartInfo {
 export interface OrderFormData {
   name: string
   namespace: string
-  menuRef?: MenuRef
-  source?: OCISource
+  productRef: ProductRef
+  /** Helm values; only sent when the Product renders with Helm. */
+  values: Record<string, unknown>
   destination: OCIDestination
-  render?: Render
   patches: Patch[]
   edits: Patch[]
   mode: PromotionMode
   approvals?: ApprovalPolicy
 }
 
-export const emptyOrderForm = (): OrderFormData => ({
+export const emptyOrderForm = (product?: { namespace: string; name: string }): OrderFormData => ({
   name: '',
-  namespace: 'kokumi',
-  source: { oci: '', version: '' },
+  namespace: product?.namespace ?? 'kokumi',
+  productRef: { name: product?.name ?? '' },
+  values: {},
   destination: {},
-  render: undefined,
   patches: [],
   edits: [],
   mode: 'Manual',
 })
 
+const copyPatches = (patches?: Patch[]): Patch[] =>
+  (patches ?? []).map((p) => ({ target: { ...p.target }, set: { ...p.set } }))
+
 export const orderToFormData = (r: Order): OrderFormData => ({
   name: r.name,
   namespace: r.namespace,
-  menuRef: r.menuRef,
-  source: r.source ? { ...r.source } : undefined,
+  productRef: { name: r.productRef.name },
+  values: r.values ?? {},
   destination: r.destination ? { ...r.destination } : {},
-  render: r.render
-    ? {
-        ...(r.render.helm
-          ? {
-              helm: {
-                releaseName: r.render.helm.releaseName ?? '',
-                namespace: r.render.helm.namespace ?? '',
-                includeCRDs: r.render.helm.includeCRDs ?? false,
-                values: r.render.helm.values ?? {},
-              },
-            }
-          : {}),
-        ...(r.render.manifest
-          ? { manifest: { layout: r.render.manifest.layout ?? 'Single' } }
-          : {}),
-      }
-    : undefined,
-  patches: (r.patches ?? []).map((p) => ({
-    target: { ...p.target },
-    set: { ...p.set },
-  })),
-  edits: (r.edits ?? []).map((p) => ({
-    target: { ...p.target },
-    set: { ...p.set },
-  })),
+  patches: copyPatches(r.patches),
+  edits: copyPatches(r.edits),
   mode: r.mode,
   approvals: r.approvals
     ? { requiredApprovals: r.approvals.requiredApprovals, allowedGroups: [...r.approvals.allowedGroups] }
     : undefined,
 })
 
-export interface MenuFormData {
+export interface ProductFormData {
   name: string
   namespace: string
   source: OCISource
-  vendor?: VendorSpec
+  /** Absent: no vendoring; {} vendors into the in-cluster registry. */
+  vendor?: OCIDestination
   render?: Render
   patches: Patch[]
-  overrides: OverridePolicy
-  defaults: MenuDefaults
+  /** Lists are only set with policy Listed. */
+  overrides: Overrides
 }
 
-export const emptyMenuForm = (): MenuFormData => ({
+export const emptyProductForm = (): ProductFormData => ({
   name: '',
   namespace: 'kokumi',
   source: { oci: '', version: '' },
-  render: undefined,
   patches: [],
-  overrides: {
-    values: { policy: 'None' },
-    patches: { policy: 'None' },
-  },
-  defaults: { mode: 'Manual' },
+  overrides: { values: { policy: 'None' }, patches: { policy: 'None' } },
 })
 
-export const menuToFormData = (m: Menu): MenuFormData => ({
-  name: m.name,
-  namespace: m.namespace,
-  source: { ...m.source },
-  vendor: m.vendor
-    ? {
-        mode: m.vendor.mode ?? 'Render',
-        destination: {
-          oci: m.vendor.destination.oci ?? '',
-          pantryRef: m.vendor.destination.pantryRef
-            ? { name: m.vendor.destination.pantryRef.name }
-            : undefined,
-        },
-      }
-    : undefined,
-  render: m.render?.helm
-    ? {
-        helm: {
-          releaseName: m.render.helm.releaseName ?? '',
-          namespace: m.render.helm.namespace ?? '',
-          includeCRDs: m.render.helm.includeCRDs ?? false,
-          values: m.render.helm.values ?? {},
-        },
-      }
-    : undefined,
-  patches: (m.patches ?? []).map((p) => ({
-    target: { ...p.target },
-    set: { ...p.set },
-  })),
-  overrides: {
-    values: {
-      policy: m.overrides.values.policy,
-      allowed: m.overrides.values.allowed ? [...m.overrides.values.allowed] : undefined,
-    },
-    patches: {
-      policy: m.overrides.patches.policy,
-      allowed: m.overrides.patches.allowed?.map((a) => ({
-        target: { ...a.target },
-        paths: [...a.paths],
-      })),
-    },
-  },
-  defaults: { ...m.defaults },
+/** A copy of a Product's overrides that keeps the lists only with policy Listed. */
+const copyOverrides = (o?: Overrides): Overrides => {
+  const values = overridePolicy(o?.values?.policy)
+  const patches = overridePolicy(o?.patches?.policy)
+  return {
+    values: values === 'Listed' ? { policy: values, paths: [...(o?.values.paths ?? [])] } : { policy: values },
+    patches: patches === 'Listed'
+      ? {
+          policy: patches,
+          targets: (o?.patches.targets ?? []).map((a) => ({ target: { ...a.target }, paths: [...a.paths] })),
+        }
+      : { policy: patches },
+  }
+}
+
+export const productToFormData = (p: Product): ProductFormData => ({
+  name: p.name,
+  namespace: p.namespace,
+  source: p.source.pantryRef
+    ? { pantryRef: { name: p.source.pantryRef.name }, version: p.source.version }
+    : { oci: p.source.oci ?? '', version: p.source.version },
+  vendor: p.vendor ? { ...p.vendor } : undefined,
+  render: p.render?.helm
+    ? { helm: { ...p.render.helm } }
+    : p.render?.manifest
+      ? { manifest: { ...p.render.manifest } }
+      : undefined,
+  patches: copyPatches(p.patches),
+  overrides: copyOverrides(p.overrides),
 })
+
+// ── Preview request types ─────────────────────────────────────────────────────
+
+/** Renders an Order over its Product; nothing is pushed. */
+export interface OrderPreviewRequest {
+  namespace: string
+  name: string
+  productRef: ProductRef
+  values?: Record<string, unknown>
+  patches?: Patch[]
+  edits?: Patch[]
+}
+
+/** Renders a Product, saved or not, without any Order on top. */
+export interface ProductPreviewRequest {
+  namespace: string
+  name: string
+  source: OCISource
+  render?: Render
+  patches?: Patch[]
+}
 
 export interface PantryFormData {
   name: string

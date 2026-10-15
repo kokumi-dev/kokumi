@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
-import { Outlet, useNavigate, useParams } from 'react-router'
+import { Link, Outlet, useNavigate, useParams } from 'react-router'
 import { deleteOrder } from '../../api/client'
 import { useOrders } from '../../hooks/useOrders'
-import { useMenus } from '../../hooks/useMenus'
+import { useProducts } from '../../hooks/useProducts'
 import { usePreparations } from '../../hooks/usePreparations'
 import { useServings } from '../../hooks/useServings'
 import { useDeniedReason } from '../../hooks/useCapability'
@@ -13,7 +13,7 @@ import { Button, ButtonLink, EditIcon, TabNav, TrashIcon } from '../../component
 import ConfirmDialog from '../../components/shared/ConfirmDialog'
 import { paths } from '../../routes/paths'
 import { preparationsOf, sortByChain } from '../../utils/preparations'
-import { orderSourceLabel } from './orderFormat'
+import { allowsPatches, productOf } from '../../utils/products'
 import type { OrderContext } from './orderContext'
 import layout from '../../components/layout/layout.module.css'
 
@@ -21,7 +21,7 @@ export default function OrderLayout() {
   const { namespace = '', name = '' } = useParams()
   const navigate = useNavigate()
   const orders = useOrders()
-  const menus = useMenus()
+  const products = useProducts()
   const allPreps = usePreparations()
   const allServings = useServings()
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -29,9 +29,7 @@ export default function OrderLayout() {
   const deleteDenied = useDeniedReason('orders:delete')
 
   const order = orders?.find((o) => o.namespace === namespace && o.name === name)
-  const menu = order?.menuRef
-    ? menus?.find((m) => m.namespace === order.namespace && m.name === order.menuRef?.name)
-    : undefined
+  const product = order && productOf(products, order)
 
   const preparations = useMemo(() => {
     const list = preparationsOf(allPreps, namespace, name)
@@ -56,10 +54,10 @@ export default function OrderLayout() {
     )
   }
 
-  // When a menuRef is set but the menu has not loaded, deny edits (fail closed).
-  const editsAllowed = !editDenied && (order.menuRef ? !!menu && menu.overrides.patches.policy !== 'None' : true)
+  // Until the Product has loaded, deny edits (fail closed).
+  const editsAllowed = !editDenied && !!product && allowsPatches(product)
 
-  const ctx: OrderContext = { order, menu, editsAllowed, preparations, servings }
+  const ctx: OrderContext = { order, product, editsAllowed, preparations, servings }
 
   return (
     <div className={layout.page}>
@@ -67,7 +65,14 @@ export default function OrderLayout() {
         breadcrumbs={[{ label: 'Orders', to: paths.orders() }, { label: order.namespace }]}
         title={order.name}
         badge={<Badge state={order.state} />}
-        subtitle={<span className={layout.mono}>{orderSourceLabel(order)}</span>}
+        subtitle={
+          <>
+            Variant of{' '}
+            <Link className={layout.inlineLink} to={paths.product(order.namespace, order.productRef.name)}>
+              {order.productRef.name}
+            </Link>
+          </>
+        }
         actions={
           <>
             <ButtonLink variant="secondary" icon={<EditIcon />} to={paths.order(order.namespace, order.name, 'edit')} disabledReason={editDenied}>Edit</ButtonLink>

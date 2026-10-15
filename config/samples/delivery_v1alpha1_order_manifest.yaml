@@ -6,9 +6,8 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: external-secrets
 spec:
-  source:
-    oci: oci://ghcr.io/kokumi-dev/testdata/external-secrets
-    version: "0.1.0"
+  productRef:
+    name: external-secrets
 
   patches:
     - target:

@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router'
 import type { OrderFormData } from '../../api/types'
 import { createOrder, updateOrder } from '../../api/client'
 import { useOrders } from '../../hooks/useOrders'
-import { useMenus } from '../../hooks/useMenus'
+import { useProducts } from '../../hooks/useProducts'
 import { useUnsavedChangesGuard } from '../../hooks/useUnsavedChangesGuard'
 import PageHeader from '../../components/layout/PageHeader'
 import ResourceNotFound from '../../components/layout/ResourceNotFound'
@@ -13,24 +13,21 @@ import OrderForm from '../../components/order/OrderForm'
 import { paths } from '../../routes/paths'
 import layout from '../../components/layout/layout.module.css'
 
-/** Full-page create (/orders/new) and edit (/orders/:ns/:name/edit) screen. */
+/** Full-page create (/orders/new[?product=ns/name]) and edit (/orders/:ns/:name/edit) screen. */
 export default function OrderEditor() {
   const { namespace, name } = useParams()
   const [search] = useSearchParams()
   const navigate = useNavigate()
   const orders = useOrders()
-  const menus = useMenus()
+  const products = useProducts()
   const [dirty, setDirty] = useState(false)
   const { allowNavigation, dialog } = useUnsavedChangesGuard(dirty)
 
   const isEdit = !!name
   const order = isEdit ? orders?.find((o) => o.namespace === namespace && o.name === name) : undefined
 
-  const menuKey = search.get('menu')
-  const presetMenu = menuKey ? menus?.find((m) => `${m.namespace}/${m.name}` === menuKey) : undefined
-  const orderMenu = order?.menuRef
-    ? menus?.find((m) => m.namespace === order.namespace && m.name === order.menuRef?.name)
-    : undefined
+  const productKey = search.get('product')
+  const presetProduct = productKey ? products?.find((p) => `${p.namespace}/${p.name}` === productKey) : undefined
 
   if (isEdit && !order) {
     return (
@@ -45,9 +42,6 @@ export default function OrderEditor() {
     )
   }
 
-  // The form seeds its state once, so wait for the data it depends on.
-  const waitingForMenus = menus === null && (!!menuKey || !!order?.menuRef)
-
   async function handleSubmit(data: OrderFormData, commitMessage: string) {
     if (order) {
       await updateOrder(order.namespace, order.name, data, commitMessage)
@@ -58,7 +52,11 @@ export default function OrderEditor() {
     navigate(paths.order(data.namespace, data.name))
   }
 
-  const back = order ? paths.order(order.namespace, order.name) : presetMenu ? paths.menu(presetMenu.namespace, presetMenu.name) : paths.orders()
+  const back = order
+    ? paths.order(order.namespace, order.name)
+    : presetProduct
+      ? paths.product(presetProduct.namespace, presetProduct.name)
+      : paths.orders()
 
   return (
     <div className={layout.page}>
@@ -72,23 +70,23 @@ export default function OrderEditor() {
         subtitle={
           order
             ? 'Changes are committed to the Order and render a new Preparation.'
-            : presetMenu
-              ? `Order from Menu ${presetMenu.name}. Source and renderer come from the Menu.`
-              : 'Pick a Menu or an OCI source, configure it, and preview the result before creating.'
+            : presetProduct
+              ? `A variant of Product ${presetProduct.name}: set what differs and preview the result before creating.`
+              : 'Pick the Product this Order is a variant of, set what differs, and preview the result before creating.'
         }
       />
 
-      {waitingForMenus ? (
+      {/* The form seeds its state once, so wait for the Products it depends on. */}
+      {products === null ? (
         <Section><EmptyState text="Loading…" /></Section>
-      ) : menuKey && !presetMenu ? (
-        <Section><EmptyState text={`Menu ${menuKey} was not found.`} /></Section>
+      ) : productKey && !presetProduct ? (
+        <Section><EmptyState text={`Product ${productKey} was not found.`} /></Section>
       ) : (
         <OrderForm
-          key={order ? `${order.namespace}/${order.name}` : menuKey ?? 'new'}
+          key={order ? `${order.namespace}/${order.name}` : productKey ?? 'new'}
           order={order}
-          menuRef={presetMenu ? { name: presetMenu.name } : undefined}
-          menu={orderMenu ?? presetMenu}
-          menus={menus ?? undefined}
+          initialProduct={presetProduct}
+          products={products}
           onSubmit={handleSubmit}
           onCancel={() => navigate(back)}
           onDirtyChange={setDirty}

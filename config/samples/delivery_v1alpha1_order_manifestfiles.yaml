@@ -6,13 +6,8 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: external-dns
 spec:
-  source:
-    oci: oci://ghcr.io/kokumi-dev/testdata/external-dns
-    version: "0.1.0"
-
-  render:
-    manifest:
-      layout: Multi
+  productRef:
+    name: external-dns
 
   patches:
     - target:

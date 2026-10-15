@@ -273,7 +273,7 @@ func TestRequiresAuth(t *testing.T) {
 		want bool
 	}{
 		{testOrdersPath, true},
-		{"/api/v1/menus/default/foo", true},
+		{"/api/v1/products/default/foo", true},
 		{"/api/v1/events", true},
 		{"/api/v1/auth/login", false},
 		{"/api/v1/info", false},

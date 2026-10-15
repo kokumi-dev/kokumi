@@ -6,6 +6,8 @@ const classForState: Record<string, string> = {
   Pending: styles.pending,
   Processing: styles.processing,
   Deploying: styles.deploying,
+  Waiting: styles.waiting,
+  Deleting: styles.deleting,
   Failed: styles.failed,
 }
 

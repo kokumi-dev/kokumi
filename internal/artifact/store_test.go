@@ -102,16 +102,16 @@ func TestStore_ResolveDigest_Errors(t *testing.T) {
 		assert.Contains(t, err.Error(), "failed to resolve digest")
 	})
 
-	t.Run("nil client and nil default returns empty digest", func(t *testing.T) {
+	t.Run("nil client and nil default", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
 		store := artifact.NewStore(nil, fs, "")
 
-		digest, err := store.ResolveDigest(context.Background(), artifact.Source{
+		_, err := store.ResolveDigest(context.Background(), artifact.Source{
 			OCI:     testSourceOCI,
 			Version: testVersion,
 		}, nil)
-		require.NoError(t, err)
-		assert.Empty(t, digest)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no OCI client")
 	})
 }
 

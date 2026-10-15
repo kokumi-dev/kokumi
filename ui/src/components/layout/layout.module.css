@@ -70,7 +70,9 @@
   border-radius: 10px;
   border: 1px solid var(--color-border-subtle);
   margin-bottom: 20px;
-  overflow: hidden;
+  /* Clips to the rounded corners without becoming a scroll container, which
+     would keep table headers inside from sticking to the page. */
+  overflow: clip;
 }
 
 .sectionHeader {
@@ -166,18 +168,44 @@
 }
 
 /* ── Data table ── */
+.tableContainer {
+  container-type: inline-size;
+}
+
+/* Scrolls sideways only where the table is wider than its container. */
 .tableScroll {
   overflow-x: auto;
 }
 
+/* Where the table fits, the wrapper must not be a scroll container, so that
+   the header row sticks to the page. Matches the table's min-width. */
+@container (min-width: 760px) {
+  .tableScroll {
+    overflow-x: visible;
+  }
+}
+
 .table {
+  /* Geometry of tree lines in expanded rows: they start at the centre of the toggle. */
+  --tree-x: 26px;
+  --tree-line: 1.5px;
+  --tree-color: var(--color-border-emphasis);
+
   width: 100%;
   min-width: 760px;
   border-collapse: collapse;
   table-layout: fixed;
 }
 
+/* Sticky, so the columns stay labelled while long or expanded tables scroll.
+   The bottom line is a shadow: a collapsed border stays behind when the
+   cell sticks. */
 .table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--color-bg-card);
+  box-shadow: inset 0 -1px 0 var(--color-border);
   text-align: left;
   font-size: 0.75rem;
   font-weight: 600;
@@ -185,7 +213,6 @@
   letter-spacing: 0.07em;
   color: var(--color-text-muted-light);
   padding: 8px 12px;
-  border-bottom: 1px solid var(--color-border);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -202,12 +229,83 @@
   text-overflow: ellipsis;
 }
 
-.table tr:last-child td {
+.table tbody:last-child > tr:last-child > td {
   border-bottom: none;
 }
 
 .table .alignEnd {
   text-align: right;
+}
+
+/* Chevron column of expandable rows; the 28px toggle centres on --tree-x. */
+.table .toggleCell {
+  padding: 0 0 0 calc(var(--tree-x) - var(--control-h-sm) / 2);
+  cursor: pointer;
+}
+
+/* The whole cell is the toggle's target; hovering it highlights the button. */
+.table .toggleCell:hover .toggle {
+  background: var(--color-fill-strong);
+  color: var(--color-text-on-light);
+}
+
+/* Outlined while its row is open; the outline draws in with a soft pulse. */
+.table .toggle {
+  transition: background 0.15s, color 0.15s, box-shadow 0.2s ease;
+}
+
+.table .toggleOpen {
+  color: var(--color-text-on-light);
+  box-shadow: inset 0 0 0 var(--tree-line) var(--tree-color);
+  animation: toggle-open 0.45s ease-out;
+}
+
+.table .toggleOpen:focus-visible {
+  box-shadow: inset 0 0 0 var(--tree-line) var(--tree-color), var(--control-focus-ring);
+}
+
+@keyframes toggle-open {
+  0% {
+    box-shadow: inset 0 0 0 0 var(--tree-color), 0 0 0 0 var(--color-accent-border);
+  }
+
+  45% {
+    box-shadow: inset 0 0 0 var(--tree-line) var(--tree-color), 0 0 0 3px var(--color-accent-ring);
+  }
+
+  100% {
+    box-shadow: inset 0 0 0 var(--tree-line) var(--tree-color), 0 0 0 7px transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .table .toggleOpen {
+    animation: none;
+  }
+}
+
+/*
+ * Line from the bottom of the open toggle into the child rows. It reaches
+ * over the row border, which the cell would otherwise clip.
+ */
+.table .toggleConnected {
+  position: relative;
+  overflow: visible;
+}
+
+.toggleConnected::after {
+  content: '';
+  position: absolute;
+  top: calc(50% + var(--control-h-sm) / 2);
+  bottom: -1px;
+  left: calc(var(--tree-x) - var(--tree-line) / 2);
+  width: var(--tree-line);
+  background: var(--tree-color);
+}
+
+/* An open row and its child rows read as one block. */
+.rowOpen td {
+  border-bottom-color: transparent;
 }
 
 .rowLink {
@@ -362,8 +460,49 @@
   font-weight: 500;
 }
 
+/* A page-wide notice below the header, e.g. a pending deletion. */
+.notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-bottom: 20px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--color-warning-bg-hover);
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
 .stack {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+/* Read-only YAML or JSON, e.g. Helm values. */
+.code {
+  margin: 0;
+  padding: 10px 12px;
+  max-height: 320px;
+  overflow: auto;
+  border-radius: 7px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-main);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+/* Text only screen readers announce. */
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }

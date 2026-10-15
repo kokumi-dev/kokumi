@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -62,7 +63,7 @@ type OrderReconciler struct {
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=orders/finalizers,verbs=update
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=preparations,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=preparations/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=menus,verbs=get;list;watch
+// +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=products,verbs=get;list;watch
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=pantries,verbs=get;list;watch
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=servings,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
@@ -104,18 +105,45 @@ func (r *OrderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	return r.reconcileOrder(ctx, order)
 }
 
-// reconcileOrder resolves the Order's effective spec and delegates artifact
-// work to the render pipeline.
+// reconcileOrder merges the Order over its Product and delegates artifact
+// work to the render pipeline. An Order whose Product is missing or not ready
+// waits; the Product watch reconciles it again.
 func (r *OrderReconciler) reconcileOrder(ctx context.Context, order *deliveryv1alpha1.Order) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
+	statusUpdater := status.NewOrderUpdater(r.Client)
 
-	effective, err := r.resolveEffectiveSpec(ctx, order)
+	product := &deliveryv1alpha1.Product{}
+	if err := r.Get(ctx, client.ObjectKey{Namespace: order.Namespace, Name: order.Spec.ProductRef.Name}, product); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return ctrl.Result{}, fmt.Errorf("failed to get Product %q: %w", order.Spec.ProductRef.Name, err)
+		}
+		logger.Info("Waiting for Product", "product", order.Spec.ProductRef.Name)
+		return ctrl.Result{}, statusUpdater.Waiting(ctx, order, deliveryv1alpha1.ReasonProductNotFound,
+			fmt.Sprintf("Product %q not found", order.Spec.ProductRef.Name))
+	}
+
+	if !product.DeletionTimestamp.IsZero() {
+		logger.Info("Waiting for Product deletion", "product", product.Name)
+		return ctrl.Result{}, statusUpdater.Waiting(ctx, order, deliveryv1alpha1.ReasonProductDeleting,
+			fmt.Sprintf("Product %q is being deleted", product.Name))
+	}
+
+	if !resolve.ProductReady(product) {
+		logger.Info("Waiting for Product to become ready", "product", product.Name)
+		msg := fmt.Sprintf("Product %q is not ready", product.Name)
+		if ready := meta.FindStatusCondition(product.Status.Conditions, deliveryv1alpha1.ConditionTypeReady); ready != nil && ready.Message != "" {
+			msg += ": " + ready.Message
+		}
+		return ctrl.Result{}, statusUpdater.Waiting(ctx, order, deliveryv1alpha1.ReasonProductNotReady, msg)
+	}
+
+	effective, err := resolve.ForProduct(product, order)
 	if err != nil {
-		statusUpdater := status.NewOrderUpdater(r.Client)
 		if uerr := statusUpdater.Failed(ctx, order, err); uerr != nil {
 			logger.Error(uerr, "Failed to update Order status")
 		}
-		return ctrl.Result{}, err
+		// Retrying does not help; a change to the Order or Product does.
+		return ctrl.Result{}, reconcile.TerminalError(err)
 	}
 
 	return r.reconcileRender(ctx, order, effective)
@@ -146,29 +174,6 @@ func (r *OrderReconciler) ensureServing(ctx context.Context, order *deliveryv1al
 	}
 	log.FromContext(ctx).Info("Created Serving", "name", serving.Name)
 	return nil
-}
-
-// resolveEffectiveSpec computes the effective source, render, and patches.
-// For plain Orders (no menuRef), the Order's own fields are used directly.
-// For Menu-based Orders, the Menu's base config is merged with validated consumer overrides.
-func (r *OrderReconciler) resolveEffectiveSpec(ctx context.Context, order *deliveryv1alpha1.Order) (*resolve.EffectiveSpec, error) {
-	logger := log.FromContext(ctx)
-
-	if order.Spec.MenuRef == nil {
-		return resolve.FromOrder(order)
-	}
-
-	m := &deliveryv1alpha1.Menu{}
-	if err := r.Get(ctx, client.ObjectKey{Namespace: order.Namespace, Name: order.Spec.MenuRef.Name}, m); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil, fmt.Errorf("referenced Menu %q not found in namespace %q", order.Spec.MenuRef.Name, order.Namespace)
-		}
-		return nil, fmt.Errorf("failed to get Menu %q: %w", order.Spec.MenuRef.Name, err)
-	}
-
-	logger.Info("Resolved Menu for Order", "menu", m.Name)
-
-	return resolve.ForMenu(m, order)
 }
 
 // reconcileRender delegates artifact work to the pipeline and then handles CRD
@@ -208,6 +213,12 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 
 	if order.Status.LatestConfigHash == specHash && order.Status.LatestPreparationName != "" {
 		logger.Info("Configuration is up-to-date, skipping reconciliation")
+		if waitedForProduct(order) {
+			if err := statusUpdater.Ready(ctx, order, specHash, order.Status.LatestPreparationName, order.Status.LatestArtifactDigest,
+				fmt.Sprintf("Preparation %s is up to date", order.Status.LatestPreparationName)); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
 		return ctrl.Result{}, r.ensureServing(ctx, order)
 	}
 
@@ -233,13 +244,8 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 	renderer := rendererFor(effective.Render, r.BuilderID)
 	config := artifactConfig(order, effective, intent, specHash, renderer)
 
-	source := artifact.Source{OCI: sourceURL, Version: spec.Source.Version}
-	if effective.Menu != nil {
-		source.Digest = effective.Menu.PreRenderedDigest
-	}
-
 	result, err := r.Pipeline.Render(ctx, artifact.RenderRequest{
-		Source:           source,
+		Source:           artifact.Source{OCI: sourceURL, Version: spec.Source.Version, Digest: spec.Source.Digest},
 		SourceClient:     sourceClient,
 		Destination:      artifact.Destination{OCI: resolvedDest},
 		DestClient:       destClient,
@@ -293,6 +299,15 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// waitedForProduct reports whether the Order's Ready condition says it is
+// waiting for its Product.
+func waitedForProduct(order *deliveryv1alpha1.Order) bool {
+	ready := meta.FindStatusCondition(order.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)
+	return ready != nil && (ready.Reason == deliveryv1alpha1.ReasonProductNotFound ||
+		ready.Reason == deliveryv1alpha1.ReasonProductNotReady ||
+		ready.Reason == deliveryv1alpha1.ReasonProductDeleting)
 }
 
 // defaultCommitMessage returns the effective commit message for a Preparation.
@@ -412,6 +427,7 @@ func rendererFor(render *deliveryv1alpha1.Render, builderID string) deliveryv1al
 func artifactConfig(order *deliveryv1alpha1.Order, effective *resolve.EffectiveSpec, intent []byte, configHash string, renderer deliveryv1alpha1.Renderer) artifact.Config {
 	config := artifact.Config{
 		Order:      &artifact.ConfigObject{Namespace: order.Namespace, Name: order.Name, UID: order.UID},
+		Product:    &artifact.ConfigProduct{Namespace: order.Namespace, Name: effective.Product.Name, ConfigHash: effective.Product.ConfigHash},
 		ConfigHash: configHash,
 		Renderer:   configRenderer(renderer),
 		Intent:     intent,
@@ -423,9 +439,6 @@ func artifactConfig(order *deliveryv1alpha1.Order, effective *resolve.EffectiveS
 	if order.Spec.Destination != nil && order.Spec.Destination.PantryRef != nil {
 		config.Destination.PantryRef = order.Spec.Destination.PantryRef.Name
 	}
-	if effective.Menu != nil {
-		config.Menu = &artifact.ConfigMenu{Namespace: order.Namespace, Name: effective.Menu.Name, ConfigHash: effective.Menu.ConfigHash}
-	}
 
 	return config
 }
@@ -435,11 +448,11 @@ func configRenderer(renderer deliveryv1alpha1.Renderer) artifact.ConfigRenderer 
 	return artifact.ConfigRenderer{Type: string(renderer.Type), Version: renderer.Version, Builder: renderer.Builder}
 }
 
-func (r *OrderReconciler) enqueueOrdersForMenu() handler.EventHandler {
+func (r *OrderReconciler) enqueueOrdersForProduct() handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
-		orders, err := index.OrdersForMenu(ctx, r.Client, obj.GetNamespace(), obj.GetName())
+		orders, err := index.OrdersForProduct(ctx, r.Client, obj.GetNamespace(), obj.GetName())
 		if err != nil {
-			log.FromContext(ctx).Error(err, "Failed to list Orders of Menu", "menu", obj.GetName())
+			log.FromContext(ctx).Error(err, "Failed to list Orders of Product", "product", obj.GetName())
 			return nil
 		}
 
@@ -476,7 +489,7 @@ func (r *OrderReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&deliveryv1alpha1.Order{}).
 		Owns(&deliveryv1alpha1.Preparation{}).
-		Watches(&deliveryv1alpha1.Menu{}, r.enqueueOrdersForMenu()).
+		Watches(&deliveryv1alpha1.Product{}, r.enqueueOrdersForProduct()).
 		Watches(&deliveryv1alpha1.Pantry{}, r.enqueueOrdersForPantry()).
 		Named("order").
 		Complete(r)

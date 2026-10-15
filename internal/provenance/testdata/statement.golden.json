@@ -14,7 +14,7 @@
       "buildType": "https://kokumi.dev/buildtypes/render/v1",
       "externalParameters": {
         "order": "shop/podinfo-prod",
-        "menu": "shop/podinfo",
+        "product": "shop/podinfo",
         "configHash": "sha256:9b1d"
       },
       "resolvedDependencies": [

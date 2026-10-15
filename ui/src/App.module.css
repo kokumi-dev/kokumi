@@ -7,6 +7,9 @@
   margin-left: var(--sidebar-width);
   flex: 1;
   min-height: 100vh;
+  /* The page scrolls, not this element, so sticky table headers stick to
+     the viewport. Wide content is clipped; tables scroll on their own. */
+  min-width: 0;
   background-color: var(--color-bg-main);
-  overflow-y: auto;
+  overflow-x: clip;
 }

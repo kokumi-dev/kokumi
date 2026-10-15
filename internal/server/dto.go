@@ -81,8 +81,8 @@ type RenderDTO struct {
 	Manifest *ManifestRenderDTO `json:"manifest,omitempty"`
 }
 
-// MenuRefDTO is the data-transfer representation of a MenuRef.
-type MenuRefDTO struct {
+// ProductRefDTO is the data-transfer representation of a ProductRef.
+type ProductRefDTO struct {
 	Name string `json:"name"`
 }
 
@@ -92,11 +92,10 @@ type OrderDTO struct {
 	Name                 string             `json:"name"`
 	Namespace            string             `json:"namespace"`
 	Labels               map[string]string  `json:"labels,omitempty"`
-	Source               *OCISourceDTO      `json:"source,omitempty"`
-	MenuRef              *MenuRefDTO        `json:"menuRef,omitempty"`
+	ProductRef           ProductRefDTO      `json:"productRef"`
+	Values               json.RawMessage    `json:"values,omitempty"`
 	Destination          OCIDestinationDTO  `json:"destination"`
 	EffectiveDestination string             `json:"effectiveDestination,omitempty"`
-	Render               *RenderDTO         `json:"render,omitempty"`
 	Patches              []PatchDTO         `json:"patches,omitempty"`
 	Edits                []PatchDTO         `json:"edits,omitempty"`
 	Mode                 string             `json:"mode"`
@@ -230,10 +229,9 @@ type AttestationDTO struct {
 type CreateOrderRequest struct {
 	Namespace     string             `json:"namespace"`
 	Name          string             `json:"name"`
-	Source        OCISourceDTO       `json:"source"`
-	MenuRef       *MenuRefDTO        `json:"menuRef,omitempty"`
+	ProductRef    ProductRefDTO      `json:"productRef"`
+	Values        json.RawMessage    `json:"values,omitempty"`
 	Destination   *OCIDestinationDTO `json:"destination,omitempty"`
-	Render        *RenderDTO         `json:"render,omitempty"`
 	Patches       []PatchDTO         `json:"patches,omitempty"`
 	Edits         []PatchDTO         `json:"edits,omitempty"`
 	Mode          string             `json:"mode"`
@@ -242,11 +240,10 @@ type CreateOrderRequest struct {
 }
 
 // UpdateOrderRequest is the body for PUT /api/v1/orders/{namespace}/{name}.
+// The Product of an Order cannot be changed.
 type UpdateOrderRequest struct {
-	Source        OCISourceDTO       `json:"source"`
-	MenuRef       *MenuRefDTO        `json:"menuRef,omitempty"`
+	Values        json.RawMessage    `json:"values,omitempty"`
 	Destination   *OCIDestinationDTO `json:"destination,omitempty"`
-	Render        *RenderDTO         `json:"render,omitempty"`
 	Patches       []PatchDTO         `json:"patches,omitempty"`
 	Edits         []PatchDTO         `json:"edits,omitempty"`
 	Mode          string             `json:"mode"`
@@ -273,13 +270,7 @@ type ServingDTO struct {
 	CreatedAt           *time.Time     `json:"createdAt,omitempty"`
 }
 
-// --- Menu DTOs ---
-
-// ValueOverridePolicyDTO is the data-transfer representation of a ValueOverridePolicy.
-type ValueOverridePolicyDTO struct {
-	Policy  string   `json:"policy"`
-	Allowed []string `json:"allowed,omitempty"`
-}
+// --- Product DTOs ---
 
 // AllowedPatchTargetDTO is the data-transfer representation of an AllowedPatchTarget.
 type AllowedPatchTargetDTO struct {
@@ -287,70 +278,70 @@ type AllowedPatchTargetDTO struct {
 	Paths  []string       `json:"paths"`
 }
 
-// PatchOverridePolicyDTO is the data-transfer representation of a PatchOverridePolicy.
-type PatchOverridePolicyDTO struct {
+// ValueOverridesDTO is the data-transfer representation of ValueOverrides.
+type ValueOverridesDTO struct {
+	Policy string   `json:"policy"`
+	Paths  []string `json:"paths,omitempty"`
+}
+
+// PatchOverridesDTO is the data-transfer representation of PatchOverrides.
+type PatchOverridesDTO struct {
 	Policy  string                  `json:"policy"`
-	Allowed []AllowedPatchTargetDTO `json:"allowed,omitempty"`
+	Targets []AllowedPatchTargetDTO `json:"targets,omitempty"`
 }
 
-// OverridePolicyDTO is the data-transfer representation of an OverridePolicy.
-type OverridePolicyDTO struct {
-	Values  ValueOverridePolicyDTO `json:"values"`
-	Patches PatchOverridePolicyDTO `json:"patches"`
+// OverridesDTO is the data-transfer representation of Overrides. An empty
+// policy in a request defaults to None.
+type OverridesDTO struct {
+	Values  ValueOverridesDTO `json:"values"`
+	Patches PatchOverridesDTO `json:"patches"`
 }
 
-// MenuDefaultsDTO is the data-transfer representation of MenuDefaults.
-type MenuDefaultsDTO struct {
-	Mode string `json:"mode"`
-}
-
-// VendorDestinationDTO is the data-transfer representation of a VendorDestination.
-type VendorDestinationDTO struct {
-	OCI       string        `json:"oci,omitempty"`
+// ProductSourceStatusDTO is the source a Product's Orders render from.
+type ProductSourceStatusDTO struct {
+	OCI       string        `json:"oci"`
+	Version   string        `json:"version"`
 	PantryRef *PantryRefDTO `json:"pantryRef,omitempty"`
+	Digest    string        `json:"digest,omitempty"`
 }
 
-// VendorSpecDTO is the data-transfer representation of a Menu VendorSpec.
-type VendorSpecDTO struct {
-	Mode        string               `json:"mode,omitempty"`
-	Destination VendorDestinationDTO `json:"destination"`
+// ProductDTO is the view of a Product served to the UI.
+type ProductDTO struct {
+	Name      string             `json:"name"`
+	Namespace string             `json:"namespace"`
+	Source    OCISourceDTO       `json:"source"`
+	Vendor    *OCIDestinationDTO `json:"vendor,omitempty"`
+	Render    *RenderDTO         `json:"render,omitempty"`
+	Patches   []PatchDTO         `json:"patches,omitempty"`
+	Overrides OverridesDTO       `json:"overrides"`
+	// ResolvedSource is status.source; absent until the Product is resolved.
+	ResolvedSource *ProductSourceStatusDTO `json:"resolvedSource,omitempty"`
+	State          string                  `json:"state,omitempty"`
+	Conditions     []ConditionDTO          `json:"conditions,omitempty"`
+	CreatedAt      *time.Time              `json:"createdAt,omitempty"`
+	// DeletionTimestamp is set while a deleted Product waits for its Orders
+	// to be deleted.
+	DeletionTimestamp *time.Time `json:"deletionTimestamp,omitempty"`
 }
 
-// MenuDTO is the view of a Menu served to the UI.
-type MenuDTO struct {
-	Name       string            `json:"name"`
-	Namespace  string            `json:"namespace"`
-	Source     OCISourceDTO      `json:"source"`
-	Vendor     *VendorSpecDTO    `json:"vendor,omitempty"`
-	Render     *RenderDTO        `json:"render,omitempty"`
-	Patches    []PatchDTO        `json:"patches,omitempty"`
-	Overrides  OverridePolicyDTO `json:"overrides"`
-	Defaults   MenuDefaultsDTO   `json:"defaults"`
-	State      string            `json:"state,omitempty"`
-	Conditions []ConditionDTO    `json:"conditions,omitempty"`
-	CreatedAt  *time.Time        `json:"createdAt,omitempty"`
+// CreateProductRequest is the body for POST /api/v1/products.
+type CreateProductRequest struct {
+	Name      string             `json:"name"`
+	Namespace string             `json:"namespace"`
+	Source    OCISourceDTO       `json:"source"`
+	Vendor    *OCIDestinationDTO `json:"vendor,omitempty"`
+	Render    *RenderDTO         `json:"render,omitempty"`
+	Patches   []PatchDTO         `json:"patches,omitempty"`
+	Overrides OverridesDTO       `json:"overrides"`
 }
 
-// CreateMenuRequest is the body for POST /api/v1/menus.
-type CreateMenuRequest struct {
-	Name      string            `json:"name"`
-	Namespace string            `json:"namespace"`
-	Source    OCISourceDTO      `json:"source"`
-	Vendor    *VendorSpecDTO    `json:"vendor,omitempty"`
-	Render    *RenderDTO        `json:"render,omitempty"`
-	Patches   []PatchDTO        `json:"patches,omitempty"`
-	Overrides OverridePolicyDTO `json:"overrides"`
-	Defaults  MenuDefaultsDTO   `json:"defaults"`
-}
-
-// UpdateMenuRequest is the body for PUT /api/v1/menus/{namespace}/{name}.
-type UpdateMenuRequest struct {
-	Source    OCISourceDTO      `json:"source"`
-	Vendor    *VendorSpecDTO    `json:"vendor,omitempty"`
-	Render    *RenderDTO        `json:"render,omitempty"`
-	Patches   []PatchDTO        `json:"patches,omitempty"`
-	Overrides OverridePolicyDTO `json:"overrides"`
-	Defaults  MenuDefaultsDTO   `json:"defaults"`
+// UpdateProductRequest is the body for PUT /api/v1/products/{namespace}/{name}.
+type UpdateProductRequest struct {
+	Source    OCISourceDTO       `json:"source"`
+	Vendor    *OCIDestinationDTO `json:"vendor,omitempty"`
+	Render    *RenderDTO         `json:"render,omitempty"`
+	Patches   []PatchDTO         `json:"patches,omitempty"`
+	Overrides OverridesDTO       `json:"overrides"`
 }
 
 // --- Pantry DTOs ---

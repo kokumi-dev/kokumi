@@ -3,7 +3,7 @@ import type { OCIDestination } from '../../api/types'
 import { getDefaultRegistry } from '../../api/client'
 import { usePantries } from '../../hooks/usePantries'
 import { SegmentedControl } from '../ui'
-import styles from '../order/OrderForm.module.css'
+import styles from './Form.module.css'
 
 // Destination mode: 'default' = in-cluster registry, 'oci' = direct URL, 'pantry' = Pantry provides URL.
 type DestMode = 'default' | 'oci' | 'pantry'
@@ -15,21 +15,18 @@ interface DestinationEditorProps {
   namespace: string
   /** Resource name used in the OCI URL placeholder. */
   name?: string
-  /** Path segment shown in the OCI URL placeholder (e.g. "rendered"). */
-  pathHint?: string
 }
 
 /**
  * DestinationEditor renders the shared three-tab destination picker
- * (In-cluster default / Direct OCI URL / From Pantry) used by both the
- * Order and Menu forms.
+ * (In-cluster default / Direct OCI URL / From Pantry) used for the Order
+ * destination and the Product vendor destination.
  */
 export default function DestinationEditor({
   destination,
   onChange,
   namespace,
   name,
-  pathHint,
 }: DestinationEditorProps) {
   const pantries = usePantries()
 
@@ -79,7 +76,7 @@ export default function DestinationEditor({
             onChange={(e) => onChange({ oci: e.target.value })}
             placeholder={
               defaultRegistry
-                ? `oci://${defaultRegistry}${pathHint ? `/${pathHint}` : ''}/${namespace || 'namespace'}/${name || 'name'}`
+                ? `oci://${defaultRegistry}/${namespace || 'namespace'}/${name || 'name'}`
                 : 'oci://ghcr.io/my-org/rendered-output'
             }
           />
@@ -101,7 +98,7 @@ export default function DestinationEditor({
         </div>
       )}
       {mode === 'default' && defaultRegistry && (
-        <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted-light)' }}>
+        <span className={styles.hint}>
           Kokumi will push to the in-cluster registry automatically
         </span>
       )}

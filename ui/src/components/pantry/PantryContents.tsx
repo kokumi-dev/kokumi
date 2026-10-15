@@ -3,7 +3,7 @@ import type { ArtifactInfo, Pantry } from '../../api/types'
 import { getArtifactInfo, listOCITags } from '../../api/client'
 import { cleanTags } from '../../api/ociTags'
 import Badge from '../shared/Badge'
-import { Button, TabButtons } from '../ui'
+import { Button, Chevron, TabButtons } from '../ui'
 import Modal from '../shared/Modal'
 import YamlEditor from '../shared/YamlEditor'
 import FileInspector from '../shared/FileInspector'
@@ -139,7 +139,7 @@ export default function PantryContents({ pantry }: Props) {
               <li key={tag} className={styles.row}>
                 {/* eslint-disable-next-line no-restricted-syntax -- accordion list row, not an action button */}
                 <button className={styles.rowHeader} onClick={() => toggle(tag)} aria-expanded={isOpen}>
-                  <span className={`${styles.chevron} ${isOpen ? styles.chevronOpen : ''}`}>›</span>
+                  <span className={styles.chevron}><Chevron open={isOpen} /></span>
                   <span className={styles.tagName}>{tag}</span>
                   {isOpen && expanded?.info && (
                     <Badge state={expanded.info.isHelm ? 'Helm' : 'Manifest'} />

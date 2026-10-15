@@ -50,11 +50,10 @@ type BuildDefinition struct {
 // ExternalParameters names what was rendered. The full parameters are the
 // intent in the subject's config blob, identified by ConfigHash.
 type ExternalParameters struct {
-	// Order is the namespace/name of the Order. Empty for artifacts
-	// pre-rendered by a Menu.
+	// Order is the namespace/name of the Order.
 	Order string `json:"order,omitempty"`
-	// Menu is the namespace/name of the Menu the configuration came from.
-	Menu string `json:"menu,omitempty"`
+	// Product is the namespace/name of the Product the Order is a variant of.
+	Product string `json:"product,omitempty"`
 	// ConfigHash is the hash of the intent in the subject's config blob.
 	ConfigHash string `json:"configHash,omitempty"`
 }
@@ -99,8 +98,8 @@ func Statement(subject oci.Reference, cfg *artifact.Config) ([]byte, error) {
 	if cfg.Order != nil {
 		params.Order = cfg.Order.Namespace + "/" + cfg.Order.Name
 	}
-	if cfg.Menu != nil {
-		params.Menu = cfg.Menu.Namespace + "/" + cfg.Menu.Name
+	if cfg.Product != nil {
+		params.Product = cfg.Product.Namespace + "/" + cfg.Product.Name
 	}
 
 	return attestation.NewStatement(subject.RepositoryReference(), subject.Digest, PredicateType, Predicate{

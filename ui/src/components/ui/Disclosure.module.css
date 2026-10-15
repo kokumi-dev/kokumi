@@ -37,10 +37,9 @@
 }
 
 .chevron {
-  display: inline-block;
-  font-size: 1rem;
-  line-height: 1;
-  transition: transform 0.15s;
+  display: block;
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
 }
 
 .chevronOpen {

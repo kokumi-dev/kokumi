@@ -32,7 +32,7 @@ func testConfig() *artifact.Config {
 			Digest:  "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		},
 		Destination: artifact.ConfigDestination{OCI: "oci://registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod"},
-		Menu:        &artifact.ConfigMenu{Namespace: "shop", Name: "podinfo", ConfigHash: "sha256:77e0"},
+		Product:     &artifact.ConfigProduct{Namespace: "shop", Name: "podinfo", ConfigHash: "sha256:77e0"},
 		Renderer:    artifact.ConfigRenderer{Type: "Helm", Version: "v4.3.0", Builder: "ghcr.io/kokumi-dev/kokumi@sha256:bb"},
 	}
 }
@@ -72,9 +72,8 @@ func TestStatement_golden(t *testing.T) {
 	require.Equal(t, indent(t, want), indent(t, statement))
 }
 
-func TestStatement_menuArtifact(t *testing.T) {
+func TestStatement_product(t *testing.T) {
 	cfg := testConfig()
-	cfg.Order = nil
 
 	statement, err := Statement(testSubject(t), cfg)
 	require.NoError(t, err)
@@ -84,9 +83,9 @@ func TestStatement_menuArtifact(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(statement, &decoded))
 	params := decoded.Predicate.BuildDefinition.ExternalParameters
-	require.Empty(t, params.Order)
-	require.Equal(t, "shop/podinfo", params.Menu)
-	require.Equal(t, cfg.ConfigHash, params.ConfigHash, "the hash of the stored intent, not the Menu's own hash")
+	require.Equal(t, "shop/podinfo-prod", params.Order)
+	require.Equal(t, "shop/podinfo", params.Product)
+	require.Equal(t, cfg.ConfigHash, params.ConfigHash, "the hash of the stored intent, not the Product's own hash")
 }
 
 func TestStatement_rejectsUnresolvedSource(t *testing.T) {

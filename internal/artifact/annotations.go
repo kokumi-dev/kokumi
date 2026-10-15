@@ -8,10 +8,6 @@ import (
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
-// AnnotationPrerendered marks artifacts that were rendered (and patched) by a
-// Menu before being published to the destination registry.
-const AnnotationPrerendered = "kokumi.dev/prerendered"
-
 // AnnotationInputs collects everything that feeds the annotation set of a
 // pushed artifact.
 type AnnotationInputs struct {
@@ -28,8 +24,7 @@ type AnnotationInputs struct {
 	Extra map[string]string
 }
 
-// buildAnnotations assembles the annotation set for a pushed artifact,
-// merging the diverged Menu and Order propagation into one builder.
+// buildAnnotations assembles the annotation set for a pushed artifact.
 func buildAnnotations(in AnnotationInputs) map[string]string {
 	annotations := map[string]string{}
 

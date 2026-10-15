@@ -24,9 +24,9 @@ const (
 	CapOrdersUpdate Capability = "orders:update"
 	CapOrdersDelete Capability = "orders:delete"
 
-	CapMenusCreate Capability = "menus:create"
-	CapMenusUpdate Capability = "menus:update"
-	CapMenusDelete Capability = "menus:delete"
+	CapProductsCreate Capability = "products:create"
+	CapProductsUpdate Capability = "products:update"
+	CapProductsDelete Capability = "products:delete"
 
 	CapPantriesCreate Capability = "pantries:create"
 	CapPantriesUpdate Capability = "pantries:update"
@@ -87,9 +87,9 @@ func capabilityCatalog(installNamespace string) []capabilityRule {
 		{capability: CapOrdersUpdate, checks: allNamespaces("orders", "update")},
 		{capability: CapOrdersDelete, checks: allNamespaces("orders", "delete")},
 
-		{capability: CapMenusCreate, checks: allNamespaces("menus", "create")},
-		{capability: CapMenusUpdate, checks: allNamespaces("menus", "update")},
-		{capability: CapMenusDelete, checks: allNamespaces("menus", "delete")},
+		{capability: CapProductsCreate, checks: allNamespaces("products", "create")},
+		{capability: CapProductsUpdate, checks: allNamespaces("products", "update")},
+		{capability: CapProductsDelete, checks: allNamespaces("products", "delete")},
 
 		// Pantry edits are applied as a patch.
 		{capability: CapPantriesCreate, checks: allNamespaces("pantries", "create")},

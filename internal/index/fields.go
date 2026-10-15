@@ -9,11 +9,12 @@ const (
 	// FieldPreparationRefName selects Approvals by spec.preparationRef.name.
 	FieldPreparationRefName = "spec.preparationRef.name"
 
-	// FieldMenuRefName indexes Orders by spec.menuRef.name (cache only).
-	FieldMenuRefName = "spec.menuRef.name"
+	// FieldProductRefName selects Orders by spec.productRef.name.
+	FieldProductRefName = "spec.productRef.name"
 
-	// FieldSourcePantryRefName indexes Orders by spec.source.pantryRef.name (cache only).
-	FieldSourcePantryRefName = "spec.source.pantryRef.name"
+	// FieldPantryRefNames indexes Products by the Pantries their source and
+	// vendor destination reference (cache only).
+	FieldPantryRefNames = "pantryRefNames"
 
 	// FieldDestinationPantryRefName indexes Orders by spec.destination.pantryRef.name (cache only).
 	FieldDestinationPantryRefName = "spec.destination.pantryRef.name"

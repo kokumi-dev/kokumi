@@ -16,11 +16,8 @@ const ImageLayerMediaType = "application/vnd.oci.image.layer.v1.tar+gzip"
 // Preparation.
 const PreparationArtifactType = "application/vnd.kokumi.preparation.v1"
 
-// MenuArtifactType is the artifactType of the manifests pre-rendered by a Menu.
-const MenuArtifactType = "application/vnd.kokumi.menu.v1"
-
 // PreparationConfigMediaType is the media type of the config blob that
-// records the intent of a Preparation or pre-rendered Menu artifact.
+// records the intent of a Preparation artifact.
 const PreparationConfigMediaType = "application/vnd.kokumi.preparation.config.v1+json"
 
 // ProvenanceArtifactType is the artifactType of the referrer that carries the

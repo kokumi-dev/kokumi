@@ -37,10 +37,10 @@ rules:
   resources:
   - approvals/status
   - kitchens/status
-  - menus/status
   - orders/status
   - pantries/status
   - preparations/status
+  - products/status
   - recipes/status
   - servings/status
   verbs:
@@ -51,7 +51,6 @@ rules:
   - delivery.kokumi.dev
   resources:
   - kitchens
-  - menus
   - orders
   - pantries
   - preparations
@@ -69,11 +68,21 @@ rules:
   - delivery.kokumi.dev
   resources:
   - kitchens/finalizers
-  - menus/finalizers
   - orders/finalizers
   - pantries/finalizers
   - preparations/finalizers
+  - products/finalizers
   - recipes/finalizers
   - servings/finalizers
   verbs:
   - update
+- apiGroups:
+  - delivery.kokumi.dev
+  resources:
+  - products
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch

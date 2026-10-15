@@ -82,16 +82,7 @@
 }
 
 .chevron {
-  display: inline-block;
-  font-size: 1.1rem;
-  line-height: 1;
   color: var(--color-text-muted-light);
-  transition: transform 0.15s ease;
-  transform: rotate(0deg);
-}
-
-.chevronOpen {
-  transform: rotate(90deg);
 }
 
 .tagName {

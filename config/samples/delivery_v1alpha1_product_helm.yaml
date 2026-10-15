@@ -1,0 +1,31 @@
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Product
+metadata:
+  labels:
+    app.kubernetes.io/name: kokumi
+    app.kubernetes.io/managed-by: kustomize
+  name: podinfo
+spec:
+  source:
+    oci: oci://ghcr.io/stefanprodan/charts/podinfo
+    version: "6.14.1"
+
+  render:
+    helm:
+      namespace: default
+      values:
+        ui:
+          color: "#EF6461"
+          logo: "https://kokumi.dev/images/logo.png"
+
+  # Orders of this Product (podinfo-dev, podinfo-staging, podinfo-prod) may
+  # only set these values. Without overrides, Orders may not change anything.
+  # Helm names the resources after each Order (the release name), so the
+  # variants do not collide in the default namespace.
+  overrides:
+    values:
+      policy: Listed
+      paths:
+        - ui.message
+        - service.type
+        - replicaCount

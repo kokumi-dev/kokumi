@@ -8,7 +8,7 @@ description: How Kokumi models release workflows and how its control loops opera
 
 Kokumi draws a hard line between three concerns that most delivery systems conflate:
 
-1. **Intent** — what _should_ be built and how (the Order)
+1. **Intent** — what _should_ be built and how (a Product and its Orders)
 2. **Artifact** — what _was_ built, exactly (the Preparation)
 3. **Activation** — what is _currently running_ (the Serving)
 
@@ -84,6 +84,8 @@ the selected Preparation. Argo CD then syncs that artifact into the cluster.
 ## Resource model
 
 ```
+Product ◀──variant of── Order  (one Order per environment or rollout)
+                          │
 Order ──renders──▶ Preparation (immutable, versioned OCI artifact)
                          ▲
 Serving ──selects────────┘  (mutable pointer to one Preparation)
@@ -92,50 +94,98 @@ Serving ──selects────────┘  (mutable pointer to one Prepar
                               │
                               └──syncs──▶ Cluster workloads
 
-Menu ──provides template──▶ Order  (consumed and parameterized)
 Recipe ──provides render profile──▶ Order  (for example Helm options)
 ```
 
-### Menu
+### Product
 
-A Menu is a reusable deployment template. It pins a source OCI reference and
-version, locks the render type, and defines default values and patches.
-Consumers create Orders that reference a Menu instead of specifying source
-details directly.
+A Product is the complete definition of an application. It pins the source OCI
+reference and version, sets the render type and options, and holds the base
+Helm values and patches. A Product is never rendered or deployed on its own;
+its Orders are.
 
-Each Menu carries an **override policy** that controls what consumers are
-allowed to customise:
+```yaml
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Product
+metadata:
+  name: podinfo
+  namespace: shop
+spec:
+  source:
+    oci: oci://ghcr.io/stefanprodan/charts/podinfo
+    version: "6.14.1"
+  render:
+    helm:
+      values:
+        replicaCount: 1
+        ui:
+          color: "#EF6461"
+  patches:
+    - target:
+        kind: Deployment
+        name: podinfo
+      set:
+        .spec.template.spec.terminationGracePeriodSeconds: "30"
+```
 
-| Policy | Behaviour |
+The Product controller resolves the source tag to a digest and publishes it in
+`status.source` (OCI URL, version, digest, and an optional Pantry reference
+for pull credentials). Orders pull the source by that digest, only once the
+Product is `Ready` for its current generation. Every variant of a Product
+therefore renders the same artifact, even if the upstream tag is moved. The
+Product resolves the tag again only when its source or vendor configuration,
+or the URL of a Pantry they use, changes; the new digest renders a new
+Preparation for every Order.
+
+A Product cannot be deleted while Orders reference it. The
+`delivery.kokumi.dev/product-protection` finalizer keeps it, like
+`kubernetes.io/pvc-protection` keeps a claimed volume, and its `Ready`
+condition reports `InUse` with the names of the remaining Orders. The UI shows
+the Product as `Deleting` and offers no new Orders for it; Orders of a Product
+being deleted wait with reason `ProductDeleting`.
+
+#### Restricting what Orders may change
+
+`spec.overrides` decides what the Orders of a Product may change, separately
+for Helm values and for patches (which cover UI edits too). Each has a
+`policy`, which the API server defaults to `None` and stores with the
+Product:
+
+```yaml
+spec:
+  overrides:
+    values:
+      policy: Listed
+      paths:
+        - replicaCount
+        - ui.message
+    patches:
+      policy: Listed
+      targets:
+        - target:
+            kind: Deployment
+            name: podinfo
+          paths:
+            - .spec.replicas
+```
+
+| `policy` | Orders may set |
 |---|---|
-| `All` | Consumer may supply any values or patches |
-| `Restricted` | Consumer may only set values or patches that match the Menu's allow-list |
-| `None` | Consumer may not override values or patches at all |
+| `None` (default) | nothing |
+| `Listed` | only the listed Helm value paths (leaf paths, dot-separated), or the listed patch targets and paths |
+| `All` | any value, or any patch and edit |
 
-Values and patches have independent policies. For example a Menu can allow
-unrestricted Helm value overrides while forbidding any patches, or restrict
-values to a specific list of keys while allowing all patches.
+`paths` and `targets` are required with `Listed` and rejected otherwise. A
+target without a namespace matches the resource in any namespace; when several
+targets match, the paths of all of them are allowed. An Order that sets
+anything else fails with a `ProcessingFailed` condition naming the offending
+value or patch.
 
-When an Order references a Menu:
+#### Vendoring
 
-1. The Order controller fetches the Menu and validates the consumer's overrides
-   against the override policy.
-2. Base values and patches from the Menu are always applied first.
-3. Allowed consumer overrides are merged on top (values are deep-merged, patches
-   are appended).
-4. If the consumer supplies overrides that violate the policy, reconciliation
-   fails with a clear status message.
-
-#### Source resolution and vendoring
-
-The Menu controller always publishes the consumable source in the Menu's
-`status.source` (OCI URL, version, optional Pantry reference for pull
-credentials, and the resolved digest). Orders consume exactly what is
-advertised there.
-
-Optionally, a Menu can **vendor** its source: copy the artifact (Helm chart or
-manifest bundle) to another OCI registry. Orders then consume the vendored
-copy:
+A Product can **vendor** its source: copy the artifact (Helm chart or manifest
+bundle) unchanged to another OCI registry, for example to prepare an
+air-gapped installation. Orders then render from the vendored copy:
 
 ```yaml
 spec:
@@ -143,15 +193,15 @@ spec:
     oci: oci://ghcr.io/kokumi-dev/testdata/external-secrets
     version: "0.1.0"
   vendor:
-    destination:
-      oci: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/external-secrets  # or a pantryRef
+    pantryRef:
+      name: internal-mirror   # or oci: oci://…; vendor: {} copies to <namespace>/vendor/<name> in the in-cluster registry
 ```
 
-The destination is either a plain `oci://` URL (anonymous) or a `pantryRef`
-(credentials from the referenced Pantry). Upstream credentials come from
-`spec.source.pantryRef` when the upstream registry is private. The vendored
-ref and its pull credentials are advertised in `status.source`, so Orders need
-no knowledge of the vendoring setup.
+Upstream credentials come from `spec.source.pantryRef` when the upstream
+registry is private. The vendored reference and its pull credentials are
+published in `status.source`, so Orders need no knowledge of the vendoring
+setup. When a Pantry's URL changes, the Product resolves its source again and
+its Orders render new Preparations.
 
 ### Recipe
 
@@ -160,28 +210,53 @@ behavior and values-related settings.
 
 ### Order
 
-Order is the concrete execution request. It binds source and runtime input and
-triggers rendering to produce immutable artifacts.
+An Order is a variant of exactly one Product, for example one environment
+such as `podinfo-dev` or `podinfo-prod`. `spec.productRef` names the Product
+in the same namespace and cannot be changed after creation. The Order only
+declares what differs from its Product:
 
-Order does not need Menu. It can fully define component intent on its own, and
-this standalone behavior is intended to remain a first-class mode.
+```yaml
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Order
+metadata:
+  name: podinfo-prod
+  namespace: shop
+spec:
+  productRef:
+    name: podinfo
+  values:                # deep-merged over the Product's render.helm.values
+    replicaCount: 3
+  patches: []            # merged over the Product's patches, per target
+  edits: []              # changes made in the UI, applied after patches
+  destination:
+    pantryRef:
+      name: prod-registry
+  promotion:
+    mode: Manual
+    approvals:
+      requiredApprovals: 2
+      allowedGroups:
+        - release-approvers
+```
 
-Alternatively, an Order can reference a Menu via `spec.menuRef`. When a Menu
-reference is present, the source, render type, and base configuration are
-inherited from the Menu. The consumer provides only the overrides that the
-Menu's policy permits.
+- **Values** are deep-merged over the Product's Helm values; the Order wins.
+  They are only valid when the Product renders with Helm.
+- **Patches** are merged over the Product's patches per target; on the same
+  path the Order wins.
+- **Edits** are applied after patches. The UI writes them when you edit a
+  rendered file.
+- **Destination** and **promotion** are per Order: each variant has its own
+  Preparation history, Serving, and approval gate.
 
-An Order declares:
+Every change to an Order or to its Product (a new source version, other values
+or patches) triggers a new reconciliation and, if the merged result changed, a
+new Preparation. Promotion stays per Order, so a new Product version can deploy
+automatically to `podinfo-dev` while `podinfo-prod` waits for approvals.
 
-- **Source** (standalone mode) — OCI image reference: either a pre-rendered
-  manifest bundle (containing `*.yaml` files) or a Helm chart in OCI format
-  (add `spec.render.helm` to configure rendering)
-- **MenuRef** (template mode) — reference to a Menu by name in the Order's
-  namespace; source and render configuration are inherited
-- **Patches** — Patches to apply before producing the artifact
-
-Orders are mutable; every change triggers a new reconciliation cycle and
-automatically produces a new Preparation.
+While its Product is missing, not `Ready`, or being deleted, an Order reports
+`Ready=False` with reason `ProductNotFound`, `ProductNotReady`, or
+`ProductDeleting` and waits; the UI shows it as `Waiting`. It continues as
+soon as the Product is ready.
 
 ### Preparation
 
@@ -259,7 +334,7 @@ fetching a blob.
   "parent": "sha256:c1…",
   "source": { "oci": "oci://ghcr.io/stefanprodan/charts/podinfo", "version": "6.10.2", "digest": "sha256:aa…" },
   "destination": { "oci": "oci://kokumi-registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod" },
-  "menu": { "namespace": "shop", "name": "podinfo", "configHash": "sha256:77e0…" },
+  "product": { "namespace": "shop", "name": "podinfo", "configHash": "sha256:77e0…" },
   "renderer": { "type": "Helm", "version": "v4.3.0", "builder": "ghcr.io/kokumi-dev/kokumi@sha256:bb…" },
   "intent": { "source": {}, "destination": "", "render": {}, "patches": [], "edits": [], "promotion": {} }
 }
@@ -268,10 +343,9 @@ fetching a blob.
 `createdTime` equals the manifest's `org.opencontainers.image.created`
 annotation.
 
-Artifacts that a Menu pre-renders use the artifactType
-`application/vnd.kokumi.menu.v1` and the same config blob without `order`,
-`parent` and promotion gates. Their `configHash` is computed the same way,
-from their own intent; `menu.configHash` is the Menu's own hash.
+`product.configHash` is the Product's own hash at render time: the hash of the
+source and vendor configuration its source was resolved from, not the hash of
+the intent.
 
 #### Intent and the config hash
 
@@ -284,10 +358,10 @@ of the `intent` value as it stands in the blob.
 
 - Changing the approval policy creates a new Preparation that needs fresh
   approvals. Switching the promotion mode does not.
-- Changing a Menu in a way that alters the merged result (a new source
-  version, other values or patches) renders a new Preparation for every Order
-  on that Menu. Orders on a pre-rendered Menu render again when the Menu
-  publishes a new artifact, because its digest is part of their intent.
+- Changing a Product in a way that alters the merged result (a new source
+  version or digest, other values or patches) renders a new Preparation for
+  every Order of that Product. The source digest is part of the intent. Where a value or patch is set, on the Product or the
+  Order, is not part of the intent; only the merged result is.
 
 {{< callout type="warning" >}}
 The intent is stored inside the artifact, so **anyone who can pull the
@@ -445,13 +519,6 @@ who can change the policies themselves, impersonate the `kokumi-server`
 ServiceAccount, or write to etcd directly. Restrict those permissions and keep
 an audit policy on `approvals` and `admissionregistration.k8s.io` resources.
 
-### Menu and Recipe lifecycle
-
-Recipe defines rendering behavior. Menu provides a reusable template with
-override policies controlling what consumers can customise.
-Order remains the concrete execution resource, whether standalone or template-
-parameterized.
-
 ## Reconciliation loop
 
 ```
@@ -473,7 +540,7 @@ Key properties:
 ## OCI source formats
 
 Kokumi supports two source OCI artifact formats, selected by the presence or
-absence of `spec.render`.
+absence of the Product's `spec.render`.
 
 ### Pre-rendered manifest bundle (default)
 
@@ -507,32 +574,32 @@ Kokumi runs `helm template` internally to render the chart into a manifest
 bundle, then stores the output as an immutable Preparation artifact.
 
 ```yaml
+kind: Product
 spec:
   source:
     oci: oci://ghcr.io/stefanprodan/charts/podinfo
-    version: "6.10.2"
+    version: "6.14.1"
   render:
     helm:
       namespace: default
       values:
         ui:
           color: "#EF6461"
-          message: "Hello from Kokumi"
           logo: "https://kokumi.dev/images/logo.png"
 ```
 
-Available `render.helm` fields:
+Available `render.helm` fields on the Product:
 
 | Field | Description | Default |
 |---|---|---|
 | `releaseName` | Helm release name passed to `helm template` | Order name |
 | `namespace` | Target namespace (`--namespace`) | Order namespace |
 | `includeCRDs` | Include CRDs in the rendered output (`--include-crds`) | `false` |
-| `values` | Inline Helm values merged last (highest priority) | — |
+| `values` | Base Helm values; each Order's `spec.values` are deep-merged over them | — |
 
 Helm OCI charts are first-class in Kokumi. Any chart published to an OCI
 registry, whether an upstream community chart or an internally-built one,
-can be used as an Order source.
+can be used as a Product source.
 
 ## OCI registry
 
@@ -545,7 +612,7 @@ that stores rendered manifests as OCI artifacts. This means:
 
 ## Deployment architecture
 
-Kokumi pulls a source artifact from a registry, renders it into an immutable artifact, and stores it in a destination registry. Argo CD then fetches the manifests by content digest and syncs them to the cluster. The source OCI reference on the Order accepts any registry (including the in-cluster one), and the destination defaults to the in-cluster registry when omitted but can be set to an external registry instead.
+Kokumi pulls a source artifact from a registry, renders it into an immutable artifact, and stores it in a destination registry. Argo CD then fetches the manifests by content digest and syncs them to the cluster. The source OCI reference on the Product accepts any registry (including the in-cluster one), and each Order's destination defaults to the in-cluster registry when omitted but can be set to an external registry instead.
 
 ```mermaid
 %%{init: {

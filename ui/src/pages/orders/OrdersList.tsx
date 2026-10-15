@@ -13,7 +13,6 @@ import StatusIndicator from '../../components/shared/StatusIndicator'
 import RelativeTime from '../../components/shared/RelativeTime'
 import { ButtonLink, PlusIcon } from '../../components/ui'
 import { paths } from '../../routes/paths'
-import { orderSourceRef } from './orderFormat'
 import layout from '../../components/layout/layout.module.css'
 
 export default function OrdersList() {
@@ -22,20 +21,20 @@ export default function OrdersList() {
   const createDenied = useDeniedReason('orders:create')
 
   const filtered = (orders ?? []).filter((o) =>
-    matchesFilter(query, o.name, o.namespace, o.menuRef?.name, o.source?.oci, o.source?.pantryRef?.name, o.source?.version),
+    matchesFilter(query, o.name, o.namespace, o.productRef.name),
   )
 
   return (
     <div className={layout.page}>
       <PageHeader
         title="Orders"
-        subtitle="What to render, how to configure it, and where it gets promoted"
+        subtitle="Variants of Products: what differs per variant, and where and how it gets promoted"
         actions={<ButtonLink variant="primary" icon={<PlusIcon />} to={paths.newOrder()} disabledReason={createDenied}>New Order</ButtonLink>}
       />
 
       <Section
         title="All Orders"
-        actions={<FilterInput label="Filter orders" value={query} onChange={setQuery} placeholder="Filter by name, namespace or source…" />}
+        actions={<FilterInput label="Filter orders" value={query} onChange={setQuery} placeholder="Filter by name, namespace or Product…" />}
         flush
       >
         {orders === null ? (
@@ -57,14 +56,15 @@ export default function OrdersList() {
                 cell: (o) => <NameCell to={paths.order(o.namespace, o.name)} name={o.name} secondary={o.namespace} />,
               },
               { header: 'Status', width: '110px', cell: (o) => <StatusIndicator state={o.state} /> },
-              { header: 'Source', truncate: true, title: (o) => o.source?.oci ?? orderSourceRef(o), cell: orderSourceRef },
               {
-                header: 'Version',
-                width: '110px',
+                header: 'Product',
                 truncate: true,
-                title: (o) => o.source?.version,
-                cell: (o) =>
-                  o.source?.version ? <span className={layout.mono}>{o.source.version}</span> : <span className={layout.muted}>—</span>,
+                title: (o) => o.productRef.name,
+                cell: (o) => (
+                  <Link className={layout.refLink} to={paths.product(o.namespace, o.productRef.name)}>
+                    {o.productRef.name}
+                  </Link>
+                ),
               },
               {
                 header: 'Active',

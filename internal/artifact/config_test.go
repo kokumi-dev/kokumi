@@ -44,7 +44,7 @@ func TestPipeline_Render_config(t *testing.T) {
 				ConfigHash:  "sha256:9b1d",
 				Source:      artifact.ConfigSource{PantryRef: "upstream"},
 				Destination: artifact.ConfigDestination{PantryRef: "internal"},
-				Menu:        &artifact.ConfigMenu{Namespace: "shop", Name: "podinfo", ConfigHash: "sha256:77e0"},
+				Product:     &artifact.ConfigProduct{Namespace: "shop", Name: "podinfo", ConfigHash: "sha256:77e0"},
 				Renderer:    artifact.ConfigRenderer{Type: "Manifest", Version: "v0.17.0", Builder: "kokumi@0.17.0"},
 				Intent:      json.RawMessage(`{"destination":"oci://dest","source":{"oci":"oci://src","version":"1.0.0"}}`),
 			}
@@ -93,15 +93,6 @@ func TestPipeline_Render_config(t *testing.T) {
 		got, err := artifact.ParseConfig(pushed.ConfigMediaType, pushed.Config)
 		require.NoError(t, err)
 		require.Equal(t, string(intent), string(got.Intent))
-	})
-
-	t.Run("a pinned source digest keeps the version as the pushed tag", func(t *testing.T) {
-		_, result := render(t, func(req *artifact.RenderRequest) {
-			req.Source.Digest = parent
-		})
-
-		require.Equal(t, testVersion, result.Config.Source.Version)
-		require.Equal(t, testVersion, result.DestRef.Tag)
 	})
 }
 

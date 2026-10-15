@@ -13,6 +13,8 @@ function toneFor(state: string): Tone {
     case 'processing':
     case 'deploying':
     case 'progressing':
+    case 'waiting':
+    case 'deleting':
       return 'warning'
     case 'failed':
     case 'error':

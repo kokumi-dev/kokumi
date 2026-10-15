@@ -186,7 +186,7 @@ func TestPipeline_RenderProvenance(t *testing.T) {
 }
 
 // TestPipeline_Render_PatchesThenEdits pins the application order: patches
-// first, edits second — edits must win, so consumer edits override Menu
+// first, edits second — edits must win, so Order edits override Product
 // patches on the same field.
 func TestPipeline_Render_PatchesThenEdits(t *testing.T) {
 	fs := afero.NewMemMapFs()

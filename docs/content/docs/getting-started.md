@@ -54,36 +54,47 @@ kubectl get pods -n kokumi
 # kokumi-controller-manager-xxx       1/1     Running   0          30s
 ```
 
-## Create your first Order
+## Create your first Product and Order
 
-An **Order** is the concrete delivery request.
+A **Product** is the complete definition of an application: the source OCI
+artifact, how it is rendered, and its base values and patches.
 
-An Order does not require a Menu. It can fully define the intent of a single
-component on its own. This standalone Order model is a first-class mode and will
-always be supported.
-
-Alternatively, an Order can reference a **Menu** to inherit source, render
-configuration, and base defaults while only supplying permitted overrides. See
-[Create a Menu](#create-a-menu) below for that workflow.
+An **Order** is a variant of exactly one Product, for example one environment.
+It only declares what differs: Helm values, patches, where the rendered
+artifact is pushed, and how it is promoted. Every application has at least one
+Order; a Product on its own is never rendered or deployed.
 
 Kokumi supports two source types:
 
 - **Pre-rendered manifest bundle** — an OCI artifact containing `*.yaml` files
   at its root (no `spec.render` needed).
 - **Helm chart in OCI format** — a standard Helm chart pushed to an OCI registry;
-  add `spec.render.helm` to control rendering.
+  add `spec.render.helm` to the Product to control rendering.
 
 #### Example: pre-rendered manifest bundle
 
 ```yaml
 apiVersion: delivery.kokumi.dev/v1alpha1
-kind: Order
+kind: Product
 metadata:
   name: external-secrets
 spec:
   source:
     oci: oci://ghcr.io/kokumi-dev/testdata/external-secrets
     version: "0.1.0"
+
+  # Orders may patch anything. Without overrides they may change nothing.
+  overrides:
+    patches:
+      policy: All
+---
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Order
+metadata:
+  name: external-secrets
+spec:
+  productRef:
+    name: external-secrets
 
   patches:
     - target:
@@ -100,13 +111,13 @@ spec:
 
 ```yaml
 apiVersion: delivery.kokumi.dev/v1alpha1
-kind: Order
+kind: Product
 metadata:
   name: podinfo
 spec:
   source:
     oci: oci://ghcr.io/stefanprodan/charts/podinfo
-    version: "6.10.2"
+    version: "6.14.1"
 
   render:
     helm:
@@ -114,8 +125,25 @@ spec:
       values:
         ui:
           color: "#EF6461"
-          message: "Hello from Kokumi"
           logo: "https://kokumi.dev/images/logo.png"
+
+  overrides:
+    values:
+      policy: All
+    patches:
+      policy: All
+---
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Order
+metadata:
+  name: podinfo
+spec:
+  productRef:
+    name: podinfo
+
+  values:
+    ui:
+      message: "Hello from Kokumi"
 
   patches:
     - target:
@@ -131,11 +159,49 @@ spec:
     mode: Manual
 ```
 
+The Order's `values` are deep-merged over the Product's
+`spec.render.helm.values`, and its patches over the Product's patches. The
+Order's settings win. An Order may only change what the Product's `overrides`
+allow; both Products above allow everything (see
+[Restrict what Orders may change](#restrict-what-orders-may-change)).
+
 Apply it:
 
 ```bash
-kubectl apply -f order.yaml
+kubectl apply -f podinfo.yaml
 ```
+
+### Add another variant
+
+More Orders of the same Product are its other variants, for example a
+production environment that runs more replicas and needs approvals:
+
+```yaml
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Order
+metadata:
+  name: podinfo-prod
+spec:
+  productRef:
+    name: podinfo
+
+  values:
+    replicaCount: 3
+    ui:
+      message: "Hello from production"
+
+  promotion:
+    mode: Manual
+    approvals:
+      requiredApprovals: 2
+      allowedGroups:
+        - release-approvers
+```
+
+The source version is set only on the Product. Changing it renders a new
+Preparation for every Order of the Product, and each Order promotes it on its
+own terms: `podinfo` can deploy it automatically while `podinfo-prod` waits for
+approvals. The `productRef` of an Order cannot be changed after creation.
 
 ## Watch a Preparation being created
 
@@ -191,90 +257,55 @@ kubectl get applications -n argocd
 
 To roll back, promote any previous Preparation. No re-rendering required.
 
-## Create a Menu
+## Restrict what Orders may change
 
-A **Menu** is a reusable template that pins source, version, and render type.
-It defines base values and patches plus an **override policy** controlling what
-consumers may customise.
+A Product decides what its Orders may change with `spec.overrides`, for
+example when a platform team owns the Product and application teams own its
+Orders. Helm values and patches each have a policy:
+
+| `policy` | Orders may set |
+|---|---|
+| `None` (default) | nothing |
+| `Listed` | only what is listed in `paths` (values) or `targets` (patches) |
+| `All` | anything |
 
 ```yaml
 apiVersion: delivery.kokumi.dev/v1alpha1
-kind: Menu
+kind: Product
 metadata:
-  namespace: kokumi
   name: podinfo
 spec:
   source:
     oci: oci://ghcr.io/stefanprodan/charts/podinfo
-    version: "6.10.2"
+    version: "6.14.1"
 
   render:
     helm:
-      namespace: default
       values:
         ui:
           color: "#EF6461"
-          logo: "https://kokumi.dev/images/logo.png"
 
   overrides:
     values:
-      policy: Restricted
-      allowed:
-        - "ui.message"
-        - "replicaCount"
+      policy: Listed
+      paths:
+        - ui.message
+        - replicaCount
     patches:
-      policy: None
-
-  defaults:
-    mode: Manual
-
+      policy: Listed
+      targets:
+        - target:
+            kind: Deployment
+            name: podinfo
+          paths:
+            - .spec.replicas
 ```
 
-This Menu:
-
-- Pins the podinfo Helm chart at version `6.10.2`
-- Always renders with the Kokumi logo as a base value
-- Allows consumers to set only `ui.message`, `ui.color`, and `replicaCount`
-- Forbids any patches
-
-Apply it:
-
-```bash
-kubectl apply -f menu.yaml
-```
-
-### Order from a Menu
-
-Create an Order that references the Menu instead of specifying a source directly:
-
-```yaml
-apiVersion: delivery.kokumi.dev/v1alpha1
-kind: Order
-metadata:
-  namespace: kokumi
-  name: podinfo-from-menu
-spec:
-  menuRef:
-    name: podinfo
-
-  render:
-    helm:
-      values:
-        ui:
-          message: "Ordered from Menu"
-
-  destination:
-    oci: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/podinfo-from-menu
-
-  promotion:
-    mode: Manual
-
-```
-
-The Order inherits the source, version, and base values from the Menu. Only the
-allowed override keys are set. Kokumi validates the overrides against the Menu's
-policy during reconciliation. Any disallowed key causes the Order to fail with
-a clear status message.
+Here Orders may only set the listed Helm value paths and patch the listed
+targets and paths; the patch policy applies to edits made in the UI too. A
+target without a namespace matches the resource in any namespace. An Order
+that sets anything else fails with a `ProcessingFailed` condition that names
+the offending value or patch.
 
 ## Access the UI
 
@@ -300,14 +331,15 @@ rotate the credentials Secret, manage the token signing key
 resource. The server picks up changes to the Secret and the `Kitchen` resource
 automatically; no restart is needed.
 
-The UI lets you browse Menus, Orders, Preparations, and Servings, create
-Orders from a Menu with one click, promote a Preparation to active, and view
-Argo CD sync status in real time.
+The UI lets you browse Products and their Orders, Preparations, and Servings,
+create an Order of a Product with one click, preview what a Product or Order
+renders, promote a Preparation to active, and view Argo CD sync status in real
+time.
 
 ## Using a private registry
 
 If your source OCI artifact lives in a private registry, create a **Pantry** with
-the registry URL and credentials, then reference it on the Order's source:
+the registry URL and credentials, then reference it on the Product's source:
 
 ```yaml
 apiVersion: delivery.kokumi.dev/v1alpha1

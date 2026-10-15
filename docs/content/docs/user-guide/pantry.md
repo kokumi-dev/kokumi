@@ -93,19 +93,20 @@ kubectl get pantry ghcr-private -n kokumi
 If the Secret is wrong or the registry is unreachable, the `Ready` column shows
 `False` with a `ConnectivityCheckFailed` reason.
 
-## Using a Pantry in an Order
+## Using a Pantry in a Product or Order
 
-A Pantry replaces the OCI URL on an Order's source or destination. It provides
-both the URL **and** the credentials. `oci` and `pantryRef` are mutually
-exclusive.
+A Pantry replaces an OCI URL: the source or vendor destination of a Product,
+or the destination of an Order. It provides both the URL **and** the
+credentials. `oci` and `pantryRef` are mutually exclusive.
 
 ### Pantry as source
 
-Use `spec.source.pantryRef` to pull the artifact from the Pantry's URL:
+Use `spec.source.pantryRef` on a Product to pull the artifact from the
+Pantry's URL:
 
 ```yaml
 apiVersion: delivery.kokumi.dev/v1alpha1
-kind: Order
+kind: Product
 metadata:
   name: my-private-app
   namespace: kokumi
@@ -115,6 +116,9 @@ spec:
       name: ghcr-private
     version: "1.2.3"
 ```
+
+When the Pantry's URL changes, the Product resolves its source again and every
+Order of the Product renders a new Preparation.
 
 ### Direct OCI source (no Pantry)
 
@@ -127,9 +131,23 @@ spec:
     version: "1.2.3"
 ```
 
+### Pantry as vendor destination
+
+To mirror a Product's source into a Pantry's registry, for example ahead of
+an air-gapped installation, use `spec.vendor.pantryRef` on the Product. Its
+Orders then render from the mirrored copy:
+
+```yaml
+spec:
+  vendor:
+    pantryRef:
+      name: internal-mirror
+```
+
 ### Pantry as destination
 
-To push rendered artifacts to a Pantry's URL, use `spec.destination.pantryRef`:
+To push an Order's rendered artifacts to a Pantry's URL, use
+`spec.destination.pantryRef` on the Order:
 
 ```yaml
 spec:

@@ -13,13 +13,13 @@ review and audit trail to get there. Kokumi keeps both: OCI artifacts as the
 immutable source of truth, with approval gates and full render visibility
 before anything reaches your cluster.
 
-It models your delivery workflow as five composable primitives:
+It models your delivery workflow as composable primitives:
 
 | Resource | Role |
 |---|---|
-| **Menu** | Optional reusable template for Orders |
+| **Product** | Complete definition of an application: source, rendering, base values and patches |
 | **Recipe** | Rendering profile instructions _(planned, not yet implemented)_ |
-| **Order** | Concrete release request that can define full intent or parameterize a Menu |
+| **Order** | Variant of a Product, such as one environment, holding only what differs |
 | **Preparation** | Immutable OCI artifact rendered from an Order |
 | **Serving** | Active deployment selecting exactly one Preparation |
 | **Pantry** | Registry credential store for private OCI registries |

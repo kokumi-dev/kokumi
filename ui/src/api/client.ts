@@ -1,5 +1,5 @@
 import { authHeaders, refresh } from './auth'
-import type { Order, Preparation, OrderFormData, Menu, MenuFormData, Patch, ChartInfo, Pantry, PantryFormData, ArtifactInfo, ArtifactFile, Approval, ApprovalDecision, Attestation, ArtifactConfig } from './types'
+import type { Order, Preparation, OrderFormData, OrderPreviewRequest, Product, ProductFormData, ProductPreviewRequest, Patch, Render, ChartInfo, Pantry, PantryFormData, ArtifactInfo, ArtifactFile, Approval, ApprovalDecision, Attestation, ArtifactConfig } from './types'
 
 // All API calls are relative so they work both in dev (proxied by Vite) and
 // in production (served from the same Go binary).
@@ -60,23 +60,47 @@ export function getOrder(namespace: string, name: string): Promise<Order> {
   return request<Order>(`/orders/${namespace}/${name}`)
 }
 
+/** Helm values for a request body; empty values are omitted. */
+function valuesBody(values?: Record<string, unknown>): Record<string, unknown> | undefined {
+  return values && Object.keys(values).length > 0 ? values : undefined
+}
+
 export function createOrder(data: OrderFormData, commitMessage?: string): Promise<Order> {
   // Edits are only set via the manifest editor on existing orders, never on create.
   return request<Order>('/orders', {
     method: 'POST',
-    body: JSON.stringify({ ...data, edits: undefined, commitMessage: commitMessage ?? '' }),
+    body: JSON.stringify({
+      namespace: data.namespace,
+      name: data.name,
+      productRef: data.productRef,
+      values: valuesBody(data.values),
+      destination: data.destination,
+      patches: data.patches,
+      mode: data.mode,
+      approvals: data.approvals,
+      commitMessage: commitMessage ?? '',
+    }),
   })
 }
 
+/** Replaces the spec of an Order. Its Product cannot be changed. */
 export function updateOrder(
   namespace: string,
   name: string,
-  data: Omit<OrderFormData, 'name' | 'namespace'>,
+  data: OrderFormData,
   commitMessage?: string,
 ): Promise<Order> {
   return request<Order>(`/orders/${namespace}/${name}`, {
     method: 'PUT',
-    body: JSON.stringify({ ...data, commitMessage: commitMessage ?? '' }),
+    body: JSON.stringify({
+      values: valuesBody(data.values),
+      destination: data.destination,
+      patches: data.patches,
+      edits: data.edits,
+      mode: data.mode,
+      approvals: data.approvals,
+      commitMessage: commitMessage ?? '',
+    }),
   })
 }
 
@@ -145,11 +169,14 @@ export function listPreparations(
   return request<Preparation[]>(`/orders/${namespace}/${orderName}/preparations`)
 }
 
-export function previewOrder(data: OrderFormData): Promise<string> {
-  return fetch(`${BASE}/orders/preview`, {
+// ── Previews (rendered on the server, nothing is pushed) ──────────────────────
+
+/** Posts a preview request and returns the rendered manifest as text. */
+function previewManifest(path: string, body: unknown): Promise<string> {
+  return fetch(`${BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify(data),
+    body: JSON.stringify(body),
   }).then(async (res) => {
     if (!res.ok) {
       handleUnauthorized(res.status)
@@ -166,10 +193,29 @@ export function previewOrder(data: OrderFormData): Promise<string> {
   })
 }
 
-export function previewOrderFiles(data: OrderFormData): Promise<ArtifactFile[]> {
+/** Renders an Order over its Product into a single manifest. */
+export function previewOrder(req: OrderPreviewRequest): Promise<string> {
+  return previewManifest('/orders/preview', req)
+}
+
+/** Renders an Order over its Product into its individual files. */
+export function previewOrderFiles(req: OrderPreviewRequest): Promise<ArtifactFile[]> {
   return request<ArtifactFile[]>('/orders/preview/files', {
     method: 'POST',
-    body: JSON.stringify(data),
+    body: JSON.stringify(req),
+  })
+}
+
+/** Renders a Product on its own into a single manifest. */
+export function previewProduct(req: ProductPreviewRequest): Promise<string> {
+  return previewManifest('/products/preview', req)
+}
+
+/** Renders a Product on its own into its individual files. */
+export function previewProductFiles(req: ProductPreviewRequest): Promise<ArtifactFile[]> {
+  return request<ArtifactFile[]>('/products/preview/files', {
+    method: 'POST',
+    body: JSON.stringify(req),
   })
 }
 
@@ -252,38 +298,48 @@ export function promote(
   )
 }
 
-// ── Menus ─────────────────────────────────────────────────────────────────────
+// ── Products ──────────────────────────────────────────────────────────────────
 
-export function listMenus(namespace?: string): Promise<Menu[]> {
-  return request<Menu[]>(
-    namespace ? `/menus?namespace=${encodeURIComponent(namespace)}` : '/menus',
+export function listProducts(namespace?: string): Promise<Product[]> {
+  return request<Product[]>(
+    namespace ? `/products?namespace=${encodeURIComponent(namespace)}` : '/products',
   )
 }
 
-export function getMenu(namespace: string, name: string): Promise<Menu> {
-  return request<Menu>(`/menus/${namespace}/${name}`)
+export function getProduct(namespace: string, name: string): Promise<Product> {
+  return request<Product>(`/products/${namespace}/${name}`)
 }
 
-export function createMenu(data: MenuFormData): Promise<Menu> {
-  return request<Menu>('/menus', {
+/** The spec fields of a Product request body. */
+function productSpecBody(data: ProductFormData) {
+  let render: Render | undefined = data.render
+  if (render?.helm) render = { helm: { ...render.helm, values: valuesBody(render.helm.values) } }
+  return {
+    source: data.source,
+    vendor: data.vendor,
+    render,
+    patches: data.patches,
+    overrides: data.overrides,
+  }
+}
+
+export function createProduct(data: ProductFormData): Promise<Product> {
+  return request<Product>('/products', {
     method: 'POST',
-    body: JSON.stringify(data),
+    body: JSON.stringify({ name: data.name, namespace: data.namespace, ...productSpecBody(data) }),
   })
 }
 
-export function updateMenu(
-  namespace: string,
-  name: string,
-  data: Omit<MenuFormData, 'name' | 'namespace'>,
-): Promise<Menu> {
-  return request<Menu>(`/menus/${namespace}/${name}`, {
+export function updateProduct(namespace: string, name: string, data: ProductFormData): Promise<Product> {
+  return request<Product>(`/products/${namespace}/${name}`, {
     method: 'PUT',
-    body: JSON.stringify(data),
+    body: JSON.stringify(productSpecBody(data)),
   })
 }
 
-export function deleteMenu(namespace: string, name: string): Promise<void> {
-  return request<void>(`/menus/${namespace}/${name}`, { method: 'DELETE' })
+/** Deletes a Product; it stays until its Orders are deleted. */
+export function deleteProduct(namespace: string, name: string): Promise<void> {
+  return request<void>(`/products/${namespace}/${name}`, { method: 'DELETE' })
 }
 
 // ── Pantries ──────────────────────────────────────────────────────────────────
