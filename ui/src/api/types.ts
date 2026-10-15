@@ -8,6 +8,33 @@ export interface OCISource {
   oci?: string
   pantryRef?: PantryRef
   version: string
+  /** Requires the source to carry a trusted signature before it is rendered. */
+  verify?: SourceVerify
+}
+
+/** A keyless signer a source may be signed by; both fields are RE2 regular expressions. */
+export interface OIDCIdentityMatch {
+  issuer: string
+  subject: string
+}
+
+/** How a source's signature is verified: by the keys in a Secret, or keyless against signer identities. */
+export interface SourceVerify {
+  /** Secret in the Product's namespace whose *.pub keys are trusted. */
+  secretRef?: string
+  matchOIDCIdentity?: OIDCIdentityMatch[]
+  /** Secret holding a Sigstore trusted_root.json; needed for keyless verification without network access. */
+  trustedRootSecretRef?: string
+}
+
+/** Who signed a source whose signature verified. */
+export interface SourceVerification {
+  provider: string
+  /** ID of the public key, for key-based signatures. */
+  keyID?: string
+  /** OIDC issuer and subject of a keyless signer. */
+  issuer?: string
+  subject?: string
 }
 
 export interface OCIDestination {
@@ -137,7 +164,6 @@ export interface Approval {
 export interface Artifact {
   ociRef: string
   digest: string
-  signed: boolean
 }
 
 export interface Preparation {
@@ -172,16 +198,26 @@ export interface Renderer {
   builder: string
 }
 
+/** Whether an attestation is a Sigstore bundle signed by a key the Kitchen trusts. */
+export interface AttestationVerification {
+  verified: boolean
+  /** ID of the key that signed a verified attestation. */
+  keyID?: string
+  /** Why the attestation did not verify. */
+  error?: string
+}
+
 /** One OCI referrer of a Preparation's artifact, listed live from the registry. */
 export interface Attestation {
   artifactType: string
   digest: string
+  /** Predicate type of a Sigstore bundle; for an unverified one, only what its annotation claims. */
+  predicateType?: string
   createdAt?: string
   size: number
-  /** Whether Kokumi recorded this referrer on the Preparation. Anyone who can push to the repository can attach one. */
-  recorded: boolean
-  /** Only set for recorded referrers. */
-  mediaType?: string
+  /** Anyone who can push to the repository can attach a referrer; only verified ones are evidence. */
+  verification: AttestationVerification
+  /** The signed in-toto statement; only set for verified referrers. */
   payload?: unknown
 }
 
@@ -193,7 +229,7 @@ export interface ArtifactConfig {
   commitMessage?: string
   createdTime: string
   parent?: string
-  source: { oci: string; version: string; digest: string; pantryRef?: string }
+  source: { oci: string; version: string; digest: string; pantryRef?: string; verified?: SourceVerification }
   destination: { oci: string; pantryRef?: string }
   product?: { namespace: string; name: string; configHash?: string }
   renderer: Renderer
@@ -258,6 +294,8 @@ export interface ResolvedSource {
   version: string
   pantryRef?: PantryRef
   digest?: string
+  /** Set when the source's signature verified. */
+  verified?: SourceVerification
 }
 
 /** The complete definition of an application; its Orders are variants of it. */
@@ -409,9 +447,16 @@ const copyOverrides = (o?: Overrides): Overrides => {
 export const productToFormData = (p: Product): ProductFormData => ({
   name: p.name,
   namespace: p.namespace,
-  source: p.source.pantryRef
-    ? { pantryRef: { name: p.source.pantryRef.name }, version: p.source.version }
-    : { oci: p.source.oci ?? '', version: p.source.version },
+  source: {
+    ...(p.source.pantryRef ? { pantryRef: { name: p.source.pantryRef.name } } : { oci: p.source.oci ?? '' }),
+    version: p.source.version,
+    verify: p.source.verify
+      ? {
+          ...p.source.verify,
+          matchOIDCIdentity: p.source.verify.matchOIDCIdentity?.map((m) => ({ ...m })),
+        }
+      : undefined,
+  },
   vendor: p.vendor ? { ...p.vendor } : undefined,
   render: p.render?.helm
     ? { helm: { ...p.render.helm } }

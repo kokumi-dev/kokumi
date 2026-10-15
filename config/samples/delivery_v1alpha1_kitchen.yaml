@@ -10,3 +10,17 @@ spec:
   auth:
     adminUser:
       enabled: true
+  # Kokumi signs every artifact with the key in the Secret
+  # kokumi-signing/kokumi-signing-key
+  # and publishes its public half in status.signing.publicKey. To rotate it,
+  # list the current public key here, then delete the Secret as a cluster
+  # admin; the controller generates a new key.
+  # signing:
+  #   trustedKeys:
+  #   - name: before-2026-10
+  #     publicKey: |
+  #       -----BEGIN PUBLIC KEY-----
+  #       ...
+  #       -----END PUBLIC KEY-----
+  #   # Every Product source must verify.
+  #   requireSourceVerification: true

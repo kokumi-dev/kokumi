@@ -1,3 +1,7 @@
+/** The tabs of the Settings page. */
+export const settingsTabs = ['general', 'authentication', 'signing'] as const
+export type SettingsTab = typeof settingsTabs[number]
+
 // Central URL builders so links stay consistent across pages.
 
 const seg = (s: string) => encodeURIComponent(s)
@@ -23,5 +27,5 @@ export const paths = {
   newPantry: () => '/pantries/new',
   pantry: (ns: string, name: string, tab?: 'tags' | 'edit') =>
     `/pantries/${seg(ns)}/${seg(name)}${tab ? `/${tab}` : ''}`,
-  settings: (tab: 'general' | 'authentication' = 'general') => `/settings/${tab}`,
+  settings: (tab: SettingsTab = 'general') => `/settings/${tab}`,
 }

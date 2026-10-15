@@ -93,6 +93,17 @@ kubectl get pantry ghcr-private -n kokumi
 If the Secret is wrong or the registry is unreachable, the `Ready` column shows
 `False` with a `ConnectivityCheckFailed` reason.
 
+### Credentials from the UI
+
+When you save a Pantry with a username and password in the UI, Kokumi stores
+them in a `kubernetes.io/dockerconfigjson` Secret named
+`<pantry>-registry-creds` in the Pantry's namespace, with your identity. This
+needs Secret access in that namespace, which a platform admin grants by
+binding the `kokumi-pantry-credentials` ClusterRole there (see
+[Authorization](../../operator-guide/authorization/#pantry-credentials)). The
+same access is needed to preview a Product whose source is a Pantry with
+credentials. Without it, reference a Secret that already exists.
+
 ## Using a Pantry in a Product or Order
 
 A Pantry replaces an OCI URL: the source or vendor destination of a Product,

@@ -132,7 +132,7 @@ func TestCapabilities(t *testing.T) {
 			name:  "editor role gets everything but settings",
 			id:    personalLogin,
 			rbacs: []rbacFunc{editorRBAC},
-			want:  without(all, CapSettingsGeneralUpdate, CapSettingsAuthUpdate),
+			want:  without(all, CapSettingsGeneralUpdate, CapSettingsAuthUpdate, CapSettingsSigningUpdate),
 		},
 		{
 			name:  "viewer role gets nothing",
@@ -178,7 +178,7 @@ func TestCapabilities(t *testing.T) {
 			rbacs: []rbacFunc{func(ra authorizationv1.ResourceAttributes) (bool, error) {
 				return ra.Resource == kitchensResource && ra.Namespace == capsInstallNamespace && ra.Name == "default", nil
 			}},
-			want: []Capability{CapSettingsAuthUpdate, CapSettingsGeneralUpdate},
+			want: []Capability{CapSettingsAuthUpdate, CapSettingsGeneralUpdate, CapSettingsSigningUpdate},
 		},
 		{
 			name: "failed checks are left out and reported",
@@ -189,8 +189,8 @@ func TestCapabilities(t *testing.T) {
 				}
 				return true, nil
 			}},
-			want:             without(all, CapSettingsGeneralUpdate, CapSettingsAuthUpdate),
-			wantUndetermined: []Capability{CapSettingsAuthUpdate, CapSettingsGeneralUpdate},
+			want:             without(all, CapSettingsGeneralUpdate, CapSettingsAuthUpdate, CapSettingsSigningUpdate),
+			wantUndetermined: []Capability{CapSettingsAuthUpdate, CapSettingsGeneralUpdate, CapSettingsSigningUpdate},
 		},
 		{
 			name:  "a failing ServiceAccount does not mask a working one",
@@ -198,8 +198,8 @@ func TestCapabilities(t *testing.T) {
 			rbacs: []rbacFunc{unimpersonableRBAC, editorRBAC},
 			// Only the settings stay undetermined: the editor is denied them,
 			// and the failing ServiceAccount might have allowed them.
-			want:             without(all, CapSettingsGeneralUpdate, CapSettingsAuthUpdate),
-			wantUndetermined: []Capability{CapSettingsAuthUpdate, CapSettingsGeneralUpdate},
+			want:             without(all, CapSettingsGeneralUpdate, CapSettingsAuthUpdate, CapSettingsSigningUpdate),
+			wantUndetermined: []Capability{CapSettingsAuthUpdate, CapSettingsGeneralUpdate, CapSettingsSigningUpdate},
 		},
 		{
 			name:             "only failing ServiceAccounts leave everything undetermined",
@@ -220,6 +220,39 @@ func TestCapabilities(t *testing.T) {
 				require.NoError(t, err)
 				assert.Empty(t, undetermined)
 			}
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestNamespacedCapabilities(t *testing.T) {
+	const teamA = "team-a"
+	// pantryCredentialsRBAC mirrors a RoleBinding of kokumi-pantry-credentials
+	// in the namespace teamA.
+	pantryCredentialsRBAC := func(ra authorizationv1.ResourceAttributes) (bool, error) {
+		return ra.Group == "" && ra.Resource == secretsResource && ra.Namespace == teamA &&
+			slices.Contains([]string{"get", "create", "patch"}, ra.Verb), nil
+	}
+
+	tests := []struct {
+		name      string
+		namespace string
+		rbacs     []rbacFunc
+		want      []Capability
+	}{
+		{name: "bound in the namespace", namespace: teamA, rbacs: []rbacFunc{pantryCredentialsRBAC}, want: []Capability{CapPantriesCredentialsUpdate}},
+		{name: "bound in another namespace", namespace: "team-b", rbacs: []rbacFunc{pantryCredentialsRBAC}, want: []Capability{}},
+		{name: "built-in editor", namespace: teamA, rbacs: []rbacFunc{func(ra authorizationv1.ResourceAttributes) (bool, error) {
+			// server-editor-role grants no Secret access.
+			return ra.Group == "delivery.kokumi.dev", nil
+		}}, want: []Capability{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			uc := capsUserClient(t, tt.rbacs...)
+			got, undetermined, err := uc.capabilities(context.Background(), personalLogin, namespacedCapabilityCatalog(tt.namespace))
+			require.NoError(t, err)
+			assert.Empty(t, undetermined)
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -296,8 +329,8 @@ func TestHandleWhoamiUndetermined(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	var body whoamiResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
-	assert.Equal(t, without(allCapabilities(), CapPreparationsApprove, CapSettingsGeneralUpdate, CapSettingsAuthUpdate), body.Capabilities)
-	assert.Equal(t, []Capability{CapSettingsAuthUpdate, CapSettingsGeneralUpdate}, body.Undetermined)
+	assert.Equal(t, without(allCapabilities(), CapPreparationsApprove, CapSettingsGeneralUpdate, CapSettingsAuthUpdate, CapSettingsSigningUpdate), body.Capabilities)
+	assert.Equal(t, []Capability{CapSettingsAuthUpdate, CapSettingsGeneralUpdate, CapSettingsSigningUpdate}, body.Undetermined)
 }
 
 func TestFirstAllowedSkipsFailingServiceAccounts(t *testing.T) {

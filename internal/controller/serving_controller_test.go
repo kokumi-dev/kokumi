@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -33,8 +34,15 @@ import (
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/approval"
+	"github.com/kokumi-dev/kokumi/internal/artifact"
+	"github.com/kokumi-dev/kokumi/internal/attestation"
+	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/deployer"
 	"github.com/kokumi-dev/kokumi/internal/index"
+	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/provenance"
+	"github.com/kokumi-dev/kokumi/internal/signing"
+	"github.com/kokumi-dev/kokumi/internal/signing/signingtest"
 )
 
 var argoAppGVK = schema.GroupVersionKind{
@@ -88,8 +96,11 @@ var _ = Describe("Serving Controller", func() {
 			Namespace: testNamespace,
 		}
 		serving := &deliveryv1alpha1.Serving{}
+		var registry *oci.FakeClient
 
 		BeforeEach(func() {
+			registry = oci.NewFakeClient(nil)
+
 			By("creating the Preparation referenced by the Serving")
 			preparation := &deliveryv1alpha1.Preparation{}
 			preparationKey := types.NamespacedName{Name: preparationName, Namespace: testNamespace}
@@ -117,7 +128,7 @@ var _ = Describe("Serving Controller", func() {
 					},
 				})).To(Succeed())
 			}
-			markPreparationReady(ctx, preparationKey)
+			markPreparationReady(ctx, registry, preparationKey)
 
 			By("ensuring the argocd namespace exists")
 			ns := &unstructured.Unstructured{}
@@ -171,11 +182,7 @@ var _ = Describe("Serving Controller", func() {
 		})
 
 		newReconciler := func() *ServingReconciler {
-			return &ServingReconciler{
-				Client:   k8sClient,
-				Scheme:   k8sClient.Scheme(),
-				Deployer: deployer.NewArgoCD(k8sClient),
-			}
+			return newServingReconciler(registry)
 		}
 
 		// setAppStatus simulates the Argo CD Application controller by
@@ -294,7 +301,7 @@ var _ = Describe("Serving Controller", func() {
 				DeferCleanup(func() {
 					_ = k8sClient.Delete(ctx, preparationV2)
 				})
-				markPreparationReady(ctx, client.ObjectKeyFromObject(preparationV2))
+				markPreparationReady(ctx, registry, client.ObjectKeyFromObject(preparationV2))
 
 				By("reconciling while the Application is still at the old revision")
 				_, err = newReconciler().Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
@@ -344,10 +351,73 @@ var _ = Describe("Serving Controller", func() {
 			Expect(targetRevision()).To(Equal(fakeDigest), "the deployed Preparation must stay in place")
 
 			By("deploying it once it is ready")
-			markPreparationReady(ctx, client.ObjectKeyFromObject(notReady))
+			markPreparationReady(ctx, registry, client.ObjectKeyFromObject(notReady))
 			_, err = newReconciler().Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(targetRevision()).To(Equal(v2Digest))
+		})
+
+		DescribeTable("does not deploy a Preparation whose evidence does not verify",
+			func(sign func(prep *deliveryv1alpha1.Preparation), reason string) {
+				const v2Digest = "sha256:cccccccccceeeeeeeeeeddddddddddbbbbbbbbbbffffffffffaaaaaaaaaaaaaa"
+
+				targetRevision := func() string {
+					revision, _, _ := unstructured.NestedString(getApp().Object, "spec", "source", "targetRevision")
+					return revision
+				}
+
+				By("deploying the verified Preparation")
+				_, err := newReconciler().Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(targetRevision()).To(Equal(fakeDigest))
+				Expect(apimeta.IsStatusConditionTrue(getServing().Status.Conditions, deliveryv1alpha1.ConditionTypeVerified)).To(BeTrue())
+
+				By("promoting a ready Preparation whose evidence does not verify")
+				forged := createTestPreparation(ctx, preparationName+"-forged", orderName, v2Digest, nil)
+				DeferCleanup(func() {
+					_ = k8sClient.Delete(ctx, forged)
+				})
+				sign(forged)
+				apimeta.SetStatusCondition(&forged.Status.Conditions, metav1.Condition{
+					Type: deliveryv1alpha1.ConditionTypeReady, Status: metav1.ConditionTrue, Reason: testReadyReason,
+				})
+				Expect(k8sClient.Status().Update(ctx, forged)).To(Succeed())
+				s := getServing()
+				s.Spec.PreparationName = forged.Name
+				Expect(k8sClient.Update(ctx, s)).To(Succeed())
+
+				_, err = newReconciler().Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+				Expect(err).NotTo(HaveOccurred())
+
+				cond := apimeta.FindStatusCondition(getServing().Status.Conditions, deliveryv1alpha1.ConditionTypeVerified)
+				Expect(cond).NotTo(BeNil())
+				Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+				Expect(cond.Reason).To(Equal(reason))
+				Expect(cond.Message).To(ContainSubstring(forged.Name))
+				Expect(targetRevision()).To(Equal(fakeDigest), "the deployed Preparation must stay in place")
+			},
+			Entry("unsigned", func(*deliveryv1alpha1.Preparation) {}, deliveryv1alpha1.ReasonSignatureMissing),
+			Entry("signed by an untrusted key", func(prep *deliveryv1alpha1.Preparation) {
+				signTestEvidence(registry, signingtest.NewSigner(GinkgoT()), prep, testNamespace+"/"+orderName)
+			}, deliveryv1alpha1.ReasonSignatureInvalid),
+			Entry("signed for another Order", func(prep *deliveryv1alpha1.Preparation) {
+				signTestEvidence(registry, testSigner, prep, testNamespace+"/another-order")
+			}, deliveryv1alpha1.ReasonSignatureInvalid),
+		)
+
+		It("waits for the signing key before deploying", func() {
+			r := newReconciler()
+			r.Signing = signing.NewProvider(k8sClient, testNamespace, "no-signing-key")
+
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+
+			cond := apimeta.FindStatusCondition(getServing().Status.Conditions, deliveryv1alpha1.ConditionTypeVerified)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Reason).To(Equal(deliveryv1alpha1.ReasonSigningKeyNotReady))
+			app := &unstructured.Unstructured{}
+			app.SetGroupVersionKind(argoAppGVK)
+			Expect(errors.IsNotFound(k8sClient.Get(ctx, client.ObjectKey{Namespace: argoNamespace, Name: resourceName}, app))).To(BeTrue())
 		})
 
 		It("marks the Serving as failed when the Application reports Degraded", func() {
@@ -520,20 +590,19 @@ var _ = Describe("Serving Controller", func() {
 
 	Context("When the target Preparation has an approval policy", func() {
 		const (
-			orderName         = "serving-gated"
-			prepOlder         = "serving-gated-p1"
-			prepNewer         = "serving-gated-p2"
-			digestOlder       = "sha256:8888888888888888888888888888888888888888888888888888888888888888"
-			digestNewer       = "sha256:9999999999999999999999999999999999999999999999999999999999999999"
-			digestAttestation = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+			orderName   = "serving-gated"
+			prepOlder   = "serving-gated-p1"
+			prepNewer   = "serving-gated-p2"
+			digestOlder = "sha256:8888888888888888888888888888888888888888888888888888888888888888"
+			digestNewer = "sha256:9999999999999999999999999999999999999999999999999999999999999999"
 		)
 		release := []string{testApproverGroup}
 		policy := &deliveryv1alpha1.ApprovalPolicy{RequiredApprovals: 1, AllowedGroups: release}
 		key := types.NamespacedName{Namespace: testNamespace, Name: orderName}
+		var registry *oci.FakeClient
 
 		reconcileServing := func() {
-			r := &ServingReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Deployer: deployer.NewArgoCD(k8sClient)}
-			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+			_, err := newServingReconciler(registry).Reconcile(ctx, reconcile.Request{NamespacedName: key})
 			Expect(err).NotTo(HaveOccurred())
 		}
 		getServing := func() *deliveryv1alpha1.Serving {
@@ -554,10 +623,8 @@ var _ = Describe("Serving Controller", func() {
 		}
 		readyPreparation := func(name, digest string) *deliveryv1alpha1.Preparation {
 			p := createTestPreparation(ctx, name, orderName, digest, policy)
-			apimeta.SetStatusCondition(&p.Status.Conditions, metav1.Condition{
-				Type: deliveryv1alpha1.ConditionTypeReady, Status: metav1.ConditionTrue, Reason: "Ready",
-			})
-			Expect(k8sClient.Status().Update(ctx, p)).To(Succeed())
+			markPreparationReady(ctx, registry, client.ObjectKeyFromObject(p))
+			Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(p), p)).To(Succeed())
 			return p
 		}
 		// sealPreparation stands in for the Preparation controller sealing and archiving the votes.
@@ -570,10 +637,9 @@ var _ = Describe("Serving Controller", func() {
 			sealedTime := approval.NewSealTime(time.Now())
 			p.Status.Approval = res.Status
 			p.Status.Approval.SealedTime = &sealedTime
-			p.Status.Approval.Attestation = &deliveryv1alpha1.ApprovalAttestation{
-				OCIRef: "oci://registry.kokumi.svc.cluster.local:5000/" + orderName + "@" + digestAttestation,
-				Digest: digestAttestation,
-			}
+			archived, err := approval.Archive(ctx, registry, testSigner, p, approvals)
+			Expect(err).NotTo(HaveOccurred())
+			p.Status.Approval.Attestation = &archived
 			apimeta.SetStatusCondition(&p.Status.Conditions, metav1.Condition{
 				Type: deliveryv1alpha1.ConditionTypeApprovalsSealed, Status: metav1.ConditionTrue, Reason: deliveryv1alpha1.ReasonSealed,
 			})
@@ -581,6 +647,8 @@ var _ = Describe("Serving Controller", func() {
 		}
 
 		BeforeEach(func() {
+			registry = oci.NewFakeClient(nil)
+
 			ns := &unstructured.Unstructured{}
 			ns.SetGroupVersionKind(schema.GroupVersionKind{Version: "v1", Kind: "Namespace"})
 			ns.SetName(argoNamespace)
@@ -672,13 +740,50 @@ var _ = Describe("Serving Controller", func() {
 	})
 })
 
-// markPreparationReady sets the Ready condition that the Preparation
-// controller sets once the provenance is attached.
-func markPreparationReady(ctx context.Context, key types.NamespacedName) {
+// newServingReconciler returns a ServingReconciler that verifies evidence in
+// registry against testSigner.
+func newServingReconciler(registry *oci.FakeClient) *ServingReconciler {
+	return &ServingReconciler{
+		Client:         k8sClient,
+		Scheme:         k8sClient.Scheme(),
+		Deployer:       deployer.NewArgoCD(k8sClient),
+		OCIClient:      registry,
+		PantryResolver: credential.NewKubeResolver(k8sClient),
+		Signing:        testSigning,
+	}
+}
+
+// markPreparationReady signs the evidence of the Preparation in registry and
+// sets the Ready condition, as the Preparation controller does.
+func markPreparationReady(ctx context.Context, registry *oci.FakeClient, key types.NamespacedName) {
 	p := &deliveryv1alpha1.Preparation{}
 	Expect(k8sClient.Get(ctx, key, p)).To(Succeed())
+	signTestEvidence(registry, testSigner, p, p.Namespace+"/"+p.Spec.OrderName)
 	apimeta.SetStatusCondition(&p.Status.Conditions, metav1.Condition{
-		Type: deliveryv1alpha1.ConditionTypeReady, Status: metav1.ConditionTrue, Reason: "Ready",
+		Type: deliveryv1alpha1.ConditionTypeReady, Status: metav1.ConditionTrue, Reason: testReadyReason,
 	})
 	Expect(k8sClient.Status().Update(ctx, p)).To(Succeed())
+}
+
+// signTestEvidence pushes the signature and the provenance of prep's
+// artifact, rendered for order ("namespace/name"), signed by signer.
+func signTestEvidence(registry *oci.FakeClient, signer *signing.Signer, prep *deliveryv1alpha1.Preparation, order string) {
+	subject, err := oci.Parse(prep.Spec.Artifact.OCIRef)
+	Expect(err).NotTo(HaveOccurred())
+
+	namespace, name, _ := strings.Cut(order, "/")
+	cfg := &artifact.Config{
+		SchemaVersion: artifact.ConfigSchemaVersion,
+		Order:         &artifact.ConfigObject{Namespace: namespace, Name: name},
+		CreatedTime:   "2026-10-12T09:14:03Z",
+		Source:        artifact.ConfigSource{OCI: prep.Spec.Source.OCI, Version: testVersion, Digest: prep.Spec.Source.BaseDigest},
+		Renderer:      artifact.ConfigRenderer{Type: "Manifest", Version: testRendererVersion, Builder: testBuilderID},
+	}
+	created, err := cfg.Created()
+	Expect(err).NotTo(HaveOccurred())
+
+	_, err = attestation.Sign(context.Background(), registry, signer, subject, created)
+	Expect(err).NotTo(HaveOccurred())
+	_, err = provenance.Attach(context.Background(), registry, signer, subject, cfg)
+	Expect(err).NotTo(HaveOccurred())
 }

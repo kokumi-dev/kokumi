@@ -19,6 +19,7 @@ type Capability string
 const (
 	CapSettingsGeneralUpdate Capability = "settings.general:update"
 	CapSettingsAuthUpdate    Capability = "settings.auth:update"
+	CapSettingsSigningUpdate Capability = "settings.signing:update"
 
 	CapOrdersCreate Capability = "orders:create"
 	CapOrdersUpdate Capability = "orders:update"
@@ -34,11 +35,15 @@ const (
 
 	CapPreparationsPromote Capability = "preparations:promote"
 	CapPreparationsApprove Capability = "preparations:approve"
+
+	// CapPantriesCredentialsUpdate is namespaced; see
+	// namespacedCapabilityCatalog.
+	CapPantriesCredentialsUpdate Capability = "pantries.credentials:update"
 )
 
-// accessCheck is one SelfSubjectAccessReview on a delivery.kokumi.dev
-// resource. An empty namespace checks all namespaces; an empty name checks any
-// object.
+// accessCheck is one SelfSubjectAccessReview on a resource the server
+// accesses as the user. An empty namespace checks all namespaces; an empty
+// name checks any object.
 type accessCheck struct {
 	verb      string
 	resource  string
@@ -77,11 +82,12 @@ func capabilityCatalog(installNamespace string) []capabilityRule {
 		name:      deliveryv1alpha1.DefaultKitchenName,
 	}}
 	return []capabilityRule{
-		// General and auth settings share the Kitchen singleton, so RBAC cannot
-		// tell them apart yet. They are separate capabilities so the UI is
-		// unaffected once they can be split.
+		// General, auth and signing settings share the Kitchen singleton, so
+		// RBAC cannot tell them apart yet. They are separate capabilities so
+		// the UI is unaffected once they can be split.
 		{capability: CapSettingsGeneralUpdate, checks: kitchen},
 		{capability: CapSettingsAuthUpdate, checks: kitchen},
+		{capability: CapSettingsSigningUpdate, checks: kitchen},
 
 		{capability: CapOrdersCreate, checks: allNamespaces("orders", "create")},
 		{capability: CapOrdersUpdate, checks: allNamespaces("orders", "update")},
@@ -104,6 +110,23 @@ func capabilityCatalog(installNamespace string) []capabilityRule {
 			checks:               allNamespaces("preparations", "approve"),
 			requirePersonalLogin: true,
 		},
+	}
+}
+
+// namespacedCapabilityCatalog maps the capabilities that hold per namespace
+// to their RBAC checks in namespace. The built-in roles grant none of them
+// cluster-wide.
+func namespacedCapabilityCatalog(namespace string) []capabilityRule {
+	return []capabilityRule{
+		// Pantry credentials are Secrets in the Pantry's namespace. The UI
+		// writes them, and previews read them, with the user's identity.
+		// Platform admins grant this per namespace by binding the
+		// kokumi-pantry-credentials ClusterRole.
+		{capability: CapPantriesCredentialsUpdate, checks: []accessCheck{
+			{verb: "get", resource: secretsResource, namespace: namespace},
+			{verb: "create", resource: secretsResource, namespace: namespace},
+			{verb: "patch", resource: secretsResource, namespace: namespace},
+		}},
 	}
 }
 

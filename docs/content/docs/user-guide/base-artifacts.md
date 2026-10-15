@@ -58,3 +58,21 @@ Order, Kokumi:
    straight to the commit (or tag) in GitHub.
 
 If a base artifact has no provenance annotations, the linkout is simply omitted.
+
+## Signing
+
+Sign the artifact so that Products can require its signature (see
+[Source verification](../source-verification/)). With a key:
+
+```bash
+cosign sign --key cosign.key ghcr.io/kokumi-dev/example@sha256:…
+```
+
+Or keyless from CI, for example in a GitHub Actions workflow with
+`id-token: write`:
+
+```bash
+cosign sign --yes ghcr.io/kokumi-dev/example@sha256:…
+```
+
+Always sign by digest, so the signature names exactly the artifact you pushed.

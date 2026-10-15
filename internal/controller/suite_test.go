@@ -34,6 +34,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/signing"
+	"github.com/kokumi-dev/kokumi/internal/signing/signingtest"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -46,6 +48,11 @@ var (
 	testEnv   *envtest.Environment
 	cfg       *rest.Config
 	k8sClient client.Client
+
+	// testSigner signs the evidence of test artifacts; testSigning provides
+	// it to the controllers under test.
+	testSigner  *signing.Signer
+	testSigning *signing.Provider
 )
 
 const (
@@ -58,6 +65,7 @@ const (
 	testRendererVersion = "v1.0.0"
 	testConfigHash      = "sha256:abc123"
 	testBuilderID       = "ghcr.io/kokumi-dev/kokumi@sha256:bb"
+	testReadyReason     = "Ready"
 )
 
 func TestControllers(t *testing.T) {
@@ -99,6 +107,9 @@ var _ = BeforeSuite(func() {
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
+
+	testSigner = signingtest.NewSigner(GinkgoT())
+	testSigning = signingtest.NewProvider(GinkgoT(), testSigner)
 })
 
 var _ = AfterSuite(func() {

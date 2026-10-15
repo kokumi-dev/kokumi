@@ -46,13 +46,14 @@ func NewStore(client oci.Client, fs afero.Fs, cacheDir string) *Store {
 	return s
 }
 
-// Copy copies the source artifact to the destination registry unchanged
-// (vendor flow). The pushed tag is the source version.
+// Copy copies the source artifact, pinned to its digest when set, to the
+// destination registry unchanged (vendor flow), together with its referrers
+// such as signatures and attestations. The pushed tag is the source version.
 func (s *Store) Copy(ctx context.Context, src Source, srcClient oci.Client, dst Destination, dstClient oci.Client) (string, error) {
 	source := cmp.Or(srcClient, s.client)
 	target := cmp.Or(dstClient, source)
 
-	srcRef, err := parseTagged(src.OCI, src.Version)
+	srcRef, err := src.ref()
 	if err != nil {
 		return "", fmt.Errorf("failed to parse source ref: %w", err)
 	}
@@ -62,7 +63,7 @@ func (s *Store) Copy(ctx context.Context, src Source, srcClient oci.Client, dst 
 		return "", fmt.Errorf("failed to parse destination ref: %w", err)
 	}
 
-	if err := source.Copy(ctx, target, srcRef, dstRef, oci.CopyOptions{}); err != nil {
+	if err := source.Copy(ctx, target, srcRef, dstRef, oci.CopyOptions{IncludeReferrers: true}); err != nil {
 		return "", fmt.Errorf("failed to copy artifact: %w", err)
 	}
 

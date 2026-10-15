@@ -34,6 +34,9 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Approved')].reason
       name: Approved
       type: string
+    - jsonPath: .status.conditions[?(@.type=='Verified')].reason
+      name: Verified
+      type: string
     - jsonPath: .status.observedPreparationName
       name: Observed
       priority: 1

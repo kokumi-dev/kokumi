@@ -7,9 +7,37 @@ import (
 
 // OCISourceDTO is the data-transfer representation of an OCISource.
 type OCISourceDTO struct {
-	OCI       string        `json:"oci,omitempty"`
-	PantryRef *PantryRefDTO `json:"pantryRef,omitempty"`
-	Version   string        `json:"version"`
+	OCI       string           `json:"oci,omitempty"`
+	PantryRef *PantryRefDTO    `json:"pantryRef,omitempty"`
+	Version   string           `json:"version"`
+	Verify    *SourceVerifyDTO `json:"verify,omitempty"`
+}
+
+// SourceVerifyDTO is the data-transfer representation of an
+// OCISourceVerification. Exactly one of SecretRef and MatchOIDCIdentity is
+// set.
+type SourceVerifyDTO struct {
+	// SecretRef names a Secret in the Product's namespace with public keys.
+	SecretRef         string                 `json:"secretRef,omitempty"`
+	MatchOIDCIdentity []OIDCIdentityMatchDTO `json:"matchOIDCIdentity,omitempty"`
+	// TrustedRootSecretRef names a Secret with a Sigstore trusted root.
+	TrustedRootSecretRef string `json:"trustedRootSecretRef,omitempty"`
+}
+
+// OIDCIdentityMatchDTO is the data-transfer representation of an
+// OIDCIdentityMatch.
+type OIDCIdentityMatchDTO struct {
+	Issuer  string `json:"issuer"`
+	Subject string `json:"subject"`
+}
+
+// SourceVerificationDTO records the signer whose signature on a source
+// verified.
+type SourceVerificationDTO struct {
+	Provider string `json:"provider"`
+	KeyID    string `json:"keyID,omitempty"`
+	Issuer   string `json:"issuer,omitempty"`
+	Subject  string `json:"subject,omitempty"`
 }
 
 // OCIDestinationDTO is the data-transfer representation of an OCIDestination.
@@ -174,7 +202,6 @@ type SubmitApprovalRequest struct {
 type ArtifactDTO struct {
 	OCIRef string `json:"ociRef"`
 	Digest string `json:"digest"`
-	Signed bool   `json:"signed"`
 }
 
 // PreparationDTO is the enriched view of a Preparation served to the UI.
@@ -211,18 +238,30 @@ type AttestationDTO struct {
 	// ArtifactType is the artifactType of the referrer.
 	ArtifactType string `json:"artifactType"`
 	Digest       string `json:"digest"`
+	// PredicateType is the predicate type of a Sigstore bundle: the verified
+	// statement's for a verified bundle, else the one the referrer's
+	// annotation claims.
+	PredicateType string `json:"predicateType,omitempty"`
 	// CreatedAt is the referrer's org.opencontainers.image.created
 	// annotation; empty when the referrer carries none.
 	CreatedAt string `json:"createdAt,omitempty"`
 	Size      int64  `json:"size"`
-	// Recorded reports whether Kokumi recorded this referrer in the
-	// Preparation's status. Anyone who can push to the repository can attach
-	// a referrer; only recorded ones were written by the controller.
-	Recorded bool `json:"recorded"`
-	// MediaType and Payload are only set for recorded referrers, and only
-	// when the payload was requested.
-	MediaType string          `json:"mediaType,omitempty"`
-	Payload   json.RawMessage `json:"payload,omitempty"`
+	// Verification reports whether the referrer is a Sigstore bundle signed
+	// by a key the Kitchen trusts. Anyone who can push to the repository can
+	// attach a referrer; only verified ones are evidence.
+	Verification AttestationVerificationDTO `json:"verification"`
+	// Payload is the verified in-toto statement. It is only set for
+	// verified referrers, and only when the payload was requested.
+	Payload json.RawMessage `json:"payload,omitempty"`
+}
+
+// AttestationVerificationDTO is the verification result of an attestation.
+type AttestationVerificationDTO struct {
+	Verified bool `json:"verified"`
+	// KeyID identifies the key that signed a verified attestation.
+	KeyID string `json:"keyID,omitempty"`
+	// Error says why the attestation did not verify.
+	Error string `json:"error,omitempty"`
 }
 
 // CreateOrderRequest is the body for POST /api/v1/orders.
@@ -303,6 +342,8 @@ type ProductSourceStatusDTO struct {
 	Version   string        `json:"version"`
 	PantryRef *PantryRefDTO `json:"pantryRef,omitempty"`
 	Digest    string        `json:"digest,omitempty"`
+	// Verified is set when the source's signature verified.
+	Verified *SourceVerificationDTO `json:"verified,omitempty"`
 }
 
 // ProductDTO is the view of a Product served to the UI.

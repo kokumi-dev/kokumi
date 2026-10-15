@@ -71,8 +71,12 @@ func handlePromote(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		// Early feedback only: the Serving controller enforces readiness and
-		// the gate.
+		// Early feedback only: the Serving controller enforces readiness, the
+		// gate, and verifies the signatures in the registry.
+		if !apimeta.IsStatusConditionTrue(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeSigned) {
+			respondError(w, http.StatusConflict, "preparation is not signed")
+			return
+		}
 		if !apimeta.IsStatusConditionTrue(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeReady) {
 			respondError(w, http.StatusConflict, "preparation is not ready")
 			return

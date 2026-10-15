@@ -21,8 +21,12 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Ready')].reason
       name: Reason
       type: string
+    - jsonPath: .status.signing.keyID
+      name: Key ID
+      type: string
     - jsonPath: .spec.argoCDURL
       name: Argo CD URL
+      priority: 1
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -210,6 +214,52 @@ spec:
                     type: object
                     x-kubernetes-map-type: atomic
                 type: object
+              signing:
+                description: |-
+                  signing configures which keys Kokumi trusts besides its own signing
+                  key, and whether the source of every Product must verify.
+                properties:
+                  requireSourceVerification:
+                    description: |-
+                      requireSourceVerification requires the source of every Product to
+                      verify, either through the Product's spec.source.verify or by a
+                      signature from a key the Kitchen trusts. A Product whose source does
+                      not verify is not ready, and its Orders render nothing.
+                    type: boolean
+                  trustedKeys:
+                    description: |-
+                      trustedKeys lists public keys Kokumi trusts for its own artifacts in
+                      addition to the current signing key: the key used before a rotation,
+                      or the key of another installation whose releases are imported.
+                    items:
+                      description: TrustedKey is a public key Kokumi trusts for its
+                        own artifacts.
+                      properties:
+                        name:
+                          description: name identifies the key, for example "before-2026-10".
+                          maxLength: 63
+                          minLength: 1
+                          pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                          type: string
+                        publicKey:
+                          description: publicKey is the PEM-encoded public key, as
+                            in cosign.pub.
+                          maxLength: 4096
+                          minLength: 1
+                          type: string
+                          x-kubernetes-validations:
+                          - message: must be a PEM-encoded public key
+                            rule: self.startsWith('-----BEGIN PUBLIC KEY-----')
+                      required:
+                      - name
+                      - publicKey
+                      type: object
+                    maxItems: 16
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                type: object
             type: object
           status:
             description: status defines the observed state of Kitchen
@@ -288,6 +338,30 @@ spec:
                   by the controller.
                 format: int64
                 type: integer
+              signing:
+                description: |-
+                  signing publishes the public half of the signing key. Absent until the
+                  controller has loaded the key.
+                properties:
+                  keyID:
+                    description: |-
+                      keyID identifies the key: the base64-encoded SHA-256 of its DER
+                      public key, as recorded in the hint of every bundle it signs.
+                    maxLength: 64
+                    minLength: 1
+                    type: string
+                  publicKey:
+                    description: |-
+                      publicKey is the PEM-encoded public key, as in cosign.pub. It verifies
+                      every artifact and attestation Kokumi writes, for example with
+                      "cosign verify --key".
+                    maxLength: 4096
+                    minLength: 1
+                    type: string
+                required:
+                - keyID
+                - publicKey
+                type: object
             type: object
         required:
         - spec

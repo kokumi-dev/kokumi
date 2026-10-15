@@ -271,8 +271,12 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Ready')].reason
       name: Reason
       type: string
+    - jsonPath: .status.signing.keyID
+      name: Key ID
+      type: string
     - jsonPath: .spec.argoCDURL
       name: Argo CD URL
+      priority: 1
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -460,6 +464,52 @@ spec:
                     type: object
                     x-kubernetes-map-type: atomic
                 type: object
+              signing:
+                description: |-
+                  signing configures which keys Kokumi trusts besides its own signing
+                  key, and whether the source of every Product must verify.
+                properties:
+                  requireSourceVerification:
+                    description: |-
+                      requireSourceVerification requires the source of every Product to
+                      verify, either through the Product's spec.source.verify or by a
+                      signature from a key the Kitchen trusts. A Product whose source does
+                      not verify is not ready, and its Orders render nothing.
+                    type: boolean
+                  trustedKeys:
+                    description: |-
+                      trustedKeys lists public keys Kokumi trusts for its own artifacts in
+                      addition to the current signing key: the key used before a rotation,
+                      or the key of another installation whose releases are imported.
+                    items:
+                      description: TrustedKey is a public key Kokumi trusts for its
+                        own artifacts.
+                      properties:
+                        name:
+                          description: name identifies the key, for example "before-2026-10".
+                          maxLength: 63
+                          minLength: 1
+                          pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                          type: string
+                        publicKey:
+                          description: publicKey is the PEM-encoded public key, as
+                            in cosign.pub.
+                          maxLength: 4096
+                          minLength: 1
+                          type: string
+                          x-kubernetes-validations:
+                          - message: must be a PEM-encoded public key
+                            rule: self.startsWith('-----BEGIN PUBLIC KEY-----')
+                      required:
+                      - name
+                      - publicKey
+                      type: object
+                    maxItems: 16
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                type: object
             type: object
           status:
             description: status defines the observed state of Kitchen
@@ -538,6 +588,30 @@ spec:
                   by the controller.
                 format: int64
                 type: integer
+              signing:
+                description: |-
+                  signing publishes the public half of the signing key. Absent until the
+                  controller has loaded the key.
+                properties:
+                  keyID:
+                    description: |-
+                      keyID identifies the key: the base64-encoded SHA-256 of its DER
+                      public key, as recorded in the hint of every bundle it signs.
+                    maxLength: 64
+                    minLength: 1
+                    type: string
+                  publicKey:
+                    description: |-
+                      publicKey is the PEM-encoded public key, as in cosign.pub. It verifies
+                      every artifact and attestation Kokumi writes, for example with
+                      "cosign verify --key".
+                    maxLength: 4096
+                    minLength: 1
+                    type: string
+                required:
+                - keyID
+                - publicKey
+                type: object
             type: object
         required:
         - spec
@@ -1092,10 +1166,10 @@ spec:
       name: Digest
       priority: 1
       type: string
-    - jsonPath: .spec.artifact.signed
+    - jsonPath: .status.conditions[?(@.type=='Signed')].status
       name: Signed
       priority: 1
-      type: boolean
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -1164,10 +1238,6 @@ spec:
                     maxLength: 2048
                     pattern: ^oci://.*@sha256:[a-f0-9]{64}$
                     type: string
-                  signed:
-                    description: signed indicates whether the artifact has been cryptographically
-                      signed
-                    type: boolean
                 required:
                 - digest
                 - ociRef
@@ -1400,13 +1470,14 @@ spec:
                 type: object
               attestations:
                 description: |-
-                  attestations lists the latest attestation of each type that records how
-                  the artifact was produced. The approvals attestation is not listed
-                  here; it is recorded in approval.attestation.
+                  attestations lists the latest attestation of each type that signs the
+                  artifact or records how it was produced. The approvals attestation is
+                  not listed here; it is recorded in approval.attestation.
                 items:
                   description: |-
                     AttestationReference references an OCI referrer that carries evidence
-                    about how the Preparation's artifact was produced.
+                    about the Preparation's artifact: a Sigstore bundle signed by the Kitchen
+                    key.
                   properties:
                     digest:
                       description: digest is the manifest digest of the attestation.
@@ -1421,6 +1492,7 @@ spec:
                     type:
                       description: type is the kind of evidence the attestation carries.
                       enum:
+                      - Signature
                       - Provenance
                       type: string
                   required:
@@ -1537,6 +1609,9 @@ spec:
       type: string
     - jsonPath: .spec.source.version
       name: Version
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='SourceVerified')].status
+      name: Verified
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -1791,6 +1866,94 @@ spec:
                     required:
                     - name
                     type: object
+                  verify:
+                    description: |-
+                      verify requires the artifact the version resolves to to carry a
+                      trusted signature, by key or keyless against an expected signer
+                      identity. A source that does not verify is not rendered.
+                    properties:
+                      matchOIDCIdentity:
+                        description: |-
+                          matchOIDCIdentity verifies keyless signatures whose certificate was
+                          issued to one of the listed identities.
+                        items:
+                          description: |-
+                            OIDCIdentityMatch matches the identity of a keyless signer. Both fields are
+                            RE2 regular expressions and are not anchored.
+                          properties:
+                            issuer:
+                              description: |-
+                                issuer matches the OIDC issuer of the signer's certificate, for
+                                example "^https://token\.actions\.githubusercontent\.com$".
+                              maxLength: 1024
+                              minLength: 1
+                              type: string
+                            subject:
+                              description: |-
+                                subject matches the subject of the signer's certificate, for example
+                                the workflow that released the artifact.
+                              maxLength: 1024
+                              minLength: 1
+                              type: string
+                          required:
+                          - issuer
+                          - subject
+                          type: object
+                        maxItems: 16
+                        minItems: 1
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      provider:
+                        default: cosign
+                        description: provider is the signature format. Only "cosign"
+                          is supported.
+                        enum:
+                        - cosign
+                        type: string
+                      secretRef:
+                        description: |-
+                          secretRef names a Secret in the Product's namespace holding public
+                          keys. Every key whose name ends in ".pub" is tried; one verifying
+                          signature suffices. Signatures are verified offline, without a
+                          transparency log.
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
+                      trustedRootSecretRef:
+                        description: |-
+                          trustedRootSecretRef names a Secret in the Product's namespace whose
+                          key "trusted_root.json" holds the Sigstore trusted root keyless
+                          signatures are verified against. When unset, the Sigstore public-good
+                          instance is used through TUF, which needs network access; set it in
+                          air-gapped clusters.
+                        properties:
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                        type: object
+                        x-kubernetes-map-type: atomic
+                    type: object
+                    x-kubernetes-validations:
+                    - message: exactly one of secretRef or matchOIDCIdentity must
+                        be set
+                      rule: has(self.secretRef) != has(self.matchOIDCIdentity)
+                    - message: trustedRootSecretRef is only used with matchOIDCIdentity
+                      rule: '!has(self.trustedRootSecretRef) || has(self.matchOIDCIdentity)'
                   version:
                     description: |-
                       version is the semantic version or tag of the artifact
@@ -1940,6 +2103,37 @@ spec:
                         type: string
                     required:
                     - name
+                    type: object
+                  verified:
+                    description: |-
+                      verified records who signed the source, when its signature verified:
+                      through spec.source.verify, or by a key the Kitchen trusts. Absent
+                      when the source was not verified.
+                    properties:
+                      issuer:
+                        description: issuer is the OIDC issuer of the keyless signer's
+                          certificate.
+                        maxLength: 2048
+                        type: string
+                      keyID:
+                        description: |-
+                          keyID identifies the public key that verified the signature: the
+                          base64-encoded SHA-256 of its DER encoding. Set for key-based
+                          verification.
+                        maxLength: 64
+                        type: string
+                      provider:
+                        description: provider is the signature format that verified.
+                        enum:
+                        - cosign
+                        type: string
+                      subject:
+                        description: subject is the subject of the keyless signer's
+                          certificate.
+                        maxLength: 2048
+                        type: string
+                    required:
+                    - provider
                     type: object
                   version:
                     description: version is the tag of the source artifact.
@@ -2119,6 +2313,9 @@ spec:
       type: string
     - jsonPath: .status.conditions[?(@.type=='Approved')].reason
       name: Approved
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Verified')].reason
+      name: Verified
       type: string
     - jsonPath: .status.observedPreparationName
       name: Observed
@@ -2781,6 +2978,23 @@ metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: kokumi
+  name: kokumi-pantry-credentials
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - create
+  - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: kokumi
   name: kokumi-pantry-editor-role
 rules:
 - apiGroups:
@@ -3086,14 +3300,6 @@ rules:
   - preparations
   verbs:
   - approve
-- apiGroups:
-  - ""
-  resources:
-  - secrets
-  verbs:
-  - get
-  - create
-  - patch
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -3153,14 +3359,6 @@ rules:
   - preparations
   verbs:
   - approve
-- apiGroups:
-  - ""
-  resources:
-  - secrets
-  verbs:
-  - get
-  - create
-  - patch
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -3573,6 +3771,11 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        - name: GOMEMLIMIT
+          valueFrom:
+            resourceFieldRef:
+              containerName: manager
+              resource: limits.memory
         image: ghcr.io/kokumi-dev/kokumi:latest
         imagePullPolicy: IfNotPresent
         livenessProbe:
@@ -3799,6 +4002,45 @@ spec:
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
+  name: kokumi-signing-key-integrity
+  namespace: kokumi
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: kokumi-signing
+    resourceRules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      - DELETE
+      resourceNames:
+      - kokumi-signing-key
+      resources:
+      - secrets
+  validations:
+  - expression: request.userInfo.username == variables.controller || variables.clusterAdmin
+      || (request.operation == 'DELETE' && request.userInfo.username == variables.namespaceController)
+    message: The signing key can only be written by the kokumi controller and cluster
+      admins (verb manage-signing-key on kitchens)
+    reason: Forbidden
+  variables:
+  - expression: '''system:serviceaccount:kokumi:kokumi-controller-manager'''
+    name: controller
+  - expression: '''system:serviceaccount:kube-system:namespace-controller'''
+    name: namespaceController
+  - expression: authorizer.group('delivery.kokumi.dev').resource('kitchens').namespace('kokumi').name('default')
+      .check('manage-signing-key').allowed()
+    name: clusterAdmin
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
   name: kokumi-status-integrity
   namespace: kokumi
 spec:
@@ -3815,9 +4057,13 @@ spec:
       - approvals/status
       - preparations/status
       - servings/status
+      - products/status
+      - orders/status
+      - pantries/status
+      - kitchens/status
   validations:
   - expression: request.userInfo.username == 'system:serviceaccount:kokumi:kokumi-controller-manager'
-    message: Approval, Preparation and Serving status is owned by the kokumi controller
+    message: Status of kokumi resources is owned by the kokumi controller
     reason: Forbidden
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -3833,9 +4079,61 @@ spec:
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
 metadata:
+  name: kokumi-signing-key-integrity
+  namespace: kokumi
+spec:
+  policyName: kokumi-signing-key-integrity
+  validationActions:
+  - Deny
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
   name: kokumi-status-integrity
   namespace: kokumi
 spec:
   policyName: kokumi-status-integrity
   validationActions:
   - Deny
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    app.kubernetes.io/component: signing
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: kokumi
+  name: kokumi-signing
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: kokumi
+  name: kokumi-signing-key-creator
+  namespace: kokumi-signing
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: kokumi
+  name: kokumi-signing-key-creator
+  namespace: kokumi-signing
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kokumi-signing-key-creator
+subjects:
+- kind: ServiceAccount
+  name: kokumi-controller-manager
+  namespace: kokumi

@@ -1,5 +1,5 @@
-// Package provenance builds and attaches the SLSA provenance of rendered
-// artifacts. Everything in a provenance statement is taken from the
+// Package provenance builds and attaches the signed SLSA provenance of
+// rendered artifacts. Everything in a provenance statement is taken from the
 // artifact's config blob, so it can be rebuilt at any time with equal bytes.
 package provenance
 
@@ -8,11 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/attestation"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/signing"
 )
 
 const (
@@ -25,6 +25,10 @@ const (
 	// BuilderID identifies the Kokumi controller as the build platform. The
 	// image and renderer that ran are recorded in the builder's version.
 	BuilderID = "https://kokumi.dev/builders/controller/v1"
+
+	// AnnotationVerified is the annotation of a resolved dependency that
+	// records who signed it, when its signature verified.
+	AnnotationVerified = "kokumi.dev/verified"
 
 	sha256Prefix = "sha256:"
 )
@@ -63,6 +67,9 @@ type ResourceDescriptor struct {
 	// URI is the oci:// URL of the artifact, with the tag it was resolved from.
 	URI    string            `json:"uri"`
 	Digest map[string]string `json:"digest"`
+	// Annotations hold AnnotationVerified for a source whose signature
+	// verified.
+	Annotations map[string]any `json:"annotations,omitempty"`
 }
 
 // RunDetails describes the render run.
@@ -102,14 +109,19 @@ func Statement(subject oci.Reference, cfg *artifact.Config) ([]byte, error) {
 		params.Product = cfg.Product.Namespace + "/" + cfg.Product.Name
 	}
 
+	source := ResourceDescriptor{
+		URI:    cfg.Source.OCI + ":" + cfg.Source.Version,
+		Digest: map[string]string{"sha256": sourceHex},
+	}
+	if cfg.Source.Verified != nil {
+		source.Annotations = map[string]any{AnnotationVerified: cfg.Source.Verified}
+	}
+
 	return attestation.NewStatement(subject.RepositoryReference(), subject.Digest, PredicateType, Predicate{
 		BuildDefinition: BuildDefinition{
-			BuildType:          BuildType,
-			ExternalParameters: params,
-			ResolvedDependencies: []ResourceDescriptor{{
-				URI:    cfg.Source.OCI + ":" + cfg.Source.Version,
-				Digest: map[string]string{"sha256": sourceHex},
-			}},
+			BuildType:            BuildType,
+			ExternalParameters:   params,
+			ResolvedDependencies: []ResourceDescriptor{source},
 		},
 		RunDetails: RunDetails{
 			Builder: Builder{
@@ -124,41 +136,41 @@ func Statement(subject oci.Reference, cfg *artifact.Config) ([]byte, error) {
 	})
 }
 
-// Attach reads the config blob of the artifact at subject, builds its
-// provenance statement, and pushes it as an OCI referrer. It returns the
-// referrer's digest. Retries are idempotent. A config blob that cannot be
-// turned into a statement fails with ErrInvalidConfig.
-func Attach(ctx context.Context, client oci.Client, subject oci.Reference) (string, error) {
+// ReadConfig reads the config blob of the artifact at subject. A blob that
+// is not a Kokumi config, or records no valid creation time, fails with
+// ErrInvalidConfig.
+func ReadConfig(ctx context.Context, client oci.Client, subject oci.Reference) (*artifact.Config, error) {
 	mediaType, data, err := client.FetchConfig(ctx, subject)
 	if err != nil {
-		return "", fmt.Errorf("reading artifact config: %w", err)
+		return nil, fmt.Errorf("reading artifact config: %w", err)
 	}
 
-	statement, created, err := fromConfig(subject, mediaType, data)
+	cfg, err := artifact.ParseConfig(mediaType, data)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidConfig, err)
+	}
+
+	if _, err := cfg.Created(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidConfig, err)
+	}
+
+	return cfg, nil
+}
+
+// Attach signs the provenance of the artifact at subject, built from its
+// config cfg, and attaches it as an OCI referrer. It returns the referrer's
+// digest. Retries are idempotent. A config that cannot be turned into a
+// statement fails with ErrInvalidConfig.
+func Attach(ctx context.Context, client oci.Client, signer *signing.Signer, subject oci.Reference, cfg *artifact.Config) (string, error) {
+	created, err := cfg.Created()
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", ErrInvalidConfig, err)
 	}
 
-	return attestation.Push(ctx, client, subject, oci.ProvenanceArtifactType, statement, created)
-}
-
-// fromConfig returns the provenance statement of the artifact at subject and
-// its creation time, both taken from the artifact's config blob.
-func fromConfig(subject oci.Reference, mediaType string, data []byte) ([]byte, time.Time, error) {
-	cfg, err := artifact.ParseConfig(mediaType, data)
-	if err != nil {
-		return nil, time.Time{}, err
-	}
-
-	created, err := cfg.Created()
-	if err != nil {
-		return nil, time.Time{}, err
-	}
-
 	statement, err := Statement(subject, cfg)
 	if err != nil {
-		return nil, time.Time{}, err
+		return "", fmt.Errorf("%w: %w", ErrInvalidConfig, err)
 	}
 
-	return statement, created, nil
+	return attestation.Push(ctx, client, signer, subject, PredicateType, statement, created)
 }

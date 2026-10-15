@@ -80,6 +80,14 @@ func (u *ServingUpdater) Gate(ctx context.Context, serving *deliveryv1alpha1.Ser
 	})
 }
 
+// Verified records whether the evidence of the target Preparation's artifact
+// verified in the registry.
+func (u *ServingUpdater) Verified(ctx context.Context, serving *deliveryv1alpha1.Serving, condStatus metav1.ConditionStatus, reason, msg string) error {
+	return u.set(ctx, serving, func(latest *deliveryv1alpha1.Serving) {
+		meta.SetStatusCondition(&latest.Status.Conditions, newTypedCondition(deliveryv1alpha1.ConditionTypeVerified, latest.Generation, condStatus, reason, msg))
+	})
+}
+
 // set re-fetches serving, applies mutate, and patches the status.
 func (u *ServingUpdater) set(ctx context.Context, serving *deliveryv1alpha1.Serving, mutate func(*deliveryv1alpha1.Serving)) error {
 	return setCondition(ctx, u.client, serving, mutate)

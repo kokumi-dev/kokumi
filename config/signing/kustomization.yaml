@@ -1,0 +1,7 @@
+# The namespace of the signing key. It is built apart from config/default,
+# whose namespace transformer would move these objects into the install
+# namespace. The names assume the default install (namespace "kokumi", name
+# prefix "kokumi-").
+resources:
+- namespace.yaml
+- role.yaml

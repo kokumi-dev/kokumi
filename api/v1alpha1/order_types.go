@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -52,6 +53,71 @@ type OCISource struct {
 	// The controller will resolve this to a digest
 	// +kubebuilder:validation:Required
 	Version string `json:"version"`
+
+	// verify requires the artifact the version resolves to to carry a
+	// trusted signature, by key or keyless against an expected signer
+	// identity. A source that does not verify is not rendered.
+	// +optional
+	Verify *OCISourceVerification `json:"verify,omitempty"`
+}
+
+// VerificationProvider names the signature format a source is verified with.
+// +kubebuilder:validation:Enum=cosign
+type VerificationProvider string
+
+// VerificationProviderCosign verifies cosign signatures and Sigstore bundles.
+const VerificationProviderCosign VerificationProvider = "cosign"
+
+// OCISourceVerification configures how the signature of a source artifact is
+// verified. It follows the shape of Flux's OCIRepository spec.verify.
+// +kubebuilder:validation:XValidation:rule="has(self.secretRef) != has(self.matchOIDCIdentity)",message="exactly one of secretRef or matchOIDCIdentity must be set"
+// +kubebuilder:validation:XValidation:rule="!has(self.trustedRootSecretRef) || has(self.matchOIDCIdentity)",message="trustedRootSecretRef is only used with matchOIDCIdentity"
+type OCISourceVerification struct {
+	// provider is the signature format. Only "cosign" is supported.
+	// +optional
+	// +kubebuilder:default=cosign
+	Provider VerificationProvider `json:"provider,omitempty"`
+
+	// secretRef names a Secret in the Product's namespace holding public
+	// keys. Every key whose name ends in ".pub" is tried; one verifying
+	// signature suffices. Signatures are verified offline, without a
+	// transparency log.
+	// +optional
+	SecretRef *corev1.LocalObjectReference `json:"secretRef,omitempty"`
+
+	// matchOIDCIdentity verifies keyless signatures whose certificate was
+	// issued to one of the listed identities.
+	// +optional
+	// +listType=atomic
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=16
+	MatchOIDCIdentity []OIDCIdentityMatch `json:"matchOIDCIdentity,omitempty"`
+
+	// trustedRootSecretRef names a Secret in the Product's namespace whose
+	// key "trusted_root.json" holds the Sigstore trusted root keyless
+	// signatures are verified against. When unset, the Sigstore public-good
+	// instance is used through TUF, which needs network access; set it in
+	// air-gapped clusters.
+	// +optional
+	TrustedRootSecretRef *corev1.LocalObjectReference `json:"trustedRootSecretRef,omitempty"`
+}
+
+// OIDCIdentityMatch matches the identity of a keyless signer. Both fields are
+// RE2 regular expressions and are not anchored.
+type OIDCIdentityMatch struct {
+	// issuer matches the OIDC issuer of the signer's certificate, for
+	// example "^https://token\.actions\.githubusercontent\.com$".
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=1024
+	Issuer string `json:"issuer"`
+
+	// subject matches the subject of the signer's certificate, for example
+	// the workflow that released the artifact.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=1024
+	Subject string `json:"subject"`
 }
 
 // PantryRef references a Pantry resource for authentication.

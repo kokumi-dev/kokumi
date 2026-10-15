@@ -20,13 +20,23 @@ const PreparationArtifactType = "application/vnd.kokumi.preparation.v1"
 // records the intent of a Preparation artifact.
 const PreparationConfigMediaType = "application/vnd.kokumi.preparation.config.v1+json"
 
-// ProvenanceArtifactType is the artifactType of the referrer that carries the
-// SLSA provenance of a rendered artifact.
-const ProvenanceArtifactType = "application/vnd.kokumi.provenance.v1+json"
+// SigstoreBundleMediaType is the artifactType of a referrer that carries a
+// Sigstore bundle, and the media type of its single layer, as cosign v3
+// writes them. Every signature and attestation Kokumi writes is such a
+// referrer; they are told apart by their predicate type.
+const SigstoreBundleMediaType = "application/vnd.dev.sigstore.bundle.v0.3+json"
 
-// InTotoStatementMediaType is the media type of an in-toto statement blob.
-const InTotoStatementMediaType = "application/vnd.in-toto+json"
-
-// ApprovalsArtifactType is the artifactType of the referrer that archives the
-// approvals of a Preparation.
-const ApprovalsArtifactType = "application/vnd.kokumi.approvals.v1+json"
+// Manifest annotations of a Sigstore bundle referrer.
+const (
+	// AnnotationBundleContent names what the bundle signs.
+	AnnotationBundleContent = "dev.sigstore.bundle.content"
+	// BundleContentDSSEEnvelope is the AnnotationBundleContent of a bundle
+	// that signs an in-toto statement in a DSSE envelope.
+	BundleContentDSSEEnvelope = "dsse-envelope"
+	// AnnotationBundlePredicateType is the predicate type of the signed
+	// statement, as cosign records it.
+	AnnotationBundlePredicateType = "dev.sigstore.bundle.predicateType"
+	// AnnotationInTotoPredicateType is the predicate type of the signed
+	// statement, as Trivy and GitHub discover attestations by it.
+	AnnotationInTotoPredicateType = "in-toto.io/predicate-type"
+)

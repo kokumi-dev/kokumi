@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/signing"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
@@ -22,6 +24,12 @@ const (
 	schemeHTTP  = "http"
 	schemeHTTPS = "https"
 )
+
+// maxTrustedKeys mirrors the MaxItems of spec.signing.trustedKeys.
+const maxTrustedKeys = 16
+
+// trustedKeyName mirrors the pattern of a trusted key's name.
+var trustedKeyName = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`)
 
 // secretRefDTO is the JSON shape of a LocalObjectReference in the settings API.
 type secretRefDTO struct {
@@ -53,19 +61,42 @@ type authDTO struct {
 	TokenSigningKeySecretRef *secretRefDTO `json:"tokenSigningKeySecretRef,omitempty"`
 }
 
+// trustedKeyDTO mirrors an entry of spec.signing.trustedKeys.
+type trustedKeyDTO struct {
+	Name      string `json:"name"`
+	PublicKey string `json:"publicKey"`
+}
+
+// signingSettingsDTO mirrors spec.signing of the Kitchen singleton.
+type signingSettingsDTO struct {
+	TrustedKeys               []trustedKeyDTO `json:"trustedKeys"`
+	RequireSourceVerification bool            `json:"requireSourceVerification"`
+}
+
 // settingsResponse is the JSON body for GET /api/v1/settings.
 type settingsResponse struct {
-	ArgoCDURL string   `json:"argoCDURL"`
-	Auth      *authDTO `json:"auth,omitempty"`
+	ArgoCDURL string             `json:"argoCDURL"`
+	Auth      *authDTO           `json:"auth,omitempty"`
+	Signing   signingSettingsDTO `json:"signing"`
 }
 
 // settingsRequest is the JSON body for PUT /api/v1/settings. Top-level fields
 // are optional: an absent field leaves the corresponding Kitchen spec part
-// unchanged, so the Settings tabs can save independently. A present auth
-// object replaces the whole spec.auth subtree.
+// unchanged, so the Settings tabs can save independently. A present auth or
+// signing object replaces the whole subtree.
 type settingsRequest struct {
-	ArgoCDURL *string  `json:"argoCDURL,omitempty"`
-	Auth      *authDTO `json:"auth,omitempty"`
+	ArgoCDURL *string             `json:"argoCDURL,omitempty"`
+	Auth      *authDTO            `json:"auth,omitempty"`
+	Signing   *signingSettingsDTO `json:"signing,omitempty"`
+}
+
+// settingsToResponse converts the Kitchen spec to the settings response.
+func settingsToResponse(spec deliveryv1alpha1.KitchenSpec) settingsResponse {
+	return settingsResponse{
+		ArgoCDURL: spec.ArgoCDURL,
+		Auth:      authToDTO(spec.Auth),
+		Signing:   signingToDTO(spec.Signing),
+	}
 }
 
 // secretRefToDTO converts a LocalObjectReference (nil-safe).
@@ -113,6 +144,20 @@ func secretRefFromDTO(ref *secretRefDTO) *corev1.LocalObjectReference {
 	return &corev1.LocalObjectReference{Name: ref.Name}
 }
 
+// signingToDTO converts a Kitchen spec.signing to its DTO shape. An unset
+// spec.signing trusts no further keys and requires nothing.
+func signingToDTO(s *deliveryv1alpha1.KitchenSigning) signingSettingsDTO {
+	out := signingSettingsDTO{TrustedKeys: []trustedKeyDTO{}}
+	if s == nil {
+		return out
+	}
+	for _, k := range s.TrustedKeys {
+		out.TrustedKeys = append(out.TrustedKeys, trustedKeyDTO{Name: k.Name, PublicKey: k.PublicKey})
+	}
+	out.RequireSourceVerification = s.RequireSourceVerification
+	return out
+}
+
 // applyAuth overwrites the target spec.auth subtree from the request DTO. nil
 // sub-objects in the DTO clear the corresponding config.
 func applyAuth(auth *deliveryv1alpha1.KitchenAuth, dto *authDTO) {
@@ -139,6 +184,19 @@ func applyAuth(auth *deliveryv1alpha1.KitchenAuth, dto *authDTO) {
 		auth.OIDC = nil
 	}
 	auth.TokenSigningKeySecretRef = secretRefFromDTO(dto.TokenSigningKeySecretRef)
+}
+
+// signingFromDTO converts the request DTO to a Kitchen spec.signing. Settings
+// that trust nothing and require nothing clear it.
+func signingFromDTO(dto *signingSettingsDTO) *deliveryv1alpha1.KitchenSigning {
+	if len(dto.TrustedKeys) == 0 && !dto.RequireSourceVerification {
+		return nil
+	}
+	out := &deliveryv1alpha1.KitchenSigning{RequireSourceVerification: dto.RequireSourceVerification}
+	for _, k := range dto.TrustedKeys {
+		out.TrustedKeys = append(out.TrustedKeys, deliveryv1alpha1.TrustedKey{Name: k.Name, PublicKey: k.PublicKey})
+	}
+	return out
 }
 
 // validateAuthDTO checks an auth payload against the constraints mirrored from
@@ -194,6 +252,33 @@ func validateAuthDTO(dto *authDTO) error {
 	return nil
 }
 
+// validateSigningDTO checks a signing payload. Every trusted key must parse:
+// the controller signs and verifies nothing while one does not.
+func validateSigningDTO(dto *signingSettingsDTO) error {
+	if dto == nil {
+		return nil
+	}
+	if len(dto.TrustedKeys) > maxTrustedKeys {
+		return fmt.Errorf("signing.trustedKeys must contain at most %d entries", maxTrustedKeys)
+	}
+	names := map[string]bool{}
+	keys := make([]signing.TrustedPublicKey, 0, len(dto.TrustedKeys))
+	for _, k := range dto.TrustedKeys {
+		if len(k.Name) > 63 || !trustedKeyName.MatchString(k.Name) {
+			return fmt.Errorf("signing.trustedKeys name %q must be a lowercase DNS label of at most 63 characters", k.Name)
+		}
+		if names[k.Name] {
+			return fmt.Errorf("signing.trustedKeys name %q is used twice", k.Name)
+		}
+		names[k.Name] = true
+		keys = append(keys, signing.TrustedPublicKey{Name: k.Name, PEM: []byte(k.PublicKey)})
+	}
+	if _, err := signing.NewTrustSet(keys...); err != nil {
+		return fmt.Errorf("signing.trustedKeys: %w", err)
+	}
+	return nil
+}
+
 // handleGetSettings handles GET /api/v1/settings.
 // Returns the settings of the singleton Kitchen/default.
 func handleGetSettings(deps *apiDeps, namespace string) http.HandlerFunc {
@@ -215,23 +300,21 @@ func handleGetSettings(deps *apiDeps, namespace string) http.HandlerFunc {
 		}, kitchen)
 		if err != nil {
 			if client.IgnoreNotFound(err) == nil {
-				respondJSON(w, http.StatusOK, settingsResponse{})
+				respondJSON(w, http.StatusOK, settingsToResponse(deliveryv1alpha1.KitchenSpec{}))
 				return
 			}
 			respondForbiddenOrError(w, err, "failed to get settings")
 			return
 		}
 
-		respondJSON(w, http.StatusOK, settingsResponse{
-			ArgoCDURL: kitchen.Spec.ArgoCDURL,
-			Auth:      authToDTO(kitchen.Spec.Auth),
-		})
+		respondJSON(w, http.StatusOK, settingsToResponse(kitchen.Spec))
 	}
 }
 
 // handlePutSettings handles PUT /api/v1/settings.
-// Updates argoCDURL and/or the auth subtree of the singleton Kitchen/default,
-// creating it if absent. Absent request fields leave the Kitchen unchanged.
+// Updates argoCDURL, the auth subtree and/or the signing subtree of the
+// singleton Kitchen/default, creating it if absent. Absent request fields
+// leave the Kitchen unchanged.
 func handlePutSettings(deps *apiDeps, namespace string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if deps == nil {
@@ -244,11 +327,15 @@ func handlePutSettings(deps *apiDeps, namespace string) http.HandlerFunc {
 			respondError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
-		if req.ArgoCDURL == nil && req.Auth == nil {
-			respondError(w, http.StatusBadRequest, "request must set argoCDURL or auth")
+		if req.ArgoCDURL == nil && req.Auth == nil && req.Signing == nil {
+			respondError(w, http.StatusBadRequest, "request must set argoCDURL, auth or signing")
 			return
 		}
 		if err := validateAuthDTO(req.Auth); err != nil {
+			respondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := validateSigningDTO(req.Signing); err != nil {
 			respondError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -291,15 +378,15 @@ func handlePutSettings(deps *apiDeps, namespace string) http.HandlerFunc {
 				kitchen.Spec.Auth = &deliveryv1alpha1.KitchenAuth{}
 				applyAuth(kitchen.Spec.Auth, req.Auth)
 			}
+			if req.Signing != nil {
+				kitchen.Spec.Signing = signingFromDTO(req.Signing)
+			}
 			if err := uc.create(r.Context(), kitchen, "kitchens"); err != nil {
 				deps.logger.Error(err, "Failed to create Kitchen")
 				respondForbiddenOrError(w, err, "failed to save settings")
 				return
 			}
-			respondJSON(w, http.StatusOK, settingsResponse{
-				ArgoCDURL: kitchen.Spec.ArgoCDURL,
-				Auth:      authToDTO(kitchen.Spec.Auth),
-			})
+			respondJSON(w, http.StatusOK, settingsToResponse(kitchen.Spec))
 			return
 		}
 
@@ -315,11 +402,11 @@ func handlePutSettings(deps *apiDeps, namespace string) http.HandlerFunc {
 			}
 			applyAuth(kitchen.Spec.Auth, req.Auth)
 		}
+		if req.Signing != nil {
+			kitchen.Spec.Signing = signingFromDTO(req.Signing)
+		}
 		if apiequality.Semantic.DeepEqual(&before, &kitchen.Spec) {
-			respondJSON(w, http.StatusOK, settingsResponse{
-				ArgoCDURL: kitchen.Spec.ArgoCDURL,
-				Auth:      authToDTO(kitchen.Spec.Auth),
-			})
+			respondJSON(w, http.StatusOK, settingsToResponse(kitchen.Spec))
 			return
 		}
 		if err := uc.update(r.Context(), kitchen, "kitchens"); err != nil {
@@ -328,9 +415,6 @@ func handlePutSettings(deps *apiDeps, namespace string) http.HandlerFunc {
 			return
 		}
 
-		respondJSON(w, http.StatusOK, settingsResponse{
-			ArgoCDURL: kitchen.Spec.ArgoCDURL,
-			Auth:      authToDTO(kitchen.Spec.Auth),
-		})
+		respondJSON(w, http.StatusOK, settingsToResponse(kitchen.Spec))
 	}
 }

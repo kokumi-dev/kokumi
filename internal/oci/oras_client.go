@@ -53,7 +53,7 @@ func (c *ORASClient) newRepository(ref string) (*remote.Repository, error) {
 		return nil, err
 	}
 
-	repo.Registry.PlainHTTP = isPlainHTTP(ref)
+	repo.Registry.PlainHTTP = IsPlainHTTP(ref)
 
 	if c.credStore != nil {
 		repo.Registry.Client = newAuthClient(c.credStore)
@@ -75,10 +75,10 @@ func newAuthClient(credStore credentials.Store) *auth.Client {
 	return client
 }
 
-// isPlainHTTP reports whether ref should be accessed over plain HTTP.
+// IsPlainHTTP reports whether ref should be accessed over plain HTTP.
 // In-cluster Kubernetes service hostnames (*.svc, *.svc.*) and loopback /
 // bare-IP addresses are treated as plain HTTP; everything else uses HTTPS.
-func isPlainHTTP(ref string) bool {
+func IsPlainHTTP(ref string) bool {
 	host := ref
 	if before, _, ok := strings.Cut(ref, "/"); ok {
 		host = before

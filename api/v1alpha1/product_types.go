@@ -157,6 +157,37 @@ type ProductSourceStatus struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	Digest string `json:"digest"`
+
+	// verified records who signed the source, when its signature verified:
+	// through spec.source.verify, or by a key the Kitchen trusts. Absent
+	// when the source was not verified.
+	// +optional
+	Verified *SourceVerification `json:"verified,omitempty"`
+}
+
+// SourceVerification records the signer whose signature on a source
+// verified.
+type SourceVerification struct {
+	// provider is the signature format that verified.
+	// +required
+	Provider VerificationProvider `json:"provider"`
+
+	// keyID identifies the public key that verified the signature: the
+	// base64-encoded SHA-256 of its DER encoding. Set for key-based
+	// verification.
+	// +optional
+	// +kubebuilder:validation:MaxLength=64
+	KeyID string `json:"keyID,omitempty"`
+
+	// issuer is the OIDC issuer of the keyless signer's certificate.
+	// +optional
+	// +kubebuilder:validation:MaxLength=2048
+	Issuer string `json:"issuer,omitempty"`
+
+	// subject is the subject of the keyless signer's certificate.
+	// +optional
+	// +kubebuilder:validation:MaxLength=2048
+	Subject string `json:"subject,omitempty"`
 }
 
 // ProductStatus defines the observed state of Product.
@@ -191,6 +222,7 @@ type ProductStatus struct {
 // +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].reason`
 // +kubebuilder:printcolumn:name="Source",type=string,JSONPath=`.spec.source.oci`
 // +kubebuilder:printcolumn:name="Version",type=string,JSONPath=`.spec.source.version`
+// +kubebuilder:printcolumn:name="Verified",type=string,JSONPath=`.status.conditions[?(@.type=='SourceVerified')].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Product is the Schema for the products API.

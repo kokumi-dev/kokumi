@@ -13,7 +13,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/attestation"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/signing/signingtest"
 )
 
 // sealed returns prep with its current votes sealed at base+1m.
@@ -64,22 +66,34 @@ func TestArchive(t *testing.T) {
 	approvals := []deliveryv1alpha1.Approval{vote("a", "alice", deliveryv1alpha1.ApprovalDecisionApprove, 0, 0)}
 	prep := sealed(testPreparation(1), approvals)
 	fake := oci.NewFakeClient(nil)
+	signer := signingtest.NewSigner(t)
 
-	att, err := Archive(context.Background(), fake, prep, approvals)
+	att, err := Archive(context.Background(), fake, signer, prep, approvals)
 	require.NoError(t, err)
 	require.Len(t, fake.Referrers, 1)
-	assert.Equal(t, oci.ApprovalsArtifactType, fake.Referrers[0].Artifact.ArtifactType)
+	assert.Equal(t, oci.SigstoreBundleMediaType, fake.Referrers[0].Artifact.ArtifactType)
+	assert.Equal(t, AttestationPredicateType, fake.Referrers[0].Artifact.Annotations[oci.AnnotationBundlePredicateType])
 	assert.Equal(t, "oci://registry.example/shop@"+att.Digest, att.OCIRef)
 
-	again, err := Archive(context.Background(), fake, prep, approvals)
+	subject, err := oci.Parse(prep.Spec.Artifact.OCIRef)
+	require.NoError(t, err)
+	evidence, err := attestation.Find(context.Background(), fake, signer.TrustSet(), subject, AttestationPredicateType)
+	require.NoError(t, err)
+	var predicate Predicate
+	require.NoError(t, evidence.Predicate(&predicate))
+	assert.Equal(t, deliveryv1alpha1.ReasonApproved, predicate.Result)
+
+	again, err := Archive(context.Background(), fake, signer, prep, approvals)
 	require.NoError(t, err)
 	assert.Equal(t, att, again, "archiving the same seal must be idempotent")
+	assert.Len(t, fake.Referrers, 1)
 
-	fake.PushReferrerErr = errors.New("registry unavailable")
-	_, err = Archive(context.Background(), fake, prep, approvals)
+	failing := oci.NewFakeClient(nil)
+	failing.PushReferrerErr = errors.New("registry unavailable")
+	_, err = Archive(context.Background(), failing, signer, prep, approvals)
 	require.ErrorContains(t, err, "registry unavailable")
 
-	_, err = Archive(context.Background(), fake, testPreparation(1), approvals)
+	_, err = Archive(context.Background(), fake, signer, testPreparation(1), approvals)
 	require.Error(t, err, "unsealed approvals must not be archived")
 }
 

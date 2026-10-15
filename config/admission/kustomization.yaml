@@ -2,6 +2,8 @@
 resources:
 - approval_integrity_policy.yaml
 - approval_integrity_policy_binding.yaml
+- signing_key_integrity_policy.yaml
+- signing_key_integrity_policy_binding.yaml
 
 configurations:
 - kustomizeconfig.yaml

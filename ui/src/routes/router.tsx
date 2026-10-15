@@ -99,7 +99,7 @@ export const router = createBrowserRouter([
       { path: 'settings', element: <Navigate to="/settings/general" replace /> },
       {
         path: 'settings/:tab',
-        element: <RequireCapability anyOf={['settings.general:update', 'settings.auth:update']}><Settings /></RequireCapability>,
+        element: <RequireCapability anyOf={['settings.general:update', 'settings.auth:update', 'settings.signing:update']}><Settings /></RequireCapability>,
       },
 
       { path: '*', element: <NotFound /> },

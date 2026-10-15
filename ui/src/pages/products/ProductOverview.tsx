@@ -12,15 +12,32 @@ import {
   patchesPolicy,
   valuesPolicy,
 } from '../../utils/products'
-import type { OverridePolicy } from '../../api/types'
+import type { OverridePolicy, SourceVerification, SourceVerify } from '../../api/types'
+import { keyLabel, useSigningKeys } from '../../hooks/useSigningKeys'
 import { useProductContext, vendorLabel } from './productFormat'
 import layout from '../../components/layout/layout.module.css'
+
+/** Describes what a source must be signed by. */
+function verifyLabel(verify?: SourceVerify): string {
+  if (!verify) return 'Not required; a key the Kitchen trusts verifies it'
+  if (verify.secretRef) return `By a public key in the Secret ${verify.secretRef}`
+  const identities = (verify.matchOIDCIdentity ?? []).map((m) => `${m.subject} (issuer ${m.issuer})`)
+  return `Keyless by ${identities.join(' or ')}`
+}
+
+/** Describes the signer whose signature verified. */
+function signerLabel(keys: ReadonlyMap<string, string>, verified: SourceVerification): string {
+  if (verified.keyID) return `Signed by ${keyLabel(keys, verified.keyID)}`
+  return `Signed by ${verified.subject} (issuer ${verified.issuer})`
+}
 
 export default function ProductOverview() {
   const { product } = useProductContext()
   const { source, resolvedSource, render, overrides } = product
   const helm = render?.helm
   const baseValues = objectToYaml(helm?.values ?? {})
+  const keys = useSigningKeys()
+  const sourceVerified = product.conditions?.find((c) => c.type === 'SourceVerified')
 
   return (
     <>
@@ -32,6 +49,7 @@ export default function ProductOverview() {
               value: <span className={layout.mono}>{source.pantryRef?.name ? `pantry: ${source.pantryRef.name}` : source.oci}</span>,
             },
             { label: 'Version', value: source.version },
+            { label: 'Verification', value: verifyLabel(source.verify) },
             {
               label: 'Vendoring',
               value: product.vendor && <span className={layout.mono}>{vendorLabel(product.vendor)}</span>,
@@ -58,6 +76,14 @@ export default function ProductOverview() {
                   : <span className={layout.muted}>Not resolved; the registry could not be reached</span>,
               },
               { label: 'Pantry', value: resolvedSource.pantryRef?.name, show: !!resolvedSource.pantryRef },
+              {
+                label: 'Signature',
+                value: resolvedSource.verified
+                  ? signerLabel(keys, resolvedSource.verified)
+                  : sourceVerified?.status === 'False'
+                    ? <span className={layout.muted}>Not verified: {sourceVerified.message}</span>
+                    : <span className={layout.muted}>Not verified</span>,
+              },
             ]}
           />
         ) : (

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 
@@ -219,7 +220,6 @@ func preparationToDTO(p deliveryv1alpha1.Preparation, isActive bool) Preparation
 		Artifact: ArtifactDTO{
 			OCIRef: p.Spec.Artifact.OCIRef,
 			Digest: p.Spec.Artifact.Digest,
-			Signed: p.Spec.Artifact.Signed,
 		},
 		ConfigHash:    p.Spec.ConfigHash,
 		State:         stateFromConditions(p.Status.Conditions),
@@ -402,7 +402,62 @@ func pantryRefFromDTO(dto *PantryRefDTO) *deliveryv1alpha1.PantryRef {
 
 // sourceToDTO converts an OCISource to its DTO representation.
 func sourceToDTO(src deliveryv1alpha1.OCISource) OCISourceDTO {
-	return OCISourceDTO{OCI: src.OCI, Version: src.Version, PantryRef: pantryRefToDTO(src.PantryRef)}
+	return OCISourceDTO{OCI: src.OCI, Version: src.Version, PantryRef: pantryRefToDTO(src.PantryRef), Verify: verifyToDTO(src.Verify)}
+}
+
+// sourceFromDTO converts an OCISourceDTO to an OCISource.
+func sourceFromDTO(dto OCISourceDTO) deliveryv1alpha1.OCISource {
+	return deliveryv1alpha1.OCISource{OCI: dto.OCI, Version: dto.Version, PantryRef: pantryRefFromDTO(dto.PantryRef), Verify: verifyFromDTO(dto.Verify)}
+}
+
+// verifyToDTO converts an OCISourceVerification; nil stays nil.
+func verifyToDTO(verify *deliveryv1alpha1.OCISourceVerification) *SourceVerifyDTO {
+	if verify == nil {
+		return nil
+	}
+	dto := &SourceVerifyDTO{}
+	if verify.SecretRef != nil {
+		dto.SecretRef = verify.SecretRef.Name
+	}
+	if verify.TrustedRootSecretRef != nil {
+		dto.TrustedRootSecretRef = verify.TrustedRootSecretRef.Name
+	}
+	for _, identity := range verify.MatchOIDCIdentity {
+		dto.MatchOIDCIdentity = append(dto.MatchOIDCIdentity, OIDCIdentityMatchDTO{Issuer: identity.Issuer, Subject: identity.Subject})
+	}
+	return dto
+}
+
+// verifyFromDTO converts a SourceVerifyDTO; nil stays nil. The provider is
+// left to its default.
+func verifyFromDTO(dto *SourceVerifyDTO) *deliveryv1alpha1.OCISourceVerification {
+	if dto == nil {
+		return nil
+	}
+	verify := &deliveryv1alpha1.OCISourceVerification{}
+	if dto.SecretRef != "" {
+		verify.SecretRef = &corev1.LocalObjectReference{Name: dto.SecretRef}
+	}
+	if dto.TrustedRootSecretRef != "" {
+		verify.TrustedRootSecretRef = &corev1.LocalObjectReference{Name: dto.TrustedRootSecretRef}
+	}
+	for _, identity := range dto.MatchOIDCIdentity {
+		verify.MatchOIDCIdentity = append(verify.MatchOIDCIdentity, deliveryv1alpha1.OIDCIdentityMatch{Issuer: identity.Issuer, Subject: identity.Subject})
+	}
+	return verify
+}
+
+// sourceVerificationToDTO converts a SourceVerification; nil stays nil.
+func sourceVerificationToDTO(verified *deliveryv1alpha1.SourceVerification) *SourceVerificationDTO {
+	if verified == nil {
+		return nil
+	}
+	return &SourceVerificationDTO{
+		Provider: string(verified.Provider),
+		KeyID:    verified.KeyID,
+		Issuer:   verified.Issuer,
+		Subject:  verified.Subject,
+	}
 }
 
 // destinationToDTO converts an OCIDestination; nil stays nil.
@@ -558,6 +613,7 @@ func productToDTO(p deliveryv1alpha1.Product) ProductDTO {
 			Version:   src.Version,
 			PantryRef: pantryRefToDTO(src.PantryRef),
 			Digest:    src.Digest,
+			Verified:  sourceVerificationToDTO(src.Verified),
 		}
 	}
 	if !p.CreationTimestamp.IsZero() {
@@ -581,7 +637,7 @@ func productsToDTO(products []deliveryv1alpha1.Product) []ProductDTO {
 // update request.
 func productSpecFromDTO(source OCISourceDTO, vendor *OCIDestinationDTO, render *RenderDTO, patches []PatchDTO, overrides OverridesDTO) deliveryv1alpha1.ProductSpec {
 	spec := deliveryv1alpha1.ProductSpec{
-		Source:    deliveryv1alpha1.OCISource{OCI: source.OCI, Version: source.Version, PantryRef: pantryRefFromDTO(source.PantryRef)},
+		Source:    sourceFromDTO(source),
 		Render:    renderFromDTO(render),
 		Patches:   patchesFromDTO(patches),
 		Overrides: overridesFromDTO(overrides),

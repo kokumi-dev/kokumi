@@ -123,6 +123,37 @@
   font-weight: 500;
 }
 
+.fieldTextarea {
+  flex: 1;
+  max-width: 560px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-main);
+  font-family: monospace;
+  font-size: 0.8rem;
+  color: var(--color-text-on-light);
+  outline: none;
+  resize: vertical;
+}
+
+.fieldTextarea:focus {
+  border-color: var(--color-accent);
+}
+
+.codeBlock {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border-subtle);
+  background: var(--color-bg-main);
+  font-family: monospace;
+  font-size: 0.78rem;
+  color: var(--color-text-on-light);
+  overflow-x: auto;
+  white-space: pre;
+}
+
 /* ── Group cards (Authentication tab) ── */
 .groupStack {
   display: flex;

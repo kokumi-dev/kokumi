@@ -34,6 +34,8 @@ func addRoutes(
 	mux.HandleFunc("GET /api/v1/settings", handleGetSettings(deps, installNamespace))
 	mux.HandleFunc("PUT /api/v1/settings", handlePutSettings(deps, installNamespace))
 	mux.HandleFunc("GET /api/v1/whoami", handleWhoami(deps, installNamespace))
+	mux.HandleFunc("GET /api/v1/namespaces/{namespace}/capabilities", handleNamespaceCapabilities(deps))
+	mux.HandleFunc("GET /api/v1/signing", handleGetSigning(deps))
 
 	// Order CRUD
 	mux.HandleFunc("GET /api/v1/orders", handleListOrders(deps))

@@ -11,6 +11,7 @@ import layout from '../../components/layout/layout.module.css'
 export default function PreparationOverview() {
   const { prep, parent } = usePreparationContext()
   const git = prep.gitSource
+  const signed = prep.conditions?.find((c) => c.type === 'Signed')
 
   return (
     <>
@@ -50,7 +51,10 @@ export default function PreparationOverview() {
             { label: 'Reference', value: <span className={layout.mono}>{prep.artifact.ociRef}</span> },
             { label: 'Digest', value: <span className={layout.mono}>{prep.artifact.digest}</span> },
             { label: 'Config hash', value: <span className={layout.mono}>{prep.configHash}</span> },
-            { label: 'Signed', value: prep.artifact.signed ? 'Yes' : 'No' },
+            {
+              label: 'Signed',
+              value: signed?.status === 'True' ? 'Yes' : signed ? `No: ${signed.message ?? signed.reason}` : 'Not yet',
+            },
           ]}
         />
       </Section>

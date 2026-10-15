@@ -1,0 +1,13 @@
+---
+# The signing key lives in its own namespace, apart from everything users may
+# be granted access to. Only the kokumi controller can write Secrets here, and
+# the signing-key-integrity admission policy guards the key. Never grant
+# anyone else access to Secrets in this namespace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kokumi-signing
+  labels:
+    app.kubernetes.io/name: kokumi
+    app.kubernetes.io/component: signing
+    app.kubernetes.io/managed-by: kustomize

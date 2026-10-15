@@ -32,9 +32,11 @@ spec:
     message: "Approvals are append-only and cannot be deleted"
     reason: Forbidden
 ---
-# The approval gate state of Approvals and Preparations, and the promotion
-# target recorded on Servings (which triggers sealing), is owned by the kokumi
-# controller; nobody else may forge it.
+# Status is owned by the kokumi controller; nobody else may forge it. It
+# records the approval gate state of Approvals and Preparations, the
+# promotion target of Servings (which triggers sealing), the source every
+# Order of a Product renders and its verification, the public signing key the
+# Kitchen publishes, and the readiness of Orders and Pantries.
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -46,8 +48,15 @@ spec:
     - apiGroups: ["delivery.kokumi.dev"]
       apiVersions: ["*"]
       operations: ["UPDATE"]
-      resources: ["approvals/status", "preparations/status", "servings/status"]
+      resources:
+      - approvals/status
+      - preparations/status
+      - servings/status
+      - products/status
+      - orders/status
+      - pantries/status
+      - kitchens/status
   validations:
   - expression: "request.userInfo.username == 'system:serviceaccount:kokumi:kokumi-controller-manager'"
-    message: "Approval, Preparation and Serving status is owned by the kokumi controller"
+    message: "Status of kokumi resources is owned by the kokumi controller"
     reason: Forbidden

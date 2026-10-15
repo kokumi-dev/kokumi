@@ -21,39 +21,27 @@ func NewPreparationUpdater(c client.Client) *PreparationUpdater {
 	return &PreparationUpdater{client: c}
 }
 
-// Ready marks the Preparation as ready for serving.
-func (u *PreparationUpdater) Ready(ctx context.Context, preparation *deliveryv1alpha1.Preparation, msg string) error {
-	return u.set(ctx, preparation, func(latest *deliveryv1alpha1.Preparation) {
-		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(latest.Generation, metav1.ConditionTrue, "Ready", msg))
-	})
-}
-
-// Failed marks the Preparation as failed.
-func (u *PreparationUpdater) Failed(ctx context.Context, preparation *deliveryv1alpha1.Preparation, err error) error {
-	return u.set(ctx, preparation, func(latest *deliveryv1alpha1.Preparation) {
-		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(latest.Generation, metav1.ConditionFalse, "ProcessingFailed", err.Error()))
-	})
-}
-
-// Pending marks the Preparation as pending.
-func (u *PreparationUpdater) Pending(ctx context.Context, preparation *deliveryv1alpha1.Preparation, msg string) error {
-	return u.set(ctx, preparation, func(latest *deliveryv1alpha1.Preparation) {
-		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(latest.Generation, metav1.ConditionUnknown, "Pending", msg))
-	})
-}
-
-func (u *PreparationUpdater) set(ctx context.Context, preparation *deliveryv1alpha1.Preparation, mutate func(*deliveryv1alpha1.Preparation)) error {
-	return setCondition(ctx, u.client, preparation, mutate)
-}
-
-// ProvenanceAttached records the provenance attestation and marks the
-// Preparation as ready for serving.
-func (u *PreparationUpdater) ProvenanceAttached(ctx context.Context, preparation *deliveryv1alpha1.Preparation, attestation deliveryv1alpha1.AttestationReference) error {
+// EvidenceAttached records the signature and provenance attestations of the
+// artifact and marks the Preparation as ready for serving.
+func (u *PreparationUpdater) EvidenceAttached(ctx context.Context, preparation *deliveryv1alpha1.Preparation, signature, provenance deliveryv1alpha1.AttestationReference) error {
 	return u.commit(ctx, preparation, func(latest *deliveryv1alpha1.Preparation) {
-		setAttestation(&latest.Status.Attestations, attestation)
+		setAttestation(&latest.Status.Attestations, signature)
+		setAttestation(&latest.Status.Attestations, provenance)
+		meta.SetStatusCondition(&latest.Status.Conditions, newTypedCondition(deliveryv1alpha1.ConditionTypeSigned, latest.Generation,
+			metav1.ConditionTrue, deliveryv1alpha1.ReasonSigned, "Signature recorded at "+signature.OCIRef))
 		meta.SetStatusCondition(&latest.Status.Conditions, newTypedCondition(deliveryv1alpha1.ConditionTypeProvenanceAttached, latest.Generation,
-			metav1.ConditionTrue, deliveryv1alpha1.ReasonProvenanceAttached, "Provenance recorded at "+attestation.OCIRef))
-		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(latest.Generation, metav1.ConditionTrue, "Ready", "Preparation is ready for serving"))
+			metav1.ConditionTrue, deliveryv1alpha1.ReasonProvenanceAttached, "Provenance recorded at "+provenance.OCIRef))
+		setEvidenceReady(latest)
+	})
+}
+
+// SignFailed records that the artifact could not be signed, for reason. The
+// Preparation is not ready until it is.
+func (u *PreparationUpdater) SignFailed(ctx context.Context, preparation *deliveryv1alpha1.Preparation, reason string, err error) error {
+	return u.commit(ctx, preparation, func(latest *deliveryv1alpha1.Preparation) {
+		meta.SetStatusCondition(&latest.Status.Conditions, newTypedCondition(deliveryv1alpha1.ConditionTypeSigned, latest.Generation,
+			metav1.ConditionFalse, reason, err.Error()))
+		setEvidenceReady(latest)
 	})
 }
 
@@ -63,9 +51,23 @@ func (u *PreparationUpdater) ProvenanceFailed(ctx context.Context, preparation *
 	return u.commit(ctx, preparation, func(latest *deliveryv1alpha1.Preparation) {
 		meta.SetStatusCondition(&latest.Status.Conditions, newTypedCondition(deliveryv1alpha1.ConditionTypeProvenanceAttached, latest.Generation,
 			metav1.ConditionFalse, deliveryv1alpha1.ReasonProvenanceAttachFailed, err.Error()))
-		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(latest.Generation, metav1.ConditionFalse,
-			deliveryv1alpha1.ReasonAwaitingProvenance, "Waiting for the provenance attestation to be recorded"))
+		setEvidenceReady(latest)
 	})
+}
+
+// setEvidenceReady sets Ready from the evidence conditions: a Preparation is
+// ready for serving once its artifact is signed and its provenance attached.
+func setEvidenceReady(latest *deliveryv1alpha1.Preparation) {
+	var ready metav1.Condition
+	switch {
+	case !meta.IsStatusConditionTrue(latest.Status.Conditions, deliveryv1alpha1.ConditionTypeSigned):
+		ready = NewCondition(latest.Generation, metav1.ConditionFalse, deliveryv1alpha1.ReasonAwaitingSignature, "Waiting for the artifact to be signed")
+	case !meta.IsStatusConditionTrue(latest.Status.Conditions, deliveryv1alpha1.ConditionTypeProvenanceAttached):
+		ready = NewCondition(latest.Generation, metav1.ConditionFalse, deliveryv1alpha1.ReasonAwaitingProvenance, "Waiting for the provenance attestation to be recorded")
+	default:
+		ready = NewCondition(latest.Generation, metav1.ConditionTrue, "Ready", "Preparation is ready for serving")
+	}
+	meta.SetStatusCondition(&latest.Status.Conditions, ready)
 }
 
 // setAttestation replaces the entry of the attestation's type, or appends it.

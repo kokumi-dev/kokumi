@@ -129,6 +129,11 @@ func startK8sWatcher(
 	if err != nil {
 		return nil, err
 	}
+	deps.kitchen = func() (*deliveryv1alpha1.Kitchen, error) {
+		kitchen := &deliveryv1alpha1.Kitchen{}
+		err := k8sCache.Get(ctx, client.ObjectKey{Namespace: installNamespace, Name: deliveryv1alpha1.DefaultKitchenName}, kitchen)
+		return kitchen, err
+	}
 	orderInformer := informers.order
 	prepInformer := informers.prep
 	servingInformer := informers.serving

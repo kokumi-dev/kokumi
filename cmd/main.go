@@ -45,6 +45,8 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/index"
 	"github.com/kokumi-dev/kokumi/internal/namespace"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/signing"
+	signingsource "github.com/kokumi-dev/kokumi/internal/signing/source"
 	"github.com/kokumi-dev/kokumi/internal/version"
 	// +kubebuilder:scaffold:imports
 )
@@ -200,6 +202,11 @@ func main() {
 		os.Exit(1)
 	}
 	ociClient := oci.NewORASClient()
+	installNamespace := namespace.Current(os.Getenv)
+
+	// The Kitchen controller reloads the signing state; every controller that
+	// signs or verifies reads it from here.
+	signingProvider := signing.NewProvider(mgr.GetAPIReader(), installNamespace, deliveryv1alpha1.SigningKeyNamespace)
 
 	if err := (&controller.PreparationReconciler{
 		Client:         mgr.GetClient(),
@@ -207,14 +214,18 @@ func main() {
 		APIReader:      mgr.GetAPIReader(),
 		OCIClient:      ociClient,
 		PantryResolver: credential.NewKubeResolver(mgr.GetClient()),
+		Signing:        signingProvider,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Preparation")
 		os.Exit(1)
 	}
 	if err := (&controller.ServingReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Deployer: deployer.NewArgoCD(mgr.GetClient()),
+		Client:         mgr.GetClient(),
+		Scheme:         mgr.GetScheme(),
+		Deployer:       deployer.NewArgoCD(mgr.GetClient()),
+		OCIClient:      ociClient,
+		PantryResolver: credential.NewKubeResolver(mgr.GetClient()),
+		Signing:        signingProvider,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Serving")
 		os.Exit(1)
@@ -240,6 +251,9 @@ func main() {
 		Scheme:         mgr.GetScheme(),
 		Store:          artifactStore,
 		PantryResolver: credential.NewKubeResolver(mgr.GetClient()),
+		OCIClient:      ociClient,
+		Signing:        signingProvider,
+		SourceVerifier: signingsource.NewVerifier(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Product")
 		os.Exit(1)
@@ -252,9 +266,11 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.KitchenReconciler{
-		Client:    mgr.GetClient(),
-		Scheme:    mgr.GetScheme(),
-		Namespace: namespace.Current(os.Getenv),
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		Namespace:        installNamespace,
+		SigningNamespace: deliveryv1alpha1.SigningKeyNamespace,
+		Signing:          signingProvider,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "kitchen")
 		os.Exit(1)

@@ -20,9 +20,12 @@ type EffectiveSpec struct {
 	// every variant of the Product renders the same artifact. Empty when
 	// rendering a Product spec that was not resolved, as in a preview.
 	SourceDigest string
-	Render       *deliveryv1alpha1.Render
-	Patches      []deliveryv1alpha1.Patch
-	Edits        []deliveryv1alpha1.Patch
+	// SourceVerified records who signed the source, when the Product
+	// verified it.
+	SourceVerified *deliveryv1alpha1.SourceVerification
+	Render         *deliveryv1alpha1.Render
+	Patches        []deliveryv1alpha1.Patch
+	Edits          []deliveryv1alpha1.Patch
 	// Product identifies the Product the spec was merged from.
 	Product ProductIdentity
 }
@@ -76,10 +79,11 @@ func ForProduct(product *deliveryv1alpha1.Product, order *deliveryv1alpha1.Order
 			Version:   product.Status.Source.Version,
 			PantryRef: product.Status.Source.PantryRef,
 		},
-		SourceDigest: product.Status.Source.Digest,
-		Render:       render,
-		Patches:      patches,
-		Edits:        order.Spec.Edits,
-		Product:      ProductIdentity{Name: product.Name, ConfigHash: product.Status.ConfigHash},
+		SourceDigest:   product.Status.Source.Digest,
+		SourceVerified: product.Status.Source.Verified,
+		Render:         render,
+		Patches:        patches,
+		Edits:          order.Spec.Edits,
+		Product:        ProductIdentity{Name: product.Name, ConfigHash: product.Status.ConfigHash},
 	}, nil
 }

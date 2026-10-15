@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -16,6 +15,7 @@ import (
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/signing"
 )
 
 // preparationFromRequest reads the Preparation named by the request path with
@@ -52,8 +52,9 @@ type objectGetter interface {
 // handleListPreparationAttestations handles
 // GET /api/v1/preparations/{namespace}/{name}/attestations[?payload=true].
 // It lists the OCI referrers of the Preparation's artifact live from the
-// registry, oldest first. With payload=true the entries Kokumi recorded carry
-// their payload.
+// registry, oldest first, and verifies each Sigstore bundle against the keys
+// the Kitchen trusts. With payload=true the verified entries carry their
+// signed statement.
 func handleListPreparationAttestations(deps *apiDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if deps == nil {
@@ -66,7 +67,14 @@ func handleListPreparationAttestations(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		attestations, err := listAttestations(r.Context(), deps.ociClient, prep, r.URL.Query().Get("payload") == "true")
+		trust, err := deps.trustSet()
+		if err != nil {
+			deps.logger.Error(err, "Failed to read the trusted keys")
+			respondError(w, http.StatusServiceUnavailable, "the trusted keys are not available: "+err.Error())
+			return
+		}
+
+		attestations, err := listAttestations(r.Context(), deps.ociClient, trust, prep, r.URL.Query().Get("payload") == "true")
 		if err != nil {
 			deps.logger.Error(err, "Failed to list attestations", "ociRef", prep.Spec.Artifact.OCIRef)
 			respondError(w, http.StatusBadGateway, "could not list attestations: "+err.Error())
@@ -79,10 +87,9 @@ func handleListPreparationAttestations(deps *apiDeps) http.HandlerFunc {
 
 // listAttestations lists the referrers of prep's artifact, oldest first.
 // Anyone who can push to the repository can attach any number of referrers,
-// so each entry says whether Kokumi recorded it on the Preparation, and only
-// recorded entries are fetched for their payload. Oversized or non-JSON
-// payloads are listed without their content.
-func listAttestations(ctx context.Context, ociClient oci.Client, prep *deliveryv1alpha1.Preparation, withPayload bool) ([]AttestationDTO, error) {
+// so each Sigstore bundle is verified against trust, and only verified
+// entries carry their statement. Other referrers are listed without content.
+func listAttestations(ctx context.Context, ociClient oci.Client, trust *signing.TrustSet, prep *deliveryv1alpha1.Preparation, withPayload bool) ([]AttestationDTO, error) {
 	subject, err := oci.Parse(prep.Spec.Artifact.OCIRef)
 	if err != nil {
 		return nil, err
@@ -93,33 +100,24 @@ func listAttestations(ctx context.Context, ociClient oci.Client, prep *deliveryv
 		return nil, err
 	}
 
-	recorded := recordedAttestations(prep)
-
 	attestations := make([]AttestationDTO, 0, len(referrers))
 	for _, referrer := range referrers {
 		dto := AttestationDTO{
-			ArtifactType: referrer.ArtifactType,
-			Digest:       referrer.Digest,
-			CreatedAt:    referrer.Annotations[ocispec.AnnotationCreated],
-			Size:         referrer.Size,
-			Recorded:     slices.Contains(recorded, referrer.Digest),
+			ArtifactType:  referrer.ArtifactType,
+			Digest:        referrer.Digest,
+			PredicateType: referrer.Annotations[oci.AnnotationBundlePredicateType],
+			CreatedAt:     referrer.Annotations[ocispec.AnnotationCreated],
+			Size:          referrer.Size,
 		}
 
-		if withPayload && dto.Recorded {
-			ref := subject
-			ref.Tag = ""
-			ref.Digest = referrer.Digest
-
-			fetched, err := ociClient.FetchReferrer(ctx, ref)
-			switch {
-			case errors.Is(err, oci.ErrPayloadTooLarge):
-			case err != nil:
-				return nil, err
-			default:
-				dto.MediaType = fetched.MediaType
-				if json.Valid(fetched.Payload) {
-					dto.Payload = fetched.Payload
-				}
+		verification, err := verifyReferrer(ctx, ociClient, trust, subject, referrer)
+		if err != nil {
+			dto.Verification.Error = err.Error()
+		} else {
+			dto.PredicateType = verification.PredicateType
+			dto.Verification = AttestationVerificationDTO{Verified: true, KeyID: verification.KeyID}
+			if withPayload {
+				dto.Payload = verification.Statement
 			}
 		}
 
@@ -133,19 +131,23 @@ func listAttestations(ctx context.Context, ociClient oci.Client, prep *deliveryv
 	return attestations, nil
 }
 
-// recordedAttestations returns the digests of the attestations Kokumi
-// recorded in prep's status.
-func recordedAttestations(prep *deliveryv1alpha1.Preparation) []string {
-	digests := make([]string, 0, len(prep.Status.Attestations)+1)
-	for _, attestation := range prep.Status.Attestations {
-		digests = append(digests, attestation.Digest)
+// verifyReferrer fetches the referrer of subject and verifies it as a
+// Sigstore bundle about subject, of any predicate type.
+func verifyReferrer(ctx context.Context, ociClient oci.Client, trust *signing.TrustSet, subject oci.Reference, referrer oci.Referrer) (*signing.Verification, error) {
+	if referrer.ArtifactType != oci.SigstoreBundleMediaType {
+		return nil, errors.New("not a Sigstore bundle")
 	}
 
-	if approval := prep.Status.Approval; approval != nil && approval.Attestation != nil {
-		digests = append(digests, approval.Attestation.Digest)
+	ref := subject
+	ref.Tag = ""
+	ref.Digest = referrer.Digest
+
+	fetched, err := ociClient.FetchReferrer(ctx, ref)
+	if err != nil {
+		return nil, err
 	}
 
-	return digests
+	return trust.Verify(fetched.Payload, subject.Digest, "")
 }
 
 // handleGetPreparationIntent handles

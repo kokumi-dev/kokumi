@@ -21,7 +21,9 @@ func NewProductUpdater(c client.Client) *ProductUpdater {
 }
 
 // Ready marks the Product as resolved, so that its Orders can render from
-// source. configHash records the inputs source was resolved from.
+// source. configHash records the inputs source was resolved from. The
+// SourceVerified condition reports source.verified, and is removed when the
+// source was not verified.
 //
 // The status records the generation of product, the object that was
 // resolved, not of the object it re-fetches: Orders render only from a
@@ -38,7 +40,37 @@ func (u *ProductUpdater) Ready(ctx context.Context, product *deliveryv1alpha1.Pr
 			reason, msg = "Vendored", "Source vendored"
 		}
 		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(generation, metav1.ConditionTrue, reason, msg))
+		if source.Verified == nil {
+			meta.RemoveStatusCondition(&latest.Status.Conditions, deliveryv1alpha1.ConditionTypeSourceVerified)
+			return
+		}
+		meta.SetStatusCondition(&latest.Status.Conditions, newTypedCondition(deliveryv1alpha1.ConditionTypeSourceVerified, generation,
+			metav1.ConditionTrue, deliveryv1alpha1.ReasonSucceeded, "Verified signature of "+VerifiedSigner(source.Verified)))
 	})
+}
+
+// VerificationFailed marks the Product as not ready because its source did
+// not verify, for reason. Orders render nothing until it does. The published
+// source is kept, but no longer recorded as verified.
+func (u *ProductUpdater) VerificationFailed(ctx context.Context, product *deliveryv1alpha1.Product, reason string, err error) error {
+	generation := product.Generation
+	return u.set(ctx, product, func(latest *deliveryv1alpha1.Product) {
+		latest.Status.ObservedGeneration = generation
+		if latest.Status.Source != nil {
+			latest.Status.Source.Verified = nil
+		}
+		meta.SetStatusCondition(&latest.Status.Conditions, newTypedCondition(deliveryv1alpha1.ConditionTypeSourceVerified, generation,
+			metav1.ConditionFalse, reason, err.Error()))
+		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(generation, metav1.ConditionFalse, reason, err.Error()))
+	})
+}
+
+// VerifiedSigner describes the signer verification recorded.
+func VerifiedSigner(verified *deliveryv1alpha1.SourceVerification) string {
+	if verified.KeyID != "" {
+		return "key " + verified.KeyID
+	}
+	return verified.Subject + " (issuer " + verified.Issuer + ")"
 }
 
 // Failed marks the Product as having a configuration error. Like Ready, it
@@ -48,6 +80,16 @@ func (u *ProductUpdater) Failed(ctx context.Context, product *deliveryv1alpha1.P
 	return u.set(ctx, product, func(latest *deliveryv1alpha1.Product) {
 		latest.Status.ObservedGeneration = generation
 		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(generation, metav1.ConditionFalse, "Failed", err.Error()))
+	})
+}
+
+// NotReady marks the Product as waiting for a prerequisite, for reason. Like
+// Ready, it records the generation of product.
+func (u *ProductUpdater) NotReady(ctx context.Context, product *deliveryv1alpha1.Product, reason, msg string) error {
+	generation := product.Generation
+	return u.set(ctx, product, func(latest *deliveryv1alpha1.Product) {
+		latest.Status.ObservedGeneration = generation
+		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(generation, metav1.ConditionFalse, reason, msg))
 	})
 }
 
