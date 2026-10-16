@@ -186,8 +186,11 @@ verification mandatory: a Product whose source does not verify, through its own
 Key-based verification works offline. Keyless verification needs the Sigstore
 trusted root:
 
-- Online, Kokumi fetches the Sigstore public-good trusted root through TUF,
-  keeps it in memory, and refreshes it once a day.
+- Online, the controller fetches the Sigstore public-good trusted root through
+  TUF, keeps it in memory, and refreshes it once a day. It needs outbound HTTPS
+  access to Sigstore's TUF repository (`tuf-repo-cdn.sigstore.dev`). Sigstore's
+  transparency log is never contacted: the signing time comes from the proof in
+  each signature.
 - Air-gapped, store a trusted root in a Secret under the key
   `trusted_root.json` and name it in `spec.source.verify.trustedRootSecretRef`:
 
@@ -197,4 +200,10 @@ trusted root:
   ```
 
 Sigstore rotates its keys and log shards over time. Refresh the stored trusted
-root regularly; Kokumi does not update it.
+root regularly; Kokumi does not update it. A changed Secret is picked up at
+once: the Products whose `verify` names it check their signatures again.
+
+The signatures must reach the cluster with the artifact. Kokumi's vendoring and
+`oras cp -r` copy OCI referrers, which is how cosign v3 stores signatures.
+Legacy signatures under `sha256-<digest>.sig` tags are only copied by
+`cosign copy`.

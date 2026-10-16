@@ -62,7 +62,7 @@ func (c *ORASClient) PushReferrer(ctx context.Context, subject Reference, artifa
 
 // ListReferrers lists the referrers of subject. An empty artifactType lists
 // all of them.
-func (c *ORASClient) ListReferrers(ctx context.Context, subject Reference, artifactType string) ([]Referrer, error) {
+func (c *ORASClient) ListReferrers(ctx context.Context, subject Reference, artifactType string) ([]Descriptor, error) {
 	repo, err := c.newRepository(subject.RepositoryReference())
 	if err != nil {
 		return nil, fmt.Errorf("create repository for %q: %w", subject, err)
@@ -73,16 +73,9 @@ func (c *ORASClient) ListReferrers(ctx context.Context, subject Reference, artif
 		return nil, fmt.Errorf("resolve subject %s: %w", subject, err)
 	}
 
-	var referrers []Referrer
+	var referrers []Descriptor
 	err = repo.Referrers(ctx, subjectDesc, artifactType, func(page []ocispec.Descriptor) error {
-		for _, desc := range page {
-			referrers = append(referrers, Referrer{
-				Digest:       desc.Digest.String(),
-				ArtifactType: desc.ArtifactType,
-				Annotations:  desc.Annotations,
-				Size:         desc.Size,
-			})
-		}
+		referrers = append(referrers, descriptorsOf(page)...)
 		return nil
 	})
 	if err != nil {

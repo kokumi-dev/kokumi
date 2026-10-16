@@ -1,6 +1,7 @@
 package oci
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/spf13/afero"
 )
 
@@ -50,7 +52,7 @@ type PushedReferrer struct {
 type PushedIndex struct {
 	Ref          Reference
 	ArtifactType string
-	Entries      []IndexEntry
+	Children     []Descriptor
 	Annotations  map[string]string
 	Digest       string
 }
@@ -156,8 +158,8 @@ func (c *FakeClient) PushReferrer(_ context.Context, subject Reference, artifact
 
 // ListReferrers returns the recorded referrers of subject, matched by the
 // subject's repository and digest.
-func (c *FakeClient) ListReferrers(_ context.Context, subject Reference, artifactType string) ([]Referrer, error) {
-	var referrers []Referrer
+func (c *FakeClient) ListReferrers(_ context.Context, subject Reference, artifactType string) ([]Descriptor, error) {
+	var referrers []Descriptor
 	for _, r := range c.Referrers {
 		if r.Subject.RepositoryReference() != subject.RepositoryReference() || r.Subject.Digest != subject.Digest {
 			continue
@@ -165,7 +167,8 @@ func (c *FakeClient) ListReferrers(_ context.Context, subject Reference, artifac
 		if artifactType != "" && r.Artifact.ArtifactType != artifactType {
 			continue
 		}
-		referrers = append(referrers, Referrer{
+		referrers = append(referrers, Descriptor{
+			MediaType:    ocispec.MediaTypeImageManifest,
 			Digest:       r.Digest,
 			ArtifactType: r.Artifact.ArtifactType,
 			Annotations:  r.Artifact.Annotations,
@@ -190,7 +193,7 @@ func (c *FakeClient) FetchReferrer(_ context.Context, ref Reference) (ReferrerAr
 }
 
 // PushIndex records the index and returns a unique digest per call.
-func (c *FakeClient) PushIndex(_ context.Context, ref Reference, artifactType string, entries []IndexEntry, annotations map[string]string) (string, error) {
+func (c *FakeClient) PushIndex(_ context.Context, ref Reference, artifactType string, children []Descriptor, annotations map[string]string) (string, error) {
 	digest, err := randomDigest()
 	if err != nil {
 		return "", err
@@ -199,20 +202,79 @@ func (c *FakeClient) PushIndex(_ context.Context, ref Reference, artifactType st
 	c.Indexes = append(c.Indexes, PushedIndex{
 		Ref:          ref,
 		ArtifactType: artifactType,
-		Entries:      entries,
+		Children:     children,
 		Annotations:  annotations,
 		Digest:       digest,
 	})
 	return digest, nil
 }
 
-// FetchIndex returns the entries of the most recent matching PushIndex, or
-// ErrNotAnIndex.
-func (c *FakeClient) FetchIndex(_ context.Context, ref Reference) ([]IndexEntry, error) {
-	for _, idx := range slices.Backward(c.Indexes) {
-		if matches(ref, idx.Ref, idx.Digest) {
-			return idx.Entries, nil
+// FetchManifest returns the manifest of the most recent matching Push or
+// PushIndex, of the recorded referrer with ref's digest, or of FakeDigest,
+// the artifact every Pull and Resolve reports.
+func (c *FakeClient) FetchManifest(_ context.Context, ref Reference) (Manifest, error) {
+	for _, p := range slices.Backward(c.Pushes) {
+		if matches(ref, p.Ref, p.Digest) {
+			return pushedManifest(p), nil
 		}
 	}
-	return nil, fmt.Errorf("fetch index %s: %w", ref, ErrNotAnIndex)
+
+	for _, idx := range slices.Backward(c.Indexes) {
+		if matches(ref, idx.Ref, idx.Digest) {
+			return Manifest{
+				MediaType:    ocispec.MediaTypeImageIndex,
+				ArtifactType: idx.ArtifactType,
+				Digest:       idx.Digest,
+				Annotations:  idx.Annotations,
+				Manifests:    idx.Children,
+			}, nil
+		}
+	}
+
+	for _, r := range c.Referrers {
+		if r.Digest == ref.Digest {
+			return Manifest{
+				MediaType:    ocispec.MediaTypeImageManifest,
+				ArtifactType: r.Artifact.ArtifactType,
+				Digest:       r.Digest,
+				Annotations:  r.Artifact.Annotations,
+				Layers:       []Descriptor{blobDescriptor(r.Artifact.MediaType, r.Artifact.Payload)},
+				Subject:      &Descriptor{MediaType: ocispec.MediaTypeImageManifest, Digest: r.Subject.Digest},
+			}, nil
+		}
+	}
+
+	if ref.Digest == FakeDigest {
+		return Manifest{
+			MediaType: ocispec.MediaTypeImageManifest, ArtifactType: "application/vnd.unknown.artifact.v1", Digest: FakeDigest,
+			Layers: []Descriptor{{MediaType: ImageLayerMediaType}},
+		}, nil
+	}
+
+	return Manifest{}, fmt.Errorf("fetch manifest %s: not found", ref)
+}
+
+// pushedManifest returns the manifest a Push records.
+func pushedManifest(p PushedArtifact) Manifest {
+	manifest := Manifest{
+		MediaType:    ocispec.MediaTypeImageManifest,
+		ArtifactType: cmp.Or(p.Options.ArtifactType, "application/vnd.unknown.artifact.v1"),
+		Digest:       p.Digest,
+		Annotations:  p.Options.Annotations,
+		Layers:       []Descriptor{{MediaType: ImageLayerMediaType}},
+	}
+	if len(p.Options.Config) > 0 {
+		config := blobDescriptor(p.Options.ConfigMediaType, p.Options.Config)
+		manifest.Config = &config
+	}
+	return manifest
+}
+
+// blobDescriptor describes data as a blob of mediaType.
+func blobDescriptor(mediaType string, data []byte) Descriptor {
+	return Descriptor{
+		MediaType: mediaType,
+		Digest:    fmt.Sprintf("sha256:%x", sha256.Sum256(data)),
+		Size:      int64(len(data)),
+	}
 }

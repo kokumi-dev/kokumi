@@ -7,7 +7,7 @@ import PropertyList from '../layout/PropertyList'
 import { formatDate } from '../../utils/format'
 import { paths } from '../../routes/paths'
 import layout from '../layout/layout.module.css'
-import styles from './EvidencePanel.module.css'
+import styles from './IntentPanel.module.css'
 
 /**
  * IntentPanel shows the config blob stored inside a Preparation's artifact:

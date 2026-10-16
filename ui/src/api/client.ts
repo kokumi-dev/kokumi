@@ -1,5 +1,5 @@
 import { authHeaders, refresh } from './auth'
-import type { Order, Preparation, OrderFormData, OrderPreviewRequest, Product, ProductFormData, ProductPreviewRequest, Patch, Render, ChartInfo, Pantry, PantryFormData, ArtifactInfo, ArtifactFile, Approval, ApprovalDecision, Attestation, ArtifactConfig } from './types'
+import type { Order, Preparation, OrderFormData, OrderPreviewRequest, Product, ProductFormData, ProductPreviewRequest, Patch, Render, ChartInfo, Pantry, PantryFormData, ArtifactInfo, ArtifactFile, Approval, ApprovalDecision, ArtifactConfig, ArtifactGraph, ProductSourceArtifact } from './types'
 
 // All API calls are relative so they work both in dev (proxied by Vite) and
 // in production (served from the same Go binary).
@@ -252,11 +252,21 @@ export function getManifestFiles(
   )
 }
 
-// ── Attestations and intent ───────────────────────────────────────────────────
+// ── Artifact graphs and intent ────────────────────────────────────────────────
 
-/** Lists the referrers of a Preparation's artifact, with the payloads of the ones Kokumi recorded. */
-export function listAttestations(namespace: string, prepName: string): Promise<Attestation[]> {
-  return request<Attestation[]>(`/preparations/${namespace}/${prepName}/attestations?payload=true`)
+/** Returns the graph of a Preparation's artifact: its manifest and everything attached to it. */
+export function getPreparationArtifact(namespace: string, prepName: string): Promise<ArtifactGraph> {
+  return request<ArtifactGraph>(`/preparations/${namespace}/${prepName}/artifact`)
+}
+
+/** Returns the graph of a Product's source and, when vendored, of the copy. */
+export function getProductSourceArtifact(namespace: string, name: string): Promise<ProductSourceArtifact> {
+  return request<ProductSourceArtifact>(`/products/${namespace}/${name}/source/artifact`)
+}
+
+/** Returns the graph of the artifact behind a tag of a Pantry's repository. */
+export function getPantryArtifact(namespace: string, name: string, tag: string): Promise<ArtifactGraph> {
+  return request<ArtifactGraph>(`/pantries/${namespace}/${name}/artifact?tag=${encodeURIComponent(tag)}`)
 }
 
 /** Returns the config blob of a Preparation's artifact. */

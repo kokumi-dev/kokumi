@@ -232,36 +232,92 @@ type RendererDTO struct {
 	Builder string `json:"builder"`
 }
 
-// AttestationDTO is one OCI referrer of a Preparation's artifact, as listed
-// live from the registry.
-type AttestationDTO struct {
-	// ArtifactType is the artifactType of the referrer.
-	ArtifactType string `json:"artifactType"`
-	Digest       string `json:"digest"`
-	// PredicateType is the predicate type of a Sigstore bundle: the verified
-	// statement's for a verified bundle, else the one the referrer's
-	// annotation claims.
-	PredicateType string `json:"predicateType,omitempty"`
-	// CreatedAt is the referrer's org.opencontainers.image.created
-	// annotation; empty when the referrer carries none.
-	CreatedAt string `json:"createdAt,omitempty"`
-	Size      int64  `json:"size"`
-	// Verification reports whether the referrer is a Sigstore bundle signed
-	// by a key the Kitchen trusts. Anyone who can push to the repository can
-	// attach a referrer; only verified ones are evidence.
-	Verification AttestationVerificationDTO `json:"verification"`
-	// Payload is the verified in-toto statement. It is only set for
-	// verified referrers, and only when the payload was requested.
-	Payload json.RawMessage `json:"payload,omitempty"`
+// DescriptorDTO describes content by digest, as an OCI descriptor does.
+type DescriptorDTO struct {
+	MediaType string `json:"mediaType"`
+	// ArtifactType is the type of the artifact a manifest describes; for an
+	// image manifest without one, its config's media type.
+	ArtifactType string            `json:"artifactType,omitempty"`
+	Digest       string            `json:"digest"`
+	Size         int64             `json:"size"`
+	Annotations  map[string]string `json:"annotations,omitempty"`
 }
 
-// AttestationVerificationDTO is the verification result of an attestation.
-type AttestationVerificationDTO struct {
-	Verified bool `json:"verified"`
-	// KeyID identifies the key that signed a verified attestation.
-	KeyID string `json:"keyID,omitempty"`
-	// Error says why the attestation did not verify.
+// ArtifactNodeDTO is one manifest of an artifact graph. Its descriptor
+// fields describe the manifest; its annotations are the manifest's own.
+type ArtifactNodeDTO struct {
+	DescriptorDTO
+	// Link is how the node is attached to its parent: Subject for an OCI
+	// referrer, Tag for cosign's legacy sha256-<hex>.sig/.att/.sbom tags,
+	// Index for a child of an image index. Empty for the root.
+	Link string `json:"link,omitempty"`
+	// Tag is the tag a node linked by Tag is stored under.
+	Tag     string          `json:"tag,omitempty"`
+	Config  *DescriptorDTO  `json:"config,omitempty"`
+	Layers  []DescriptorDTO `json:"layers,omitempty"`
+	Subject *DescriptorDTO  `json:"subject,omitempty"`
+	// PredicateType is the predicate type of a Sigstore bundle: the verified
+	// statement's for a verified bundle, else the one its annotation claims.
+	PredicateType string `json:"predicateType,omitempty"`
+	// Verification is set for Sigstore bundles. Anyone who can push to the
+	// repository can attach a referrer; only verified ones are evidence.
+	Verification *VerificationDTO `json:"verification,omitempty"`
+	// Payload is the in-toto statement of a verified bundle.
+	Payload json.RawMessage `json:"payload,omitempty"`
+	// Manifests are the children of an image index.
+	Manifests []ArtifactNodeDTO `json:"manifests,omitempty"`
+	// Referrers are the artifacts attached to this one, oldest first.
+	Referrers []ArtifactNodeDTO `json:"referrers,omitempty"`
+	// Truncated reports that children or referrers were left out at the
+	// limits of the walk.
+	Truncated bool `json:"truncated,omitempty"`
+	// Error says why children or referrers could not be read completely.
 	Error string `json:"error,omitempty"`
+}
+
+// VerificationDTO is the result of verifying a signature: a Sigstore bundle
+// against the keys the Kitchen trusts, or, in the graph of a Product's
+// source, any signature as the Product controller verified it against
+// spec.source.verify.
+type VerificationDTO struct {
+	Verified bool `json:"verified"`
+	// KeyID identifies the key that signed a verified bundle.
+	KeyID string `json:"keyID,omitempty"`
+	// KeyName is the name a Kitchen key is trusted under: "current" for the
+	// Kitchen's signing key, else the name of a trusted key.
+	KeyName string `json:"keyName,omitempty"`
+	// Issuer and Subject identify a keyless signer.
+	Issuer  string `json:"issuer,omitempty"`
+	Subject string `json:"subject,omitempty"`
+	// Reason says why a signature is not verified: UntrustedSigner (signed
+	// by a key or identity that is not trusted; the signature may well be
+	// valid), Invalid, Unsupported (a format that is not verified), or
+	// NotChecked (not checked by the Product controller yet).
+	Reason string `json:"reason,omitempty"`
+	// Error says why the bundle did not verify.
+	Error string `json:"error,omitempty"`
+}
+
+// ArtifactGraphDTO is an artifact with everything attached to it in its
+// repository, read live from the registry.
+type ArtifactGraphDTO struct {
+	// Repository is the oci:// URL of the repository.
+	Repository string `json:"repository"`
+	// Tag is the tag the artifact was looked up by.
+	Tag string `json:"tag,omitempty"`
+	// TagDigest is the digest Tag points at now; it differs from the root's
+	// digest when the tag moved, and is empty when the tag did not resolve.
+	TagDigest string           `json:"tagDigest,omitempty"`
+	Root      *ArtifactNodeDTO `json:"root,omitempty"`
+	// Error says why the graph could not be read; Root is empty then.
+	Error string `json:"error,omitempty"`
+}
+
+// ProductSourceArtifactDTO is the graph of a Product's source at its source
+// location and, when the Product vendors it, of the vendored copy.
+type ProductSourceArtifactDTO struct {
+	Source   ArtifactGraphDTO  `json:"source"`
+	Vendored *ArtifactGraphDTO `json:"vendored,omitempty"`
 }
 
 // CreateOrderRequest is the body for POST /api/v1/orders.

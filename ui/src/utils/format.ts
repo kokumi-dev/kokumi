@@ -18,6 +18,19 @@ export function shortDigest(digest: string): string {
   return digest.replace('sha256:', '').slice(0, 8)
 }
 
+/** Formats a size in bytes, e.g. "512 B", "4.2 KB", "18 MB". */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  const units = ['KB', 'MB', 'GB']
+  let value = bytes / 1024
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit++
+  }
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`
+}
+
 /** Formats a count with a singular/plural noun, e.g. "1 approval", "2 approvals". */
 export function plural(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? '' : 's'}`

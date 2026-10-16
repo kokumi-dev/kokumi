@@ -32,6 +32,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -42,7 +43,6 @@ import (
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
-	"github.com/kokumi-dev/kokumi/internal/attestation"
 	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/index"
 	"github.com/kokumi-dev/kokumi/internal/oci"
@@ -77,17 +77,24 @@ type ProductReconciler struct {
 	SourceVerifier SourceVerifier
 }
 
-// SourceVerifier verifies that the source artifact at ref, pinned to its
-// digest, is signed according to policy.
+// SourceVerifier verifies every signature in the graph of the source at
+// ref, pinned to its digest: against policy when it is set, else against
+// trust.
 type SourceVerifier interface {
-	Verify(ctx context.Context, ref oci.Reference, creds credentials.Store, policy signingsource.Policy) (*signingsource.Signer, error)
+	Verify(ctx context.Context, registry oci.Client, creds credentials.Store, ref oci.Reference, policy *signingsource.Policy, trust *signing.TrustSet) (*signingsource.Report, error)
 }
 
+// productConcurrency is how many Products reconcile at a time. Checking
+// signatures waits on registries, not on the CPU.
+const productConcurrency = 4
+
 // errSourceRejected reports a source whose signature did not verify, as
-// opposed to a registry that could not be read.
+// opposed to a registry that could not be read. checked holds the verdicts
+// of the signatures when they were checked.
 type errSourceRejected struct {
-	reason string
-	err    error
+	reason  string
+	err     error
+	checked *[]deliveryv1alpha1.SignatureVerdict
 }
 
 func (e *errSourceRejected) Error() string { return e.err.Error() }
@@ -197,14 +204,15 @@ func (r *ProductReconciler) reconcileProduct(ctx context.Context, product *deliv
 		published := product.Status.Source.DeepCopy()
 		src.Digest = published.Digest
 
-		verified, err := r.verifySource(ctx, product, state, src, sourceClient, sourceCreds)
+		check, err := r.verifySource(ctx, product, state, src, sourceClient, sourceCreds)
 		switch {
 		case errors.Is(err, errTrustLookup):
 			logger.Info("Keeping the recorded verification of the Product source", "reason", err.Error())
 		case err != nil:
 			return r.verificationFailed(ctx, product, err)
 		default:
-			published.Verified = verified
+			published.Verified = check.verified
+			status.RecordSignatures(published, product.Status.Source, check.signatures, time.Now())
 		}
 
 		return ctrl.Result{}, statusUpdater.Ready(ctx, product, configHash, published)
@@ -216,10 +224,11 @@ func (r *ProductReconciler) reconcileProduct(ctx context.Context, product *deliv
 	}
 	src.Digest = digest
 
-	verified, err := r.verifySource(ctx, product, state, src, sourceClient, sourceCreds)
+	check, err := r.verifySource(ctx, product, state, src, sourceClient, sourceCreds)
 	switch {
 	case errors.Is(err, errTrustLookup):
 		logger.Info("Publishing the Product source unverified", "reason", err.Error())
+		check = &sourceCheck{}
 	case err != nil:
 		return r.verificationFailed(ctx, product, err)
 	}
@@ -229,8 +238,9 @@ func (r *ProductReconciler) reconcileProduct(ctx context.Context, product *deliv
 		Version:   product.Spec.Source.Version,
 		PantryRef: product.Spec.Source.PantryRef,
 		Digest:    digest,
-		Verified:  verified,
+		Verified:  check.verified,
 	}
+	status.RecordSignatures(published, product.Status.Source, check.signatures, time.Now())
 
 	// Only a verified source is vendored. The copy keeps the digest and the
 	// signatures attached as referrers, so it verifies like the source.
@@ -248,7 +258,7 @@ func (r *ProductReconciler) reconcileProduct(ctx context.Context, product *deliv
 		return ctrl.Result{}, err
 	}
 
-	logger.Info("Resolved Product source", "name", product.Name, "source", published.OCI, "verified", verified != nil)
+	logger.Info("Resolved Product source", "name", product.Name, "source", published.OCI, "verified", published.Verified != nil)
 	return ctrl.Result{}, nil
 }
 
@@ -261,22 +271,34 @@ func (r *ProductReconciler) verificationFailed(ctx context.Context, product *del
 	}
 
 	log.FromContext(ctx).Info("Product source did not verify", "reason", rejected.reason, "error", err.Error())
-	if err := status.NewProductUpdater(r.Client).VerificationFailed(ctx, product, rejected.reason, err); err != nil {
+	if err := status.NewProductUpdater(r.Client).VerificationFailed(ctx, product, rejected.reason, err, rejected.checked); err != nil {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{RequeueAfter: sourceVerificationRetryInterval}, nil
 }
 
-// verifySource verifies the signature of the source artifact src, pinned to
-// its digest, at its source location. With spec.source.verify it must be
-// signed as configured there. Without, a signature by a key the Kitchen
-// trusts verifies it: releases of this or another Kokumi installation. It
-// returns nil when the source is not verified and need not be.
-func (r *ProductReconciler) verifySource(ctx context.Context, product *deliveryv1alpha1.Product, state signing.State, src artifact.Source, ociClient oci.Client, creds credentials.Store) (*deliveryv1alpha1.SourceVerification, error) {
+// sourceCheck is the result of checking the signatures of a source.
+type sourceCheck struct {
+	// verified is who signed the source itself; nil when it is not
+	// verified.
+	verified *deliveryv1alpha1.SourceVerification
+	// signatures holds the verdict of every signature in the graph of the
+	// source.
+	signatures []deliveryv1alpha1.SignatureVerdict
+}
+
+// verifySource checks every signature in the graph of the source artifact
+// src, pinned to its digest, at its source location. With
+// spec.source.verify the source must be signed as configured there. Without,
+// a signature by a key the Kitchen trusts verifies it: releases of this or
+// another Kokumi installation. Its verified signer is nil when the source is
+// not verified and need not be.
+func (r *ProductReconciler) verifySource(ctx context.Context, product *deliveryv1alpha1.Product, state signing.State, src artifact.Source, ociClient oci.Client, creds credentials.Store) (*sourceCheck, error) {
 	ref, err := oci.Parse(src.OCI + "@" + src.Digest)
 	if err != nil {
 		return nil, fmt.Errorf("parsing source reference: %w", err)
 	}
+	registry := cmp.Or(ociClient, r.OCIClient)
 
 	if verify := product.Spec.Source.Verify; verify != nil {
 		policy, err := r.verificationPolicy(ctx, product.Namespace, verify)
@@ -284,39 +306,99 @@ func (r *ProductReconciler) verifySource(ctx context.Context, product *deliveryv
 			return nil, &errSourceRejected{reason: deliveryv1alpha1.ReasonVerificationError, err: err}
 		}
 
-		signer, err := r.SourceVerifier.Verify(ctx, ref, creds, policy)
+		report, err := r.SourceVerifier.Verify(ctx, registry, creds, ref, &policy, nil)
 		if err != nil {
-			// cosign does not tell an unreachable registry from a missing
-			// signature; both leave the source unverified.
+			// An unreachable registry and a missing signature both leave
+			// the source unverified, as with cosign.
 			return nil, &errSourceRejected{reason: deliveryv1alpha1.ReasonVerificationError, err: err}
 		}
 
-		return &deliveryv1alpha1.SourceVerification{
-			Provider: deliveryv1alpha1.VerificationProviderCosign,
-			KeyID:    signer.KeyID,
-			Issuer:   signer.Issuer,
-			Subject:  signer.Subject,
-		}, nil
+		check := newSourceCheck(report)
+		if check.verified == nil {
+			return nil, &errSourceRejected{
+				reason:  deliveryv1alpha1.ReasonVerificationError,
+				err:     fmt.Errorf("no signature of %s verifies against spec.source.verify%s", ref, describeVerdicts(report, ref.Digest)),
+				checked: &check.signatures,
+			}
+		}
+		return check, nil
 	}
 
-	evidence, err := attestation.Find(ctx, cmp.Or(ociClient, r.OCIClient), state.Trust, ref, attestation.SignaturePredicateType)
-	unsigned := errors.Is(err, attestation.ErrNotFound) || errors.Is(err, signing.ErrNotVerified)
+	report, err := r.SourceVerifier.Verify(ctx, registry, creds, ref, nil, state.Trust)
 	switch {
-	case err == nil:
-		return &deliveryv1alpha1.SourceVerification{Provider: deliveryv1alpha1.VerificationProviderCosign, KeyID: evidence.KeyID}, nil
-	case unsigned && state.RequireSourceVerification:
-		return nil, &errSourceRejected{
-			reason: deliveryv1alpha1.ReasonVerificationRequired,
-			err:    fmt.Errorf("the Kitchen requires sources to verify, and the source sets no spec.source.verify and carries no signature by a trusted Kokumi key: %w", err),
-		}
-	case unsigned:
-		return nil, nil
-	case state.RequireSourceVerification:
+	case err != nil && state.RequireSourceVerification:
 		// The registry could not be read; retry without changing the status.
 		return nil, err
-	default:
+	case err != nil:
 		return nil, fmt.Errorf("%w: %w", errTrustLookup, err)
 	}
+
+	check := newSourceCheck(report)
+	if check.verified == nil && state.RequireSourceVerification {
+		return nil, &errSourceRejected{
+			reason:  deliveryv1alpha1.ReasonVerificationRequired,
+			err:     fmt.Errorf("the Kitchen requires sources to verify, and the source sets no spec.source.verify and carries no signature by a trusted Kokumi key%s", describeVerdicts(report, ref.Digest)),
+			checked: &check.signatures,
+		}
+	}
+	return check, nil
+}
+
+// newSourceCheck converts the report of a signature check.
+func newSourceCheck(report *signingsource.Report) *sourceCheck {
+	check := &sourceCheck{verified: sourceVerification(report.Signer)}
+	for _, v := range report.Verdicts {
+		check.signatures = append(check.signatures, deliveryv1alpha1.SignatureVerdict{
+			Digest:  v.Digest,
+			Subject: v.Subject,
+			Result:  deliveryv1alpha1.SignatureResult(v.Result),
+			Signer:  sourceVerification(v.Signer),
+			Message: truncate(v.Message, maxVerdictMessage),
+		})
+	}
+	return check
+}
+
+// maxVerdictMessage is the longest message a SignatureVerdict records.
+const maxVerdictMessage = 1024
+
+func sourceVerification(signer *signingsource.Signer) *deliveryv1alpha1.SourceVerification {
+	if signer == nil {
+		return nil
+	}
+	return &deliveryv1alpha1.SourceVerification{
+		Provider: deliveryv1alpha1.VerificationProviderCosign,
+		KeyID:    signer.KeyID,
+		Issuer:   signer.Issuer,
+		Subject:  signer.Subject,
+	}
+}
+
+// describeVerdicts summarizes why none of the signatures of the source with
+// digest verified, for an error message.
+func describeVerdicts(report *signingsource.Report, digest string) string {
+	var reasons []string
+	for _, v := range report.Verdicts {
+		if v.Subject != digest {
+			continue
+		}
+		reason := string(v.Result)
+		if v.Message != "" {
+			reason += ": " + v.Message
+		}
+		reasons = append(reasons, reason)
+	}
+	if len(reasons) == 0 {
+		return "; the source carries no signature"
+	}
+	return "; " + strings.Join(reasons, "; ")
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n-1] + "…"
 }
 
 // verificationPolicy reads the keys or the trusted root verify names from
@@ -417,6 +499,25 @@ func (r *ProductReconciler) enqueueProductsForPantry() handler.EventHandler {
 	})
 }
 
+// enqueueProductsForSecret enqueues the Products whose spec.source.verify
+// reads the Secret, so that changed keys or a changed trusted root verify
+// their sources again.
+func (r *ProductReconciler) enqueueProductsForSecret() handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+		products, err := index.ProductsForSecret(ctx, r.Client, obj.GetNamespace(), obj.GetName())
+		if err != nil {
+			log.FromContext(ctx).Error(err, "Failed to list Products of Secret", "secret", obj.GetName())
+			return nil
+		}
+
+		reqs := make([]reconcile.Request, 0, len(products))
+		for _, product := range products {
+			reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&product)})
+		}
+		return reqs
+	})
+}
+
 // enqueueProductOfOrder enqueues the Product an Order references.
 func enqueueProductOfOrder() handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
@@ -459,8 +560,10 @@ func (r *ProductReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&deliveryv1alpha1.Product{}).
 		Watches(&deliveryv1alpha1.Pantry{}, r.enqueueProductsForPantry()).
+		Watches(&corev1.Secret{}, r.enqueueProductsForSecret()).
 		Watches(&deliveryv1alpha1.Order{}, enqueueProductOfOrder(), builder.WithPredicates(orderCreatedOrDeleted)).
 		WatchesRawSource(source.Channel(r.Signing.Changes(), handler.EnqueueRequestsFromMapFunc(r.enqueueAllProducts))).
 		Named("product").
+		WithOptions(controller.Options{MaxConcurrentReconciles: productConcurrency}).
 		Complete(r)
 }

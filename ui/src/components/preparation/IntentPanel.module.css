@@ -1,0 +1,26 @@
+.code {
+  margin: 6px 0 0;
+  padding: 10px 12px;
+  max-height: 480px;
+  overflow: auto;
+  border-radius: 7px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-main);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--color-text-on-light);
+  white-space: pre;
+}
+
+.note {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-text-muted-light);
+}
+
+.error {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-danger);
+}

@@ -16,6 +16,10 @@ const (
 	// vendor destination reference (cache only).
 	FieldPantryRefNames = "pantryRefNames"
 
+	// FieldVerifySecretNames indexes Products by the Secrets their
+	// spec.source.verify reads keys or a trusted root from (cache only).
+	FieldVerifySecretNames = "verifySecretNames"
+
 	// FieldDestinationPantryRefName indexes Orders by spec.destination.pantryRef.name (cache only).
 	FieldDestinationPantryRefName = "spec.destination.pantryRef.name"
 )

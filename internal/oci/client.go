@@ -9,10 +9,6 @@ import (
 // resolves to an image index.
 var ErrIsIndex = errors.New("reference is an image index")
 
-// ErrNotAnIndex is returned when an image index was expected but the reference
-// resolves to something else.
-var ErrNotAnIndex = errors.New("reference is not an image index")
-
 // AnnotationParentDigest is the OCI manifest annotation key that records the digest
 // of the artifact produced by the immediately preceding Preparation for the same Order.
 // Its presence on a manifest makes the revision chain explicit and tamper-evident.
@@ -44,23 +40,31 @@ type CopyOptions struct {
 	IncludeReferrers bool
 }
 
-// Referrer describes one referrer of a subject.
-type Referrer struct {
-	Digest       string
+// Descriptor describes content by digest, as an OCI descriptor does.
+type Descriptor struct {
+	MediaType string
+	// ArtifactType is the type of the artifact a manifest describes. For an
+	// image manifest without one it is its config's media type, as the OCI
+	// referrers API reports it.
 	ArtifactType string
-	Annotations  map[string]string
+	Digest       string
 	Size         int64
+	Annotations  map[string]string
 }
 
-// IndexEntry is one child of an image index. PushIndex reads Digest and
-// Annotations; FetchIndex fills all fields.
-type IndexEntry struct {
-	Digest string
-	// Annotations are set on the child's descriptor in the index.
-	Annotations  map[string]string
-	MediaType    string
-	ArtifactType string
-	Size         int64
+// Manifest is the content of an image manifest or an image index.
+type Manifest struct {
+	// Descriptor describes the manifest itself. Its Annotations are the
+	// manifest's own.
+	Descriptor
+	// Config is the config blob of an image manifest.
+	Config *Descriptor
+	// Layers are the layers of an image manifest.
+	Layers []Descriptor
+	// Manifests are the children of an image index.
+	Manifests []Descriptor
+	// Subject is the manifest this one is a referrer of.
+	Subject *Descriptor
 }
 
 // Client defines the interface for interacting with an OCI registry.
@@ -100,17 +104,17 @@ type Client interface {
 
 	// ListReferrers lists the referrers of subject. An empty artifactType
 	// lists all of them.
-	ListReferrers(ctx context.Context, subject Reference, artifactType string) ([]Referrer, error)
+	ListReferrers(ctx context.Context, subject Reference, artifactType string) ([]Descriptor, error)
 
 	// FetchReferrer returns the single-blob payload of the referrer at ref,
 	// or ErrPayloadTooLarge when it exceeds MaxReferrerPayloadSize.
 	FetchReferrer(ctx context.Context, ref Reference) (ReferrerArtifact, error)
 
 	// PushIndex pushes an OCI image index whose children already exist in
-	// ref's repository and returns its digest.
-	PushIndex(ctx context.Context, ref Reference, artifactType string, entries []IndexEntry, annotations map[string]string) (digest string, err error)
+	// ref's repository and returns its digest. It reads the Digest and
+	// Annotations of each child.
+	PushIndex(ctx context.Context, ref Reference, artifactType string, children []Descriptor, annotations map[string]string) (digest string, err error)
 
-	// FetchIndex returns the children of the index at ref. It returns
-	// ErrNotAnIndex when ref resolves to anything else.
-	FetchIndex(ctx context.Context, ref Reference) ([]IndexEntry, error)
+	// FetchManifest returns the image manifest or image index at ref.
+	FetchManifest(ctx context.Context, ref Reference) (Manifest, error)
 }

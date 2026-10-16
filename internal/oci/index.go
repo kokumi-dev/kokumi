@@ -82,7 +82,7 @@ func (c *ORASClient) FetchConfig(ctx context.Context, ref Reference) (string, []
 
 // PushIndex pushes an OCI image index whose children already exist in ref's
 // repository. The index is tagged with ref's tag when one is set.
-func (c *ORASClient) PushIndex(ctx context.Context, ref Reference, artifactType string, entries []IndexEntry, annotations map[string]string) (string, error) {
+func (c *ORASClient) PushIndex(ctx context.Context, ref Reference, artifactType string, children []Descriptor, annotations map[string]string) (string, error) {
 	repo, err := c.newRepository(ref.RepositoryReference())
 	if err != nil {
 		return "", fmt.Errorf("create repository for %q: %w", ref, err)
@@ -92,17 +92,17 @@ func (c *ORASClient) PushIndex(ctx context.Context, ref Reference, artifactType 
 		SchemaVersion: 2,
 		MediaType:     ocispec.MediaTypeImageIndex,
 		ArtifactType:  artifactType,
-		Manifests:     make([]ocispec.Descriptor, 0, len(entries)),
+		Manifests:     make([]ocispec.Descriptor, 0, len(children)),
 		Annotations:   annotations,
 	}
 
-	for _, entry := range entries {
-		child, err := childDescriptor(ctx, repo, entry.Digest)
+	for _, child := range children {
+		desc, err := childDescriptor(ctx, repo, child.Digest)
 		if err != nil {
-			return "", fmt.Errorf("resolve index child %s: %w", entry.Digest, err)
+			return "", fmt.Errorf("resolve index child %s: %w", child.Digest, err)
 		}
-		child.Annotations = entry.Annotations
-		index.Manifests = append(index.Manifests, child)
+		desc.Annotations = child.Annotations
+		index.Manifests = append(index.Manifests, desc)
 	}
 
 	data, err := json.Marshal(index)
@@ -156,37 +156,92 @@ func childDescriptor(ctx context.Context, repo *remote.Repository, dgst string) 
 	}, nil
 }
 
-// FetchIndex returns the children of the index at ref, or ErrNotAnIndex.
-func (c *ORASClient) FetchIndex(ctx context.Context, ref Reference) ([]IndexEntry, error) {
+// FetchManifest returns the image manifest or image index at ref.
+func (c *ORASClient) FetchManifest(ctx context.Context, ref Reference) (Manifest, error) {
 	repo, err := c.newRepository(ref.RepositoryReference())
 	if err != nil {
-		return nil, fmt.Errorf("create repository for %q: %w", ref, err)
+		return Manifest{}, fmt.Errorf("create repository for %q: %w", ref, err)
 	}
 
 	desc, data, err := oras.FetchBytes(ctx, repo, ref.GetReference(), oras.DefaultFetchBytesOptions)
 	if err != nil {
-		return nil, fmt.Errorf("fetch index %s: %w", ref, err)
+		return Manifest{}, fmt.Errorf("fetch manifest %s: %w", ref, err)
 	}
 
-	if !isIndex(desc.MediaType) {
-		return nil, fmt.Errorf("fetch index %s: %w", ref, ErrNotAnIndex)
+	manifest, err := decodeManifest(desc, data)
+	if err != nil {
+		return Manifest{}, fmt.Errorf("parse manifest %s: %w", desc.Digest, err)
 	}
 
-	var index ocispec.Index
-	if err := json.Unmarshal(data, &index); err != nil {
-		return nil, fmt.Errorf("parse index %s: %w", desc.Digest, err)
+	return manifest, nil
+}
+
+// decodeManifest decodes the image manifest or image index data described by
+// desc.
+func decodeManifest(desc ocispec.Descriptor, data []byte) (Manifest, error) {
+	// Image manifests and indexes share artifactType, subject and
+	// annotations; only one of config/layers and manifests is set.
+	var body struct {
+		ArtifactType string               `json:"artifactType"`
+		Config       *ocispec.Descriptor  `json:"config"`
+		Layers       []ocispec.Descriptor `json:"layers"`
+		Manifests    []ocispec.Descriptor `json:"manifests"`
+		Subject      *ocispec.Descriptor  `json:"subject"`
+		Annotations  map[string]string    `json:"annotations"`
+	}
+	if err := json.Unmarshal(data, &body); err != nil {
+		return Manifest{}, err
 	}
 
-	entries := make([]IndexEntry, 0, len(index.Manifests))
-	for _, child := range index.Manifests {
-		entries = append(entries, IndexEntry{
-			Digest:       child.Digest.String(),
-			Annotations:  child.Annotations,
-			MediaType:    child.MediaType,
-			ArtifactType: child.ArtifactType,
-			Size:         child.Size,
-		})
+	manifest := Manifest{
+		MediaType:    desc.MediaType,
+		ArtifactType: body.ArtifactType,
+		Digest:       desc.Digest.String(),
+		Size:         desc.Size,
+		Annotations:  body.Annotations,
+		Subject:      optionalDescriptor(body.Subject),
 	}
 
-	return entries, nil
+	if isIndex(desc.MediaType) {
+		manifest.Manifests = descriptorsOf(body.Manifests)
+		return manifest, nil
+	}
+
+	manifest.Config = optionalDescriptor(body.Config)
+	manifest.Layers = descriptorsOf(body.Layers)
+	if manifest.ArtifactType == "" && manifest.Config != nil {
+		manifest.ArtifactType = manifest.Config.MediaType
+	}
+
+	return manifest, nil
+}
+
+// descriptorOf converts an OCI descriptor.
+func descriptorOf(desc ocispec.Descriptor) Descriptor {
+	return Descriptor{
+		MediaType:    desc.MediaType,
+		ArtifactType: desc.ArtifactType,
+		Digest:       desc.Digest.String(),
+		Size:         desc.Size,
+		Annotations:  desc.Annotations,
+	}
+}
+
+func optionalDescriptor(desc *ocispec.Descriptor) *Descriptor {
+	if desc == nil {
+		return nil
+	}
+	converted := descriptorOf(*desc)
+	return &converted
+}
+
+func descriptorsOf(descs []ocispec.Descriptor) []Descriptor {
+	if len(descs) == 0 {
+		return nil
+	}
+	converted := make([]Descriptor, 0, len(descs))
+	for _, desc := range descs {
+		converted = append(converted, descriptorOf(desc))
+	}
+	return converted
 }

@@ -88,7 +88,7 @@ export default function PreparationLayout() {
           { to: paths.preparation(prep.namespace, prep.name, 'files'), label: 'Files' },
           { to: paths.preparation(prep.namespace, prep.name, 'changes'), label: 'Changes' },
           { to: paths.preparation(prep.namespace, prep.name, 'intent'), label: 'Intent' },
-          { to: paths.preparation(prep.namespace, prep.name, 'attestations'), label: 'Attestations' },
+          { to: paths.preparation(prep.namespace, prep.name, 'artifact'), label: 'Artifact' },
           ...(prep.approval
             ? [{ to: paths.preparation(prep.namespace, prep.name, 'approvals'), label: 'Approvals', count: prep.approval.submissionCount }]
             : []),

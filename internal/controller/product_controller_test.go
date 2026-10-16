@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	stderrors "errors"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -49,21 +50,32 @@ type unlistableClient struct {
 	*oci.FakeClient
 }
 
-func (unlistableClient) ListReferrers(context.Context, oci.Reference, string) ([]oci.Referrer, error) {
+func (unlistableClient) ListReferrers(context.Context, oci.Reference, string) ([]oci.Descriptor, error) {
 	return nil, stderrors.New("registry unreachable")
 }
 
+// testKeyID is the key ID the fake source verifier reports.
+const testKeyID = "key-id"
+
 // fakeSourceVerifier records the policies it is asked to verify and answers
-// with signer or err.
+// with signer and verdicts, or err. Without a policy it verifies against the
+// Kitchen keys as the real verifier does.
 type fakeSourceVerifier struct {
 	policies []signingsource.Policy
 	signer   *signingsource.Signer
+	verdicts []signingsource.Verdict
 	err      error
 }
 
-func (f *fakeSourceVerifier) Verify(_ context.Context, _ oci.Reference, _ credentials.Store, policy signingsource.Policy) (*signingsource.Signer, error) {
-	f.policies = append(f.policies, policy)
-	return f.signer, f.err
+func (f *fakeSourceVerifier) Verify(ctx context.Context, client oci.Client, creds credentials.Store, ref oci.Reference, policy *signingsource.Policy, trust *signing.TrustSet) (*signingsource.Report, error) {
+	if policy == nil {
+		return signingsource.NewVerifier().Verify(ctx, client, creds, ref, nil, trust)
+	}
+	f.policies = append(f.policies, *policy)
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &signingsource.Report{Signer: f.signer, Verdicts: f.verdicts}, nil
 }
 
 // unresolvableClient is a FakeClient whose registry cannot resolve tags.
@@ -196,6 +208,37 @@ var _ = Describe("Product Controller", func() {
 		Expect(verifier.policies).To(BeEmpty(), "cosign is only used for spec.source.verify")
 	})
 
+	It("records the verdict of every signature in the graph of the source", func() {
+		const name = "product-signatures"
+		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion}})
+		signSource(testSigner)
+		source, err := oci.Parse(testOCIRef + "@" + oci.FakeDigest)
+		Expect(err).NotTo(HaveOccurred())
+		sbom, err := fake.PushReferrer(ctx, source, oci.ReferrerArtifact{ArtifactType: "application/spdx+json", MediaType: "application/spdx+json", Payload: []byte("{}")})
+		Expect(err).NotTo(HaveOccurred())
+		sbomRef := source
+		sbomRef.Digest = sbom
+		sbomSignature, err := attestation.Sign(ctx, fake, testSigner, sbomRef, time.Date(2026, 10, 12, 9, 15, 0, 0, time.UTC))
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(reconcileProduct(name)).To(Succeed())
+
+		published := getProduct(name).Status.Source
+		Expect(published.Signatures).To(HaveLen(2), "the SBOM is not a signature, its signature is")
+		signer := &deliveryv1alpha1.SourceVerification{Provider: deliveryv1alpha1.VerificationProviderCosign, KeyID: testSigner.KeyID()}
+		Expect(published.Signatures).To(ContainElement(deliveryv1alpha1.SignatureVerdict{
+			Digest: sbomSignature, Subject: sbom, Result: deliveryv1alpha1.SignatureVerified, Signer: signer,
+		}))
+		Expect(published.SignaturesCheckedTime).NotTo(BeNil())
+
+		By("keeping the check time, and writing no status, while nothing changed")
+		before := getProduct(name)
+		Expect(reconcileProduct(name)).To(Succeed())
+		after := getProduct(name)
+		Expect(after.Status.Source.SignaturesCheckedTime).To(Equal(before.Status.Source.SignaturesCheckedTime))
+		Expect(after.ResourceVersion).To(Equal(before.ResourceVersion), "a status write would trigger the next reconcile")
+	})
+
 	It("does not verify a source signed by an untrusted key", func() {
 		const name = "product-signed-by-stranger"
 		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion}})
@@ -206,6 +249,7 @@ var _ = Describe("Product Controller", func() {
 		Expect(getProduct(name).Status.Source.Verified).To(BeNil())
 		Expect(sourceVerifiedOf(name)).To(BeNil())
 		Expect(readyOf(name).Status).To(Equal(metav1.ConditionTrue))
+		Expect(getProduct(name).Status.Source.Signatures).To(ConsistOf(HaveField("Result", deliveryv1alpha1.SignatureUntrustedSigner)))
 	})
 
 	It("renders nothing from an unverified source when the Kitchen requires verification", func() {
@@ -249,7 +293,7 @@ var _ = Describe("Product Controller", func() {
 			OCI: testOCIRef, Version: testVersion,
 			Verify: &deliveryv1alpha1.OCISourceVerification{SecretRef: &corev1.LocalObjectReference{Name: secretName}},
 		}})
-		verifier.signer = &signingsource.Signer{KeyID: "key-id"}
+		verifier.signer = &signingsource.Signer{KeyID: testKeyID}
 
 		Expect(reconcileProduct(name)).To(Succeed())
 
@@ -257,7 +301,7 @@ var _ = Describe("Product Controller", func() {
 		Expect(verifier.policies[0].Keys).To(HaveLen(2))
 		Expect(verifier.policies[0].Keys[0].Name).To(Equal("cosign.pub"))
 		Expect(getProduct(name).Status.Source.Verified).To(Equal(&deliveryv1alpha1.SourceVerification{
-			Provider: deliveryv1alpha1.VerificationProviderCosign, KeyID: "key-id",
+			Provider: deliveryv1alpha1.VerificationProviderCosign, KeyID: testKeyID,
 		}))
 		Expect(sourceVerifiedOf(name).Status).To(Equal(metav1.ConditionTrue))
 	})
@@ -291,6 +335,37 @@ var _ = Describe("Product Controller", func() {
 		Expect(fake.Copies).To(HaveLen(1))
 		Expect(fake.Copies[0].Options.IncludeReferrers).To(BeTrue())
 		Expect(fake.Copies[0].Source.Digest).To(Equal(oci.FakeDigest), "the verified digest is copied, not the tag")
+	})
+
+	It("records the verdicts of a source that no longer verifies", func() {
+		const (
+			name       = "product-verify-withdrawn"
+			secretName = "product-verify-withdrawn"
+		)
+		secret := &corev1.Secret{Name: secretName, Namespace: ns, Data: map[string][]byte{"cosign.pub": testSigner.PublicKeyPEM()}}
+		Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+		DeferCleanup(func() { _ = k8sClient.Delete(ctx, secret) })
+		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{
+			OCI: testOCIRef, Version: testVersion,
+			Verify: &deliveryv1alpha1.OCISourceVerification{SecretRef: &corev1.LocalObjectReference{Name: secretName}},
+		}})
+		signature := "sha256:" + strings.Repeat("5", 64)
+		verifier.signer = &signingsource.Signer{KeyID: testKeyID}
+		verifier.verdicts = []signingsource.Verdict{{Digest: signature, Subject: oci.FakeDigest, Result: signingsource.Verified, Signer: verifier.signer}}
+		Expect(reconcileProduct(name)).To(Succeed())
+		Expect(getProduct(name).Status.Source.Signatures[0].Result).To(Equal(deliveryv1alpha1.SignatureVerified))
+
+		By("rotating the key away")
+		verifier.signer = nil
+		verifier.verdicts = []signingsource.Verdict{{Digest: signature, Subject: oci.FakeDigest, Result: signingsource.UntrustedSigner, Message: "signed by key key-id"}}
+		Expect(reconcileProduct(name)).To(Succeed())
+
+		published := getProduct(name).Status.Source
+		Expect(published.Verified).To(BeNil())
+		Expect(published.Signatures).To(Equal([]deliveryv1alpha1.SignatureVerdict{{
+			Digest: signature, Subject: oci.FakeDigest, Result: deliveryv1alpha1.SignatureUntrustedSigner, Message: "signed by key key-id",
+		}}))
+		Expect(sourceVerifiedOf(name).Message).To(ContainSubstring("UntrustedSigner: signed by key key-id"))
 	})
 
 	It("keeps the recorded verification while the registry cannot be read", func() {

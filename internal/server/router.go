@@ -53,6 +53,7 @@ func addRoutes(
 	mux.HandleFunc("POST /api/v1/products/preview", handlePreviewProduct(deps))
 	mux.HandleFunc("POST /api/v1/products/preview/files", handlePreviewProductFiles(deps))
 	mux.HandleFunc("GET /api/v1/products/{namespace}/{name}", handleGetProduct(deps))
+	mux.HandleFunc("GET /api/v1/products/{namespace}/{name}/source/artifact", handleGetProductSourceArtifact(deps))
 	mux.HandleFunc("PUT /api/v1/products/{namespace}/{name}", handleUpdateProduct(deps))
 	mux.HandleFunc("DELETE /api/v1/products/{namespace}/{name}", handleDeleteProduct(deps))
 
@@ -60,6 +61,7 @@ func addRoutes(
 	mux.HandleFunc("GET /api/v1/pantries", handleListPantries(deps))
 	mux.HandleFunc("POST /api/v1/pantries", handleCreatePantry(deps))
 	mux.HandleFunc("GET /api/v1/pantries/{namespace}/{name}", handleGetPantry(deps))
+	mux.HandleFunc("GET /api/v1/pantries/{namespace}/{name}/artifact", handleGetPantryArtifact(deps))
 	mux.HandleFunc("PUT /api/v1/pantries/{namespace}/{name}", handleUpdatePantry(deps))
 	mux.HandleFunc("DELETE /api/v1/pantries/{namespace}/{name}", handleDeletePantry(deps))
 
@@ -74,8 +76,8 @@ func addRoutes(
 	// Promote / rollback a Preparation
 	mux.HandleFunc("POST /api/v1/orders/{namespace}/{name}/promote", handlePromote(deps))
 
-	// Preparation manifest (rendered YAML from OCI)
-	mux.HandleFunc("GET /api/v1/preparations/{namespace}/{name}/attestations", handleListPreparationAttestations(deps))
+	// Preparation artifact: its graph, intent and rendered YAML from OCI
+	mux.HandleFunc("GET /api/v1/preparations/{namespace}/{name}/artifact", handleGetPreparationArtifact(deps))
 	mux.HandleFunc("GET /api/v1/preparations/{namespace}/{name}/intent", handleGetPreparationIntent(deps))
 	mux.HandleFunc("GET /api/v1/preparations/{namespace}/{name}/manifest", handleGetPreparationManifest(deps))
 	mux.HandleFunc("GET /api/v1/preparations/{namespace}/{name}/manifest/files", handleGetPreparationManifestFiles(deps))

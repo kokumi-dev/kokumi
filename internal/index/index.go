@@ -21,6 +21,7 @@ func Setup(ctx context.Context, indexer client.FieldIndexer) error {
 		{&deliveryv1alpha1.Order{}, FieldProductRefName, orderProduct},
 		{&deliveryv1alpha1.Order{}, FieldDestinationPantryRefName, orderDestinationPantry},
 		{&deliveryv1alpha1.Product{}, FieldPantryRefNames, productPantries},
+		{&deliveryv1alpha1.Product{}, FieldVerifySecretNames, productVerifySecrets},
 	}
 	for _, idx := range indexes {
 		if err := indexer.IndexField(ctx, idx.obj, idx.field, idx.extract); err != nil {
@@ -95,6 +96,19 @@ func ProductsForPantry(ctx context.Context, r client.Reader, namespace, pantryNa
 	return products.Items, nil
 }
 
+// ProductsForSecret returns the Products whose spec.source.verify reads the
+// named Secret. It requires the cache indexes registered by Setup.
+func ProductsForSecret(ctx context.Context, r client.Reader, namespace, secretName string) ([]deliveryv1alpha1.Product, error) {
+	products := &deliveryv1alpha1.ProductList{}
+	if err := r.List(ctx, products,
+		client.InNamespace(namespace),
+		client.MatchingFields{FieldVerifySecretNames: secretName},
+	); err != nil {
+		return nil, err
+	}
+	return products.Items, nil
+}
+
 func approvalPreparation(obj client.Object) []string {
 	approval, ok := obj.(*deliveryv1alpha1.Approval)
 	if !ok {
@@ -130,6 +144,22 @@ func productPantries(obj client.Object) []string {
 	}
 	if vendor := product.Spec.Vendor; vendor != nil && vendor.PantryRef != nil && !slices.Contains(names, vendor.PantryRef.Name) {
 		names = append(names, vendor.PantryRef.Name)
+	}
+	return names
+}
+
+func productVerifySecrets(obj client.Object) []string {
+	product, ok := obj.(*deliveryv1alpha1.Product)
+	if !ok || product.Spec.Source.Verify == nil {
+		return nil
+	}
+	verify := product.Spec.Source.Verify
+	var names []string
+	if ref := verify.SecretRef; ref != nil {
+		names = append(names, ref.Name)
+	}
+	if ref := verify.TrustedRootSecretRef; ref != nil && !slices.Contains(names, ref.Name) {
+		names = append(names, ref.Name)
 	}
 	return names
 }

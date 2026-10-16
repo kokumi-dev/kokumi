@@ -102,21 +102,68 @@ func TestFakeClient_Referrers(t *testing.T) {
 	assert.Equal(t, []byte("one"), artifact.Payload)
 }
 
-func TestFakeClient_Index(t *testing.T) {
+func TestFakeClient_FetchManifest(t *testing.T) {
 	ctx := context.Background()
 	client := &FakeClient{}
 
-	ref, err := Parse("registry.example/a:bundle")
+	ref, err := Parse("registry.example/a:1.0.0")
 	require.NoError(t, err)
 
-	_, err = client.FetchIndex(ctx, ref)
-	require.ErrorIs(t, err, ErrNotAnIndex)
+	t.Run("pushed artifact", func(t *testing.T) {
+		digest, err := client.Push(ctx, ref, "/out", PushOptions{
+			ArtifactType:    "application/vnd.example.v1",
+			Config:          []byte(`{"a":1}`),
+			ConfigMediaType: "application/vnd.example.config.v1+json",
+			Annotations:     map[string]string{"k": "v"},
+		})
+		require.NoError(t, err)
 
-	entries := []IndexEntry{{Digest: "sha256:aa"}, {Digest: "sha256:bb", Annotations: map[string]string{"k": "v"}}}
-	_, err = client.PushIndex(ctx, ref, "application/vnd.example.bundle", entries, nil)
-	require.NoError(t, err)
+		got, err := client.FetchManifest(ctx, ref)
+		require.NoError(t, err)
+		assert.Equal(t, digest, got.Digest)
+		assert.Equal(t, "application/vnd.example.v1", got.ArtifactType)
+		assert.Equal(t, map[string]string{"k": "v"}, got.Annotations)
+		require.NotNil(t, got.Config)
+		assert.Equal(t, "application/vnd.example.config.v1+json", got.Config.MediaType)
+		assert.Len(t, got.Layers, 1)
+	})
 
-	got, err := client.FetchIndex(ctx, ref)
-	require.NoError(t, err)
-	assert.Equal(t, entries, got)
+	t.Run("referrer", func(t *testing.T) {
+		subject := ref
+		subject.Tag = ""
+		subject.Digest = FakeDigest
+		digest, err := client.PushReferrer(ctx, subject, ReferrerArtifact{ArtifactType: "application/vnd.example.sig", MediaType: "application/json", Payload: []byte("{}")})
+		require.NoError(t, err)
+
+		byDigest := subject
+		byDigest.Digest = digest
+		got, err := client.FetchManifest(ctx, byDigest)
+		require.NoError(t, err)
+		assert.Equal(t, "application/vnd.example.sig", got.ArtifactType)
+		require.NotNil(t, got.Subject)
+		assert.Equal(t, FakeDigest, got.Subject.Digest)
+		require.Len(t, got.Layers, 1)
+		assert.Equal(t, "application/json", got.Layers[0].MediaType)
+	})
+
+	t.Run("index", func(t *testing.T) {
+		indexRef, err := Parse("registry.example/a:bundle")
+		require.NoError(t, err)
+		children := []Descriptor{{Digest: "sha256:aa"}, {Digest: "sha256:bb", Annotations: map[string]string{"k": "v"}}}
+		_, err = client.PushIndex(ctx, indexRef, "application/vnd.example.bundle", children, nil)
+		require.NoError(t, err)
+
+		got, err := client.FetchManifest(ctx, indexRef)
+		require.NoError(t, err)
+		assert.Equal(t, "application/vnd.example.bundle", got.ArtifactType)
+		assert.Equal(t, children, got.Manifests)
+	})
+
+	t.Run("unknown reference", func(t *testing.T) {
+		other, err := Parse("registry.example/b:1.0.0")
+		require.NoError(t, err)
+
+		_, err = client.FetchManifest(ctx, other)
+		require.Error(t, err)
+	})
 }

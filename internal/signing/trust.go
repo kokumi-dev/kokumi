@@ -24,6 +24,22 @@ import (
 // expected subject, or carries another predicate type.
 var ErrNotVerified = errors.New("signature not verified")
 
+// UntrustedSignerError reports a bundle that is not signed by a key of the
+// trust set: by another key, or keyless. It says nothing about whether the
+// signature itself is valid.
+type UntrustedSignerError struct {
+	// KeyID is the hint of the key the bundle names; empty for a bundle
+	// without a public key.
+	KeyID string
+}
+
+func (e *UntrustedSignerError) Error() string {
+	if e.KeyID == "" {
+		return "not signed with a public key"
+	}
+	return fmt.Sprintf("signed by untrusted key %q", e.KeyID)
+}
+
 // CurrentKeyName is the name the current signing key is trusted under.
 const CurrentKeyName = "current"
 
@@ -159,7 +175,7 @@ func (t *TrustSet) Verify(data []byte, subjectDigest, predicateType string) (*Ve
 	keyID := b.GetVerificationMaterial().GetPublicKey().GetHint()
 	key, ok := t.keys[keyID]
 	if !ok {
-		return nil, fmt.Errorf("%w: signed by untrusted key %q", ErrNotVerified, keyID)
+		return nil, fmt.Errorf("%w: %w", ErrNotVerified, &UntrustedSignerError{KeyID: keyID})
 	}
 
 	material := root.NewTrustedPublicKeyMaterial(func(hint string) (root.TimeConstrainedVerifier, error) {

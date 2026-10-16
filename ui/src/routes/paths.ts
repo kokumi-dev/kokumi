@@ -10,7 +10,7 @@ export const paths = {
   dashboard: () => '/',
   products: () => '/products',
   newProduct: () => '/products/new',
-  product: (ns: string, name: string, tab?: 'orders' | 'preview' | 'edit') =>
+  product: (ns: string, name: string, tab?: 'orders' | 'preview' | 'artifact' | 'edit') =>
     `/products/${seg(ns)}/${seg(name)}${tab ? `/${tab}` : ''}`,
   orders: () => '/orders',
   /** Optionally preselects the Product the new Order is a variant of. */
@@ -19,7 +19,7 @@ export const paths = {
   order: (ns: string, name: string, tab?: 'preparations' | 'servings' | 'files' | 'edit') =>
     `/orders/${seg(ns)}/${seg(name)}${tab ? `/${tab}` : ''}`,
   preparations: () => '/preparations',
-  preparation: (ns: string, name: string, tab?: 'files' | 'changes' | 'intent' | 'attestations' | 'approvals') =>
+  preparation: (ns: string, name: string, tab?: 'files' | 'changes' | 'intent' | 'artifact' | 'approvals') =>
     `/preparations/${seg(ns)}/${seg(name)}${tab ? `/${tab}` : ''}`,
   servings: () => '/servings',
   serving: (ns: string, name: string) => `/servings/${seg(ns)}/${seg(name)}`,

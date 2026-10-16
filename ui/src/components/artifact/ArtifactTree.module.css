@@ -1,0 +1,221 @@
+/*
+ * Every attached item has a trunk on its left, running up to the manifest it
+ * is attached to, and an elbow into its card. The trunk starts under the
+ * centre of the parent's icon; --elbow-y meets the centre of the card's icon.
+ *
+ * The lines overlap where they join, so their colour is opaque: the
+ * translucent border tokens would darken every overlap. It is the
+ * emphasised border as it shows on a section.
+ */
+.tree {
+  --edge: color-mix(in srgb, var(--color-text-on-light) 25%, var(--color-bg-card));
+  --elbow-x: 22px;
+  --elbow-y: 38px;
+  --arrow-height: 7px;
+
+  width: max-content;
+  max-width: 100%;
+}
+
+.branch {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.children {
+  position: relative;
+  margin: 0 0 0 25px;
+  padding: 0;
+  list-style: none;
+}
+
+.branchRoot > .children {
+  margin-left: 32px;
+}
+
+.item {
+  position: relative;
+  padding: 10px 0 0 var(--elbow-x);
+}
+
+.item::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-left: 1.5px solid var(--edge);
+}
+
+.item:last-child::before {
+  bottom: auto;
+  height: calc(var(--elbow-y) - 10px);
+}
+
+/* Below an arrow, the trunk starts at the arrow's base. */
+.pointsUp > .item:first-child::before {
+  top: var(--arrow-height);
+}
+
+.pointsUp > .item:only-child::before {
+  height: calc(var(--elbow-y) - 10px - var(--arrow-height));
+}
+
+.elbow {
+  position: absolute;
+  top: calc(var(--elbow-y) - 10px);
+  left: 0;
+  width: var(--elbow-x);
+  height: 10px;
+  border-bottom: 1.5px solid var(--edge);
+  border-left: 1.5px solid var(--edge);
+  border-bottom-left-radius: 8px;
+}
+
+.linkTag > .elbow {
+  border-bottom-style: dashed;
+}
+
+.linkIndex > .elbow {
+  border-bottom-style: dotted;
+}
+
+/* A referrer names its subject: the arrow points up at it, its tip on the subject's card. */
+.pointsUp::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -4px;
+  border: 4.75px solid transparent;
+  border-top: 0;
+  border-bottom: var(--arrow-height) solid var(--edge);
+}
+
+/* ── Root card ── */
+
+.rootCard {
+  display: flex;
+  flex-direction: column;
+  width: 380px;
+  max-width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: var(--color-bg-main);
+  box-shadow: var(--shadow-sm);
+}
+
+.rootHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 14px 6px 17px;
+}
+
+.rootHeader > :last-child {
+  flex: none;
+}
+
+.rootButton {
+  flex: 1;
+  border-radius: 8px;
+}
+
+.rootMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 0 14px 12px 59px;
+  font-size: 0.75rem;
+  color: var(--color-text-muted-light);
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 10px 14px 10px 17px;
+  border-top: 1px solid var(--color-border-subtle);
+  list-style: none;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: 0.78rem;
+}
+
+.rowLabel {
+  flex: none;
+  width: 32px;
+  color: var(--color-text-muted-light);
+}
+
+.rowValue {
+  color: var(--color-text-on-light);
+}
+
+.rowLink {
+  margin-left: auto;
+}
+
+.rowRef {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.refArrow {
+  position: relative;
+  flex: none;
+  width: 18px;
+  border-top: 1.5px dotted var(--edge);
+}
+
+.refArrow::after {
+  content: '';
+  position: absolute;
+  top: -5px;
+  right: -3px;
+  border: 4px solid transparent;
+  border-right: 0;
+  border-left: 6px solid var(--edge);
+}
+
+/* ── Attached cards ── */
+
+.card {
+  min-width: 240px;
+  max-width: 340px;
+  padding: 10px 14px 10px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-bg-main);
+  box-shadow: var(--shadow-xs);
+}
+
+.card:hover,
+.rootCard:hover {
+  border-color: var(--color-border-emphasis);
+}
+
+.selected,
+.selected:hover {
+  border-color: var(--color-accent);
+  box-shadow: var(--control-focus-ring);
+}
+
+.more {
+  display: block;
+  padding-top: calc(var(--elbow-y) - 22px);
+  font-size: 0.78rem;
+  color: var(--color-text-muted-light);
+}
