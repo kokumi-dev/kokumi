@@ -2,7 +2,9 @@ package status
 
 import (
 	"context"
+	"time"
 
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -51,18 +53,44 @@ func (u *ProductUpdater) Ready(ctx context.Context, product *deliveryv1alpha1.Pr
 
 // VerificationFailed marks the Product as not ready because its source did
 // not verify, for reason. Orders render nothing until it does. The published
-// source is kept, but no longer recorded as verified.
-func (u *ProductUpdater) VerificationFailed(ctx context.Context, product *deliveryv1alpha1.Product, reason string, err error) error {
+// source is kept, but no longer recorded as verified. When the signatures
+// were checked, checked holds their verdicts, which are recorded with the
+// published source.
+func (u *ProductUpdater) VerificationFailed(ctx context.Context, product *deliveryv1alpha1.Product, reason string, err error, checked *[]deliveryv1alpha1.SignatureVerdict) error {
 	generation := product.Generation
 	return u.set(ctx, product, func(latest *deliveryv1alpha1.Product) {
 		latest.Status.ObservedGeneration = generation
-		if latest.Status.Source != nil {
-			latest.Status.Source.Verified = nil
+		if source := latest.Status.Source; source != nil {
+			source.Verified = nil
+			if checked != nil {
+				RecordSignatures(source, source.DeepCopy(), *checked, time.Now())
+			}
 		}
 		meta.SetStatusCondition(&latest.Status.Conditions, newTypedCondition(deliveryv1alpha1.ConditionTypeSourceVerified, generation,
 			metav1.ConditionFalse, reason, err.Error()))
 		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(generation, metav1.ConditionFalse, reason, err.Error()))
 	})
+}
+
+// signaturesRefresh is how old the recorded check time of unchanged
+// signatures may get before a check refreshes it. Refreshing it on every
+// check would trigger the next reconcile with each status update.
+const signaturesRefresh = time.Hour
+
+// RecordSignatures records signatures, the verdicts of a check made at now,
+// in source. recorded is the source as last recorded, nil when there is
+// none. The check time is kept while the verdicts are unchanged and it is
+// younger than an hour.
+func RecordSignatures(source, recorded *deliveryv1alpha1.ProductSourceStatus, signatures []deliveryv1alpha1.SignatureVerdict, now time.Time) {
+	source.Signatures = signatures
+	if recorded != nil && recorded.SignaturesCheckedTime != nil &&
+		apiequality.Semantic.DeepEqual(recorded.Signatures, signatures) &&
+		now.Sub(recorded.SignaturesCheckedTime.Time) < signaturesRefresh {
+		source.SignaturesCheckedTime = recorded.SignaturesCheckedTime
+		return
+	}
+	checked := metav1.NewTime(now)
+	source.SignaturesCheckedTime = &checked
 }
 
 // VerifiedSigner describes the signer verification recorded.

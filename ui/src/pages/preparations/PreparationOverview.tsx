@@ -45,7 +45,11 @@ export default function PreparationOverview() {
         />
       </Section>
 
-      <Section title="Artifact" description="Immutable OCI artifact this Preparation was rendered into">
+      <Section
+        title="Artifact"
+        description="Immutable OCI artifact this Preparation was rendered into"
+        actions={<Link className={layout.inlineLink} to={paths.preparation(prep.namespace, prep.name, 'artifact')}>View structure</Link>}
+      >
         <PropertyList
           items={[
             { label: 'Reference', value: <span className={layout.mono}>{prep.artifact.ociRef}</span> },

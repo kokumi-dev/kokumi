@@ -169,6 +169,6 @@ type unreadable struct {
 	*oci.FakeClient
 }
 
-func (unreadable) ListReferrers(context.Context, oci.Reference, string) ([]oci.Referrer, error) {
+func (unreadable) ListReferrers(context.Context, oci.Reference, string) ([]oci.Descriptor, error) {
 	return nil, errors.New("registry unreachable")
 }

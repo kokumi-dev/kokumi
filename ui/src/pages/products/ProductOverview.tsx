@@ -12,9 +12,9 @@ import {
   patchesPolicy,
   valuesPolicy,
 } from '../../utils/products'
-import type { OverridePolicy, SourceVerification, SourceVerify } from '../../api/types'
-import { keyLabel, useSigningKeys } from '../../hooks/useSigningKeys'
-import { useProductContext, vendorLabel } from './productFormat'
+import type { OverridePolicy, SourceVerify } from '../../api/types'
+import { useSigningKeys } from '../../hooks/useSigningKeys'
+import { signerLabel, useProductContext, vendorLabel } from './productFormat'
 import layout from '../../components/layout/layout.module.css'
 
 /** Describes what a source must be signed by. */
@@ -23,12 +23,6 @@ function verifyLabel(verify?: SourceVerify): string {
   if (verify.secretRef) return `By a public key in the Secret ${verify.secretRef}`
   const identities = (verify.matchOIDCIdentity ?? []).map((m) => `${m.subject} (issuer ${m.issuer})`)
   return `Keyless by ${identities.join(' or ')}`
-}
-
-/** Describes the signer whose signature verified. */
-function signerLabel(keys: ReadonlyMap<string, string>, verified: SourceVerification): string {
-  if (verified.keyID) return `Signed by ${keyLabel(keys, verified.keyID)}`
-  return `Signed by ${verified.subject} (issuer ${verified.issuer})`
 }
 
 export default function ProductOverview() {

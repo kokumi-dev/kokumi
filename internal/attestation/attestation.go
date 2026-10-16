@@ -170,7 +170,7 @@ func find(ctx context.Context, client oci.Client, trust *signing.TrustSet, subje
 
 	// The annotation only narrows the candidates; the signed statement
 	// decides. A bundle without it is still tried.
-	referrers = slices.DeleteFunc(referrers, func(r oci.Referrer) bool {
+	referrers = slices.DeleteFunc(referrers, func(r oci.Descriptor) bool {
 		annotated, ok := r.Annotations[oci.AnnotationBundlePredicateType]
 		return ok && annotated != predicateType
 	})
@@ -179,7 +179,7 @@ func find(ctx context.Context, client oci.Client, trust *signing.TrustSet, subje
 	}
 
 	// Newest first, so that Find returns the latest of several.
-	slices.SortFunc(referrers, func(a, b oci.Referrer) int {
+	slices.SortFunc(referrers, func(a, b oci.Descriptor) int {
 		return cmp.Or(
 			strings.Compare(b.Annotations[ocispec.AnnotationCreated], a.Annotations[ocispec.AnnotationCreated]),
 			strings.Compare(b.Digest, a.Digest),

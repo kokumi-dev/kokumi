@@ -121,6 +121,9 @@ func TestSign(t *testing.T) {
 
 		_, err = testSigner(t).TrustSet().Verify(bundle, subjectDigest, testPredicate)
 		require.ErrorIs(t, err, ErrNotVerified)
+		var untrusted *UntrustedSignerError
+		require.ErrorAs(t, err, &untrusted)
+		require.Equal(t, signer.KeyID(), untrusted.KeyID)
 	})
 
 	t.Run("does not verify for another subject", func(t *testing.T) {
@@ -129,6 +132,8 @@ func TestSign(t *testing.T) {
 
 		_, err = signer.TrustSet().Verify(bundle, otherDigest, testPredicate)
 		require.ErrorIs(t, err, ErrNotVerified)
+		var untrusted *UntrustedSignerError
+		require.NotErrorAs(t, err, &untrusted, "a trusted key with a wrong subject is invalid, not untrusted")
 	})
 
 	t.Run("does not verify for another predicate type", func(t *testing.T) {
@@ -194,6 +199,27 @@ func TestTrustSet(t *testing.T) {
 	t.Run("refuses a malformed key", func(t *testing.T) {
 		_, err := NewTrustSet(TrustedPublicKey{Name: "bad", PEM: []byte("-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n")})
 		require.ErrorIs(t, err, ErrInvalidTrustedKey)
+	})
+
+	t.Run("names a bundle without a public key", func(t *testing.T) {
+		bundle, err := current.Sign(statement(subjectDigest, "https://slsa.dev/provenance/v1"))
+		require.NoError(t, err)
+
+		var decoded map[string]any
+		require.NoError(t, json.Unmarshal(bundle, &decoded))
+		// A keyless bundle carries a certificate instead of a key hint.
+		material := decoded["verificationMaterial"].(map[string]any)
+		delete(material, "publicKey")
+		material["certificate"] = map[string]any{"rawBytes": base64.StdEncoding.EncodeToString([]byte("certificate"))}
+		keyless, err := json.Marshal(decoded)
+		require.NoError(t, err)
+
+		_, err = trust.Verify(keyless, subjectDigest, "")
+		require.ErrorIs(t, err, ErrNotVerified)
+		var untrusted *UntrustedSignerError
+		require.ErrorAs(t, err, &untrusted)
+		require.Empty(t, untrusted.KeyID)
+		require.ErrorContains(t, err, "not signed with a public key")
 	})
 }
 

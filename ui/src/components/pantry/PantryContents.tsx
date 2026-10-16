@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { ArtifactInfo, Pantry } from '../../api/types'
-import { getArtifactInfo, listOCITags } from '../../api/client'
+import type { ArtifactGraph, ArtifactInfo, Pantry } from '../../api/types'
+import { getArtifactInfo, getPantryArtifact, listOCITags } from '../../api/client'
 import { cleanTags } from '../../api/ociTags'
 import Badge from '../shared/Badge'
 import { Button, Chevron, TabButtons } from '../ui'
 import Modal from '../shared/Modal'
 import YamlEditor from '../shared/YamlEditor'
 import FileInspector from '../shared/FileInspector'
+import ArtifactView from '../artifact/ArtifactView'
 import styles from './PantryContents.module.css'
 
 const PAGE_SIZE = 20
@@ -15,7 +16,7 @@ interface Props {
   pantry: Pantry
 }
 
-type Tab = 'readme' | 'values' | 'manifest'
+type Tab = 'readme' | 'values' | 'manifest' | 'structure'
 
 interface ExpandedState {
   tag: string
@@ -150,7 +151,7 @@ export default function PantryContents({ pantry }: Props) {
                   <div className={styles.detail}>
                     {expanded.loading && <div className={styles.placeholder}>Loading…</div>}
                     {expanded.error && <div className={styles.placeholder}>{expanded.error}</div>}
-                    {expanded.info && <ArtifactDetail info={expanded.info} onViewManifest={(c) => setManifestModal({ tag, content: c })} />}
+                    {expanded.info && <ArtifactDetail pantry={pantry} tag={tag} info={expanded.info} onViewManifest={(c) => setManifestModal({ tag, content: c })} />}
                   </div>
                 )}
               </li>
@@ -168,7 +169,7 @@ export default function PantryContents({ pantry }: Props) {
   )
 }
 
-function ArtifactDetail({ info, onViewManifest }: { info: ArtifactInfo; onViewManifest: (content: string) => void }) {
+function ArtifactDetail({ pantry, tag, info, onViewManifest }: { pantry: Pantry; tag: string; info: ArtifactInfo; onViewManifest: (content: string) => void }) {
   const [tab, setTab] = useState<Tab>(info.isHelm ? 'readme' : 'manifest')
 
   return (
@@ -192,7 +193,10 @@ function ArtifactDetail({ info, onViewManifest }: { info: ArtifactInfo; onViewMa
       )}
 
       <TabButtons<Tab>
-        tabs={info.isHelm ? [{ id: 'readme', label: 'README' }, { id: 'values', label: 'Values' }] : [{ id: 'manifest', label: 'Manifest' }]}
+        tabs={[
+          ...(info.isHelm ? [{ id: 'readme' as const, label: 'README' }, { id: 'values' as const, label: 'Values' }] : [{ id: 'manifest' as const, label: 'Manifest' }]),
+          { id: 'structure', label: 'Structure' },
+        ]}
         active={tab}
         onSelect={setTab}
       />
@@ -200,6 +204,7 @@ function ArtifactDetail({ info, onViewManifest }: { info: ArtifactInfo; onViewMa
       <div className={styles.tabBody}>
         {tab === 'readme' && <pre className={styles.pre}>{info.chartInfo?.readme || 'No README.'}</pre>}
         {tab === 'values' && <pre className={styles.pre}>{info.chartInfo?.defaultValues || 'No default values.'}</pre>}
+        {tab === 'structure' && <TagStructure pantry={pantry} tag={tag} />}
         {tab === 'manifest' && (
           <div className={styles.manifestInline}>
             {info.files && info.files.length > 1 ? (
@@ -217,4 +222,22 @@ function ArtifactDetail({ info, onViewManifest }: { info: ArtifactInfo; onViewMa
       </div>
     </div>
   )
+}
+
+/** TagStructure draws the artifact behind a tag and everything attached to it. */
+function TagStructure({ pantry, tag }: { pantry: Pantry; tag: string }) {
+  const [graph, setGraph] = useState<ArtifactGraph | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    getPantryArtifact(pantry.namespace, pantry.name, tag)
+      .then((g) => !cancelled && setGraph(g))
+      .catch((e: Error) => !cancelled && setError(e.message))
+    return () => {
+      cancelled = true
+    }
+  }, [pantry.namespace, pantry.name, tag])
+
+  return <ArtifactView graph={graph} error={error} />
 }

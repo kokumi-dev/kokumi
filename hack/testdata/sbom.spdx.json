@@ -1,0 +1,30 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "kokumi-testdata-external-secrets",
+  "documentNamespace": "https://kokumi.dev/spdx/testdata/external-secrets",
+  "creationInfo": {
+    "created": "2026-10-16T00:00:00Z",
+    "creators": ["Tool: kokumi-hack-push-artifacts"]
+  },
+  "packages": [
+    {
+      "name": "external-secrets",
+      "SPDXID": "SPDXRef-Package-external-secrets",
+      "versionInfo": "2.0.1",
+      "downloadLocation": "https://charts.external-secrets.io",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0",
+      "licenseDeclared": "Apache-2.0",
+      "copyrightText": "NOASSERTION"
+    }
+  ],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relationshipType": "DESCRIBES",
+      "relatedSpdxElement": "SPDXRef-Package-external-secrets"
+    }
+  ]
+}

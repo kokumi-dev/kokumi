@@ -198,27 +198,87 @@ export interface Renderer {
   builder: string
 }
 
-/** Whether an attestation is a Sigstore bundle signed by a key the Kitchen trusts. */
-export interface AttestationVerification {
+/**
+ * Whether a signature verified: a Sigstore bundle against the keys the
+ * Kitchen trusts or, in the graph of a Product's source, any signature as
+ * the Product controller verified it against spec.source.verify.
+ */
+export interface Verification {
   verified: boolean
-  /** ID of the key that signed a verified attestation. */
+  /** ID of the key that signed, for a key-based signature. */
   keyID?: string
-  /** Why the attestation did not verify. */
+  /** Name a Kitchen key is trusted under: "current" for the signing key, else the trusted key's name. */
+  keyName?: string
+  /** Issuer and subject of a keyless signer. */
+  issuer?: string
+  subject?: string
+  /**
+   * Why the signature is not verified: signed by a key or identity that is
+   * not trusted (it may well be valid), invalid, in a format that is not
+   * verified, or not checked by the Product controller yet.
+   */
+  reason?: 'UntrustedSigner' | 'Invalid' | 'Unsupported' | 'NotChecked'
+  /** Why the signature did not verify. */
   error?: string
 }
 
-/** One OCI referrer of a Preparation's artifact, listed live from the registry. */
-export interface Attestation {
-  artifactType: string
+/** Content addressed by digest, as an OCI descriptor describes it. */
+export interface Descriptor {
+  mediaType: string
+  /** For an image manifest without one, its config's media type. */
+  artifactType?: string
   digest: string
+  size: number
+  annotations?: Record<string, string>
+}
+
+/**
+ * How a node is attached to its parent: Subject for an OCI referrer, Tag for
+ * cosign's legacy sha256-<hex>.sig/.att/.sbom tags, Index for a child of an
+ * image index.
+ */
+export type ArtifactLink = 'Subject' | 'Tag' | 'Index'
+
+/** One manifest of an artifact graph; its annotations are the manifest's own. */
+export interface ArtifactNode extends Descriptor {
+  /** Absent for the root. */
+  link?: ArtifactLink
+  /** The tag a node linked by Tag is stored under. */
+  tag?: string
+  config?: Descriptor
+  layers?: Descriptor[]
+  subject?: Descriptor
   /** Predicate type of a Sigstore bundle; for an unverified one, only what its annotation claims. */
   predicateType?: string
-  createdAt?: string
-  size: number
-  /** Anyone who can push to the repository can attach a referrer; only verified ones are evidence. */
-  verification: AttestationVerification
-  /** The signed in-toto statement; only set for verified referrers. */
+  /** Set for Sigstore bundles. Anyone who can push to the repository can attach a referrer; only verified ones are evidence. */
+  verification?: Verification
+  /** The signed in-toto statement; only set for verified bundles. */
   payload?: unknown
+  /** Children of an image index. */
+  manifests?: ArtifactNode[]
+  /** Artifacts attached to this one, oldest first. */
+  referrers?: ArtifactNode[]
+  /** Children or referrers were left out at the limits of the walk. */
+  truncated?: boolean
+  /** Why children or referrers could not be read completely. */
+  error?: string
+}
+
+/** An artifact with everything attached to it in its repository, read live from the registry. */
+export interface ArtifactGraph {
+  repository: string
+  tag?: string
+  /** Where the tag points now; differs from the root's digest when the tag moved. */
+  tagDigest?: string
+  root?: ArtifactNode
+  /** Why the graph could not be read. */
+  error?: string
+}
+
+/** A Product's source at its source location and, when vendored, the copy. */
+export interface ProductSourceArtifact {
+  source: ArtifactGraph
+  vendored?: ArtifactGraph
 }
 
 /** The config blob of a Preparation's artifact: what was asked for and what it was built from. */

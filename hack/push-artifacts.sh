@@ -85,8 +85,24 @@ case "$REPO" in
     echo '{}' > "$DOCKER_CONFIG/config.json"
     ;;
 esac
-COSIGN_PASSWORD="" "$COSIGN" sign --yes \
-  --key "${GIT_ROOT}/hack/testdata/cosign.key" \
-  --use-signing-config=false --tlog-upload=false \
-  --allow-http-registry \
-  "${REPO}/kokumi-dev/testdata/${SIGNED_PACKAGE}@${digest}"
+sign() {
+  COSIGN_PASSWORD="" "$COSIGN" sign --yes \
+    --key "${GIT_ROOT}/hack/testdata/cosign.key" \
+    --use-signing-config=false --tlog-upload=false \
+    --allow-http-registry \
+    "$1"
+}
+sign "${REPO}/kokumi-dev/testdata/${SIGNED_PACKAGE}@${digest}"
+
+# Attach an SBOM to the signed package and sign the SBOM too, so that the
+# package carries a signature, an SBOM and a signature of the SBOM as OCI
+# referrers, as many upstream releases do.
+sbom_digest="$(
+  cd "${GIT_ROOT}/hack/testdata"
+  oras attach --artifact-type application/spdx+json \
+    --format go-template --template '{{.digest}}' \
+    "${REPO}/kokumi-dev/testdata/${SIGNED_PACKAGE}@${digest}" \
+    sbom.spdx.json:application/spdx+json
+)"
+echo "Signing SBOM: ${SIGNED_PACKAGE}@${sbom_digest}"
+sign "${REPO}/kokumi-dev/testdata/${SIGNED_PACKAGE}@${sbom_digest}"

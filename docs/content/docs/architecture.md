@@ -215,6 +215,10 @@ spec:
 - A source without `verify` that carries a signature by a key the Kitchen
   trusts verifies too: releases of this Kokumi installation or, once its key
   is trusted, of another one.
+- Every signature in the graph of the source is checked with the same policy,
+  including the publisher's signatures on attachments such as an SBOM, and
+  recorded in `status.source.signatures`. Only a signature on the source itself
+  decides; the others are evidence the Artifact tab shows.
 - The result is the `SourceVerified` condition, with reason `Succeeded`,
   `VerificationError` or `VerificationRequired`, and `status.source.verified`,
   which names the key ID or the keyless issuer and subject. The condition is
@@ -247,6 +251,12 @@ spec:
     pantryRef:
       name: internal-mirror   # or oci: oci://…; vendor: {} copies to <namespace>/vendor/<name> in the in-cluster registry
 ```
+
+The copy carries the referrers of the source, the OCI 1.1 way of attaching
+signatures, SBOMs and attestations. Signatures that cosign stored under
+legacy `sha256-<digest>.sig` tags are not referrers and are not copied. The
+**Artifact** tab of a Product draws the source and the vendored copy side by
+side, so you can see that both have the same digest and what came along.
 
 Upstream credentials come from `spec.source.pantryRef` when the upstream
 registry is private. The vendored reference and its pull credentials are
@@ -372,6 +382,22 @@ kokumi-registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod
 └─ tag 6.10.2 → sha256:c3…
 ```
 
+- The **referrers** (Signature, provenance, approvals) are Sigstore bundles,
+  artifactType `application/vnd.dev.sigstore.bundle.v0.3+json`, attached
+  through the OCI 1.1 referrers API: each names the Preparation's manifest in
+  its `subject`. Registries without that API store them through the referrers
+  tag schema; tools find them either way.
+- The **annotations** of the manifest: `org.opencontainers.image.description`
+  (the commit message), `org.opencontainers.image.source`, `.version` and
+  `.revision`, `org.opencontainers.image.base.name` and `.base.digest`,
+  `kokumi.dev/parent`, and `kokumi.dev/approval-policy`.
+- The **tag** is the source version. A later Preparation of the same version
+  moves it; the digest of this one never changes.
+
+The **Artifact** tab of a Preparation draws this graph live from the
+registry, including anything else attached to the artifact, and verifies every
+Sigstore bundle in it. See [Artifacts in the registry](user-guide/artifacts/).
+
 The **config blob** is the authoritative record. The `kokumi.dev/*` and
 description annotations repeat parts of it so tools can read them without
 fetching a blob.
@@ -495,10 +521,10 @@ cosign verify --key kokumi.pub --insecure-ignore-tlog=true <registry>/shop/podin
 cosign verify-attestation --key kokumi.pub --insecure-ignore-tlog=true --type slsaprovenance1 <registry>/shop/podinfo-prod@sha256:c3…
 ```
 
-The Attestations view lists every referrer of the artifact live from the
-registry and verifies each against the keys the Kitchen trusts. Anyone who can
-push to the repository can attach a referrer, so the view shows the statement
-of verified referrers only.
+The Artifact tab of a Preparation shows every referrer of the artifact live
+from the registry and verifies each against the keys the Kitchen trusts.
+Anyone who can push to the repository can attach a referrer, so the view
+shows the statement of verified referrers only.
 
 ### Serving
 

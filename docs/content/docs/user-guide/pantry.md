@@ -104,6 +104,16 @@ binding the `kokumi-pantry-credentials` ClusterRole there (see
 same access is needed to preview a Product whose source is a Pantry with
 credentials. Without it, reference a Secret that already exists.
 
+## Browsing a Pantry
+
+The **Tags** tab of a Pantry lists the tags of its repository. Expand a tag to
+read the chart's README and values or the manifests, and open **Structure** to
+see the artifact behind the tag as a graph: its manifest and everything
+attached to it, such as signatures, SBOMs and attestations. Tags that cosign
+uses to store signatures (`sha256-<digest>.sig`, `.att`) are not listed as tags
+of their own; they appear in the graph of the artifact they belong to. See
+[Artifacts in the registry](../artifacts/).
+
 ## Using a Pantry in a Product or Order
 
 A Pantry replaces an OCI URL: the source or vendor destination of a Product,

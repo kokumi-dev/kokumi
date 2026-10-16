@@ -521,6 +521,88 @@ spec:
                     required:
                     - name
                     type: object
+                  signatures:
+                    description: |-
+                      signatures lists every signature in the graph of the source: on the
+                      source itself and on what is attached to it, such as an SBOM. Each is
+                      verified against spec.source.verify, or against the keys the Kitchen
+                      trusts when it is not set. Only verified is a decision; signatures is
+                      the evidence.
+                    items:
+                      description: |-
+                        SignatureVerdict is the result of verifying one signature in the graph of
+                        a source.
+                      properties:
+                        digest:
+                          description: |-
+                            digest is the digest of the signature: a Sigstore bundle referrer, a
+                            legacy cosign signature manifest, or a signature in another format.
+                          pattern: ^sha256:[a-f0-9]{64}$
+                          type: string
+                        message:
+                          description: message says why the signature did not verify.
+                          maxLength: 1024
+                          type: string
+                        result:
+                          description: result is the result of the verification.
+                          enum:
+                          - Verified
+                          - UntrustedSigner
+                          - Invalid
+                          - Unsupported
+                          type: string
+                        signer:
+                          description: |-
+                            signer identifies whose signature verified. Set only when result is
+                            Verified.
+                          properties:
+                            issuer:
+                              description: issuer is the OIDC issuer of the keyless
+                                signer's certificate.
+                              maxLength: 2048
+                              type: string
+                            keyID:
+                              description: |-
+                                keyID identifies the public key that verified the signature: the
+                                base64-encoded SHA-256 of its DER encoding. Set for key-based
+                                verification.
+                              maxLength: 64
+                              type: string
+                            provider:
+                              description: provider is the signature format that verified.
+                              enum:
+                              - cosign
+                              type: string
+                            subject:
+                              description: subject is the subject of the keyless signer's
+                                certificate.
+                              maxLength: 2048
+                              type: string
+                          required:
+                          - provider
+                          type: object
+                        subject:
+                          description: subject is the digest of the manifest the signature
+                            signs.
+                          pattern: ^sha256:[a-f0-9]{64}$
+                          type: string
+                      required:
+                      - digest
+                      - result
+                      - subject
+                      type: object
+                    maxItems: 64
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - digest
+                    x-kubernetes-list-type: map
+                  signaturesCheckedTime:
+                    description: |-
+                      signaturesCheckedTime is when signatures was last checked. It is
+                      refreshed when the signatures change, and otherwise at most once an
+                      hour.
+                    format: date-time
+                    type: string
                   verified:
                     description: |-
                       verified records who signed the source, when its signature verified:

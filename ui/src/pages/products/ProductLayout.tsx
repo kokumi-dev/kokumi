@@ -67,6 +67,7 @@ export default function ProductLayout() {
           { to: paths.product(product.namespace, product.name), label: 'Overview', end: true },
           { to: paths.product(product.namespace, product.name, 'orders'), label: 'Orders', count: orderCount },
           { to: paths.product(product.namespace, product.name, 'preview'), label: 'Preview' },
+          { to: paths.product(product.namespace, product.name, 'artifact'), label: 'Artifact' },
         ]}
       />
 

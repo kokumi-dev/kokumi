@@ -163,6 +163,71 @@ type ProductSourceStatus struct {
 	// when the source was not verified.
 	// +optional
 	Verified *SourceVerification `json:"verified,omitempty"`
+
+	// signatures lists every signature in the graph of the source: on the
+	// source itself and on what is attached to it, such as an SBOM. Each is
+	// verified against spec.source.verify, or against the keys the Kitchen
+	// trusts when it is not set. Only verified is a decision; signatures is
+	// the evidence.
+	// +optional
+	// +listType=map
+	// +listMapKey=digest
+	// +kubebuilder:validation:MaxItems=64
+	Signatures []SignatureVerdict `json:"signatures,omitempty"`
+
+	// signaturesCheckedTime is when signatures was last checked. It is
+	// refreshed when the signatures change, and otherwise at most once an
+	// hour.
+	// +optional
+	SignaturesCheckedTime *metav1.Time `json:"signaturesCheckedTime,omitempty"`
+}
+
+// SignatureResult is the result of verifying one signature.
+// +kubebuilder:validation:Enum=Verified;UntrustedSigner;Invalid;Unsupported
+type SignatureResult string
+
+const (
+	// SignatureVerified is a signature by a key or identity the policy
+	// accepts.
+	SignatureVerified SignatureResult = "Verified"
+	// SignatureUntrustedSigner is a signature by a key or identity the
+	// policy does not accept. The signature itself may be valid.
+	SignatureUntrustedSigner SignatureResult = "UntrustedSigner"
+	// SignatureInvalid is a signature that does not verify, for example
+	// because it signs another digest.
+	SignatureInvalid SignatureResult = "Invalid"
+	// SignatureUnsupported is a signature in a format Kokumi does not
+	// verify, such as Notary.
+	SignatureUnsupported SignatureResult = "Unsupported"
+)
+
+// SignatureVerdict is the result of verifying one signature in the graph of
+// a source.
+type SignatureVerdict struct {
+	// digest is the digest of the signature: a Sigstore bundle referrer, a
+	// legacy cosign signature manifest, or a signature in another format.
+	// +required
+	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
+	Digest string `json:"digest"`
+
+	// subject is the digest of the manifest the signature signs.
+	// +required
+	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
+	Subject string `json:"subject"`
+
+	// result is the result of the verification.
+	// +required
+	Result SignatureResult `json:"result"`
+
+	// signer identifies whose signature verified. Set only when result is
+	// Verified.
+	// +optional
+	Signer *SourceVerification `json:"signer,omitempty"`
+
+	// message says why the signature did not verify.
+	// +optional
+	// +kubebuilder:validation:MaxLength=1024
+	Message string `json:"message,omitempty"`
 }
 
 // SourceVerification records the signer whose signature on a source

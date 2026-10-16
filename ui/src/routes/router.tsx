@@ -9,6 +9,7 @@ import ProductLayout from '../pages/products/ProductLayout'
 import ProductOverview from '../pages/products/ProductOverview'
 import ProductOrders from '../pages/products/ProductOrders'
 import ProductPreview from '../pages/products/ProductPreview'
+import ProductArtifact from '../pages/products/ProductArtifact'
 import ProductEditor from '../pages/products/ProductEditor'
 import OrdersList from '../pages/orders/OrdersList'
 import OrderLayout from '../pages/orders/OrderLayout'
@@ -24,7 +25,7 @@ import PreparationFiles from '../pages/preparations/PreparationFiles'
 import PreparationChanges from '../pages/preparations/PreparationChanges'
 import PreparationApprovals from '../pages/preparations/PreparationApprovals'
 import PreparationIntent from '../pages/preparations/PreparationIntent'
-import PreparationAttestations from '../pages/preparations/PreparationAttestations'
+import PreparationArtifact from '../pages/preparations/PreparationArtifact'
 import ServingsList from '../pages/servings/ServingsList'
 import ServingDetail from '../pages/servings/ServingDetail'
 import PantriesList from '../pages/pantries/PantriesList'
@@ -50,6 +51,7 @@ export const router = createBrowserRouter([
           { index: true, element: <ProductOverview /> },
           { path: 'orders', element: <ProductOrders /> },
           { path: 'preview', element: <ProductPreview /> },
+          { path: 'artifact', element: <ProductArtifact /> },
         ],
       },
 
@@ -76,7 +78,7 @@ export const router = createBrowserRouter([
           { path: 'files', element: <PreparationFiles /> },
           { path: 'changes', element: <PreparationChanges /> },
           { path: 'intent', element: <PreparationIntent /> },
-          { path: 'attestations', element: <PreparationAttestations /> },
+          { path: 'artifact', element: <PreparationArtifact /> },
           { path: 'approvals', element: <PreparationApprovals /> },
         ],
       },
