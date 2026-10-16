@@ -2,13 +2,9 @@
  * Every attached item has a trunk on its left, running up to the manifest it
  * is attached to, and an elbow into its card. The trunk starts under the
  * centre of the parent's icon; --elbow-y meets the centre of the card's icon.
- *
- * The lines overlap where they join, so their colour is opaque: the
- * translucent border tokens would darken every overlap. It is the
- * emphasised border as it shows on a section.
+ * The lines are drawn in the colour --edge of the graph view.
  */
 .tree {
-  --edge: color-mix(in srgb, var(--color-text-on-light) 25%, var(--color-bg-card));
   --elbow-x: 22px;
   --elbow-y: 38px;
   --arrow-height: 7px;
@@ -105,6 +101,16 @@
   box-shadow: var(--shadow-sm);
 }
 
+.rootCard:hover {
+  border-color: var(--color-border-emphasis);
+}
+
+.selected,
+.selected:hover {
+  border-color: var(--color-accent);
+  box-shadow: var(--control-focus-ring);
+}
+
 .rootHeader {
   display: flex;
   align-items: center;
@@ -190,28 +196,7 @@
   border-left: 6px solid var(--edge);
 }
 
-/* ── Attached cards ── */
-
-.card {
-  min-width: 240px;
-  max-width: 340px;
-  padding: 10px 14px 10px 10px;
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
-  background: var(--color-bg-main);
-  box-shadow: var(--shadow-xs);
-}
-
-.card:hover,
-.rootCard:hover {
-  border-color: var(--color-border-emphasis);
-}
-
-.selected,
-.selected:hover {
-  border-color: var(--color-accent);
-  box-shadow: var(--control-focus-ring);
-}
+/* ── Attached cards are the graph's NodeCard; this says that more is attached ── */
 
 .more {
   display: block;

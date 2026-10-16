@@ -10,6 +10,7 @@ import CommitBox from '../../components/shared/CommitBox'
 import { Button, Counter } from '../../components/ui'
 import { paths } from '../../routes/paths'
 import { formatDate } from '../../utils/format'
+import { orderDestinationLabel } from '../../utils/products'
 import { objectToYaml } from '../../utils/yaml'
 import { useOrderContext } from './orderContext'
 import { useDeniedReason } from '../../hooks/useCapability'
@@ -49,10 +50,6 @@ export default function OrderOverview() {
     ) : (
       <span className={layout.muted}>—</span>
     )
-
-  const destination = order.destination?.pantryRef && !order.destination.oci
-    ? `pantry: ${order.destination.pantryRef.name}`
-    : order.destination?.oci || `${order.effectiveDestination ?? ''} (default)`
 
   return (
     <>
@@ -98,7 +95,7 @@ export default function OrderOverview() {
               show: !!product,
             },
             { label: 'Version', value: product?.source.version, show: !!product },
-            { label: 'Destination', value: <span className={layout.mono}>{destination}</span> },
+            { label: 'Destination', value: <span className={layout.mono}>{orderDestinationLabel(order)}</span> },
             {
               label: 'Values',
               value: <pre className={layout.code}>{objectToYaml(order.values ?? {})}</pre>,

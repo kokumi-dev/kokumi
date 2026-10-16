@@ -1,7 +1,8 @@
-import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import type { ArtifactGraph, ArtifactNode } from '../../api/types'
 import { shortDigest } from '../../utils/format'
-import { kindOf, statusOf, tagExplanation, tagState, type IconKind, type Status } from './artifactKinds'
+import { Chip, NodeIcon, NodeSummary, TagIcon, type IconTone } from '../graph/parts'
+import { kindOf, statusOf, tagExplanation, tagState, type IconKind } from './artifactKinds'
 import type { Signer, SignerIcon as SignerIconKind } from './signer'
 import styles from './parts.module.css'
 
@@ -9,12 +10,6 @@ import styles from './parts.module.css'
 export interface Reference {
   label: string
   value: ReactNode
-}
-
-/** A line of explanation shown with the graph. */
-export interface Note {
-  tone?: 'ok' | 'warning'
-  text: ReactNode
 }
 
 /** What the root's config and layers link to, e.g. the tab that shows them. */
@@ -69,48 +64,33 @@ const iconPaths: Record<IconKind, ReactNode> = {
   ),
 }
 
+const iconTones: Record<IconKind, IconTone> = {
+  artifact: 'accent',
+  signature: 'success',
+  approvals: 'success',
+  attestation: 'warning',
+  sbom: 'warning',
+  index: 'muted',
+  unknown: 'muted',
+}
+
 /**
  * The icon of a kind of node, in a soft tile. Evidence only takes its colour
  * once it verified, so colour never suggests trust that is not there.
  */
 export function ArtifactIcon({ kind, size = 'md', muted }: { kind: IconKind; size?: 'md' | 'lg'; muted?: boolean }) {
-  const tone = muted && kind !== 'artifact' ? styles.icon_unknown : styles[`icon_${kind}`]
   return (
-    <span className={`${styles.icon} ${styles[`icon_${size}`]} ${tone}`} aria-hidden>
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-        {iconPaths[kind]}
-      </svg>
-    </span>
-  )
-}
-
-/** A status: a small mark and a few words. */
-export function StatusMark({ status, quiet }: { status: Status; quiet?: boolean }) {
-  return (
-    <span className={`${styles.status} ${styles[`status_${status.tone}`]} ${quiet ? styles.statusQuiet : ''}`}>
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-        {status.tone === 'ok' && <path d="m4 8.5 2.75 2.75L12 5.5" />}
-        {status.tone === 'bad' && <path d="m5 5 6 6M11 5l-6 6" />}
-        {status.tone === 'neutral' && <circle cx="8" cy="8" r="2" fill="currentColor" stroke="none" />}
-      </svg>
-      <span className={styles.statusLabel}>{status.label}</span>
-    </span>
+    <NodeIcon tone={muted && kind !== 'artifact' ? 'muted' : iconTones[kind]} size={size}>
+      {iconPaths[kind]}
+    </NodeIcon>
   )
 }
 
 /** The kind and status of a node, the status below the kind. */
-export function NodeSummary({ node }: { node: ArtifactNode }) {
+export function ArtifactSummary({ node }: { node: ArtifactNode }) {
   const kind = kindOf(node)
   const status = statusOf(node)
-  return (
-    <>
-      <ArtifactIcon kind={kind.icon} muted={status.tone !== 'ok'} />
-      <span className={styles.summaryText}>
-        <span className={styles.summaryTitle}>{kind.label}</span>
-        <StatusMark status={status} quiet />
-      </span>
-    </>
-  )
+  return <NodeSummary icon={<ArtifactIcon kind={kind.icon} muted={status.tone !== 'ok'} />} title={kind.label} status={status} />
 }
 
 const signerIconPaths: Record<SignerIconKind, ReactNode> = {
@@ -157,11 +137,18 @@ export function SignerIcon({ icon }: { icon: SignerIconKind }) {
  * what tells them apart. Its title holds the full identity.
  */
 export function SignerMark({ signer, detail, variant = 'plain' }: { signer: Signer; detail?: boolean; variant?: 'plain' | 'chip' }) {
-  return (
-    <span className={`${styles.signer} ${variant === 'chip' ? styles.signerChip : ''}`} title={`${signer.keyless ? 'Keyless' : 'Key'}: ${signer.full}`}>
-      <SignerIcon icon={signer.icon} />
+  const title = `${signer.keyless ? 'Keyless' : 'Key'}: ${signer.full}`
+  const content = (
+    <>
       <span className={styles.signerTitle}>{signer.title}</span>
       {detail && signer.detail && <span className={styles.signerDetail}>{signer.detail}</span>}
+    </>
+  )
+  if (variant === 'chip') return <Chip icon={<SignerIcon icon={signer.icon} />} title={title}>{content}</Chip>
+  return (
+    <span className={styles.signer} title={title}>
+      <SignerIcon icon={signer.icon} />
+      {content}
     </span>
   )
 }
@@ -171,36 +158,9 @@ export function TagPill({ graph }: { graph: ArtifactGraph }) {
   const tag = tagState(graph)
   if (!tag) return null
   return (
-    <span className={`${styles.tag} ${tag.here ? '' : styles.tagMoved}`} title={tagExplanation(graph)}>
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-        <path d="M2.25 2.25h5l6.5 6.5-5 5-6.5-6.5v-5Z" />
-        <path d="M5.25 5.25h.01" />
-      </svg>
+    <Chip icon={<TagIcon />} tone={tag.here ? 'plain' : 'faded'} mono title={tagExplanation(graph)} className={styles.tag}>
       {tag.tag}
       {!tag.here && <span className={styles.tagNote}>{tag.moved ? `moved to ${shortDigest(tag.moved)}…` : 'gone'}</span>}
-    </span>
-  )
-}
-
-interface NodeButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  /** The digest of the node it selects. */
-  digest: string
-  selected: boolean
-}
-
-/**
- * Selects a node of a graph. It carries data-artifact-node, so that a click
- * on it does not count as a click outside the details.
- */
-export function NodeButton({ digest, selected, className, ...rest }: NodeButtonProps) {
-  return (
-    // eslint-disable-next-line no-restricted-syntax -- selects a node of a diagram, not an action button
-    <button
-      type="button"
-      aria-pressed={selected}
-      data-artifact-node={digest}
-      className={`${styles.nodeButton} ${className ?? ''}`}
-      {...rest}
-    />
+    </Chip>
   )
 }

@@ -1,4 +1,5 @@
 import type { ArtifactGraph, ArtifactNode, Verification } from '../../api/types'
+import type { Status } from '../graph/parts'
 
 /** The artifactType of a referrer that carries a Sigstore bundle, as cosign v3 writes it. */
 const sigstoreBundleType = 'application/vnd.dev.sigstore.bundle.v0.3+json'
@@ -106,13 +107,6 @@ export function signatures(node: ArtifactNode): Verification[] {
     }
   }
   return [...bySigner.values()]
-}
-
-export type Tone = 'ok' | 'neutral' | 'bad'
-
-export interface Status {
-  tone: Tone
-  label: string
 }
 
 /**

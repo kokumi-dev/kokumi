@@ -1,21 +1,29 @@
-import { useNavigate } from 'react-router'
+import { useMemo } from 'react'
 import { useOrders } from '../../hooks/useOrders'
+import { usePreparations } from '../../hooks/usePreparations'
+import { useDeniedReason } from '../../hooks/useCapability'
 import Section from '../../components/layout/Section'
-import ProductRelationGraph from '../../components/product/ProductRelationGraph'
-import { paths } from '../../routes/paths'
+import { ordersByProduct, productDeletingReason, productKey } from '../../utils/products'
+import OrderGraph from './OrderGraph'
 import { useProductContext } from './productFormat'
 
 export default function ProductOrders() {
   const { product } = useProductContext()
   const orders = useOrders()
-  const navigate = useNavigate()
+  const preparations = usePreparations()
+  const orderDenied = useDeniedReason('orders:create')
+  const variants = useMemo(
+    () => (orders === null ? null : ordersByProduct(orders).get(productKey(product.namespace, product.name)) ?? []),
+    [orders, product.namespace, product.name],
+  )
 
   return (
-    <Section title="Orders" description="The variants of this Product. Select one to open it.">
-      <ProductRelationGraph
+    <Section title="Orders" description="The variants of this Product. Select one to see what it runs.">
+      <OrderGraph
         product={product}
-        orders={orders}
-        onSelectOrder={(o) => navigate(paths.order(o.namespace, o.name))}
+        orders={variants}
+        preparations={preparations}
+        orderDenied={productDeletingReason(product) ?? orderDenied}
       />
     </Section>
   )

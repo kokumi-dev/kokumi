@@ -1,4 +1,5 @@
 import type { Order, Preparation } from '../../api/types'
+import type { Status } from '../../components/graph/parts'
 import { plural } from '../../utils/format'
 
 /** What an Order currently runs and whether something newer waits. */
@@ -58,4 +59,18 @@ function overlaySummary(order: Order): string {
 function countLeaves(value: unknown): number {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return value === undefined ? 0 : 1
   return Object.values(value).reduce<number>((n, v) => n + countLeaves(v), 0)
+}
+
+/** The status mark of the state of a Product or an Order. */
+export function stateStatus(state?: string): Status {
+  const label = state || 'Unknown'
+  switch (label) {
+    case 'Ready':
+    case 'Resolved':
+      return { tone: 'ok', label }
+    case 'Failed':
+      return { tone: 'bad', label }
+    default:
+      return { tone: 'neutral', label }
+  }
 }

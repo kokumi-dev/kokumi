@@ -1,0 +1,35 @@
+.signers {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.signerBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--color-fill-subtle);
+}
+
+.signerFull {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  color: var(--color-text-muted-light);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.digestRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.error {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--color-danger);
+  overflow-wrap: anywhere;
+}
