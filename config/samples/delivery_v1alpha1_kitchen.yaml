@@ -24,3 +24,9 @@ spec:
   #       -----END PUBLIC KEY-----
   #   # Every Product source must verify.
   #   requireSourceVerification: true
+  # Resolve and vendor images through a mirror, such as a pull-through cache
+  # or an air-gapped copy. Manifests keep the original image names.
+  # images:
+  #   mirrors:
+  #   - prefix: docker.io
+  #     location: oci://harbor.example.com/dockerhub

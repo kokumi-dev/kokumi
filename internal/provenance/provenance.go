@@ -11,6 +11,7 @@ import (
 
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/attestation"
+	"github.com/kokumi-dev/kokumi/internal/images"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/signing"
 )
@@ -29,6 +30,10 @@ const (
 	// AnnotationVerified is the annotation of a resolved dependency that
 	// records who signed it, when its signature verified.
 	AnnotationVerified = "kokumi.dev/verified"
+
+	// AnnotationVendored is the annotation of a container image dependency
+	// that records where it was vendored to.
+	AnnotationVendored = "kokumi.dev/vendored"
 
 	sha256Prefix = "sha256:"
 )
@@ -67,8 +72,10 @@ type ResourceDescriptor struct {
 	// URI is the oci:// URL of the artifact, with the tag it was resolved from.
 	URI    string            `json:"uri"`
 	Digest map[string]string `json:"digest"`
+	// MediaType is the media type of a container image's manifest.
+	MediaType string `json:"mediaType,omitempty"`
 	// Annotations hold AnnotationVerified for a source whose signature
-	// verified.
+	// verified, and AnnotationVendored for a vendored container image.
 	Annotations map[string]any `json:"annotations,omitempty"`
 }
 
@@ -91,6 +98,29 @@ type Builder struct {
 type Metadata struct {
 	StartedOn  string `json:"startedOn"`
 	FinishedOn string `json:"finishedOn"`
+}
+
+// imageDependencies returns the container images the render resolved to
+// digests, in the order of the config blob, which is sorted by reference.
+func imageDependencies(imgs []images.Image) []ResourceDescriptor {
+	var deps []ResourceDescriptor
+	for _, img := range imgs {
+		algorithm, encoded, ok := strings.Cut(img.Digest, ":")
+		if !ok {
+			continue
+		}
+
+		dep := ResourceDescriptor{
+			URI:       "oci://" + img.TaggedName(),
+			Digest:    map[string]string{algorithm: encoded},
+			MediaType: img.MediaType,
+		}
+		if img.Vendored != "" {
+			dep.Annotations = map[string]any{AnnotationVendored: img.Vendored}
+		}
+		deps = append(deps, dep)
+	}
+	return deps
 }
 
 // Statement returns the deterministic in-toto provenance statement for the
@@ -121,7 +151,7 @@ func Statement(subject oci.Reference, cfg *artifact.Config) ([]byte, error) {
 		BuildDefinition: BuildDefinition{
 			BuildType:            BuildType,
 			ExternalParameters:   params,
-			ResolvedDependencies: []ResourceDescriptor{source},
+			ResolvedDependencies: append([]ResourceDescriptor{source}, imageDependencies(cfg.Images)...),
 		},
 		RunDetails: RunDetails{
 			Builder: Builder{

@@ -19,7 +19,7 @@ export const paths = {
   order: (ns: string, name: string, tab?: 'preparations' | 'servings' | 'files' | 'edit') =>
     `/orders/${seg(ns)}/${seg(name)}${tab ? `/${tab}` : ''}`,
   preparations: () => '/preparations',
-  preparation: (ns: string, name: string, tab?: 'files' | 'changes' | 'intent' | 'artifact' | 'approvals') =>
+  preparation: (ns: string, name: string, tab?: 'files' | 'changes' | 'images' | 'intent' | 'artifact' | 'approvals') =>
     `/preparations/${seg(ns)}/${seg(name)}${tab ? `/${tab}` : ''}`,
   servings: () => '/servings',
   serving: (ns: string, name: string) => `/servings/${seg(ns)}/${seg(name)}`,

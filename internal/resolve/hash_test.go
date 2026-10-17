@@ -6,10 +6,12 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
@@ -135,6 +137,27 @@ func TestCalculateSpecHash(t *testing.T) {
 		o := order()
 		o.Spec.Promotion = &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeAutomatic}
 		require.Equal(t, base, hashOf(t, product(), o, hashSource, hashDest))
+	})
+
+	t.Run("the default image policy is not hashed", func(t *testing.T) {
+		p := product()
+		p.Spec.Images = deliveryv1alpha1.ProductImages{
+			Policy:        deliveryv1alpha1.ImagePolicyRecord,
+			PullSecretRef: &corev1.LocalObjectReference{Name: "registry-credentials"},
+		}
+		require.Equal(t, base, hashOf(t, p, order(), hashSource, hashDest))
+	})
+
+	t.Run("image policy and field specs produce different hashes", func(t *testing.T) {
+		pin := product()
+		pin.Spec.Images.Policy = deliveryv1alpha1.ImagePolicyPin
+		vendor := product()
+		vendor.Spec.Images.Policy = deliveryv1alpha1.ImagePolicyVendor
+		specs := product()
+		specs.Spec.Images.FieldSpecs = []deliveryv1alpha1.ImageFieldSpec{{Kind: "Prometheus", Path: "spec/image"}}
+
+		hashes := []string{base, hashOf(t, pin, order(), hashSource, hashDest), hashOf(t, vendor, order(), hashSource, hashDest), hashOf(t, specs, order(), hashSource, hashDest)}
+		require.Len(t, slices.Compact(slices.Sorted(slices.Values(hashes))), 4)
 	})
 
 	t.Run("approval policy change produces different hash", func(t *testing.T) {
@@ -279,6 +302,11 @@ func TestIntent_golden(t *testing.T) {
 		Target: deliveryv1alpha1.PatchTarget{Kind: "Deployment", Name: name, Namespace: namespace},
 		Set:    map[string]string{".spec.replicas": "1", ".metadata.labels.tier": "web"},
 	}}
+	product.Spec.Images = deliveryv1alpha1.ProductImages{
+		Policy:        deliveryv1alpha1.ImagePolicyVendor,
+		FieldSpecs:    []deliveryv1alpha1.ImageFieldSpec{{Group: "monitoring.coreos.com", Kind: "Prometheus", Path: "spec/image"}},
+		PullSecretRef: &corev1.LocalObjectReference{Name: "registry-credentials"},
+	}
 
 	order := orderOf(deliveryv1alpha1.OrderSpec{
 		Values: &apiextensionsv1.JSON{Raw: []byte(`{"replicaCount": 2, "id": 9007199254740993}`)},

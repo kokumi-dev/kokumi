@@ -1,4 +1,4 @@
-import type { AllowedPatchTarget, Order, OverridePolicy, Product } from '../api/types'
+import type { AllowedPatchTarget, ImageFieldSpec, ImagePolicy, Order, OverridePolicy, Product } from '../api/types'
 import { overridePolicy } from '../api/types'
 import { stripOCIScheme } from './format'
 
@@ -71,6 +71,25 @@ export function describePatchesPolicy(policy: OverridePolicy): string {
     default:
       return 'Orders may not set patches or edits'
   }
+}
+
+/** What an image policy does, in words. */
+export function describeImagePolicy(policy: ImagePolicy): string {
+  switch (policy) {
+    case 'Pin':
+      return 'Every image reference is pinned to its digest; name and tag stay for readability'
+    case 'Vendor':
+      return "Every image is copied into each Preparation's repository and pulled from there by digest"
+    default:
+      return 'Every image is listed by digest; the manifests stay unchanged'
+  }
+}
+
+/** An image field spec in words, e.g. "Prometheus.monitoring.coreos.com: spec/image". */
+export function imageFieldSpecLabel(f: ImageFieldSpec): string {
+  const group = f.group ? `.${f.group}` : ''
+  const version = f.version ? ` (${f.version})` : ''
+  return `${f.kind}${group}${version}: ${f.path}`
 }
 
 /** An allowed patch target in words, e.g. "Deployment/web: .spec.replicas". */

@@ -88,8 +88,9 @@ setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
 			echo "Kind cluster '$(KIND_CLUSTER)' already exists. Skipping creation." ;; \
 		*) \
 			echo "Creating Kind cluster '$(KIND_CLUSTER)'..."; \
-			$(KIND) create cluster --name $(KIND_CLUSTER) ;; \
+			$(KIND) create cluster --name $(KIND_CLUSTER) --config hack/kind/kokumi-test-e2e.yaml ;; \
 	esac
+	@KIND=$(KIND) hack/kind/registry-mirror.sh $(KIND_CLUSTER)
 
 .PHONY: test-e2e
 test-e2e: setup-test-e2e manifests generate fmt vet cosign ## Run the e2e tests. Expected an isolated environment using Kind.
@@ -127,6 +128,7 @@ kind-setup: ## Set up a Kind cluster for local development if it does not exist
 			echo "Creating Kind cluster '$(KIND_CLUSTER_DEVELOPMENT)'..."; \
 			$(KIND) create cluster --config hack/kind/kokumi-cluster.yaml ;; \
 	esac
+	@KIND=$(KIND) hack/kind/registry-mirror.sh $(KIND_CLUSTER_DEVELOPMENT)
 
 .PHONY: kind-delete
 kind-delete: ## Delete the Kind cluster for local development

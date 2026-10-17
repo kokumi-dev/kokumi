@@ -264,6 +264,40 @@ published in `status.source`, so Orders need no knowledge of the vendoring
 setup. When a Pantry's URL changes, the Product resolves its source again and
 its Orders render new Preparations.
 
+#### Images
+
+`spec.images` decides what happens to the container images the rendered
+manifests reference. Every render finds them, following kustomize's image
+transformer, and resolves each to a digest with the credentials of
+`images.pullSecretRef` and through the Kitchen's mirrors:
+
+```yaml
+spec:
+  images:
+    policy: Pin                # Record (default) | Pin | Vendor
+    fieldSpecs:                # custom resource fields that hold an image
+    - group: monitoring.coreos.com
+      kind: Prometheus
+      path: spec/image
+    pullSecretRef:             # kubernetes.io/dockerconfigjson, per registry host
+      name: registry-credentials
+```
+
+- `Record` lists every image by digest in the Preparation and leaves the
+  manifests unchanged.
+- `Pin` rewrites `repo:tag` to `repo:tag@sha256:…`.
+- `Vendor` copies every image, with all platforms and its referrers, into the
+  Order's destination repository and rewrites the reference to pull it from
+  there by digest.
+
+Images are resolved once per render. A tag that moves upstream does not render
+a new Preparation; promotion and rollback run exactly the digests a
+Preparation recorded. Under `Pin` and `Vendor` the digests of the Order's
+latest Preparation act as a lock file: a later render keeps the digest of
+every reference written the same way and resolves only new or changed ones.
+Orders cannot change the image settings. See
+[Container Images](user-guide/images/).
+
 ### Recipe
 
 Recipe captures rendering configuration, including options like Helm rendering
@@ -379,6 +413,8 @@ kokumi-registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod
 │   ├─ predicate https://slsa.dev/provenance/v1                   SLSA v1 provenance
 │   └─ predicate https://kokumi.dev/attestations/approval/v1      written on promotion
 │
+├─ sha256:aa…  image index, untagged, with its platforms and referrers   (images.policy: Vendor)
+│
 └─ tag 6.10.2 → sha256:c3…
 ```
 
@@ -393,6 +429,10 @@ kokumi-registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod
   `kokumi.dev/parent`, and `kokumi.dev/approval-policy`.
 - The **tag** is the source version. A later Preparation of the same version
   moves it; the digest of this one never changes.
+- The **vendored images**, under `images.policy: Vendor`: every image the
+  manifests pull, by digest and untagged, with all its platforms and its
+  referrers. They are not part of the Preparation's graph; the manifests
+  reference them.
 
 The **Artifact** tab of a Preparation draws this graph live from the
 registry, including anything else attached to the artifact, and verifies every
@@ -417,12 +457,25 @@ fetching a blob.
   "destination": { "oci": "oci://kokumi-registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod" },
   "product": { "namespace": "shop", "name": "podinfo", "configHash": "sha256:77e0…" },
   "renderer": { "type": "Helm", "version": "v4.3.0", "builder": "ghcr.io/kokumi-dev/kokumi@sha256:bb…" },
-  "intent": { "source": {}, "destination": "", "render": {}, "patches": [], "edits": [], "promotion": {} }
+  "intent": { "source": {}, "destination": "", "render": {}, "patches": [], "edits": [], "images": {}, "promotion": {} },
+  "images": [
+    {
+      "ref": "ghcr.io/stefanprodan/podinfo:6.10.2", "name": "ghcr.io/stefanprodan/podinfo",
+      "digest": "sha256:aa…", "mediaType": "application/vnd.oci.image.index.v1+json",
+      "vendored": "kokumi-registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod@sha256:aa…"
+    }
+  ]
 }
 ```
 
 `createdTime` equals the manifest's `org.opencontainers.image.created`
 annotation.
+
+`images` lists every container image the manifests reference: the reference
+as written, its normalized name, the digest and media type it resolved to,
+the vendored reference under `Vendor`, and the reason for an image that could
+not be resolved. `Preparation.spec.images` repeats the list without the
+reasons.
 
 `product.configHash` is the Product's own hash at render time: the hash of the
 source and vendor configuration its source was resolved from, not the hash of
@@ -443,6 +496,10 @@ of the `intent` value as it stands in the blob.
   version or digest, other values or patches) renders a new Preparation for
   every Order of that Product. The source digest is part of the intent. Where a value or patch is set, on the Product or the
   Order, is not part of the intent; only the merged result is.
+- The image policy and field specs are part of the intent unless they are the
+  defaults (`Record`, no field specs). The digests images resolve to are not:
+  they are an outcome of the render, so a moved upstream tag renders nothing
+  new. The pull Secret and the Kitchen's mirrors are not part of it either.
 
 {{< callout type="warning" >}}
 The intent is stored inside the artifact, so **anyone who can pull the
@@ -503,7 +560,9 @@ DSSE envelope over an in-toto statement, signed with the
 - The provenance is built entirely from the config blob. Its `builder.id` is
   `https://kokumi.dev/builders/controller/v1`; `builder.version` names the
   controller image and the rendering engine, and the source is listed by its
-  OCI URL, digest and verified signer.
+  OCI URL, digest and verified signer. Every container image that resolved to
+  a digest follows the source in `resolvedDependencies`, with its media type
+  and, under `Vendor`, its vendored reference.
 - Signing is deterministic (RFC 6979), so a retried push yields the same
   referrer, and an existing referrer with the same statement is reused.
 
@@ -638,6 +697,15 @@ Serving selects Preparation ──▶ Create/update Argo CD Application
                                         │
                                         └──▶ Argo CD syncs manifests to cluster
 ```
+
+Rendering a source runs these stages:
+
+```
+pull ──▶ render (Helm) ──▶ patches ──▶ edits ──▶ images ──▶ push
+```
+
+The images stage resolves, pins or vendors the images of the final manifests
+(see [Images](#images)).
 
 Key properties:
 

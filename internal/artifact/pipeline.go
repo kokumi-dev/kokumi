@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/afero"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"github.com/kokumi-dev/kokumi/internal/images"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/renderer"
 )
@@ -21,12 +22,18 @@ import (
 // the pull machinery and is domain-agnostic and safe for concurrent use.
 type Pipeline struct {
 	store *Store
+	// PreviewImagesTimeout bounds the image lookups of one preview, which a
+	// user waits for. References not resolved in time stay as written.
+	PreviewImagesTimeout time.Duration
 }
+
+// defaultPreviewImagesTimeout is the PreviewImagesTimeout of NewPipeline.
+const defaultPreviewImagesTimeout = 20 * time.Second
 
 // NewPipeline returns a Pipeline composing the given Store (which supplies
 // the default OCI client, filesystem, and shared pull cache).
 func NewPipeline(store *Store) *Pipeline {
-	return &Pipeline{store: store}
+	return &Pipeline{store: store, PreviewImagesTimeout: defaultPreviewImagesTimeout}
 }
 
 // RenderRequest describes one render-and-publish operation.
@@ -48,6 +55,9 @@ type RenderRequest struct {
 	Patches []PatchSpec
 	// Edits are applied on top of patches.
 	Edits []PatchSpec
+	// Images configures the image stage, which runs after the edits.
+	// Vendored images are copied to the destination repository.
+	Images ImageOptions
 	// Name and Namespace are used as Helm releaseName/namespace fallbacks
 	// when the Render spec does not set them explicitly.
 	Name      string
@@ -77,6 +87,8 @@ type RenderResult struct {
 	DestRef oci.Reference
 	// SCM holds Git provenance extracted from the source artifact.
 	SCM SCMInfo
+	// Images lists the images the manifests reference.
+	Images []images.Image
 	// Config is the config blob that was pushed.
 	Config Config
 }
@@ -114,6 +126,14 @@ func (p *Pipeline) Render(ctx context.Context, req RenderRequest) (*RenderResult
 		return nil, err
 	}
 
+	imgs, err := p.processImages(ctx, pulled.dir, req.Images, images.Stage{
+		Destination: &destRef,
+		DestClient:  dstClient,
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	logger.Info("Pushing artifact to destination")
 
 	annotations := buildAnnotations(AnnotationInputs{
@@ -129,6 +149,7 @@ func (p *Pipeline) Render(ctx context.Context, req RenderRequest) (*RenderResult
 	annotations[ocispec.AnnotationCreated] = created
 
 	config := completeConfig(req, sourceRef, destRef, created)
+	config.Images = imgs
 
 	data, err := config.Encode()
 	if err != nil {
@@ -152,6 +173,7 @@ func (p *Pipeline) Render(ctx context.Context, req RenderRequest) (*RenderResult
 		SourceRef: sourceRef,
 		DestRef:   destRef,
 		SCM:       scm,
+		Images:    imgs,
 		Config:    config,
 	}, nil
 }
@@ -185,6 +207,13 @@ type PreviewRequest struct {
 	Patches []PatchSpec
 	// Edits are applied on top of patches.
 	Edits []PatchSpec
+	// Images configures the image stage. A preview resolves and rewrites
+	// images but copies none, and leaves the references it cannot resolve
+	// as written.
+	Images ImageOptions
+	// Destination is the oci:// URL of the repository images would be
+	// vendored into. Without it, the Vendor policy pins the references.
+	Destination string
 	// Name and Namespace are used as Helm releaseName/namespace fallbacks.
 	Name      string
 	Namespace string
@@ -244,7 +273,35 @@ func (p *Pipeline) preview(ctx context.Context, req PreviewRequest) ([]File, err
 		return nil, err
 	}
 
+	if err := p.previewImages(ctx, pulled.dir, req); err != nil {
+		return nil, err
+	}
+
 	return listFiles(p.store.fs, pulled.dir)
+}
+
+// previewImages pins or vendors the images in dir as the render would,
+// without copying, within PreviewImagesTimeout. Under Record a render leaves
+// the manifests unchanged, so the preview looks nothing up.
+func (p *Pipeline) previewImages(ctx context.Context, dir string, req PreviewRequest) error {
+	if cmp.Or(req.Images.Policy, images.PolicyRecord) == images.PolicyRecord {
+		return nil
+	}
+
+	stage := images.Stage{DryRun: true}
+	if req.Destination != "" {
+		destination, err := oci.Parse(req.Destination)
+		if err != nil {
+			return fmt.Errorf("failed to parse destination ref: %w", err)
+		}
+		stage.Destination = &destination
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, p.PreviewImagesTimeout)
+	defer cancel()
+
+	_, err := p.processImages(ctx, dir, req.Images, stage)
+	return err
 }
 
 // ref returns the reference the source is pulled by: its digest when pinned,
@@ -305,30 +362,94 @@ func (p *Pipeline) renderToDir(ctx context.Context, dir string, render *RenderSp
 	// Remove the pulled chart blob so only rendered manifests are published.
 	_ = p.store.fs.Remove(filepath.Join(dir, "chart.tgz")) //nolint:errcheck
 
-	return p.processManifestFiles(ctx, dir, manifestPath, patches, edits)
+	return p.processManifestFiles(ctx, dir, patches, edits)
 }
 
-// processManifestFiles applies patches and edits to the manifest content in dir.
-// When manifestPath exists, only that file is processed. Otherwise every
-// top-level YAML file is processed individually, preserving the artifact's
-// original file layout.
-func (p *Pipeline) processManifestFiles(ctx context.Context, dir, manifestPath string, patches, edits []PatchSpec) error {
-	if _, err := p.store.fs.Stat(manifestPath); err == nil {
-		return p.processManifestFile(ctx, manifestPath, patches, edits)
-	}
-
-	files, err := listFiles(p.store.fs, dir)
+// processManifestFiles applies patches and edits to the manifest files in
+// dir (see manifestFiles), preserving the artifact's original file layout.
+func (p *Pipeline) processManifestFiles(ctx context.Context, dir string, patches, edits []PatchSpec) error {
+	paths, err := manifestFiles(p.store.fs, dir)
 	if err != nil {
 		return err
 	}
 
-	for _, file := range files {
-		if err := p.processManifestFile(ctx, filepath.Join(dir, file.Path), patches, edits); err != nil {
+	for _, path := range paths {
+		if err := p.processManifestFile(ctx, path, patches, edits); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+// manifestFiles returns the paths of the manifest files in dir: only
+// manifest.yaml when it exists, every YAML and JSON file otherwise.
+func manifestFiles(fs afero.Fs, dir string) ([]string, error) {
+	manifestPath := filepath.Join(dir, "manifest.yaml")
+	if _, err := fs.Stat(manifestPath); err == nil {
+		return []string{manifestPath}, nil
+	}
+
+	return manifestPaths(fs, dir)
+}
+
+// processImages runs the image stage over the manifest files in dir and
+// writes back what it rewrote. stage carries the destination and whether the
+// stage is a dry run; opts fills in the rest. Pin and Vendor need fully
+// rendered manifests: they fail on a source with a kustomization file, whose
+// image transformer and remote bases Argo CD applies later.
+func (p *Pipeline) processImages(ctx context.Context, dir string, opts ImageOptions, stage images.Stage) ([]images.Image, error) {
+	stage.Policy = cmp.Or(opts.Policy, images.PolicyRecord)
+	stage.Client = cmp.Or(opts.Client, p.store.client)
+	stage.Mirrors = opts.Mirrors
+	stage.Locked = opts.Locked
+	stage.DestClient = cmp.Or(stage.DestClient, p.store.client)
+
+	if stage.Policy != images.PolicyRecord && hasKustomization(p.store.fs, dir) {
+		return nil, fmt.Errorf("the %s image policy needs rendered manifests, but the source has a kustomization file that Argo CD renders later", stage.Policy)
+	}
+
+	paths, err := manifestFiles(p.store.fs, dir)
+	if err != nil {
+		return nil, err
+	}
+
+	manifests := make([]*images.Manifest, 0, len(paths))
+	for _, path := range paths {
+		content, err := afero.ReadFile(p.store.fs, path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read manifest: %w", err)
+		}
+
+		manifest, err := images.ParseManifest(content, opts.FieldSpecs)
+		if err != nil {
+			return nil, fmt.Errorf("failed to find images in %s: %w", filepath.Base(path), err)
+		}
+		manifests = append(manifests, manifest)
+	}
+
+	found, err := stage.Run(ctx, manifests)
+	if err != nil {
+		return nil, err
+	}
+
+	log.FromContext(ctx).Info("Processed images", "policy", stage.Policy, "count", len(found))
+
+	if stage.Policy == images.PolicyRecord {
+		return found, nil
+	}
+
+	for i, manifest := range manifests {
+		content, err := manifest.Encode()
+		if err != nil {
+			return nil, err
+		}
+		if err := afero.WriteFile(p.store.fs, paths[i], content, 0600); err != nil {
+			return nil, fmt.Errorf("failed to write manifest: %w", err)
+		}
+	}
+
+	return found, nil
 }
 
 // processManifestFile applies patches and edits to a single file in place.

@@ -27,7 +27,8 @@ capability:
 
 - **General**: the Argo CD base URL, stored as `spec.argoCDURL` and used to
   build deep links to applications on the Servings page. Leave it empty if you
-  do not want Argo CD links.
+  do not want Argo CD links. Also the image mirrors, stored in
+  `spec.images.mirrors`. See [Container Images](../../operator-guide/images/).
 - **Authentication**: the admin account and OIDC, stored in `spec.auth`. See
   [Authentication](../../operator-guide/authentication/).
 - **Signing**: the public key Kokumi signs with, the cosign commands that

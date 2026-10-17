@@ -217,3 +217,30 @@ func TestClientForPantry(t *testing.T) {
 		assert.Nil(t, client)
 	})
 }
+
+func TestCredentialsForSecret(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("dockerconfigjson Secret yields credentials per registry", func(t *testing.T) {
+		store, err := testResolver(t, testSecret()).CredentialsForSecret(ctx, testNamespace, testSecretName)
+		require.NoError(t, err)
+
+		cred, err := store.Get(ctx, "registry.example")
+		require.NoError(t, err)
+		assert.Equal(t, "user", cred.Username)
+		assert.Equal(t, "pass", cred.Password)
+	})
+
+	t.Run("Secret without docker config is an error", func(t *testing.T) {
+		secret := testSecret()
+		secret.Data = map[string][]byte{"token": []byte("x")}
+		_, err := testResolver(t, secret).CredentialsForSecret(ctx, testNamespace, testSecretName)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), ".dockerconfigjson")
+	})
+
+	t.Run("missing Secret is an error", func(t *testing.T) {
+		_, err := testResolver(t).CredentialsForSecret(ctx, testNamespace, testSecretName)
+		require.Error(t, err)
+	})
+}

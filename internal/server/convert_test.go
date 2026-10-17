@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
@@ -69,6 +70,41 @@ func TestProductToDTO(t *testing.T) {
 
 		require.Equal(t, overrides, overridesFromDTO(overridesToDTO(overrides)))
 	})
+
+	t.Run("an unset image policy reads as Record", func(t *testing.T) {
+		dto := productToDTO(deliveryv1alpha1.Product{})
+		require.Equal(t, string(deliveryv1alpha1.ImagePolicyRecord), dto.Images.Policy)
+	})
+
+	t.Run("image settings round-trip", func(t *testing.T) {
+		images := deliveryv1alpha1.ProductImages{
+			Policy:        deliveryv1alpha1.ImagePolicyVendor,
+			FieldSpecs:    []deliveryv1alpha1.ImageFieldSpec{{Group: "monitoring.coreos.com", Kind: prometheusKind, Path: imagePath}},
+			PullSecretRef: &corev1.LocalObjectReference{Name: "registry-credentials"},
+		}
+
+		require.Equal(t, images, productImagesFromDTO(productImagesToDTO(images)))
+	})
+}
+
+func TestPreparationToDTO_images(t *testing.T) {
+	images := []deliveryv1alpha1.PreparationImage{{
+		Ref:       nginxRef,
+		Name:      nginxName,
+		Digest:    "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+		MediaType: "application/vnd.oci.image.index.v1+json",
+		Vendored:  "registry.example.com/shop/app@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+	}}
+
+	dto := preparationToDTO(deliveryv1alpha1.Preparation{Spec: deliveryv1alpha1.PreparationSpec{Images: images}}, false)
+
+	require.Equal(t, []PreparationImageDTO{{
+		Ref:       images[0].Ref,
+		Name:      images[0].Name,
+		Digest:    images[0].Digest,
+		MediaType: images[0].MediaType,
+		Vendored:  images[0].Vendored,
+	}}, dto.Images)
 }
 
 // sortedKeys are the namespace/name pairs the list converters must return,

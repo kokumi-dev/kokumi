@@ -148,6 +148,56 @@ spec:
                     maxLength: 256
                     type: string
                 type: object
+              images:
+                description: |-
+                  images lists the container images the rendered manifests reference,
+                  resolved to digests when the Preparation was rendered. The artifact's
+                  config blob records the same list, with the reason for each image that
+                  could not be resolved.
+                items:
+                  description: PreparationImage is a container image the rendered
+                    manifests reference.
+                  properties:
+                    digest:
+                      description: |-
+                        digest is the manifest digest ref resolved to, with one of the
+                        algorithms the OCI image spec registers. Absent when the image could
+                        not be resolved, which only the Record policy allows.
+                      maxLength: 135
+                      pattern: ^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128})$
+                      type: string
+                    mediaType:
+                      description: |-
+                        mediaType is the media type of the manifest digest names: an image
+                        index for multi-platform images, an image manifest otherwise.
+                      maxLength: 255
+                      type: string
+                    name:
+                      description: |-
+                        name is the normalized repository of ref, for example
+                        "docker.io/library/nginx". Absent when ref is not a valid reference.
+                      maxLength: 512
+                      type: string
+                    ref:
+                      description: |-
+                        ref is the image reference as written in the manifests before any
+                        rewriting, for example "nginx:1.27".
+                      maxLength: 1024
+                      minLength: 1
+                      type: string
+                    vendored:
+                      description: |-
+                        vendored is the reference the manifests pull the image from after it
+                        was copied into the Preparation's repository. Set under the Vendor
+                        policy only.
+                      maxLength: 2048
+                      type: string
+                  required:
+                  - ref
+                  type: object
+                maxItems: 512
+                type: array
+                x-kubernetes-list-type: atomic
               orderName:
                 description: orderName is the name of the Order this preparation belongs
                   to

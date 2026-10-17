@@ -87,6 +87,7 @@ export default function PreparationLayout() {
           { to: paths.preparation(prep.namespace, prep.name), label: 'Overview', end: true },
           { to: paths.preparation(prep.namespace, prep.name, 'files'), label: 'Files' },
           { to: paths.preparation(prep.namespace, prep.name, 'changes'), label: 'Changes' },
+          { to: paths.preparation(prep.namespace, prep.name, 'images'), label: 'Images', count: prep.images?.length ?? 0 },
           { to: paths.preparation(prep.namespace, prep.name, 'intent'), label: 'Intent' },
           { to: paths.preparation(prep.namespace, prep.name, 'artifact'), label: 'Artifact' },
           ...(prep.approval

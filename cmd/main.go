@@ -237,11 +237,14 @@ func main() {
 	setupLog.Info("Resolved builder identity", "builder", builderID)
 
 	if err := (&controller.OrderReconciler{
-		Client:         mgr.GetClient(),
-		Scheme:         mgr.GetScheme(),
-		Pipeline:       artifactPipeline,
-		PantryResolver: credential.NewKubeResolver(mgr.GetClient()),
-		BuilderID:      builderID,
+		Client:           mgr.GetClient(),
+		APIReader:        mgr.GetAPIReader(),
+		Scheme:           mgr.GetScheme(),
+		Pipeline:         artifactPipeline,
+		PantryResolver:   credential.NewKubeResolver(mgr.GetClient()),
+		Recorder:         mgr.GetEventRecorder("kokumi-order-controller"),
+		InstallNamespace: installNamespace,
+		BuilderID:        builderID,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Order")
 		os.Exit(1)

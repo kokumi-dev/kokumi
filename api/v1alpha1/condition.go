@@ -51,6 +51,13 @@ const (
 	ReasonInUse = "InUse"
 )
 
+// Event reasons used by Orders.
+const (
+	// ReasonImageNotResolved reports in a Warning Event on an Order that
+	// images of its rendered manifests could not be resolved to digests.
+	ReasonImageNotResolved = "ImageNotResolved"
+)
+
 // Condition reasons used by the approval gate.
 const (
 	ReasonApproved            = "Approved"

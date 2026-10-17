@@ -32,8 +32,8 @@ func (c *failingResolveClient) ListTags(_ context.Context, _ oci.Reference) ([]s
 	return nil, nil
 }
 
-func (c *failingResolveClient) Resolve(_ context.Context, _ oci.Reference) (string, error) {
-	return "", assert.AnError
+func (c *failingResolveClient) Resolve(_ context.Context, _ oci.Reference) (oci.Descriptor, error) {
+	return oci.Descriptor{}, assert.AnError
 }
 
 func (c *failingResolveClient) PushReferrer(_ context.Context, _ oci.Reference, _ oci.ReferrerArtifact) (string, error) {
@@ -259,8 +259,8 @@ func (c *emptyFakeClient) ListTags(_ context.Context, _ oci.Reference) ([]string
 	return nil, nil
 }
 
-func (c *emptyFakeClient) Resolve(_ context.Context, _ oci.Reference) (string, error) {
-	return fakeDigest, nil
+func (c *emptyFakeClient) Resolve(_ context.Context, _ oci.Reference) (oci.Descriptor, error) {
+	return oci.Descriptor{Digest: fakeDigest}, nil
 }
 
 func (c *emptyFakeClient) PushReferrer(_ context.Context, _ oci.Reference, _ oci.ReferrerArtifact) (string, error) {

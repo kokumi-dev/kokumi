@@ -7,12 +7,15 @@ import { formatDate } from '../../utils/format'
 import { objectToYaml } from '../../utils/yaml'
 import {
   allowedTargetLabel,
+  describeImagePolicy,
   describePatchesPolicy,
   describeValuesPolicy,
+  imageFieldSpecLabel,
   patchesPolicy,
   valuesPolicy,
 } from '../../utils/products'
 import type { OverridePolicy, SourceVerify } from '../../api/types'
+import { imagePolicy } from '../../api/types'
 import { useSigningKeys } from '../../hooks/useSigningKeys'
 import { signerLabel, useProductContext, vendorLabel } from './productFormat'
 import layout from '../../components/layout/layout.module.css'
@@ -103,6 +106,38 @@ export default function ProductOverview() {
           <PatchList patches={product.patches} />
         </Section>
       )}
+
+      <Section title="Images" description="How the container images of every Order's manifests are handled">
+        <PropertyList
+          items={[
+            {
+              label: 'Policy',
+              value: (
+                <>
+                  {imagePolicy(product.images?.policy)}{' '}
+                  <span className={layout.muted}>· {describeImagePolicy(imagePolicy(product.images?.policy))}</span>
+                </>
+              ),
+            },
+            {
+              label: 'Image fields',
+              value: (
+                <>
+                  <span className={layout.muted}>Containers, init and ephemeral containers, image volumes</span>
+                  {(product.images?.fieldSpecs ?? []).map((f) => (
+                    <div key={imageFieldSpecLabel(f)} className={layout.mono}>{imageFieldSpecLabel(f)}</div>
+                  ))}
+                </>
+              ),
+            },
+            {
+              label: 'Pull Secret',
+              value: <span className={layout.mono}>{product.images?.pullSecretRef?.name}</span>,
+              show: !!product.images?.pullSecretRef?.name,
+            },
+          ]}
+        />
+      </Section>
 
       <Section title="Overrides" description="What Orders of this Product may change">
         <PropertyList

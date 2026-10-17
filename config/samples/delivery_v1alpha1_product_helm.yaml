@@ -29,3 +29,9 @@ spec:
         - ui.message
         - service.type
         - replicaCount
+
+  # Every image the chart runs is pinned to the digest its tag resolves to
+  # when an Order renders (repo:tag@sha256:...), so a Preparation always runs
+  # the same images. Each Preparation lists them on its Images tab.
+  images:
+    policy: Pin

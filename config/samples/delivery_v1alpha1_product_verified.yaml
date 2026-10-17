@@ -36,3 +36,11 @@ spec:
     verify:
       secretRef:
         name: testdata-signing-key
+
+  # Every image is copied, with all platforms and its signatures, into the
+  # repository of each Preparation, and the manifests pull it from there by
+  # digest: the release runs from kokumi-registry alone. Nodes must be able to
+  # pull from the Order's destination registry; the Kind setup configures
+  # that for kokumi-registry (hack/kind/registry-mirror.sh).
+  images:
+    policy: Vendor

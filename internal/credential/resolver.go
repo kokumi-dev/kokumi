@@ -45,6 +45,10 @@ type PantryResolver interface {
 	// CredentialsForPantry returns the registry credentials of the given
 	// pantry, or nil when it has none.
 	CredentialsForPantry(ctx context.Context, namespace, pantryName string) (credentials.Store, error)
+
+	// CredentialsForSecret returns the registry credentials of the given
+	// kubernetes.io/dockerconfigjson Secret.
+	CredentialsForSecret(ctx context.Context, namespace, secretName string) (credentials.Store, error)
 }
 
 // KubeResolver resolves Pantry CRD references into OCI URLs and authenticated
@@ -140,15 +144,12 @@ func (kr *KubeResolver) credentialsForPantry(ctx context.Context, namespace, pan
 		return &pantry, nil, nil
 	}
 
-	var secret corev1.Secret
-	if err := kr.Reader.Get(ctx, types.NamespacedName{
-		Namespace: namespace,
-		Name:      pantry.Spec.SecretRef.Name,
-	}, &secret); err != nil {
+	secret, err := kr.secret(ctx, namespace, pantry.Spec.SecretRef.Name)
+	if err != nil {
 		return nil, nil, fmt.Errorf("get credential Secret %q for Pantry %q: %w", pantry.Spec.SecretRef.Name, pantryName, err)
 	}
 
-	credData := secret.Data[".dockerconfigjson"]
+	credData := secret.Data[corev1.DockerConfigJsonKey]
 	if len(credData) == 0 {
 		return &pantry, nil, nil
 	}
@@ -159,4 +160,35 @@ func (kr *KubeResolver) credentialsForPantry(ctx context.Context, namespace, pan
 	}
 
 	return &pantry, credStore, nil
+}
+
+// CredentialsForSecret returns the registry credentials of the named
+// kubernetes.io/dockerconfigjson Secret. Unlike a Pantry's Secret, which may
+// be empty, a Secret named only for its credentials must hold some.
+func (kr *KubeResolver) CredentialsForSecret(ctx context.Context, namespace, secretName string) (credentials.Store, error) {
+	secret, err := kr.secret(ctx, namespace, secretName)
+	if err != nil {
+		return nil, fmt.Errorf("get credential Secret %q: %w", secretName, err)
+	}
+
+	credData := secret.Data[corev1.DockerConfigJsonKey]
+	if len(credData) == 0 {
+		return nil, fmt.Errorf("credential Secret %q has no %s key", secretName, corev1.DockerConfigJsonKey)
+	}
+
+	credStore, err := oci.CredentialsFromDockerConfigJSON(credData)
+	if err != nil {
+		return nil, fmt.Errorf("parse credentials in Secret %q: %w", secretName, err)
+	}
+
+	return credStore, nil
+}
+
+// secret fetches the named Secret.
+func (kr *KubeResolver) secret(ctx context.Context, namespace, name string) (*corev1.Secret, error) {
+	var secret corev1.Secret
+	if err := kr.Reader.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &secret); err != nil {
+		return nil, err
+	}
+	return &secret, nil
 }

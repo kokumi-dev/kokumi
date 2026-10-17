@@ -189,6 +189,21 @@ export interface Preparation {
   renderer: Renderer
   conditions?: Condition[]
   approval?: PreparationApproval
+  /** The container images the manifests reference, as resolved when rendered. */
+  images?: PreparationImage[]
+}
+
+/** A container image a Preparation's manifests reference. */
+export interface PreparationImage {
+  /** The reference as written in the manifests before any rewriting. */
+  ref: string
+  /** The normalized repository; absent when ref is not a valid reference. */
+  name?: string
+  /** Absent when the image could not be resolved, which only Record allows. */
+  digest?: string
+  mediaType?: string
+  /** Where the manifests pull the image from after vendoring. */
+  vendored?: string
 }
 
 /** What rendered a Preparation. The builder is reported by the controller itself. */
@@ -294,6 +309,8 @@ export interface ArtifactConfig {
   product?: { namespace: string; name: string; configHash?: string }
   renderer: Renderer
   intent?: unknown
+  /** The images as resolved when rendered, with why an image could not be resolved. */
+  images?: (PreparationImage & { error?: string })[]
 }
 
 export interface Serving {
@@ -348,6 +365,33 @@ export interface Overrides {
   patches: PatchOverrides
 }
 
+/** What Kokumi does with the container images of the rendered manifests. */
+export type ImagePolicy = 'Record' | 'Pin' | 'Vendor'
+
+export const imagePolicies: readonly ImagePolicy[] = ['Record', 'Pin', 'Vendor']
+
+/** Reads an image policy defensively: anything missing or unknown counts as Record. */
+export function imagePolicy(policy: string | undefined): ImagePolicy {
+  return imagePolicies.find((p) => p === policy) ?? 'Record'
+}
+
+/** A field of a custom resource that holds an image reference, in kustomize's FieldSpec shape. */
+export interface ImageFieldSpec {
+  group?: string
+  version?: string
+  kind: string
+  /** Slash-separated, with [] for list elements, e.g. spec/image. */
+  path: string
+}
+
+/** How a Product's images are recorded, pinned or vendored. */
+export interface ProductImages {
+  policy: ImagePolicy
+  fieldSpecs?: ImageFieldSpec[]
+  /** A kubernetes.io/dockerconfigjson Secret in the Product's namespace. */
+  pullSecretRef?: { name: string }
+}
+
 /** The source a Product's Orders render from: the vendored copy when vendoring is set. */
 export interface ResolvedSource {
   oci: string
@@ -368,6 +412,7 @@ export interface Product {
   render?: Render
   patches?: Patch[]
   overrides: Overrides
+  images: ProductImages
   resolvedSource?: ResolvedSource
   state?: string
   conditions?: Condition[]
@@ -479,6 +524,7 @@ export interface ProductFormData {
   patches: Patch[]
   /** Lists are only set with policy Listed. */
   overrides: Overrides
+  images: ProductImages
 }
 
 export const emptyProductForm = (): ProductFormData => ({
@@ -487,6 +533,14 @@ export const emptyProductForm = (): ProductFormData => ({
   source: { oci: '', version: '' },
   patches: [],
   overrides: { values: { policy: 'None' }, patches: { policy: 'None' } },
+  images: { policy: 'Record' },
+})
+
+/** A copy of a Product's image settings that leaves out what is unset. */
+const copyImages = (i?: ProductImages): ProductImages => ({
+  policy: imagePolicy(i?.policy),
+  ...(i?.fieldSpecs?.length ? { fieldSpecs: i.fieldSpecs.map((f) => ({ ...f })) } : {}),
+  ...(i?.pullSecretRef?.name ? { pullSecretRef: { name: i.pullSecretRef.name } } : {}),
 })
 
 /** A copy of a Product's overrides that keeps the lists only with policy Listed. */
@@ -525,6 +579,7 @@ export const productToFormData = (p: Product): ProductFormData => ({
       : undefined,
   patches: copyPatches(p.patches),
   overrides: copyOverrides(p.overrides),
+  images: copyImages(p.images),
 })
 
 // ── Preview request types ─────────────────────────────────────────────────────
@@ -535,6 +590,8 @@ export interface OrderPreviewRequest {
   name: string
   productRef: ProductRef
   values?: Record<string, unknown>
+  /** Where vendored images would be pulled from; the in-cluster registry when empty. */
+  destination?: OCIDestination
   patches?: Patch[]
   edits?: Patch[]
 }
@@ -546,6 +603,7 @@ export interface ProductPreviewRequest {
   source: OCISource
   render?: Render
   patches?: Patch[]
+  images?: ProductImages
 }
 
 export interface PantryFormData {

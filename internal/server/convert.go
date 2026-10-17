@@ -240,6 +240,15 @@ func preparationToDTO(p deliveryv1alpha1.Preparation, isActive bool) Preparation
 		Conditions: conditionsToDTO(p.Status.Conditions),
 		Approval:   preparationApprovalToDTO(p),
 	}
+	for _, img := range p.Spec.Images {
+		dto.Images = append(dto.Images, PreparationImageDTO{
+			Ref:       img.Ref,
+			Name:      img.Name,
+			Digest:    img.Digest,
+			MediaType: img.MediaType,
+			Vendored:  img.Vendored,
+		})
+	}
 	if !p.CreationTimestamp.IsZero() {
 		t := p.CreationTimestamp.UTC()
 		dto.CreatedAt = &t
@@ -599,6 +608,7 @@ func productToDTO(p deliveryv1alpha1.Product) ProductDTO {
 		Render:     renderToDTO(p.Spec.Render),
 		Patches:    patchesToDTO(p.Spec.Patches),
 		Overrides:  overridesToDTO(p.Spec.Overrides),
+		Images:     productImagesToDTO(p.Spec.Images),
 		State:      stateFromConditions(p.Status.Conditions),
 		Conditions: conditionsToDTO(p.Status.Conditions),
 	}
@@ -633,21 +643,47 @@ func productsToDTO(products []deliveryv1alpha1.Product) []ProductDTO {
 	return out
 }
 
-// productSpecFromDTO builds a ProductSpec from the fields of a create or
-// update request.
-func productSpecFromDTO(source OCISourceDTO, vendor *OCIDestinationDTO, render *RenderDTO, patches []PatchDTO, overrides OverridesDTO) deliveryv1alpha1.ProductSpec {
+// productSpecFromDTO builds a ProductSpec from a create or update request.
+func productSpecFromDTO(dto ProductSpecDTO) deliveryv1alpha1.ProductSpec {
 	spec := deliveryv1alpha1.ProductSpec{
-		Source:    sourceFromDTO(source),
-		Render:    renderFromDTO(render),
-		Patches:   patchesFromDTO(patches),
-		Overrides: overridesFromDTO(overrides),
+		Source:    sourceFromDTO(dto.Source),
+		Render:    renderFromDTO(dto.Render),
+		Patches:   patchesFromDTO(dto.Patches),
+		Overrides: overridesFromDTO(dto.Overrides),
+		Images:    productImagesFromDTO(dto.Images),
 	}
 	// An empty vendor destination is valid: the controller vendors to the
 	// in-cluster registry.
-	if vendor != nil {
+	if vendor := dto.Vendor; vendor != nil {
 		spec.Vendor = &deliveryv1alpha1.OCIDestination{OCI: vendor.OCI, PantryRef: pantryRefFromDTO(vendor.PantryRef)}
 	}
 	return spec
+}
+
+// productImagesToDTO converts ProductImages to its DTO representation. An
+// unset policy is reported as Record, which is what it means.
+func productImagesToDTO(images deliveryv1alpha1.ProductImages) ProductImagesDTO {
+	dto := ProductImagesDTO{
+		Policy:        string(images.EffectivePolicy()),
+		PullSecretRef: secretRefToDTO(images.PullSecretRef),
+	}
+	for _, fs := range images.FieldSpecs {
+		dto.FieldSpecs = append(dto.FieldSpecs, ImageFieldSpecDTO{Group: fs.Group, Version: fs.Version, Kind: fs.Kind, Path: fs.Path})
+	}
+	return dto
+}
+
+// productImagesFromDTO converts a ProductImagesDTO into the CRD type. An
+// empty policy is left for the API server to default.
+func productImagesFromDTO(dto ProductImagesDTO) deliveryv1alpha1.ProductImages {
+	images := deliveryv1alpha1.ProductImages{
+		Policy:        deliveryv1alpha1.ImagePolicy(dto.Policy),
+		PullSecretRef: secretRefFromDTO(dto.PullSecretRef),
+	}
+	for _, fs := range dto.FieldSpecs {
+		images.FieldSpecs = append(images.FieldSpecs, deliveryv1alpha1.ImageFieldSpec{Group: fs.Group, Version: fs.Version, Kind: fs.Kind, Path: fs.Path})
+	}
+	return images
 }
 
 // overridesToDTO converts Overrides to its DTO representation. An unset

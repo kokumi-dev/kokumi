@@ -61,6 +61,88 @@ spec:
           spec:
             description: spec defines the desired state of Product
             properties:
+              images:
+                default: {}
+                description: |-
+                  images configures how the container images the rendered manifests
+                  reference are recorded, pinned or vendored. It applies to every Order
+                  of the Product.
+                properties:
+                  fieldSpecs:
+                    description: |-
+                      fieldSpecs lists the fields of custom resources that hold image
+                      references, in addition to the containers, initContainers,
+                      ephemeralContainers and image volumes of every Pod template.
+                    items:
+                      description: |-
+                        ImageFieldSpec locates a field that holds a container image reference, in
+                        the shape of a kustomize FieldSpec.
+                      properties:
+                        group:
+                          description: |-
+                            group is the API group of the resources. Empty matches the core group
+                            and every other group.
+                          maxLength: 253
+                          type: string
+                        kind:
+                          description: kind is the kind of the resources, for example
+                            "Prometheus".
+                          maxLength: 63
+                          minLength: 1
+                          type: string
+                        path:
+                          description: |-
+                            path is the slash-separated path to the field, with [] for every
+                            element of a list, for example "spec/image" or
+                            "spec/sidecars[]/image".
+                          maxLength: 256
+                          minLength: 1
+                          type: string
+                        version:
+                          description: |-
+                            version is the API version of the resources. Empty matches every
+                            version.
+                          maxLength: 63
+                          type: string
+                      required:
+                      - kind
+                      - path
+                      type: object
+                    maxItems: 32
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  policy:
+                    default: Record
+                    description: |-
+                      policy controls what Kokumi does with the images: Record lists them by
+                      digest, Pin also rewrites the manifests to those digests, and Vendor
+                      copies the images into each Preparation's repository and rewrites the
+                      manifests to pull them from there.
+                    enum:
+                    - Record
+                    - Pin
+                    - Vendor
+                    type: string
+                  pullSecretRef:
+                    description: |-
+                      pullSecretRef names a kubernetes.io/dockerconfigjson Secret in the
+                      Product's namespace whose credentials are used, per registry host, to
+                      resolve and vendor the images. Like a Pod's imagePullSecrets, it lets
+                      everyone who may edit the Product use these credentials. Without it,
+                      registries are accessed anonymously.
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
+                type: object
               overrides:
                 default: {}
                 description: |-

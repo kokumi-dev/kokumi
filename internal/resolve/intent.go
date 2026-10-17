@@ -14,7 +14,8 @@ import (
 //
 // It deliberately leaves out everything that does not change what is rendered
 // or what must hold before it is served: the Product reference, Pantry names and
-// credentials, the promotion mode, and the commit message.
+// credentials, the image pull secret and mirrors, the digests images resolve
+// to, the promotion mode, and the commit message.
 type Intent struct {
 	// Source is the resolved source artifact.
 	Source IntentSource `json:"source"`
@@ -27,6 +28,9 @@ type Intent struct {
 	Patches []deliveryv1alpha1.Patch `json:"patches,omitempty"`
 	// Edits are applied on top of the patches.
 	Edits []deliveryv1alpha1.Patch `json:"edits,omitempty"`
+	// Images is how the images of the rendered manifests are handled. It is
+	// absent under the default Record policy without field specs.
+	Images *IntentImages `json:"images,omitempty"`
 	// Promotion holds the gates the artifact must pass before it is served.
 	Promotion *IntentPromotion `json:"promotion,omitempty"`
 }
@@ -40,6 +44,14 @@ type IntentSource struct {
 	// Digest pins the source to the artifact the Product resolved, so that
 	// the Product resolving a new artifact changes the intent.
 	Digest string `json:"digest"`
+}
+
+// IntentImages is the image handling that is part of an Intent.
+type IntentImages struct {
+	// Policy is the image policy.
+	Policy deliveryv1alpha1.ImagePolicy `json:"policy"`
+	// FieldSpecs locate image fields besides the default ones.
+	FieldSpecs []deliveryv1alpha1.ImageFieldSpec `json:"fieldSpecs,omitempty"`
 }
 
 // IntentPromotion holds the promotion gates that are part of an Intent.
@@ -57,6 +69,10 @@ func NewIntent(order *deliveryv1alpha1.Order, effective *EffectiveSpec, sourceOC
 		Render:      effective.Render,
 		Patches:     effective.Patches,
 		Edits:       effective.Edits,
+	}
+
+	if policy := effective.Images.EffectivePolicy(); policy != deliveryv1alpha1.ImagePolicyRecord || len(effective.Images.FieldSpecs) > 0 {
+		intent.Images = &IntentImages{Policy: policy, FieldSpecs: effective.Images.FieldSpecs}
 	}
 
 	if policy := order.ApprovalPolicy(); policy != nil {

@@ -3,7 +3,10 @@ package artifact
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -46,8 +49,8 @@ func (c *countingFakeClient) ListTags(_ context.Context, _ oci.Reference) ([]str
 	return nil, nil
 }
 
-func (c *countingFakeClient) Resolve(_ context.Context, _ oci.Reference) (string, error) {
-	return fakeDigest, nil
+func (c *countingFakeClient) Resolve(_ context.Context, _ oci.Reference) (oci.Descriptor, error) {
+	return oci.Descriptor{Digest: fakeDigest}, nil
 }
 
 func (c *countingFakeClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Reference, _ oci.CopyOptions) error {
@@ -263,4 +266,57 @@ func TestPullCacheKey_SplitsByLayout(t *testing.T) {
 		pullCacheKey(ref, LayoutSingle),
 		pullCacheKey(ref, layoutRaw),
 		"raw pulls must not share cache entries with consolidated layouts")
+}
+
+func TestPullCache_ConcurrentPullsRestoreCompleteEntries(t *testing.T) {
+	fs := afero.NewOsFs()
+	cacheDir := t.TempDir()
+	content := strings.Repeat("kind: ConfigMap\n", 4096)
+
+	client := &contentFakeClient{fs: fs, content: []byte(content)}
+	store := NewStore(client, fs, cacheDir)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 16)
+	for range 16 {
+		wg.Go(func() {
+			pulled, err := store.pull(context.Background(), client, parseRef(t), LayoutMulti, "cache-test-*")
+			if err != nil {
+				errs <- err
+				return
+			}
+			defer store.cleanup(pulled.dir)
+			data, err := afero.ReadFile(fs, filepath.Join(pulled.dir, "manifest.yaml"))
+			if err != nil {
+				errs <- err
+				return
+			}
+			if string(data) != content {
+				errs <- fmt.Errorf("restored %d of %d bytes", len(data), len(content))
+			}
+		})
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		assert.NoError(t, err)
+	}
+	leftovers, err := filepath.Glob(filepath.Join(cacheDir, ".tmp-*"))
+	require.NoError(t, err)
+	assert.Empty(t, leftovers, "temporary entries are removed")
+}
+
+// contentFakeClient pulls a manifest.yaml with the given content.
+type contentFakeClient struct {
+	countingFakeClient
+	fs      afero.Fs
+	content []byte
+}
+
+func (c *contentFakeClient) Pull(_ context.Context, _ oci.Reference, targetDir string) (string, string, map[string]string, error) {
+	if err := afero.WriteFile(c.fs, filepath.Join(targetDir, "manifest.yaml"), c.content, 0600); err != nil {
+		return "", "", nil, err
+	}
+	return "", fakeDigest, nil, nil
 }

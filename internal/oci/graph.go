@@ -91,8 +91,8 @@ func Walk(ctx context.Context, client Client, ref Reference) (*Graph, error) {
 	case ref.Tag != "":
 		tagged := repo
 		tagged.Tag = ref.Tag
-		if digest, err := client.Resolve(ctx, tagged); err == nil {
-			graph.TagDigest = digest
+		if desc, err := client.Resolve(ctx, tagged); err == nil {
+			graph.TagDigest = desc.Digest
 		}
 	}
 

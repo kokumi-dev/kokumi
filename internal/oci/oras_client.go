@@ -21,6 +21,7 @@ import (
 	"github.com/oras-project/oras-go/v3/registry/remote"
 	"github.com/oras-project/oras-go/v3/registry/remote/auth"
 	"github.com/oras-project/oras-go/v3/registry/remote/credentials"
+	"github.com/oras-project/oras-go/v3/registry/remote/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
@@ -29,7 +30,9 @@ import (
 // (hosts ending in .svc, .svc.<domain>, or bare IP/localhost) and HTTPS
 // for all other hosts.
 type ORASClient struct {
-	credStore credentials.Store
+	// authClient authenticates every repository of the client, sharing
+	// one token cache. Nil means anonymous, through auth.DefaultClient.
+	authClient *auth.Client
 }
 
 var _ Client = (*ORASClient)(nil)
@@ -40,9 +43,12 @@ func NewORASClient() *ORASClient {
 }
 
 // NewAuthenticatedORASClient returns an ORASClient that authenticates requests
-// using the provided credential store.
+// using the provided credential store, or an anonymous one when it is nil.
 func NewAuthenticatedORASClient(credStore credentials.Store) *ORASClient {
-	return &ORASClient{credStore: credStore}
+	if credStore == nil {
+		return NewORASClient()
+	}
+	return &ORASClient{authClient: newAuthClient(credStore)}
 }
 
 // newRepository creates a configured remote.Repository for the given ref,
@@ -55,20 +61,24 @@ func (c *ORASClient) newRepository(ref string) (*remote.Repository, error) {
 
 	repo.Registry.PlainHTTP = IsPlainHTTP(ref)
 
-	if c.credStore != nil {
-		repo.Registry.Client = newAuthClient(c.credStore)
+	if c.authClient != nil {
+		repo.Registry.Client = c.authClient
 	}
 
 	return repo, nil
 }
 
 // newAuthClient returns an auth client that reads credentials from credStore.
-// It keeps the distribution token flow for username/password credentials;
-// oras-go v3 would otherwise default to the OAuth2 password grant, which not
-// every registry serves.
+// Like auth.DefaultClient, which anonymous clients use, it caches tokens and
+// retries rate-limited and failed requests. It keeps the distribution token
+// flow for username/password credentials; oras-go v3 would otherwise default
+// to the OAuth2 password grant, which not every registry serves.
 func newAuthClient(credStore credentials.Store) *auth.Client {
 	client := &auth.Client{
+		Client:         retry.DefaultClient,
+		Header:         auth.DefaultClient.Header.Clone(),
 		CredentialFunc: remote.NewCredentialFunc(credStore),
+		Cache:          auth.NewCache(),
 	}
 	client.TokenFetcher = auth.NewCompositeTokenFetcher(client.Client, client.Header, client.ClientID, true)
 
@@ -311,19 +321,20 @@ func (c *ORASClient) ListTags(ctx context.Context, ref Reference) ([]string, err
 	return tags, nil
 }
 
-// Resolve resolves ref (tag or digest) to the manifest digest of the artifact.
-func (c *ORASClient) Resolve(ctx context.Context, ref Reference) (string, error) {
+// Resolve resolves ref (tag or digest) to the descriptor of the manifest it
+// names.
+func (c *ORASClient) Resolve(ctx context.Context, ref Reference) (Descriptor, error) {
 	repo, err := c.newRepository(ref.RepositoryReference())
 	if err != nil {
-		return "", fmt.Errorf("create repository for %q: %w", ref, err)
+		return Descriptor{}, fmt.Errorf("create repository for %q: %w", ref, err)
 	}
 
 	desc, err := repo.Resolve(ctx, ref.GetReference())
 	if err != nil {
-		return "", fmt.Errorf("resolve %s: %w", ref, err)
+		return Descriptor{}, fmt.Errorf("resolve %s: %w", ref, err)
 	}
 
-	return desc.Digest.String(), nil
+	return Descriptor{MediaType: desc.MediaType, Digest: desc.Digest.String(), Size: desc.Size}, nil
 }
 
 // Copy copies the artifact at srcRef (in this client's registry) and

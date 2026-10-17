@@ -464,6 +464,55 @@ spec:
                     type: object
                     x-kubernetes-map-type: atomic
                 type: object
+              images:
+                description: |-
+                  images configures how Kokumi reaches the registries of the container
+                  images that rendered manifests reference.
+                properties:
+                  mirrors:
+                    description: |-
+                      mirrors redirects image lookups and copies to mirror registries. Like
+                      a registries.conf prefix with a location, the mirror with the longest
+                      prefix of an image's normalized name replaces that prefix, without
+                      falling back to the original registry. Manifests and records keep the
+                      original name, so nodes pull through their own mirror configuration.
+                    items:
+                      description: ImageMirror maps a repository prefix to the location
+                        of its mirror.
+                      properties:
+                        location:
+                          description: |-
+                            location is the oci:// URL the prefix is replaced with, for example
+                            "oci://harbor.example.com/dockerhub" for a pull-through cache.
+                            Credentials for it come from the Product's images.pullSecretRef.
+                          maxLength: 2048
+                          type: string
+                          x-kubernetes-validations:
+                          - message: must be a valid OCI URL
+                            rule: isURL(self) && url(self).getScheme() == 'oci'
+                        prefix:
+                          description: |-
+                            prefix is a normalized repository prefix, matched at path boundaries:
+                            a registry such as "docker.io" or a namespace such as
+                            "docker.io/library". It starts with a registry host, as every
+                            normalized name does.
+                          maxLength: 255
+                          minLength: 1
+                          pattern: ^[a-z0-9]([-a-z0-9.:]*[a-z0-9])?(/[a-z0-9]+([._-][a-z0-9]+)*)*$
+                          type: string
+                          x-kubernetes-validations:
+                          - message: must start with a registry host, such as docker.io
+                            rule: self.matches('^(localhost|[^/]*[.:][^/]*)(/|$)')
+                      required:
+                      - location
+                      - prefix
+                      type: object
+                    maxItems: 32
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - prefix
+                    x-kubernetes-list-type: map
+                type: object
               signing:
                 description: |-
                   signing configures which keys Kokumi trusts besides its own signing
@@ -1281,6 +1330,56 @@ spec:
                     maxLength: 256
                     type: string
                 type: object
+              images:
+                description: |-
+                  images lists the container images the rendered manifests reference,
+                  resolved to digests when the Preparation was rendered. The artifact's
+                  config blob records the same list, with the reason for each image that
+                  could not be resolved.
+                items:
+                  description: PreparationImage is a container image the rendered
+                    manifests reference.
+                  properties:
+                    digest:
+                      description: |-
+                        digest is the manifest digest ref resolved to, with one of the
+                        algorithms the OCI image spec registers. Absent when the image could
+                        not be resolved, which only the Record policy allows.
+                      maxLength: 135
+                      pattern: ^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128})$
+                      type: string
+                    mediaType:
+                      description: |-
+                        mediaType is the media type of the manifest digest names: an image
+                        index for multi-platform images, an image manifest otherwise.
+                      maxLength: 255
+                      type: string
+                    name:
+                      description: |-
+                        name is the normalized repository of ref, for example
+                        "docker.io/library/nginx". Absent when ref is not a valid reference.
+                      maxLength: 512
+                      type: string
+                    ref:
+                      description: |-
+                        ref is the image reference as written in the manifests before any
+                        rewriting, for example "nginx:1.27".
+                      maxLength: 1024
+                      minLength: 1
+                      type: string
+                    vendored:
+                      description: |-
+                        vendored is the reference the manifests pull the image from after it
+                        was copied into the Preparation's repository. Set under the Vendor
+                        policy only.
+                      maxLength: 2048
+                      type: string
+                  required:
+                  - ref
+                  type: object
+                maxItems: 512
+                type: array
+                x-kubernetes-list-type: atomic
               orderName:
                 description: orderName is the name of the Order this preparation belongs
                   to
@@ -1644,6 +1743,88 @@ spec:
           spec:
             description: spec defines the desired state of Product
             properties:
+              images:
+                default: {}
+                description: |-
+                  images configures how the container images the rendered manifests
+                  reference are recorded, pinned or vendored. It applies to every Order
+                  of the Product.
+                properties:
+                  fieldSpecs:
+                    description: |-
+                      fieldSpecs lists the fields of custom resources that hold image
+                      references, in addition to the containers, initContainers,
+                      ephemeralContainers and image volumes of every Pod template.
+                    items:
+                      description: |-
+                        ImageFieldSpec locates a field that holds a container image reference, in
+                        the shape of a kustomize FieldSpec.
+                      properties:
+                        group:
+                          description: |-
+                            group is the API group of the resources. Empty matches the core group
+                            and every other group.
+                          maxLength: 253
+                          type: string
+                        kind:
+                          description: kind is the kind of the resources, for example
+                            "Prometheus".
+                          maxLength: 63
+                          minLength: 1
+                          type: string
+                        path:
+                          description: |-
+                            path is the slash-separated path to the field, with [] for every
+                            element of a list, for example "spec/image" or
+                            "spec/sidecars[]/image".
+                          maxLength: 256
+                          minLength: 1
+                          type: string
+                        version:
+                          description: |-
+                            version is the API version of the resources. Empty matches every
+                            version.
+                          maxLength: 63
+                          type: string
+                      required:
+                      - kind
+                      - path
+                      type: object
+                    maxItems: 32
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  policy:
+                    default: Record
+                    description: |-
+                      policy controls what Kokumi does with the images: Record lists them by
+                      digest, Pin also rewrites the manifests to those digests, and Vendor
+                      copies the images into each Preparation's repository and rewrites the
+                      manifests to pull them from there.
+                    enum:
+                    - Record
+                    - Pin
+                    - Vendor
+                    type: string
+                  pullSecretRef:
+                    description: |-
+                      pullSecretRef names a kubernetes.io/dockerconfigjson Secret in the
+                      Product's namespace whose credentials are used, per registry host, to
+                      resolve and vendor the images. Like a Pod's imagePullSecrets, it lets
+                      everyone who may edit the Product use these credentials. Without it,
+                      registries are accessed anonymously.
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
+                type: object
               overrides:
                 default: {}
                 description: |-
@@ -2933,6 +3114,13 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - events.k8s.io
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole

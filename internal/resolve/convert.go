@@ -6,6 +6,7 @@ import (
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
+	"github.com/kokumi-dev/kokumi/internal/images"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 )
 
@@ -16,6 +17,9 @@ type ArtifactSpec struct {
 	Render  *artifact.RenderSpec
 	Patches []artifact.PatchSpec
 	Edits   []artifact.PatchSpec
+	// Images holds the image policy and field specs; the caller adds the
+	// registry client and mirrors.
+	Images artifact.ImageOptions
 }
 
 // ToArtifactSpec converts the effective spec into pipeline inputs.
@@ -30,7 +34,18 @@ func (e *EffectiveSpec) ToArtifactSpec() (*ArtifactSpec, error) {
 		Render:  render,
 		Patches: toPatchSpecs(e.Patches),
 		Edits:   toPatchSpecs(e.Edits),
+		Images:  toImageOptions(e.Images),
 	}, nil
+}
+
+// toImageOptions converts a Product's image settings into the pipeline's
+// image options, without client and mirrors.
+func toImageOptions(spec deliveryv1alpha1.ProductImages) artifact.ImageOptions {
+	opts := artifact.ImageOptions{Policy: images.Policy(spec.EffectivePolicy())}
+	for _, fs := range spec.FieldSpecs {
+		opts.FieldSpecs = append(opts.FieldSpecs, images.FieldSpec{Group: fs.Group, Version: fs.Version, Kind: fs.Kind, Path: fs.Path})
+	}
+	return opts
 }
 
 // toRenderSpec converts a CRD Render into a pipeline RenderSpec.

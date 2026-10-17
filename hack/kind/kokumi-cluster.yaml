@@ -2,6 +2,12 @@
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 name: kokumi
+# containerd reads per-registry hosts.toml files from here;
+# hack/kind/registry-mirror.sh writes the one for the bundled registry.
+containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".registry]
+      config_path = "/etc/containerd/certs.d"
 nodes:
   - role: control-plane
     extraPortMappings:
