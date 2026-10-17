@@ -1,8 +1,11 @@
 package renderer
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 
@@ -29,70 +32,65 @@ type Patch struct {
 	Set map[string]string
 }
 
-// ApplyPatches applies patches to YAML content, preserving document order, comments,
-// and formatting. Returns the modified content, or the original content unchanged if
-// no patches matched.
-func ApplyPatches(ctx context.Context, content []byte, patches []Patch) ([]byte, error) {
-	log := ctrl.LoggerFrom(ctx)
+// Process normalizes YAML content and applies patches to it, one document at a
+// time: it decodes a document, applies the patches that target it, encodes it
+// with 2-space indentation and drops it before decoding the next. Memory
+// follows the largest document instead of the whole content. Every output is
+// formatted the same way, whether patches matched or not, so the same source
+// always yields the same bytes. A document that does not parse fails with its
+// 1-based index.
+func Process(ctx context.Context, content []byte, patches []Patch) ([]byte, error) {
+	decoder := yaml.NewDecoder(bytes.NewReader(content))
 
-	decoder := yaml.NewDecoder(strings.NewReader(string(content)))
-
-	var documents []*yaml.Node
-	modified := false
-
-	for {
+	var out bytes.Buffer
+	for i := 1; ; i++ {
 		var doc yaml.Node
 		if err := decoder.Decode(&doc); err != nil {
-			break
+			if errors.Is(err, io.EOF) {
+				return out.Bytes(), nil
+			}
+			return nil, fmt.Errorf("document %d: %w", i, err)
 		}
 
-		if applyPatchesToNode(ctx, &doc, patches) {
-			modified = true
+		applyPatchesToNode(ctx, &doc, patches)
+
+		if i > 1 {
+			out.WriteString("---\n")
 		}
-
-		documents = append(documents, &doc)
+		if err := encodeDocument(&out, &doc); err != nil {
+			return nil, fmt.Errorf("document %d: %w", i, err)
+		}
 	}
-
-	if modified {
-		log.Info("Patches applied to YAML content")
-		return marshalYAMLNodes(documents)
-	}
-
-	return content, nil
 }
 
-// NormalizeYAML parses and re-serializes YAML to produce consistent formatting.
-// This guarantees that manifests rendered without any patches have identical bytes
-// for the same source, making content-addressed comparisons reliable.
-func NormalizeYAML(content []byte) ([]byte, error) {
-	decoder := yaml.NewDecoder(strings.NewReader(string(content)))
+// encodeDocument writes doc to w with 2-space indentation, as one encoder
+// writes each document of a stream after the separator. Every document gets
+// its own encoder because an encoder keeps every event it emitted until it is
+// dropped, which would make memory follow the whole stream.
+func encodeDocument(w io.Writer, doc *yaml.Node) error {
+	encoder := yaml.NewEncoder(w)
+	encoder.SetIndent(2)
 
-	var documents []*yaml.Node
-
-	for {
-		var doc yaml.Node
-		if err := decoder.Decode(&doc); err != nil {
-			break
-		}
-
-		documents = append(documents, &doc)
+	if err := encoder.Encode(doc); err != nil {
+		return fmt.Errorf("failed to encode: %w", err)
 	}
 
-	return marshalYAMLNodes(documents)
+	if err := encoder.Close(); err != nil {
+		return fmt.Errorf("failed to encode: %w", err)
+	}
+
+	return nil
 }
 
-// applyPatchesToNode applies patches to a single YAML document node.
-// Returns true if any patch was applied.
-func applyPatchesToNode(ctx context.Context, docNode *yaml.Node, patches []Patch) bool {
-	log := ctrl.LoggerFrom(ctx)
-
-	if docNode.Kind != yaml.DocumentNode || len(docNode.Content) == 0 {
-		return false
+// applyPatchesToNode applies the patches that target a single YAML document.
+func applyPatchesToNode(ctx context.Context, docNode *yaml.Node, patches []Patch) {
+	if len(patches) == 0 || docNode.Kind != yaml.DocumentNode || len(docNode.Content) == 0 {
+		return
 	}
 
 	root := docNode.Content[0]
 	if root.Kind != yaml.MappingNode {
-		return false
+		return
 	}
 
 	kind := getYAMLNodeField(root, "kind")
@@ -100,10 +98,10 @@ func applyPatchesToNode(ctx context.Context, docNode *yaml.Node, patches []Patch
 	namespace := getYAMLNodeField(root, "metadata", "namespace")
 
 	if kind == "" || name == "" {
-		return false
+		return
 	}
 
-	modified := false
+	log := ctrl.LoggerFrom(ctx)
 
 	for _, patch := range patches {
 		if patch.Target.Kind != kind || patch.Target.Name != name {
@@ -125,11 +123,8 @@ func applyPatchesToNode(ctx context.Context, docNode *yaml.Node, patches []Patch
 			}
 
 			log.Info("Applied patch", "path", jsonPath, "value", value)
-			modified = true
 		}
 	}
-
-	return modified
 }
 
 // getYAMLNodeField retrieves a scalar value from a YAML mapping node by path.
@@ -274,24 +269,6 @@ func createYAMLNode(value any) *yaml.Node {
 	}
 
 	return node
-}
-
-// marshalYAMLNodes re-encodes a slice of YAML document nodes with consistent 2-space indentation.
-func marshalYAMLNodes(documents []*yaml.Node) ([]byte, error) {
-	var builder strings.Builder
-
-	encoder := yaml.NewEncoder(&builder)
-	encoder.SetIndent(2)
-
-	for _, doc := range documents {
-		if err := encoder.Encode(doc); err != nil {
-			return nil, fmt.Errorf("failed to encode document: %w", err)
-		}
-	}
-
-	encoder.Close() //nolint:errcheck
-
-	return []byte(builder.String()), nil
 }
 
 // parseArrayIndex parses "containers[0]" into the field name "containers" and index 0.

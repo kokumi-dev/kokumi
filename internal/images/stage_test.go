@@ -61,6 +61,17 @@ func registry() *oci.FakeClient {
 	}}
 }
 
+// run runs stage over the references of manifest and rewrites it, as the
+// render pipeline does.
+func run(stage Stage, manifest *Manifest) ([]Image, error) {
+	images, rewrites, err := stage.Run(context.Background(), manifest.References())
+	if err != nil {
+		return nil, err
+	}
+	manifest.Rewrite(rewrites)
+	return images, nil
+}
+
 func parse(t *testing.T, content string) *Manifest {
 	t.Helper()
 	manifest, err := ParseManifest([]byte(content), nil)
@@ -86,17 +97,17 @@ func encode(t *testing.T, manifest *Manifest) string {
 
 func TestStage_recordResolvesWithoutRewriting(t *testing.T) {
 	client := registry()
-	manifest := parse(t, stageManifest+`        - name: missing
+	refs, err := FindReferences([]byte(stageManifest+`        - name: missing
           image: ghcr.io/example/missing:1
         - name: broken
           image: "UPPER:case"
-`)
-	before := encode(t, manifest)
-
-	images, err := Stage{Client: client}.Run(context.Background(), []*Manifest{manifest})
+`), nil)
 	require.NoError(t, err)
 
-	assert.Equal(t, before, encode(t, manifest))
+	images, rewrites, err := Stage{Client: client}.Run(context.Background(), refs)
+	require.NoError(t, err)
+
+	assert.Nil(t, rewrites)
 	require.Len(t, images, 5)
 	assert.Equal(t, Image{Ref: "UPPER:case", Error: images[0].Error}, images[0])
 	assert.Contains(t, images[0].Error, "invalid image reference")
@@ -111,7 +122,7 @@ func TestStage_recordResolvesWithoutRewriting(t *testing.T) {
 func TestStage_pinKeepsNameAndTag(t *testing.T) {
 	manifest := parse(t, stageManifest)
 
-	images, err := Stage{Policy: PolicyPin, Client: registry()}.Run(context.Background(), []*Manifest{manifest})
+	images, err := run(Stage{Policy: PolicyPin, Client: registry()}, manifest)
 	require.NoError(t, err)
 	require.Len(t, images, 3)
 
@@ -126,7 +137,7 @@ func TestStage_pinFailsOnUnresolvedImages(t *testing.T) {
           image: ghcr.io/example/missing:1
 `)
 
-	_, err := Stage{Policy: PolicyPin, Client: registry()}.Run(context.Background(), []*Manifest{manifest})
+	_, err := run(Stage{Policy: PolicyPin, Client: registry()}, manifest)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ghcr.io/example/missing:1")
 	assert.Contains(t, err.Error(), "Pin image policy")
@@ -140,7 +151,7 @@ func TestStage_vendorCopiesEachDigestOnceAndRewrites(t *testing.T) {
 	destination.Tag = "1.0.0"
 
 	manifest := parse(t, stageManifest)
-	images, err := Stage{Policy: PolicyVendor, Client: client, Destination: &destination, DestClient: dest}.Run(context.Background(), []*Manifest{manifest})
+	images, err := run(Stage{Policy: PolicyVendor, Client: client, Destination: &destination, DestClient: dest}, manifest)
 	require.NoError(t, err)
 
 	vendoredApp := "kokumi-registry.kokumi.svc.cluster.local:5000/shop/web@" + appDigest
@@ -172,7 +183,7 @@ func TestStage_dryRunNeverCopiesOrFails(t *testing.T) {
 	manifest := parse(t, stageManifest+`        - name: missing
           image: ghcr.io/example/missing:1
 `)
-	_, err = Stage{Policy: PolicyVendor, Client: client, Destination: &destination, DryRun: true}.Run(context.Background(), []*Manifest{manifest})
+	_, err = run(Stage{Policy: PolicyVendor, Client: client, Destination: &destination, DryRun: true}, manifest)
 	require.NoError(t, err)
 
 	assert.Empty(t, client.Copies)
@@ -185,7 +196,7 @@ func TestStage_vendorWithoutDestinationPins(t *testing.T) {
 	client := registry()
 	manifest := parse(t, stageManifest)
 
-	_, err := Stage{Policy: PolicyVendor, Client: client, DryRun: true}.Run(context.Background(), []*Manifest{manifest})
+	_, err := run(Stage{Policy: PolicyVendor, Client: client, DryRun: true}, manifest)
 	require.NoError(t, err)
 
 	assert.Contains(t, encode(t, manifest), "image: nginx:1.27@"+nginxDigest+"\n")
@@ -207,13 +218,13 @@ spec:
     - name: web
       image: nginx:1.27
 `)
-	images, err := Stage{
+	images, err := run(Stage{
 		Policy:      PolicyVendor,
 		Client:      client,
 		Mirrors:     []Mirror{{Prefix: dockerHub, Location: "harbor.example.com/dockerhub"}, {Prefix: "docker.io/other", Location: "unused.example.com"}},
 		Destination: &destination,
 		DestClient:  &oci.FakeClient{},
-	}.Run(context.Background(), []*Manifest{manifest})
+	}, manifest)
 	require.NoError(t, err)
 
 	require.Len(t, images, 1)
@@ -293,7 +304,7 @@ func TestStage_rejectsMoreImagesThanAPreparationRecords(t *testing.T) {
 	}
 	client := registry()
 
-	_, err := Stage{Client: client}.Run(context.Background(), []*Manifest{parse(t, podManifest(refs...))})
+	_, err := run(Stage{Client: client}, parse(t, podManifest(refs...)))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "513 images")
 	assert.Empty(t, client.Resolves, "nothing is looked up")
@@ -303,7 +314,7 @@ func TestStage_rejectsOverlongReferences(t *testing.T) {
 	client := registry()
 	manifest := parse(t, podManifest(nginxRef, "ghcr.io/example/"+strings.Repeat("a", MaxRefLength)+":1"))
 
-	_, err := Stage{Client: client}.Run(context.Background(), []*Manifest{manifest})
+	_, err := run(Stage{Client: client}, manifest)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "longer than 1024 characters")
 	assert.Empty(t, client.Resolves, "nothing is looked up")
@@ -322,7 +333,7 @@ func TestStage_unreachableRegistryIsTriedOnce(t *testing.T) {
 		"ghcr.io/example/app:2.0", "ghcr.io/example/gone:1", "ghcr.io/example/gone:2",
 	))
 
-	images, err := Stage{Client: client}.Run(context.Background(), []*Manifest{manifest})
+	images, err := run(Stage{Client: client}, manifest)
 	require.NoError(t, err)
 
 	tried := map[string]int{}
@@ -345,7 +356,7 @@ func TestStage_pinKeepsLockedDigests(t *testing.T) {
 	manifest := parse(t, stageManifest)
 	locked := []Image{{Ref: nginxRef, Name: nginxName, Digest: movedDigest, MediaType: ocispec.MediaTypeImageIndex}}
 
-	images, err := Stage{Policy: PolicyPin, Client: client, Locked: locked}.Run(context.Background(), []*Manifest{manifest})
+	images, err := run(Stage{Policy: PolicyPin, Client: client, Locked: locked}, manifest)
 	require.NoError(t, err)
 
 	require.Len(t, images, 3)
@@ -361,7 +372,7 @@ func TestStage_recordIgnoresLocks(t *testing.T) {
 	client := registry()
 	locked := []Image{{Ref: nginxRef, Name: nginxName, Digest: movedDigest}}
 
-	images, err := Stage{Client: client, Locked: locked}.Run(context.Background(), []*Manifest{parse(t, stageManifest)})
+	images, err := run(Stage{Client: client, Locked: locked}, parse(t, stageManifest))
 	require.NoError(t, err)
 
 	assert.Equal(t, nginxDigest, images[2].Digest)
@@ -374,9 +385,9 @@ func TestStage_vendorSkipsImagesTheLockVendoredAlready(t *testing.T) {
 	vendoredNginx := bundled + "@" + nginxDigest
 	locked := []Image{{Ref: nginxRef, Name: nginxName, Digest: nginxDigest, MediaType: ocispec.MediaTypeImageIndex, Vendored: vendoredNginx}}
 
-	images, err := Stage{
+	images, err := run(Stage{
 		Policy: PolicyVendor, Client: client, Destination: bundledDestination(t), DestClient: dest, Locked: locked,
-	}.Run(context.Background(), []*Manifest{parse(t, stageManifest)})
+	}, parse(t, stageManifest))
 	require.NoError(t, err)
 
 	assert.Equal(t, vendoredNginx, images[2].Vendored)
@@ -390,9 +401,9 @@ func TestStage_vendorCopiesLockedImagesThatAreGone(t *testing.T) {
 	dest := &oci.FakeClient{Resolved: map[string]oci.Descriptor{}}
 	locked := []Image{{Ref: nginxRef, Name: nginxName, Digest: nginxDigest, Vendored: bundled + "@" + nginxDigest}}
 
-	_, err := Stage{
+	_, err := run(Stage{
 		Policy: PolicyVendor, Client: client, Destination: bundledDestination(t), DestClient: dest, Locked: locked,
-	}.Run(context.Background(), []*Manifest{parse(t, stageManifest)})
+	}, parse(t, stageManifest))
 	require.NoError(t, err)
 
 	assert.Contains(t, copies(client), nginxName+"@"+nginxDigest+" -> "+bundled+"@"+nginxDigest)
@@ -402,9 +413,9 @@ func TestStage_vendorCopiesLockedImagesToANewDestination(t *testing.T) {
 	client := registry()
 	locked := []Image{{Ref: nginxRef, Name: nginxName, Digest: movedDigest, Vendored: "registry.example.com/old/web@" + movedDigest}}
 
-	_, err := Stage{
+	_, err := run(Stage{
 		Policy: PolicyVendor, Client: client, Destination: bundledDestination(t), DestClient: &oci.FakeClient{}, Locked: locked,
-	}.Run(context.Background(), []*Manifest{parse(t, stageManifest)})
+	}, parse(t, stageManifest))
 	require.NoError(t, err)
 
 	assert.Contains(t, copies(client), nginxName+"@"+movedDigest+" -> "+bundled+"@"+movedDigest,
@@ -450,9 +461,9 @@ func TestStage_vendorCopiesInParallel(t *testing.T) {
 	}
 	client := &barrierClient{FakeClient: &oci.FakeClient{Resolved: resolved}, full: make(chan struct{})}
 
-	_, err := Stage{
+	_, err := run(Stage{
 		Policy: PolicyVendor, Client: client, Destination: bundledDestination(t), DestClient: &oci.FakeClient{},
-	}.Run(context.Background(), []*Manifest{parse(t, podManifest(refs...))})
+	}, parse(t, podManifest(refs...)))
 	require.NoError(t, err)
 
 	assert.Len(t, client.Copies, maxParallelCopies+1)
@@ -463,9 +474,9 @@ func TestStage_vendorFailsWhenACopyFails(t *testing.T) {
 	client := registry()
 	client.CopyErr = errors.New("blob upload refused")
 
-	_, err := Stage{
+	_, err := run(Stage{
 		Policy: PolicyVendor, Client: client, Destination: bundledDestination(t), DestClient: &oci.FakeClient{},
-	}.Run(context.Background(), []*Manifest{parse(t, stageManifest)})
+	}, parse(t, stageManifest))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "blob upload refused")
 }

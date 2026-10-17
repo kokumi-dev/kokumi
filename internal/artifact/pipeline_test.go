@@ -211,6 +211,32 @@ func TestPipeline_Render_PatchesThenEdits(t *testing.T) {
 		"edits are applied after patches and must win on the same field")
 }
 
+func TestPipeline_Render_processesEveryDocument(t *testing.T) {
+	const indented = "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n    name: web\nspec:\n    replicas: 1\n"
+
+	t.Run("patches that match nothing still normalize", func(t *testing.T) {
+		p, client := newFilesPipeline(map[string]string{testManifestFile: indented})
+
+		req := baseRenderRequest()
+		req.Patches = []artifact.PatchSpec{
+			{Target: artifact.PatchTargetSpec{Kind: kindDeployment, Name: "missing"}, Set: map[string]string{replicasPatchPath: "3"}},
+		}
+
+		_, err := p.Render(context.Background(), req)
+		require.NoError(t, err)
+		assert.Equal(t, "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec:\n  replicas: 1\n", client.lastPushedFiles[testManifestFile])
+	})
+
+	t.Run("a syntax error in a later document fails the render", func(t *testing.T) {
+		p, client := newFilesPipeline(map[string]string{testManifestFile: indented + "---\nkind: [unclosed\n"})
+
+		_, err := p.Render(context.Background(), baseRenderRequest())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "failed to process manifest.yaml: document 2:")
+		assert.Nil(t, client.lastPushedFiles, "a truncated manifest is never pushed")
+	})
+}
+
 func TestPipeline_PullCache(t *testing.T) {
 	const cacheDir = "/cache"
 

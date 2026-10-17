@@ -414,11 +414,24 @@ func (p *Pipeline) processImages(ctx context.Context, dir string, opts ImageOpti
 		return nil, err
 	}
 
-	manifests := make([]*images.Manifest, 0, len(paths))
+	var (
+		refs      []string
+		manifests []*images.Manifest
+	)
 	for _, path := range paths {
 		content, err := afero.ReadFile(p.store.fs, path)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read manifest: %w", err)
+		}
+
+		// Record rewrites nothing, so it keeps no parsed documents.
+		if stage.Policy == images.PolicyRecord {
+			found, err := images.FindReferences(content, opts.FieldSpecs)
+			if err != nil {
+				return nil, fmt.Errorf("failed to find images in %s: %w", filepath.Base(path), err)
+			}
+			refs = append(refs, found...)
+			continue
 		}
 
 		manifest, err := images.ParseManifest(content, opts.FieldSpecs)
@@ -426,20 +439,20 @@ func (p *Pipeline) processImages(ctx context.Context, dir string, opts ImageOpti
 			return nil, fmt.Errorf("failed to find images in %s: %w", filepath.Base(path), err)
 		}
 		manifests = append(manifests, manifest)
+		refs = append(refs, manifest.References()...)
 	}
 
-	found, err := stage.Run(ctx, manifests)
+	found, rewrites, err := stage.Run(ctx, refs)
 	if err != nil {
 		return nil, err
 	}
 
 	log.FromContext(ctx).Info("Processed images", "policy", stage.Policy, "count", len(found))
 
-	if stage.Policy == images.PolicyRecord {
-		return found, nil
-	}
-
 	for i, manifest := range manifests {
+		if !manifest.Rewrite(rewrites) {
+			continue
+		}
 		content, err := manifest.Encode()
 		if err != nil {
 			return nil, err
@@ -461,7 +474,7 @@ func (p *Pipeline) processManifestFile(ctx context.Context, path string, patches
 
 	processed, err := p.processManifest(ctx, content, patches, edits)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to process %s: %w", filepath.Base(path), err)
 	}
 
 	if err := afero.WriteFile(p.store.fs, path, processed, 0600); err != nil {
@@ -471,47 +484,24 @@ func (p *Pipeline) processManifestFile(ctx context.Context, path string, patches
 	return nil
 }
 
-// processManifest applies patches and edits when present, otherwise normalizes
-// YAML formatting. Patches are applied first, then edits on top.
+// processManifest normalizes content and applies patches, then edits on top,
+// one document at a time.
 func (p *Pipeline) processManifest(ctx context.Context, content []byte, patches, edits []PatchSpec) ([]byte, error) {
-	logger := log.FromContext(ctx)
+	processed, err := renderer.Process(ctx, content, toRendererPatches(patches))
+	if err != nil {
+		return nil, err
+	}
 
-	if len(patches) == 0 && len(edits) == 0 {
-		logger.Info("Normalizing YAML formatting")
-
-		processed, err := renderer.NormalizeYAML(content)
-		if err != nil {
-			return nil, fmt.Errorf("failed to normalize YAML: %w", err)
-		}
-
+	if len(edits) == 0 {
 		return processed, nil
 	}
 
-	result := content
-
-	if len(patches) > 0 {
-		logger.Info("Applying patches", "count", len(patches))
-
-		processed, err := renderer.ApplyPatches(ctx, result, toRendererPatches(patches))
-		if err != nil {
-			return nil, fmt.Errorf("failed to apply patches: %w", err)
-		}
-
-		result = processed
+	processed, err = renderer.Process(ctx, processed, toRendererPatches(edits))
+	if err != nil {
+		return nil, fmt.Errorf("failed to apply edits: %w", err)
 	}
 
-	if len(edits) > 0 {
-		logger.Info("Applying edits", "count", len(edits))
-
-		processed, err := renderer.ApplyPatches(ctx, result, toRendererPatches(edits))
-		if err != nil {
-			return nil, fmt.Errorf("failed to apply edits: %w", err)
-		}
-
-		result = processed
-	}
-
-	return result, nil
+	return processed, nil
 }
 
 // toRendererPatches converts pipeline patch specs to renderer patches.
