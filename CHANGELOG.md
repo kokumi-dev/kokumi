@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.18.0](https://github.com/kokumi-dev/kokumi/compare/0.17.0...0.18.0) (2026-10-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* render each preview once and join files the same way everywhere ([#457](https://github.com/kokumi-dev/kokumi/issues/457))
+* sign artifacts and verify sources ([#447](https://github.com/kokumi-dev/kokumi/issues/447))
+* replace Menu with Product and make Orders its variants ([#445](https://github.com/kokumi-dev/kokumi/issues/445))
+* add provenance and intent handling for preparations ([#439](https://github.com/kokumi-dev/kokumi/issues/439))
+
+### Features
+
+* add provenance and intent handling for preparations ([#439](https://github.com/kokumi-dev/kokumi/issues/439)) ([0e653b0](https://github.com/kokumi-dev/kokumi/commit/0e653b06fd9c233ce5b7fa958da46121cd1f5220))
+* align the order graph with artifact ([#452](https://github.com/kokumi-dev/kokumi/issues/452)) ([b3ee431](https://github.com/kokumi-dev/kokumi/commit/b3ee4311aa286846d3c7b6dfae0aacb9bbd40684))
+* draw OCI artifacts and verify every signature of a source ([#451](https://github.com/kokumi-dev/kokumi/issues/451)) ([58433e4](https://github.com/kokumi-dev/kokumi/commit/58433e448b389eef7a7e9020a62d6be7dcf55d61))
+* raise memory limits and set gomemlimit on server ([#455](https://github.com/kokumi-dev/kokumi/issues/455)) ([ee3a482](https://github.com/kokumi-dev/kokumi/commit/ee3a48208be9762ebafaf72ab31870fa108d9056))
+* record, pin or vendor the images every preparation runs ([#453](https://github.com/kokumi-dev/kokumi/issues/453)) ([befd20f](https://github.com/kokumi-dev/kokumi/commit/befd20f19b878920442ee87976efc48596059fb7))
+* refactor user capabilities management ([#444](https://github.com/kokumi-dev/kokumi/issues/444)) ([0acd1ce](https://github.com/kokumi-dev/kokumi/commit/0acd1ce818723e77fec99c64fb6c3871f7a46e95))
+* replace Menu with Product and make Orders its variants ([#445](https://github.com/kokumi-dev/kokumi/issues/445)) ([c76042a](https://github.com/kokumi-dev/kokumi/commit/c76042a4f173208adcb69abadb53e71a3b4d7ff6))
+* sign artifacts and verify sources ([#447](https://github.com/kokumi-dev/kokumi/issues/447)) ([517ab45](https://github.com/kokumi-dev/kokumi/commit/517ab45ac345726b222403019c3a05625345c772))
+* update OCI client to support referrers API and index management ([#434](https://github.com/kokumi-dev/kokumi/issues/434)) ([37f31f1](https://github.com/kokumi-dev/kokumi/commit/37f31f1aa62cbb4483191640d97d41dd240d2ba3))
+* use distribution fork with OCI referrers API ([#432](https://github.com/kokumi-dev/kokumi/issues/432)) ([f4db64f](https://github.com/kokumi-dev/kokumi/commit/f4db64f873fb1252ed27b13a3ed104a8e5c36008))
+
+
+### Bug Fixes
+
+* render each preview once and join files the same way everywhere ([#457](https://github.com/kokumi-dev/kokumi/issues/457)) ([dcdb3a3](https://github.com/kokumi-dev/kokumi/commit/dcdb3a35781d20f0334040aee9473c01dcc034e0))
+* show the kokumi icon instead of hextras defaults ([#454](https://github.com/kokumi-dev/kokumi/issues/454)) ([df30434](https://github.com/kokumi-dev/kokumi/commit/df3043482e831e62c224d31945c23c75e88c6250))
+* stop serving status loop and list flickering in the UI ([#446](https://github.com/kokumi-dev/kokumi/issues/446)) ([a7a780e](https://github.com/kokumi-dev/kokumi/commit/a7a780e907e4f539eadd73e6df40a760b3998277))
+
 ## [0.17.0](https://github.com/kokumi-dev/kokumi/compare/0.16.0...0.17.0) (2026-10-11)
 
 
