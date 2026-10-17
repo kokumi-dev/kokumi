@@ -11,22 +11,25 @@ import type {
   ChartInfo,
   FileLayout,
   HelmRender,
+  ImageFieldSpec,
+  ImagePolicy,
   OCIDestination,
   OCISource,
   OverridePolicy,
   Overrides,
   Product,
   ProductFormData,
+  ProductImages,
   ProductPreviewRequest,
   Render,
   SourceVerify,
 } from '../../api/types'
-import { emptyProductForm, overridePolicies, productToFormData } from '../../api/types'
+import { emptyProductForm, imagePolicies, overridePolicies, productToFormData } from '../../api/types'
 import { getChartInfo, listOCITags, previewProduct, previewProductFiles } from '../../api/client'
 import { cleanTags } from '../../api/ociTags'
 import { usePantries } from '../../hooks/usePantries'
 import { assertKnownKeys, patchesFromYaml, patchesToYaml } from '../../utils/yaml'
-import { describePatchesPolicy, describeValuesPolicy } from '../../utils/products'
+import { describeImagePolicy, describePatchesPolicy, describeValuesPolicy } from '../../utils/products'
 import styles from '../shared/Form.module.css'
 
 interface Props {
@@ -123,7 +126,61 @@ function formToYaml(data: ProductFormData): string {
   }
   if (data.patches.length > 0) doc.patches = patchesToYaml(data.patches)
   doc.overrides = overridesToYaml(data.overrides)
+  const images = imagesToYaml(data.images)
+  if (images) doc.images = images
   return dump(doc, { lineWidth: 100 })
+}
+
+/** The image settings as written in YAML; absent when they are the default. */
+function imagesToYaml(i: ProductImages): Record<string, unknown> | undefined {
+  const doc: Record<string, unknown> = {}
+  if (i.policy !== 'Record') doc.policy = i.policy
+  if (i.fieldSpecs?.length) {
+    doc.fieldSpecs = i.fieldSpecs.map((f) => ({
+      ...(f.group ? { group: f.group } : {}),
+      ...(f.version ? { version: f.version } : {}),
+      kind: f.kind,
+      path: f.path,
+    }))
+  }
+  if (i.pullSecretRef?.name) doc.pullSecretRef = { name: i.pullSecretRef.name }
+  return Object.keys(doc).length ? doc : undefined
+}
+
+function imagesFromYaml(raw: unknown): ProductImages {
+  if (raw === undefined || raw === null) return { policy: 'Record' }
+  if (!isMapping(raw)) throw new Error('images must be a mapping')
+  assertKnownKeys(raw, ['policy', 'fieldSpecs', 'pullSecretRef'], 'images')
+  const policy = imagePolicies.find((p) => p === (raw.policy ?? 'Record'))
+  if (!policy) throw new Error('images.policy must be Record, Pin or Vendor')
+  const images: ProductImages = { policy }
+  if (raw.fieldSpecs !== undefined && raw.fieldSpecs !== null) {
+    if (!Array.isArray(raw.fieldSpecs)) throw new Error('images.fieldSpecs must be a list')
+    images.fieldSpecs = raw.fieldSpecs.map((f: unknown, i: number) => {
+      const entry = isMapping(f) ? f : {}
+      assertKnownKeys(entry, ['group', 'version', 'kind', 'path'], `images.fieldSpecs[${i}]`)
+      return {
+        group: entry.group ? String(entry.group) : undefined,
+        version: entry.version ? String(entry.version) : undefined,
+        kind: String(entry.kind ?? ''),
+        path: String(entry.path ?? ''),
+      }
+    })
+  }
+  if (raw.pullSecretRef !== undefined && raw.pullSecretRef !== null) {
+    if (!isMapping(raw.pullSecretRef)) throw new Error('images.pullSecretRef must be a mapping with a name')
+    assertKnownKeys(raw.pullSecretRef, ['name'], 'images.pullSecretRef')
+    images.pullSecretRef = { name: String(raw.pullSecretRef.name ?? '') }
+  }
+  return images
+}
+
+/** Why the image settings cannot be saved: every field spec needs a kind and a path. */
+function imagesError(i: ProductImages): string | null {
+  if (i.fieldSpecs?.some((f) => !f.kind.trim() || !f.path.trim())) {
+    return 'Every image field needs a kind and a path'
+  }
+  return null
 }
 
 /** The overrides as written in YAML; the lists only appear with policy Listed. */
@@ -209,7 +266,7 @@ function overridesError(o: Overrides): string | null {
 function yamlToPartialForm(text: string): Omit<ProductFormData, 'name' | 'namespace'> {
   const doc = load(text) as Record<string, unknown>
   if (!isMapping(doc)) throw new Error('YAML must be a mapping')
-  assertKnownKeys(doc, ['source', 'vendor', 'render', 'patches', 'overrides'], '')
+  assertKnownKeys(doc, ['source', 'vendor', 'render', 'patches', 'overrides', 'images'], '')
 
   // Source — exactly one of oci or pantryRef
   const src = isMapping(doc.source) ? doc.source : {}
@@ -255,12 +312,12 @@ function yamlToPartialForm(text: string): Omit<ProductFormData, 'name' | 'namesp
   // Overrides — absent policies are None, as on the server
   const overrides = overridesFromYaml(doc.overrides)
 
-  return { source, vendor, render, patches: patchesFromYaml(doc.patches), overrides }
+  return { source, vendor, render, patches: patchesFromYaml(doc.patches), overrides, images: imagesFromYaml(doc.images) }
 }
 
 function previewRequest(data: ProductFormData): ProductPreviewRequest | null {
   if (!(data.source.oci || data.source.pantryRef?.name) || !data.source.version) return null
-  return { namespace: data.namespace, name: data.name, source: data.source, render: data.render, patches: data.patches }
+  return { namespace: data.namespace, name: data.name, source: data.source, render: data.render, patches: data.patches, images: data.images }
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -313,7 +370,7 @@ export default function ProductForm({ product, onCancel, onSubmit, onDirtyChange
         return
       }
     }
-    const invalid = overridesError(data.overrides) ?? verifyError(data.source.verify)
+    const invalid = overridesError(data.overrides) ?? verifyError(data.source.verify) ?? imagesError(data.images)
     if (invalid) {
       setSubmitError(invalid)
       return
@@ -426,6 +483,7 @@ function FormView({ formData, isEdit, onChange }: FormViewProps) {
 
   const [isVendorOpen, setIsVendorOpen] = useState(!!formData.vendor)
   const [isVerifyOpen, setIsVerifyOpen] = useState(!!formData.source.verify)
+  const [isImagesOpen, setIsImagesOpen] = useState(!!imagesToYaml(formData.images))
 
   // Source type: 'oci' = direct URL, 'pantry' = named Pantry provides the URL
   const [sourceMode, setSourceMode] = useState<'oci' | 'pantry'>(
@@ -546,6 +604,10 @@ function FormView({ formData, isEdit, onChange }: FormViewProps) {
       ? `keys in ${verify.secretRef}`
       : `${verify.matchOIDCIdentity?.length ?? 0} signer identit${(verify.matchOIDCIdentity?.length ?? 0) === 1 ? 'y' : 'ies'}`
     : undefined
+  const imageFields = formData.images.fieldSpecs?.length ?? 0
+  const imagesSummary = imageFields
+    ? `${formData.images.policy}, ${imageFields} extra field${imageFields === 1 ? '' : 's'}`
+    : formData.images.policy
   const vendorSummary = formData.vendor &&
     (formData.vendor.oci || (formData.vendor.pantryRef?.name ? `pantry: ${formData.vendor.pantryRef.name}` : 'in-cluster registry'))
 
@@ -694,6 +756,11 @@ function FormView({ formData, isEdit, onChange }: FormViewProps) {
         />
       </div>
 
+      {/* Images (collapsible) */}
+      <Disclosure label="Images" summary={imagesSummary} open={isImagesOpen} onOpenChange={setIsImagesOpen}>
+        <ImagesEditor images={formData.images} onChange={(images) => setField('images', images)} />
+      </Disclosure>
+
       {/* Source verification (collapsible) */}
       <Disclosure label="Verify source" summary={verifySummary} open={isVerifyOpen} onOpenChange={setIsVerifyOpen}>
         <VerifyEditor
@@ -723,6 +790,112 @@ function FormView({ formData, isEdit, onChange }: FormViewProps) {
           )}
         </div>
       </Disclosure>
+    </div>
+  )
+}
+
+// ── ImagesEditor ──────────────────────────────────────────────────────────────
+
+interface ImagesEditorProps {
+  images: ProductImages
+  onChange: (images: ProductImages) => void
+}
+
+/**
+ * ImagesEditor edits how the container images of the rendered manifests are
+ * handled: the policy, the custom resource fields that hold images, and the
+ * Secret whose credentials resolve and copy them.
+ */
+function ImagesEditor({ images, onChange }: ImagesEditorProps) {
+  const fieldSpecs = images.fieldSpecs ?? []
+
+  function setFieldSpecs(next: ImageFieldSpec[]) {
+    onChange({ ...images, fieldSpecs: next.length ? next : undefined })
+  }
+
+  function setFieldSpec(index: number, change: Partial<ImageFieldSpec>) {
+    setFieldSpecs(fieldSpecs.map((f, i) => (i === index ? { ...f, ...change } : f)))
+  }
+
+  return (
+    <div className={styles.formGrid} style={{ gap: 10, marginTop: 4 }}>
+      <div className={styles.fieldGroup}>
+        <label className={styles.label}>Policy</label>
+        <select
+          className={styles.input}
+          value={images.policy}
+          onChange={(e) => onChange({ ...images, policy: e.target.value as ImagePolicy })}
+        >
+          {imagePolicies.map((p) => (
+            <option key={p} value={p}>{p}</option>
+          ))}
+        </select>
+        <span className={styles.hint}>
+          {describeImagePolicy(images.policy)}.
+          {images.policy === 'Vendor' && ' Nodes must be able to pull from each Order\'s destination registry.'}
+        </span>
+      </div>
+
+      <div className={styles.fieldGroup}>
+        <label className={styles.label}>Image fields of custom resources</label>
+        <span className={styles.hint}>
+          Containers, init containers, ephemeral containers and image volumes are always searched.
+          Add the fields of custom resources that hold an image, e.g. kind <code>Prometheus</code>,
+          path <code>spec/image</code>.
+        </span>
+        {fieldSpecs.map((f, i) => (
+          <div key={i} className={styles.row2}>
+            <div className={styles.row2}>
+              <input
+                className={styles.input}
+                aria-label="Group"
+                value={f.group ?? ''}
+                onChange={(e) => setFieldSpec(i, { group: e.target.value || undefined })}
+                placeholder="group, e.g. monitoring.coreos.com"
+              />
+              <input
+                className={styles.input}
+                aria-label="Kind"
+                value={f.kind}
+                onChange={(e) => setFieldSpec(i, { kind: e.target.value })}
+                placeholder="Kind"
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input
+                className={styles.input}
+                aria-label="Path"
+                value={f.path}
+                onChange={(e) => setFieldSpec(i, { path: e.target.value })}
+                placeholder="spec/image"
+              />
+              <IconButton aria-label="Remove image field" onClick={() => setFieldSpecs(fieldSpecs.filter((_, j) => j !== i))}>
+                <CloseIcon />
+              </IconButton>
+            </div>
+          </div>
+        ))}
+        <div>
+          <Button variant="secondary" onClick={() => setFieldSpecs([...fieldSpecs, { kind: '', path: '' }])}>
+            <PlusIcon /> Add image field
+          </Button>
+        </div>
+      </div>
+
+      <div className={styles.fieldGroup}>
+        <label className={styles.label}>Pull Secret (optional)</label>
+        <input
+          className={styles.input}
+          value={images.pullSecretRef?.name ?? ''}
+          onChange={(e) => onChange({ ...images, pullSecretRef: e.target.value ? { name: e.target.value } : undefined })}
+          placeholder="registry-credentials"
+        />
+        <span className={styles.hint}>
+          A <code>kubernetes.io/dockerconfigjson</code> Secret in the Product&apos;s namespace. Its
+          credentials are used per registry to resolve and vendor the images; without it,
+          registries are read anonymously.
+        </span>
+      </div>
     </div>
   )
 }

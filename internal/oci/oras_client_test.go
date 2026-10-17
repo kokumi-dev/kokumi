@@ -4,10 +4,17 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/stretchr/testify/require"
 )
 
@@ -132,4 +139,44 @@ func TestExtractGzipTar(t *testing.T) {
 
 		require.Error(t, extractGzipTar(buf, FluxContentMediaType, dir))
 	})
+}
+
+func TestORASClient_authenticatedClientCachesTokens(t *testing.T) {
+	const digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	var tokens, challenges atomic.Int32
+
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/token":
+			tokens.Add(1)
+			_, _ = w.Write([]byte(`{"token":"tok"}`))
+		case r.Header.Get("Authorization") != "Bearer tok":
+			challenges.Add(1)
+			w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer realm="%s/token",service="test",scope="repository:app:pull"`, srv.URL))
+			w.WriteHeader(http.StatusUnauthorized)
+		default:
+			w.Header().Set("Content-Type", ocispec.MediaTypeImageManifest)
+			w.Header().Set("Docker-Content-Digest", digest)
+			w.Header().Set("Content-Length", "2")
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer srv.Close()
+
+	host := strings.TrimPrefix(srv.URL, "http://")
+	creds, err := CredentialsFromDockerConfigJSON(fmt.Appendf(nil, `{"auths":{%q:{"username":"u","password":"p"}}}`, host))
+	require.NoError(t, err)
+	ref, err := Parse(host + "/app:1")
+	require.NoError(t, err)
+
+	client := NewAuthenticatedORASClient(creds)
+	for range 2 {
+		desc, err := client.Resolve(context.Background(), ref)
+		require.NoError(t, err)
+		require.Equal(t, digest, desc.Digest)
+	}
+
+	require.Equal(t, int32(1), tokens.Load(), "the token is fetched once")
+	require.Equal(t, int32(1), challenges.Load(), "the second request carries the cached token")
 }

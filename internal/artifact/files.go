@@ -14,7 +14,33 @@ import (
 // their paths relative to dir, sorted by path. This is the richer superset
 // semantics previously implemented (divergently) in the server.
 func listFiles(fs afero.Fs, dir string) ([]File, error) {
-	var files []File
+	paths, err := manifestPaths(fs, dir)
+	if err != nil {
+		return nil, err
+	}
+
+	files := make([]File, 0, len(paths))
+	for _, path := range paths {
+		data, err := afero.ReadFile(fs, path)
+		if err != nil {
+			return nil, fmt.Errorf("reading %s: %w", path, err)
+		}
+
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			rel = filepath.Base(path)
+		}
+
+		files = append(files, File{Path: filepath.ToSlash(rel), Content: string(data)})
+	}
+
+	return files, nil
+}
+
+// manifestPaths walks dir recursively and returns the paths of all
+// .yaml/.yml/.json files, sorted, without reading them.
+func manifestPaths(fs afero.Fs, dir string) ([]string, error) {
+	var paths []string
 
 	err := afero.Walk(fs, dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -25,30 +51,18 @@ func listFiles(fs afero.Fs, dir string) ([]File, error) {
 		}
 
 		ext := strings.ToLower(filepath.Ext(path))
-		if ext != ".yaml" && ext != ".yml" && ext != ".json" {
-			return nil
+		if ext == ".yaml" || ext == ".yml" || ext == ".json" {
+			paths = append(paths, path)
 		}
-
-		data, err := afero.ReadFile(fs, path)
-		if err != nil {
-			return fmt.Errorf("reading %s: %w", path, err)
-		}
-
-		rel, err := filepath.Rel(dir, path)
-		if err != nil {
-			rel = filepath.Base(path)
-		}
-
-		files = append(files, File{Path: filepath.ToSlash(rel), Content: string(data)})
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	slices.SortFunc(files, func(a, b File) int { return strings.Compare(a.Path, b.Path) })
+	slices.Sort(paths)
 
-	return files, nil
+	return paths, nil
 }
 
 // joinFiles concatenates file contents with "---" separators.

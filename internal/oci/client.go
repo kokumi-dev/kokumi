@@ -87,8 +87,9 @@ type Client interface {
 	// is unreachable or the repository does not exist.
 	ListTags(ctx context.Context, ref Reference) ([]string, error)
 
-	// Resolve resolves ref (tag or digest) to the manifest digest of the artifact.
-	Resolve(ctx context.Context, ref Reference) (digest string, err error)
+	// Resolve resolves ref (tag or digest) to the descriptor of the manifest
+	// it names: its digest, media type and size.
+	Resolve(ctx context.Context, ref Reference) (Descriptor, error)
 
 	// Copy copies the artifact at srcRef (in this client's registry) and
 	// everything it references (index children, config, layers) to dstRef (in

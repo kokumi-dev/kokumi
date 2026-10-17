@@ -15,6 +15,7 @@ export default function ProductPreview() {
           source: product.source,
           render: product.render,
           patches: product.patches,
+          images: product.images,
         }}
         renderManifest={previewProduct}
         renderFiles={previewProductFiles}

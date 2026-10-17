@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -92,11 +93,14 @@ var _ = Describe("Order Controller", func() {
 			By("Reconciling the created resource")
 			fs := afero.NewMemMapFs()
 			controllerReconciler := &OrderReconciler{
-				Client:         k8sClient,
-				Scheme:         k8sClient.Scheme(),
-				Pipeline:       artifact.NewPipeline(artifact.NewStore(oci.NewFakeClient(fs), fs, "")),
-				PantryResolver: credential.NewKubeResolver(k8sClient),
-				BuilderID:      testBuilderID,
+				Client:           k8sClient,
+				APIReader:        k8sClient,
+				Scheme:           k8sClient.Scheme(),
+				Pipeline:         artifact.NewPipeline(artifact.NewStore(oci.NewFakeClient(fs), fs, "")),
+				PantryResolver:   credential.NewKubeResolver(k8sClient),
+				Recorder:         events.NewFakeRecorder(100),
+				InstallNamespace: testNamespace,
+				BuilderID:        testBuilderID,
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
@@ -121,11 +125,14 @@ var _ = Describe("Order Controller", func() {
 		newReconciler := func() *OrderReconciler {
 			fs := afero.NewMemMapFs()
 			return &OrderReconciler{
-				Client:         k8sClient,
-				Scheme:         k8sClient.Scheme(),
-				Pipeline:       artifact.NewPipeline(artifact.NewStore(oci.NewFakeClient(fs), fs, "")),
-				PantryResolver: credential.NewKubeResolver(k8sClient),
-				BuilderID:      testBuilderID,
+				Client:           k8sClient,
+				APIReader:        k8sClient,
+				Scheme:           k8sClient.Scheme(),
+				Pipeline:         artifact.NewPipeline(artifact.NewStore(oci.NewFakeClient(fs), fs, "")),
+				PantryResolver:   credential.NewKubeResolver(k8sClient),
+				Recorder:         events.NewFakeRecorder(100),
+				InstallNamespace: testNamespace,
+				BuilderID:        testBuilderID,
 			}
 		}
 
@@ -398,11 +405,14 @@ var _ = Describe("Order Controller", func() {
 		newReconciler := func() *OrderReconciler {
 			fs := afero.NewMemMapFs()
 			return &OrderReconciler{
-				Client:         k8sClient,
-				Scheme:         k8sClient.Scheme(),
-				Pipeline:       artifact.NewPipeline(artifact.NewStore(oci.NewFakeClient(fs), fs, "")),
-				PantryResolver: credential.NewKubeResolver(k8sClient),
-				BuilderID:      testBuilderID,
+				Client:           k8sClient,
+				APIReader:        k8sClient,
+				Scheme:           k8sClient.Scheme(),
+				Pipeline:         artifact.NewPipeline(artifact.NewStore(oci.NewFakeClient(fs), fs, "")),
+				PantryResolver:   credential.NewKubeResolver(k8sClient),
+				Recorder:         events.NewFakeRecorder(100),
+				InstallNamespace: testNamespace,
+				BuilderID:        testBuilderID,
 			}
 		}
 
@@ -531,11 +541,14 @@ var _ = Describe("Order Controller", func() {
 
 			fs := afero.NewMemMapFs()
 			r := &OrderReconciler{
-				Client:         k8sClient,
-				Scheme:         k8sClient.Scheme(),
-				Pipeline:       artifact.NewPipeline(artifact.NewStore(oci.NewFakeClient(fs), fs, "")),
-				PantryResolver: credential.NewKubeResolver(k8sClient),
-				BuilderID:      testBuilderID,
+				Client:           k8sClient,
+				APIReader:        k8sClient,
+				Scheme:           k8sClient.Scheme(),
+				Pipeline:         artifact.NewPipeline(artifact.NewStore(oci.NewFakeClient(fs), fs, "")),
+				PantryResolver:   credential.NewKubeResolver(k8sClient),
+				Recorder:         events.NewFakeRecorder(100),
+				InstallNamespace: testNamespace,
+				BuilderID:        testBuilderID,
 			}
 			_, err := r.Reconcile(ctx, reconcile.Request{Namespace: testNamespace, Name: orderName})
 			Expect(err).NotTo(HaveOccurred())
@@ -568,11 +581,14 @@ var _ = Describe("Order Controller", func() {
 			fs := afero.NewMemMapFs()
 			fake = oci.NewFakeClient(fs)
 			r = &OrderReconciler{
-				Client:         k8sClient,
-				Scheme:         k8sClient.Scheme(),
-				Pipeline:       artifact.NewPipeline(artifact.NewStore(fake, fs, "")),
-				PantryResolver: credential.NewKubeResolver(k8sClient),
-				BuilderID:      testBuilderID,
+				Client:           k8sClient,
+				APIReader:        k8sClient,
+				Scheme:           k8sClient.Scheme(),
+				Pipeline:         artifact.NewPipeline(artifact.NewStore(fake, fs, "")),
+				PantryResolver:   credential.NewKubeResolver(k8sClient),
+				Recorder:         events.NewFakeRecorder(100),
+				InstallNamespace: testNamespace,
+				BuilderID:        testBuilderID,
 			}
 		})
 
@@ -943,11 +959,14 @@ const (
 // newTestOrderReconciler returns an OrderReconciler pushing to fake.
 func newTestOrderReconciler(fake *oci.FakeClient) *OrderReconciler {
 	return &OrderReconciler{
-		Client:         k8sClient,
-		Scheme:         k8sClient.Scheme(),
-		Pipeline:       artifact.NewPipeline(artifact.NewStore(fake, afero.NewMemMapFs(), "")),
-		PantryResolver: credential.NewKubeResolver(k8sClient),
-		BuilderID:      testBuilderID,
+		Client:           k8sClient,
+		APIReader:        k8sClient,
+		Scheme:           k8sClient.Scheme(),
+		Pipeline:         artifact.NewPipeline(artifact.NewStore(fake, afero.NewMemMapFs(), "")),
+		PantryResolver:   credential.NewKubeResolver(k8sClient),
+		Recorder:         events.NewFakeRecorder(100),
+		InstallNamespace: testNamespace,
+		BuilderID:        testBuilderID,
 	}
 }
 

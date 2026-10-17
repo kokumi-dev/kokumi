@@ -330,6 +330,7 @@ function productSpecBody(data: ProductFormData) {
     render,
     patches: data.patches,
     overrides: data.overrides,
+    images: data.images,
   }
 }
 
@@ -424,10 +425,23 @@ export interface SigningSettings {
   requireSourceVerification: boolean
 }
 
+/** Redirects image lookups and copies under a repository prefix to a mirror. */
+export interface ImageMirror {
+  /** A normalized repository prefix, e.g. docker.io or docker.io/library. */
+  prefix: string
+  /** The oci:// URL that replaces the prefix, e.g. oci://harbor.example.com/dockerhub. */
+  location: string
+}
+
+export interface ImagesSettings {
+  mirrors: ImageMirror[]
+}
+
 export interface Settings {
   argoCDURL: string
   auth?: AuthSettings
   signing: SigningSettings
+  images: ImagesSettings
 }
 
 export function getSettings(): Promise<Settings> {
@@ -447,6 +461,14 @@ export function saveAuthSettings(auth: AuthSettings): Promise<Settings> {
   return request<Settings>('/settings', {
     method: 'PUT',
     body: JSON.stringify({ auth }),
+  })
+}
+
+// saveImagesSettings replaces the whole images subtree.
+export function saveImagesSettings(images: ImagesSettings): Promise<Settings> {
+  return request<Settings>('/settings', {
+    method: 'PUT',
+    body: JSON.stringify({ images }),
   })
 }
 

@@ -214,6 +214,55 @@ spec:
                     type: object
                     x-kubernetes-map-type: atomic
                 type: object
+              images:
+                description: |-
+                  images configures how Kokumi reaches the registries of the container
+                  images that rendered manifests reference.
+                properties:
+                  mirrors:
+                    description: |-
+                      mirrors redirects image lookups and copies to mirror registries. Like
+                      a registries.conf prefix with a location, the mirror with the longest
+                      prefix of an image's normalized name replaces that prefix, without
+                      falling back to the original registry. Manifests and records keep the
+                      original name, so nodes pull through their own mirror configuration.
+                    items:
+                      description: ImageMirror maps a repository prefix to the location
+                        of its mirror.
+                      properties:
+                        location:
+                          description: |-
+                            location is the oci:// URL the prefix is replaced with, for example
+                            "oci://harbor.example.com/dockerhub" for a pull-through cache.
+                            Credentials for it come from the Product's images.pullSecretRef.
+                          maxLength: 2048
+                          type: string
+                          x-kubernetes-validations:
+                          - message: must be a valid OCI URL
+                            rule: isURL(self) && url(self).getScheme() == 'oci'
+                        prefix:
+                          description: |-
+                            prefix is a normalized repository prefix, matched at path boundaries:
+                            a registry such as "docker.io" or a namespace such as
+                            "docker.io/library". It starts with a registry host, as every
+                            normalized name does.
+                          maxLength: 255
+                          minLength: 1
+                          pattern: ^[a-z0-9]([-a-z0-9.:]*[a-z0-9])?(/[a-z0-9]+([._-][a-z0-9]+)*)*$
+                          type: string
+                          x-kubernetes-validations:
+                          - message: must start with a registry host, such as docker.io
+                            rule: self.matches('^(localhost|[^/]*[.:][^/]*)(/|$)')
+                      required:
+                      - location
+                      - prefix
+                      type: object
+                    maxItems: 32
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - prefix
+                    x-kubernetes-list-type: map
+                type: object
               signing:
                 description: |-
                   signing configures which keys Kokumi trusts besides its own signing

@@ -67,15 +67,15 @@ func (s *Store) Copy(ctx context.Context, src Source, srcClient oci.Client, dst 
 		return "", fmt.Errorf("failed to copy artifact: %w", err)
 	}
 
-	digest, err := target.Resolve(ctx, dstRef)
+	desc, err := target.Resolve(ctx, dstRef)
 	if err != nil {
-		digest, err = source.Resolve(ctx, dstRef)
+		desc, err = source.Resolve(ctx, dstRef)
 		if err != nil {
 			return "", fmt.Errorf("failed to resolve copied digest: %w", err)
 		}
 	}
 
-	return digest, nil
+	return desc.Digest, nil
 }
 
 // ResolveDigest resolves the tag of the given source to its current digest.
@@ -91,12 +91,12 @@ func (s *Store) ResolveDigest(ctx context.Context, src Source, client oci.Client
 		return "", fmt.Errorf("failed to parse source ref: %w", err)
 	}
 
-	digest, err := c.Resolve(ctx, ref)
+	desc, err := c.Resolve(ctx, ref)
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve digest: %w", err)
 	}
 
-	return digest, nil
+	return desc.Digest, nil
 }
 
 // pull fetches the artifact. Raw layout pulls preserve the artifact's original

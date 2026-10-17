@@ -475,8 +475,8 @@ func (c *capturingFakeClient) ListTags(_ context.Context, _ oci.Reference) ([]st
 	return nil, nil
 }
 
-func (c *capturingFakeClient) Resolve(_ context.Context, _ oci.Reference) (string, error) {
-	return fakeDigest, nil
+func (c *capturingFakeClient) Resolve(_ context.Context, _ oci.Reference) (oci.Descriptor, error) {
+	return oci.Descriptor{Digest: fakeDigest}, nil
 }
 
 func (c *capturingFakeClient) PushReferrer(_ context.Context, _ oci.Reference, _ oci.ReferrerArtifact) (string, error) {
@@ -515,8 +515,8 @@ func (c *multiFileFakeClient) ListTags(_ context.Context, _ oci.Reference) ([]st
 	return nil, nil
 }
 
-func (c *multiFileFakeClient) Resolve(_ context.Context, _ oci.Reference) (string, error) {
-	return fakeDigest, nil
+func (c *multiFileFakeClient) Resolve(_ context.Context, _ oci.Reference) (oci.Descriptor, error) {
+	return oci.Descriptor{Digest: fakeDigest}, nil
 }
 
 func (c *multiFileFakeClient) PushReferrer(_ context.Context, _ oci.Reference, _ oci.ReferrerArtifact) (string, error) {
@@ -536,8 +536,8 @@ var _ oci.Client = (*kustomizeFakeClient)(nil)
 
 func (c *kustomizeFakeClient) Pull(_ context.Context, _ oci.Reference, targetDir string) (string, string, map[string]string, error) {
 	files := map[string]string{
-		"kustomization.yaml": "resources:\n- deployment.yaml\n",
-		"deployment.yaml":    "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: my-app\n",
+		testKustomizationFile: testKustomization,
+		testDeploymentFile:    "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: my-app\n",
 	}
 	for name, content := range files {
 		if err := afero.WriteFile(c.fs, filepath.Join(targetDir, name), []byte(content), 0600); err != nil {
@@ -555,8 +555,8 @@ func (c *kustomizeFakeClient) ListTags(_ context.Context, _ oci.Reference) ([]st
 	return nil, nil
 }
 
-func (c *kustomizeFakeClient) Resolve(_ context.Context, _ oci.Reference) (string, error) {
-	return fakeDigest, nil
+func (c *kustomizeFakeClient) Resolve(_ context.Context, _ oci.Reference) (oci.Descriptor, error) {
+	return oci.Descriptor{Digest: fakeDigest}, nil
 }
 
 func (c *kustomizeFakeClient) PushReferrer(_ context.Context, _ oci.Reference, _ oci.ReferrerArtifact) (string, error) {
@@ -576,9 +576,9 @@ var _ oci.Client = (*fluxFakeClient)(nil)
 
 func (c *fluxFakeClient) Pull(_ context.Context, _ oci.Reference, targetDir string) (string, string, map[string]string, error) {
 	files := map[string]string{
-		"kustomization.yaml": "resources:\n- deployment.yaml\n- service.yaml\n",
-		"deployment.yaml":    "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: podinfo\n",
-		"service.yaml":       "apiVersion: v1\nkind: Service\nmetadata:\n  name: podinfo\n",
+		testKustomizationFile: "resources:\n- deployment.yaml\n- service.yaml\n",
+		"deployment.yaml":     "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: podinfo\n",
+		"service.yaml":        "apiVersion: v1\nkind: Service\nmetadata:\n  name: podinfo\n",
 	}
 	for name, content := range files {
 		if err := afero.WriteFile(c.fs, filepath.Join(targetDir, name), []byte(content), 0600); err != nil {
@@ -596,8 +596,8 @@ func (c *fluxFakeClient) ListTags(_ context.Context, _ oci.Reference) ([]string,
 	return nil, nil
 }
 
-func (c *fluxFakeClient) Resolve(_ context.Context, _ oci.Reference) (string, error) {
-	return fakeDigest, nil
+func (c *fluxFakeClient) Resolve(_ context.Context, _ oci.Reference) (oci.Descriptor, error) {
+	return oci.Descriptor{Digest: fakeDigest}, nil
 }
 
 func (c *fluxFakeClient) PushReferrer(_ context.Context, _ oci.Reference, _ oci.ReferrerArtifact) (string, error) {
@@ -629,8 +629,8 @@ func (c *countingFakeClient) ListTags(_ context.Context, _ oci.Reference) ([]str
 	return nil, nil
 }
 
-func (c *countingFakeClient) Resolve(_ context.Context, _ oci.Reference) (string, error) {
-	return fakeDigest, nil
+func (c *countingFakeClient) Resolve(_ context.Context, _ oci.Reference) (oci.Descriptor, error) {
+	return oci.Descriptor{Digest: fakeDigest}, nil
 }
 
 func (c *countingFakeClient) PushReferrer(_ context.Context, _ oci.Reference, _ oci.ReferrerArtifact) (string, error) {
@@ -662,8 +662,8 @@ func (c *copyFakeClient) ListTags(_ context.Context, _ oci.Reference) ([]string,
 	return nil, nil
 }
 
-func (c *copyFakeClient) Resolve(_ context.Context, _ oci.Reference) (string, error) {
-	return fakeDigest, nil
+func (c *copyFakeClient) Resolve(_ context.Context, _ oci.Reference) (oci.Descriptor, error) {
+	return oci.Descriptor{Digest: fakeDigest}, nil
 }
 
 func (c *copyFakeClient) PushReferrer(_ context.Context, _ oci.Reference, _ oci.ReferrerArtifact) (string, error) {

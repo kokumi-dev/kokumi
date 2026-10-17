@@ -83,8 +83,8 @@ type unresolvableClient struct {
 	*oci.FakeClient
 }
 
-func (unresolvableClient) Resolve(context.Context, oci.Reference) (string, error) {
-	return "", stderrors.New("registry unreachable")
+func (unresolvableClient) Resolve(context.Context, oci.Reference) (oci.Descriptor, error) {
+	return oci.Descriptor{}, stderrors.New("registry unreachable")
 }
 
 var _ = Describe("Product Controller", func() {

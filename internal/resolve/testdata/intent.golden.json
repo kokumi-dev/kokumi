@@ -11,6 +11,16 @@
       }
     }
   ],
+  "images": {
+    "fieldSpecs": [
+      {
+        "group": "monitoring.coreos.com",
+        "kind": "Prometheus",
+        "path": "spec/image"
+      }
+    ],
+    "policy": "Vendor"
+  },
   "patches": [
     {
       "set": {

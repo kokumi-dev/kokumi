@@ -69,6 +69,13 @@ const inClusterRegistry = "kokumi-registry.kokumi.svc.cluster.local:5000"
 // signingNamespace holds the Products and Orders of the signing specs.
 const signingNamespace = "e2e-signing"
 
+// imagesNamespace holds the Products, Orders and Pods of the image specs.
+const imagesNamespace = "e2e-images"
+
+// upstreamImage is the image the vendoring spec copies into the bundled
+// registry. It has Linux platforms only, so every layer can be copied.
+const upstreamImage = "ghcr.io/stefanprodan/podinfo:6.14.1"
+
 var _ = Describe("Manager", Ordered, func() {
 	var controllerPodName string
 
@@ -105,8 +112,8 @@ var _ = Describe("Manager", Ordered, func() {
 		cmd := exec.Command("kubectl", "delete", "pod", "curl-metrics", "-n", namespace)
 		_, _ = utils.Run(cmd)
 
-		By("removing the signing namespace")
-		cmd = exec.Command("kubectl", "delete", "ns", signingNamespace, "--ignore-not-found", "--timeout=2m")
+		By("removing the signing and images namespaces")
+		cmd = exec.Command("kubectl", "delete", "ns", signingNamespace, imagesNamespace, "--ignore-not-found", "--timeout=2m")
 		_, _ = utils.Run(cmd)
 
 		By("undeploying the controller-manager")
@@ -485,6 +492,125 @@ spec:
 			Eventually(sourceVerified).Should(Equal("True/True"))
 		})
 
+		It("should vendor images into the Preparation's repository and run them from there", func() {
+			host := forwardRegistry()
+
+			By("pushing a source whose Pod runs an upstream image")
+			pushManifest(host, "e2e/workload", fmt.Sprintf(`apiVersion: v1
+kind: Pod
+metadata:
+  name: web
+spec:
+  containers:
+    - name: web
+      image: %s
+`, upstreamImage))
+
+			By("rendering an Order of a Product that vendors its images and lets Orders label the Pod")
+			createNamespace(imagesNamespace)
+			apply(fmt.Sprintf(`
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Product
+metadata:
+  name: vendored
+  namespace: %[1]s
+spec:
+  source:
+    oci: oci://%[2]s/e2e/workload
+    version: "1.0.0"
+  overrides:
+    patches:
+      policy: Listed
+      targets:
+        - target:
+            kind: Pod
+            name: web
+          paths:
+            - .metadata.labels.tier
+  images:
+    policy: Vendor
+---
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Order
+metadata:
+  name: vendored
+  namespace: %[1]s
+spec:
+  productRef:
+    name: vendored
+  destination:
+    oci: oci://%[2]s/e2e/vendored
+`, imagesNamespace, inClusterRegistry))
+
+			var artifactDigest, imageDigest, vendored string
+			Eventually(func(g Gomega) {
+				out, err := utils.Run(exec.Command("kubectl", "get", "preparations", "-n", imagesNamespace,
+					"-l", "delivery.kokumi.dev/order=vendored", "-o",
+					`jsonpath={range .items[*]}{.spec.artifact.digest} {.spec.images[0].ref} {.spec.images[0].digest} {.spec.images[0].vendored}{"\n"}{end}`))
+				g.Expect(err).NotTo(HaveOccurred())
+				fields := strings.Fields(out)
+				g.Expect(fields).To(HaveLen(4), "one Preparation with one image: "+out)
+				g.Expect(fields[1]).To(Equal(upstreamImage))
+				artifactDigest, imageDigest, vendored = fields[0], fields[2], fields[3]
+			}, 5*time.Minute).Should(Succeed())
+			Expect(vendored).To(Equal(fmt.Sprintf("%s/e2e/vendored@%s", inClusterRegistry, imageDigest)))
+
+			ctx := context.Background()
+			client := oci.NewORASClient()
+
+			By("finding the image, with all its platforms, in the Preparation's repository by digest")
+			copied, err := oci.Parse(fmt.Sprintf("%s/e2e/vendored@%s", host, imageDigest))
+			Expect(err).NotTo(HaveOccurred())
+			desc, err := client.Resolve(ctx, copied)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(desc.Digest).To(Equal(imageDigest))
+			index, err := client.FetchManifest(ctx, copied)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(len(index.Manifests)).To(BeNumerically(">", 1), "an index keeps all platforms")
+
+			By("finding the vendored reference in the rendered manifests")
+			rendered, err := oci.Parse(fmt.Sprintf("%s/e2e/vendored@%s", host, artifactDigest))
+			Expect(err).NotTo(HaveOccurred())
+			dir := GinkgoT().TempDir()
+			_, _, _, err = client.Pull(ctx, rendered, dir)
+			Expect(err).NotTo(HaveOccurred())
+			manifest, err := os.ReadFile(filepath.Join(dir, "manifest.yaml"))
+			Expect(err).NotTo(HaveOccurred())
+			Expect(string(manifest)).To(ContainSubstring("image: " + vendored))
+
+			By("running a Pod from the vendored reference")
+			apply(fmt.Sprintf(`
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vendored
+  namespace: %s
+spec:
+  containers:
+    - name: web
+      image: %s
+`, imagesNamespace, vendored))
+			_, err = utils.Run(exec.Command("kubectl", "wait", "pod/vendored", "-n", imagesNamespace,
+				"--for=condition=Ready", "--timeout=3m"))
+			Expect(err).NotTo(HaveOccurred(), "the node pulls the vendored image from the bundled registry")
+
+			By("keeping the vendored digest when an edit renders the Order again")
+			_, err = utils.Run(exec.Command("kubectl", "patch", "orders.delivery.kokumi.dev", "vendored", "-n", imagesNamespace, "--type=merge", "-p",
+				`{"spec":{"edits":[{"target":{"kind":"Pod","name":"web"},"set":{".metadata.labels.tier":"web"}}]}}`))
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(func(g Gomega) {
+				out, err := utils.Run(exec.Command("kubectl", "get", "preparations", "-n", imagesNamespace,
+					"-l", "delivery.kokumi.dev/order=vendored", "-o",
+					`jsonpath={range .items[*]}{.spec.artifact.digest} {.spec.images[0].digest} {.spec.images[0].vendored}{"\n"}{end}`))
+				g.Expect(err).NotTo(HaveOccurred())
+				lines := strings.Split(strings.TrimSpace(out), "\n")
+				g.Expect(lines).To(HaveLen(2), "a second Preparation: "+out)
+				for _, line := range lines {
+					g.Expect(strings.Fields(line)[1:]).To(Equal([]string{imageDigest, vendored}))
+				}
+			}, 5*time.Minute).Should(Succeed())
+		})
+
 		It("should keep the signing key away from everyone but the controller and cluster admins", func() {
 			By("waiting for the controller to generate the key in its own namespace")
 			Eventually(func() error {
@@ -618,9 +744,14 @@ func generateCosignKey() string {
 // pushSource pushes a manifest bundle as repository:1.0.0 to the registry
 // at host and returns its digest.
 func pushSource(host, repository string) string {
+	return pushManifest(host, repository, "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: e2e\ndata:\n  key: value\n")
+}
+
+// pushManifest pushes a manifest bundle of manifest as repository:1.0.0 to
+// the registry at host and returns its digest.
+func pushManifest(host, repository, manifest string) string {
 	dir := GinkgoT().TempDir()
-	Expect(os.WriteFile(filepath.Join(dir, "manifest.yaml"),
-		[]byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: e2e\ndata:\n  key: value\n"), 0o600)).To(Succeed())
+	Expect(os.WriteFile(filepath.Join(dir, "manifest.yaml"), []byte(manifest), 0o600)).To(Succeed())
 
 	ref, err := oci.Parse(host + "/" + repository + ":1.0.0")
 	Expect(err).NotTo(HaveOccurred())

@@ -89,7 +89,7 @@ func handleCreateProduct(deps *apiDeps) http.HandlerFunc {
 		product := &deliveryv1alpha1.Product{
 			Namespace: req.Namespace,
 			Name:      req.Name,
-			Spec:      productSpecFromDTO(req.Source, req.Vendor, req.Render, req.Patches, req.Overrides),
+			Spec:      productSpecFromDTO(req.ProductSpecDTO),
 		}
 
 		uc, err := deps.resolveUserClient(r)
@@ -132,7 +132,7 @@ func handleUpdateProduct(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		product.Spec = productSpecFromDTO(req.Source, req.Vendor, req.Render, req.Patches, req.Overrides)
+		product.Spec = productSpecFromDTO(req.ProductSpecDTO)
 
 		if err := uc.update(r.Context(), product, "products"); err != nil {
 			deps.logger.Error(err, "Failed to update Product", "name", product.Name)

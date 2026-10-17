@@ -65,6 +65,47 @@ type KitchenSpec struct {
 	// key, and whether the source of every Product must verify.
 	// +optional
 	Signing *KitchenSigning `json:"signing,omitempty"`
+
+	// images configures how Kokumi reaches the registries of the container
+	// images that rendered manifests reference.
+	// +optional
+	Images *KitchenImages `json:"images,omitempty"`
+}
+
+// KitchenImages configures registry access for container images.
+type KitchenImages struct {
+	// mirrors redirects image lookups and copies to mirror registries. Like
+	// a registries.conf prefix with a location, the mirror with the longest
+	// prefix of an image's normalized name replaces that prefix, without
+	// falling back to the original registry. Manifests and records keep the
+	// original name, so nodes pull through their own mirror configuration.
+	// +optional
+	// +listType=map
+	// +listMapKey=prefix
+	// +kubebuilder:validation:MaxItems=32
+	Mirrors []ImageMirror `json:"mirrors,omitempty"`
+}
+
+// ImageMirror maps a repository prefix to the location of its mirror.
+type ImageMirror struct {
+	// prefix is a normalized repository prefix, matched at path boundaries:
+	// a registry such as "docker.io" or a namespace such as
+	// "docker.io/library". It starts with a registry host, as every
+	// normalized name does.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=255
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.:]*[a-z0-9])?(/[a-z0-9]+([._-][a-z0-9]+)*)*$`
+	// +kubebuilder:validation:XValidation:rule="self.matches('^(localhost|[^/]*[.:][^/]*)(/|$)')",message="must start with a registry host, such as docker.io"
+	Prefix string `json:"prefix"`
+
+	// location is the oci:// URL the prefix is replaced with, for example
+	// "oci://harbor.example.com/dockerhub" for a pull-through cache.
+	// Credentials for it come from the Product's images.pullSecretRef.
+	// +required
+	// +kubebuilder:validation:MaxLength=2048
+	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() == 'oci'",message="must be a valid OCI URL"
+	Location string `json:"location"`
 }
 
 // KitchenSigning configures the trust of the Kitchen. The signing key itself

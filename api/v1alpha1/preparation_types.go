@@ -163,6 +163,52 @@ type PreparationSpec struct {
 	// the policy is satisfied. It is also recorded on the OCI artifact.
 	// +optional
 	ApprovalPolicy *ApprovalPolicy `json:"approvalPolicy,omitempty"`
+
+	// images lists the container images the rendered manifests reference,
+	// resolved to digests when the Preparation was rendered. The artifact's
+	// config blob records the same list, with the reason for each image that
+	// could not be resolved.
+	// +optional
+	// +listType=atomic
+	// +kubebuilder:validation:MaxItems=512
+	Images []PreparationImage `json:"images,omitempty"`
+}
+
+// PreparationImage is a container image the rendered manifests reference.
+type PreparationImage struct {
+	// ref is the image reference as written in the manifests before any
+	// rewriting, for example "nginx:1.27".
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=1024
+	Ref string `json:"ref"`
+
+	// name is the normalized repository of ref, for example
+	// "docker.io/library/nginx". Absent when ref is not a valid reference.
+	// +optional
+	// +kubebuilder:validation:MaxLength=512
+	Name string `json:"name,omitempty"`
+
+	// digest is the manifest digest ref resolved to, with one of the
+	// algorithms the OCI image spec registers. Absent when the image could
+	// not be resolved, which only the Record policy allows.
+	// +optional
+	// +kubebuilder:validation:MaxLength=135
+	// +kubebuilder:validation:Pattern=`^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128})$`
+	Digest string `json:"digest,omitempty"`
+
+	// mediaType is the media type of the manifest digest names: an image
+	// index for multi-platform images, an image manifest otherwise.
+	// +optional
+	// +kubebuilder:validation:MaxLength=255
+	MediaType string `json:"mediaType,omitempty"`
+
+	// vendored is the reference the manifests pull the image from after it
+	// was copied into the Preparation's repository. Set under the Vendor
+	// policy only.
+	// +optional
+	// +kubebuilder:validation:MaxLength=2048
+	Vendored string `json:"vendored,omitempty"`
 }
 
 // VoteResult describes how the latest vote of an approver is evaluated.

@@ -5,11 +5,13 @@ package resolve
 
 import (
 	"fmt"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/images"
 )
 
 // EffectiveSpec holds the resolved source, render config, patches, and edits
@@ -26,6 +28,9 @@ type EffectiveSpec struct {
 	Render         *deliveryv1alpha1.Render
 	Patches        []deliveryv1alpha1.Patch
 	Edits          []deliveryv1alpha1.Patch
+	// Images configures how the images of the rendered manifests are
+	// handled. It always comes from the Product.
+	Images deliveryv1alpha1.ProductImages
 	// Product identifies the Product the spec was merged from.
 	Product ProductIdentity
 }
@@ -84,6 +89,41 @@ func ForProduct(product *deliveryv1alpha1.Product, order *deliveryv1alpha1.Order
 		Render:         render,
 		Patches:        patches,
 		Edits:          order.Spec.Edits,
+		Images:         *product.Spec.Images.DeepCopy(),
 		Product:        ProductIdentity{Name: product.Name, ConfigHash: product.Status.ConfigHash},
 	}, nil
+}
+
+// LockedImages returns the images of preparation, whose digests Pin and
+// Vendor keep when its Order renders again.
+func LockedImages(preparation *deliveryv1alpha1.Preparation) []images.Image {
+	if preparation == nil || len(preparation.Spec.Images) == 0 {
+		return nil
+	}
+
+	locked := make([]images.Image, 0, len(preparation.Spec.Images))
+	for _, img := range preparation.Spec.Images {
+		locked = append(locked, images.Image{
+			Ref:       img.Ref,
+			Name:      img.Name,
+			Digest:    img.Digest,
+			MediaType: img.MediaType,
+			Vendored:  img.Vendored,
+		})
+	}
+	return locked
+}
+
+// ImageMirrors returns the image mirrors of kitchen, without the oci://
+// scheme of their locations.
+func ImageMirrors(kitchen *deliveryv1alpha1.Kitchen) []images.Mirror {
+	if kitchen == nil || kitchen.Spec.Images == nil {
+		return nil
+	}
+
+	mirrors := make([]images.Mirror, 0, len(kitchen.Spec.Images.Mirrors))
+	for _, m := range kitchen.Spec.Images.Mirrors {
+		mirrors = append(mirrors, images.Mirror{Prefix: m.Prefix, Location: strings.TrimPrefix(m.Location, "oci://")})
+	}
+	return mirrors
 }

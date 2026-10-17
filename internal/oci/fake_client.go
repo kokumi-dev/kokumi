@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+	"sync"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/spf13/afero"
@@ -20,7 +21,9 @@ const FakeDigest = "sha256:fdf90e00e76bf3f0d2e5042c4c4e6c42a6d38c1e2b4f5a7d8e9f0
 // FakeClient implements Client intended for testing. It records what is
 // pushed so that the read methods can serve it back. The zero value is usable
 // for everything but Pull, which needs the filesystem given to NewFakeClient.
+// Resolve and Copy may be called concurrently.
 type FakeClient struct {
+	mu          sync.Mutex
 	fs          afero.Fs
 	Annotations map[string]string
 	Pulls       []Reference
@@ -30,6 +33,17 @@ type FakeClient struct {
 	Indexes     []PushedIndex
 	// PushReferrerErr, when set, is returned by PushReferrer.
 	PushReferrerErr error
+	// Resolved maps references (Reference.String()) to the descriptors
+	// Resolve returns for them. When it is nil, Resolve returns FakeDigest
+	// for every reference; otherwise it fails for references it lacks.
+	Resolved map[string]Descriptor
+	// ResolveErrs maps references (Reference.String()) to the errors
+	// Resolve returns for them, ahead of Resolved.
+	ResolveErrs map[string]error
+	// Resolves records Resolve calls.
+	Resolves []Reference
+	// CopyErr, when set, is returned by Copy.
+	CopyErr error
 }
 
 var _ Client = (*FakeClient)(nil)
@@ -124,15 +138,36 @@ func (c *FakeClient) ListTags(_ context.Context, _ Reference) ([]string, error) 
 	return nil, nil
 }
 
-// Resolve returns FakeDigest.
-func (c *FakeClient) Resolve(_ context.Context, _ Reference) (string, error) {
-	return FakeDigest, nil
+// Resolve returns the error ResolveErrs holds for ref, the descriptor
+// Resolved holds for it, or an image manifest with FakeDigest when Resolved
+// is nil.
+func (c *FakeClient) Resolve(_ context.Context, ref Reference) (Descriptor, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.Resolves = append(c.Resolves, ref)
+
+	if err, ok := c.ResolveErrs[ref.String()]; ok {
+		return Descriptor{}, err
+	}
+	if c.Resolved == nil {
+		return Descriptor{Digest: FakeDigest, MediaType: ocispec.MediaTypeImageManifest}, nil
+	}
+
+	desc, ok := c.Resolved[ref.String()]
+	if !ok {
+		return Descriptor{}, fmt.Errorf("resolve %s: not found", ref)
+	}
+	return desc, nil
 }
 
-// Copy records the copy and returns nil.
+// Copy records the copy and returns CopyErr.
 func (c *FakeClient) Copy(_ context.Context, _ Client, srcRef, dstRef Reference, opts CopyOptions) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	c.Copies = append(c.Copies, CopiedRefs{Source: srcRef, Target: dstRef, Options: opts})
-	return nil
+	return c.CopyErr
 }
 
 // FetchConfig returns the config of the most recent matching Push.

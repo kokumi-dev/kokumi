@@ -26,3 +26,55 @@
 }
 
 
+
+.images {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.imageList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.imageChange {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  word-break: break-all;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+}
+
+.changeKind {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+}
+
+.added {
+  color: var(--color-success);
+  background: var(--color-success-bg);
+}
+
+.removed {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+}
+
+.changed {
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+}

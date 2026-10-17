@@ -30,6 +30,26 @@
               "subject": "https://github.com/stefanprodan/podinfo/.github/workflows/release.yml@refs/tags/6.10.2"
             }
           }
+        },
+        {
+          "uri": "oci://docker.io/library/busybox",
+          "digest": {
+            "sha256": "d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1"
+          },
+          "mediaType": "application/vnd.oci.image.index.v1+json",
+          "annotations": {
+            "kokumi.dev/vendored": "registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod@sha256:d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1"
+          }
+        },
+        {
+          "uri": "oci://ghcr.io/stefanprodan/podinfo:6.10.2",
+          "digest": {
+            "sha256": "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4"
+          },
+          "mediaType": "application/vnd.oci.image.index.v1+json",
+          "annotations": {
+            "kokumi.dev/vendored": "registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod@sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4"
+          }
         }
       ]
     },

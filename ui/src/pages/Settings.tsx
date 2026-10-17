@@ -13,9 +13,10 @@ import {
   getSigning,
   saveSettings,
   saveAuthSettings,
+  saveImagesSettings,
   saveSigningSettings,
 } from '../api/client'
-import type { AuthSettings, Settings, SigningInfo, SigningSettings, TrustedKey } from '../api/client'
+import type { AuthSettings, ImageMirror, ImagesSettings, Settings, SigningInfo, SigningSettings, TrustedKey } from '../api/client'
 import { settingsTabs, type SettingsTab } from '../routes/paths'
 
 const tabs = settingsTabs
@@ -36,9 +37,12 @@ const tabLabel: Record<Tab, string> = {
 
 const maxClaimLength = 253
 
+/** Mirrors the MaxItems of the Kitchen's spec.images.mirrors. */
+const maxImageMirrors = 32
+
 /**
  * Settings shows the operator configuration of the Kitchen singleton in three
- * tabs: General (Argo CD URL), Authentication (admin user, OIDC) and Signing
+ * tabs: General (Argo CD URL, image mirrors), Authentication (admin user, OIDC) and Signing
  * (public key, trusted keys, source verification). Each tab is only shown
  * with its capability; the server still enforces RBAC on every write.
  */
@@ -101,7 +105,10 @@ export default function Settings() {
       {loading ? (
         <p className={styles.fieldHint}>Loading…</p>
       ) : tab === 'general' ? (
-        <GeneralTab key={`g-${settingsRev}`} argoCDURL={settings?.argoCDURL ?? ''} onSaved={handleSaved} />
+        <div className={styles.groupStack}>
+          <GeneralTab key={`g-${settingsRev}`} argoCDURL={settings?.argoCDURL ?? ''} onSaved={handleSaved} />
+          <ImageMirrorsSection key={`m-${settingsRev}`} images={settings?.images} onSaved={handleSaved} />
+        </div>
       ) : tab === 'signing' ? (
         <SigningTab key={`s-${settingsRev}`} signing={settings?.signing} onSaved={handleSaved} />
       ) : (
@@ -191,6 +198,119 @@ function GeneralTab({ argoCDURL, onSaved }: { argoCDURL: string; onSaved: (s: Se
             Used to generate deep links on the Servings page. Example:{' '}
             <code style={{ fontFamily: 'monospace' }}>https://argocd.example.com</code>
           </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Image mirrors (General tab) ──────────────────────────────────────────────
+
+function ImageMirrorsSection({ images, onSaved }: { images?: ImagesSettings; onSaved: (s: Settings) => void }) {
+  const [mirrors, setMirrors] = useState<ImageMirror[]>(images?.mirrors ?? [])
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => () => {
+    if (savedTimer.current) clearTimeout(savedTimer.current)
+  }, [])
+
+  function update(index: number, change: Partial<ImageMirror>) {
+    setMirrors((prev) => prev.map((m, i) => (i === index ? { ...m, ...change } : m)))
+    setSaved(false)
+  }
+
+  function validate(): string | null {
+    const prefixes = new Set<string>()
+    for (const m of mirrors) {
+      if (!m.prefix.trim()) return 'Every mirror needs a prefix'
+      if (prefixes.has(m.prefix.trim())) return `Prefix "${m.prefix}" is used twice`
+      prefixes.add(m.prefix.trim())
+      if (!/^(localhost|[^/]*[.:][^/]*)(\/|$)/.test(m.prefix.trim())) {
+        return `Prefix "${m.prefix}" must start with a registry host, such as docker.io`
+      }
+      if (!/^oci:\/\/.+/.test(m.location.trim())) return `The location of "${m.prefix}" must be an oci:// URL`
+    }
+    return null
+  }
+
+  function handleSave() {
+    const problem = validate()
+    if (problem) {
+      setError(problem)
+      return
+    }
+    setError(null)
+    setSubmitting(true)
+    saveImagesSettings({ mirrors: mirrors.map((m) => ({ prefix: m.prefix.trim(), location: m.location.trim() })) })
+      .then((s) => {
+        setSaved(true)
+        savedTimer.current = setTimeout(() => setSaved(false), 2000)
+        onSaved(s)
+      })
+      .catch((e) => setError((e as Error).message))
+      .finally(() => setSubmitting(false))
+  }
+
+  return (
+    <div className={styles.section}>
+      <div className={styles.sectionHeader}>
+        <span className={styles.sectionTitle}>Image Mirrors</span>
+      </div>
+      <div className={styles.sectionBody}>
+        <div className={styles.settingsSection}>
+          <p className={styles.fieldHint}>
+            Kokumi resolves and vendors the images of every render through the mirror
+            with the longest matching prefix, such as a pull-through cache or an
+            air-gapped copy, and never falls back to the original registry. Manifests
+            keep the original names; nodes pull through their own mirror configuration.
+          </p>
+          {mirrors.length === 0 && <p className={styles.fieldHint}>No mirrors: images are read from their own registries.</p>}
+          {mirrors.map((m, i) => (
+            <div key={i} className={styles.fieldRow}>
+              <input
+                aria-label="Prefix"
+                className={styles.fieldInput}
+                type="text"
+                placeholder="docker.io"
+                value={m.prefix}
+                disabled={submitting}
+                onChange={(e) => update(i, { prefix: e.target.value })}
+              />
+              <input
+                aria-label="Location"
+                className={styles.fieldInput}
+                type="text"
+                placeholder="oci://harbor.example.com/dockerhub"
+                value={m.location}
+                disabled={submitting}
+                onChange={(e) => update(i, { location: e.target.value })}
+              />
+              <Button
+                variant="secondary"
+                onClick={() => { setMirrors((prev) => prev.filter((_, j) => j !== i)); setSaved(false) }}
+                disabled={submitting}
+              >
+                Remove
+              </Button>
+            </div>
+          ))}
+          <div className={styles.fieldRow}>
+            <Button
+              variant="secondary"
+              onClick={() => { setMirrors((prev) => [...prev, { prefix: '', location: '' }]); setSaved(false) }}
+              disabled={submitting || mirrors.length >= maxImageMirrors}
+            >
+              Add mirror
+            </Button>
+            <Button variant="primary" onClick={handleSave} disabled={submitting}>
+              Save
+            </Button>
+            {saved && <span className={styles.savedMsg}>Saved ✓</span>}
+          </div>
+          {error && <p className={styles.fieldError}>{error}</p>}
         </div>
       </div>
     </div>

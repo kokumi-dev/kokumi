@@ -28,6 +28,9 @@ const (
 // maxTrustedKeys mirrors the MaxItems of spec.signing.trustedKeys.
 const maxTrustedKeys = 16
 
+// maxImageMirrors mirrors the MaxItems of spec.images.mirrors.
+const maxImageMirrors = 32
+
 // trustedKeyName mirrors the pattern of a trusted key's name.
 var trustedKeyName = regexp.MustCompile(`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`)
 
@@ -73,21 +76,34 @@ type signingSettingsDTO struct {
 	RequireSourceVerification bool            `json:"requireSourceVerification"`
 }
 
+// imageMirrorDTO mirrors an entry of spec.images.mirrors.
+type imageMirrorDTO struct {
+	Prefix   string `json:"prefix"`
+	Location string `json:"location"`
+}
+
+// imagesSettingsDTO mirrors spec.images of the Kitchen singleton.
+type imagesSettingsDTO struct {
+	Mirrors []imageMirrorDTO `json:"mirrors"`
+}
+
 // settingsResponse is the JSON body for GET /api/v1/settings.
 type settingsResponse struct {
 	ArgoCDURL string             `json:"argoCDURL"`
 	Auth      *authDTO           `json:"auth,omitempty"`
 	Signing   signingSettingsDTO `json:"signing"`
+	Images    imagesSettingsDTO  `json:"images"`
 }
 
 // settingsRequest is the JSON body for PUT /api/v1/settings. Top-level fields
 // are optional: an absent field leaves the corresponding Kitchen spec part
-// unchanged, so the Settings tabs can save independently. A present auth or
-// signing object replaces the whole subtree.
+// unchanged, so the Settings tabs can save independently. A present auth,
+// signing or images object replaces the whole subtree.
 type settingsRequest struct {
 	ArgoCDURL *string             `json:"argoCDURL,omitempty"`
 	Auth      *authDTO            `json:"auth,omitempty"`
 	Signing   *signingSettingsDTO `json:"signing,omitempty"`
+	Images    *imagesSettingsDTO  `json:"images,omitempty"`
 }
 
 // settingsToResponse converts the Kitchen spec to the settings response.
@@ -96,7 +112,58 @@ func settingsToResponse(spec deliveryv1alpha1.KitchenSpec) settingsResponse {
 		ArgoCDURL: spec.ArgoCDURL,
 		Auth:      authToDTO(spec.Auth),
 		Signing:   signingToDTO(spec.Signing),
+		Images:    imagesSettingsToDTO(spec.Images),
 	}
+}
+
+// imagesSettingsToDTO converts a Kitchen spec.images to its DTO shape.
+func imagesSettingsToDTO(images *deliveryv1alpha1.KitchenImages) imagesSettingsDTO {
+	out := imagesSettingsDTO{Mirrors: []imageMirrorDTO{}}
+	if images == nil {
+		return out
+	}
+	for _, m := range images.Mirrors {
+		out.Mirrors = append(out.Mirrors, imageMirrorDTO{Prefix: m.Prefix, Location: m.Location})
+	}
+	return out
+}
+
+// imagesSettingsFromDTO converts the request DTO to a Kitchen spec.images.
+// Settings without mirrors clear it.
+func imagesSettingsFromDTO(dto *imagesSettingsDTO) *deliveryv1alpha1.KitchenImages {
+	if len(dto.Mirrors) == 0 {
+		return nil
+	}
+	out := &deliveryv1alpha1.KitchenImages{}
+	for _, m := range dto.Mirrors {
+		out.Mirrors = append(out.Mirrors, deliveryv1alpha1.ImageMirror{Prefix: m.Prefix, Location: m.Location})
+	}
+	return out
+}
+
+// validateImagesDTO checks an images payload for what the UI can get wrong;
+// the API server validates the rest.
+func validateImagesDTO(dto *imagesSettingsDTO) error {
+	if dto == nil {
+		return nil
+	}
+	if len(dto.Mirrors) > maxImageMirrors {
+		return fmt.Errorf("images.mirrors must contain at most %d entries", maxImageMirrors)
+	}
+	prefixes := map[string]bool{}
+	for _, m := range dto.Mirrors {
+		if m.Prefix == "" {
+			return fmt.Errorf("images.mirrors prefix must not be empty")
+		}
+		if prefixes[m.Prefix] {
+			return fmt.Errorf("images.mirrors prefix %q is used twice", m.Prefix)
+		}
+		prefixes[m.Prefix] = true
+		if !strings.HasPrefix(m.Location, "oci://") || len(m.Location) == len("oci://") {
+			return fmt.Errorf("images.mirrors location for %q must be an oci:// URL", m.Prefix)
+		}
+	}
+	return nil
 }
 
 // secretRefToDTO converts a LocalObjectReference (nil-safe).
@@ -312,7 +379,7 @@ func handleGetSettings(deps *apiDeps, namespace string) http.HandlerFunc {
 }
 
 // handlePutSettings handles PUT /api/v1/settings.
-// Updates argoCDURL, the auth subtree and/or the signing subtree of the
+// Updates argoCDURL and the auth, signing and images subtrees of the
 // singleton Kitchen/default, creating it if absent. Absent request fields
 // leave the Kitchen unchanged.
 func handlePutSettings(deps *apiDeps, namespace string) http.HandlerFunc {
@@ -327,8 +394,8 @@ func handlePutSettings(deps *apiDeps, namespace string) http.HandlerFunc {
 			respondError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
-		if req.ArgoCDURL == nil && req.Auth == nil && req.Signing == nil {
-			respondError(w, http.StatusBadRequest, "request must set argoCDURL, auth or signing")
+		if req.ArgoCDURL == nil && req.Auth == nil && req.Signing == nil && req.Images == nil {
+			respondError(w, http.StatusBadRequest, "request must set argoCDURL, auth, signing or images")
 			return
 		}
 		if err := validateAuthDTO(req.Auth); err != nil {
@@ -336,6 +403,10 @@ func handlePutSettings(deps *apiDeps, namespace string) http.HandlerFunc {
 			return
 		}
 		if err := validateSigningDTO(req.Signing); err != nil {
+			respondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := validateImagesDTO(req.Images); err != nil {
 			respondError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -381,6 +452,9 @@ func handlePutSettings(deps *apiDeps, namespace string) http.HandlerFunc {
 			if req.Signing != nil {
 				kitchen.Spec.Signing = signingFromDTO(req.Signing)
 			}
+			if req.Images != nil {
+				kitchen.Spec.Images = imagesSettingsFromDTO(req.Images)
+			}
 			if err := uc.create(r.Context(), kitchen, "kitchens"); err != nil {
 				deps.logger.Error(err, "Failed to create Kitchen")
 				respondForbiddenOrError(w, err, "failed to save settings")
@@ -404,6 +478,9 @@ func handlePutSettings(deps *apiDeps, namespace string) http.HandlerFunc {
 		}
 		if req.Signing != nil {
 			kitchen.Spec.Signing = signingFromDTO(req.Signing)
+		}
+		if req.Images != nil {
+			kitchen.Spec.Images = imagesSettingsFromDTO(req.Images)
 		}
 		if apiequality.Semantic.DeepEqual(&before, &kitchen.Spec) {
 			respondJSON(w, http.StatusOK, settingsToResponse(kitchen.Spec))

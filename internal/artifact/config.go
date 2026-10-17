@@ -8,6 +8,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/types"
 
+	"github.com/kokumi-dev/kokumi/internal/images"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 )
 
@@ -43,6 +44,9 @@ type Config struct {
 	// Intent is the canonical JSON of the merged configuration that
 	// ConfigHash is computed from.
 	Intent json.RawMessage `json:"intent,omitempty"`
+	// Images lists the container images the manifests reference, as they
+	// were resolved, pinned or vendored when the artifact was rendered.
+	Images []images.Image `json:"images,omitempty"`
 }
 
 // ConfigObject identifies a Kubernetes object.

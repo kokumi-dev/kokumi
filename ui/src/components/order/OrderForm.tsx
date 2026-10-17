@@ -197,6 +197,7 @@ export default function OrderForm({ order, initialProduct, products, onCancel, o
       name: sent.name,
       productRef: sent.productRef,
       values: hasValues(sent.values) ? sent.values : undefined,
+      destination: sent.destination,
       patches: sent.patches,
       edits: sent.edits,
     }

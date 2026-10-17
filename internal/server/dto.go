@@ -223,6 +223,18 @@ type PreparationDTO struct {
 	Conditions    []ConditionDTO `json:"conditions,omitempty"`
 	// Approval is set when the Preparation has an approval policy.
 	Approval *PreparationApprovalDTO `json:"approval,omitempty"`
+	// Images lists the container images the manifests reference.
+	Images []PreparationImageDTO `json:"images,omitempty"`
+}
+
+// PreparationImageDTO is a container image a Preparation's manifests
+// reference.
+type PreparationImageDTO struct {
+	Ref       string `json:"ref"`
+	Name      string `json:"name,omitempty"`
+	Digest    string `json:"digest,omitempty"`
+	MediaType string `json:"mediaType,omitempty"`
+	Vendored  string `json:"vendored,omitempty"`
 }
 
 // RendererDTO identifies what rendered a Preparation.
@@ -402,15 +414,38 @@ type ProductSourceStatusDTO struct {
 	Verified *SourceVerificationDTO `json:"verified,omitempty"`
 }
 
-// ProductDTO is the view of a Product served to the UI.
-type ProductDTO struct {
-	Name      string             `json:"name"`
-	Namespace string             `json:"namespace"`
+// ImageFieldSpecDTO is the data-transfer representation of an
+// ImageFieldSpec.
+type ImageFieldSpecDTO struct {
+	Group   string `json:"group,omitempty"`
+	Version string `json:"version,omitempty"`
+	Kind    string `json:"kind"`
+	Path    string `json:"path"`
+}
+
+// ProductImagesDTO is the data-transfer representation of ProductImages. An
+// empty policy in a request defaults to Record.
+type ProductImagesDTO struct {
+	Policy        string              `json:"policy"`
+	FieldSpecs    []ImageFieldSpecDTO `json:"fieldSpecs,omitempty"`
+	PullSecretRef *secretRefDTO       `json:"pullSecretRef,omitempty"`
+}
+
+// ProductSpecDTO is the data-transfer representation of a ProductSpec.
+type ProductSpecDTO struct {
 	Source    OCISourceDTO       `json:"source"`
 	Vendor    *OCIDestinationDTO `json:"vendor,omitempty"`
 	Render    *RenderDTO         `json:"render,omitempty"`
 	Patches   []PatchDTO         `json:"patches,omitempty"`
 	Overrides OverridesDTO       `json:"overrides"`
+	Images    ProductImagesDTO   `json:"images"`
+}
+
+// ProductDTO is the view of a Product served to the UI.
+type ProductDTO struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	ProductSpecDTO
 	// ResolvedSource is status.source; absent until the Product is resolved.
 	ResolvedSource *ProductSourceStatusDTO `json:"resolvedSource,omitempty"`
 	State          string                  `json:"state,omitempty"`
@@ -423,22 +458,14 @@ type ProductDTO struct {
 
 // CreateProductRequest is the body for POST /api/v1/products.
 type CreateProductRequest struct {
-	Name      string             `json:"name"`
-	Namespace string             `json:"namespace"`
-	Source    OCISourceDTO       `json:"source"`
-	Vendor    *OCIDestinationDTO `json:"vendor,omitempty"`
-	Render    *RenderDTO         `json:"render,omitempty"`
-	Patches   []PatchDTO         `json:"patches,omitempty"`
-	Overrides OverridesDTO       `json:"overrides"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	ProductSpecDTO
 }
 
 // UpdateProductRequest is the body for PUT /api/v1/products/{namespace}/{name}.
 type UpdateProductRequest struct {
-	Source    OCISourceDTO       `json:"source"`
-	Vendor    *OCIDestinationDTO `json:"vendor,omitempty"`
-	Render    *RenderDTO         `json:"render,omitempty"`
-	Patches   []PatchDTO         `json:"patches,omitempty"`
-	Overrides OverridesDTO       `json:"overrides"`
+	ProductSpecDTO
 }
 
 // --- Pantry DTOs ---

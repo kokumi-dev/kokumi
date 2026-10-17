@@ -1,5 +1,10 @@
 package artifact
 
+import (
+	"github.com/kokumi-dev/kokumi/internal/images"
+	"github.com/kokumi-dev/kokumi/internal/oci"
+)
+
 // Source describes where an artifact is pulled from.
 type Source struct {
 	// OCI is the fully-qualified OCI URL (oci://host/repo) of the artifact.
@@ -96,4 +101,20 @@ type SCMInfo struct {
 type File struct {
 	Path    string
 	Content string
+}
+
+// ImageOptions configures the image stage of a render or preview.
+type ImageOptions struct {
+	// Policy is what to do with the images. Empty means images.PolicyRecord.
+	Policy images.Policy
+	// FieldSpecs locate image fields besides the default ones.
+	FieldSpecs []images.FieldSpec
+	// Client reads the images' registries and mirrors. Nil falls back to
+	// the store's default client.
+	Client oci.Client
+	// Mirrors redirect image lookups and copies.
+	Mirrors []images.Mirror
+	// Locked are the images of the previous render, whose digests Pin and
+	// Vendor keep for references written the same way.
+	Locked []images.Image
 }

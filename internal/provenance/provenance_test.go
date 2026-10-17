@@ -13,6 +13,7 @@ import (
 
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/attestation"
+	"github.com/kokumi-dev/kokumi/internal/images"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/signing/signingtest"
 )
@@ -41,8 +42,29 @@ func testConfig() *artifact.Config {
 		Destination: artifact.ConfigDestination{OCI: "oci://registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod"},
 		Product:     &artifact.ConfigProduct{Namespace: "shop", Name: "podinfo", ConfigHash: "sha256:77e0"},
 		Renderer:    artifact.ConfigRenderer{Type: "Helm", Version: "v4.3.0", Builder: "ghcr.io/kokumi-dev/kokumi@sha256:bb"},
+		Images: []images.Image{
+			{
+				Ref:       "busybox@" + busyboxDigest,
+				Name:      "docker.io/library/busybox",
+				Digest:    busyboxDigest,
+				MediaType: "application/vnd.oci.image.index.v1+json",
+				Vendored:  "registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod@" + busyboxDigest,
+			},
+			{
+				Ref:       "ghcr.io/stefanprodan/podinfo:6.10.2",
+				Name:      "ghcr.io/stefanprodan/podinfo",
+				Digest:    podinfoDigest,
+				MediaType: "application/vnd.oci.image.index.v1+json",
+				Vendored:  "registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod@" + podinfoDigest,
+			},
+		},
 	}
 }
+
+const (
+	busyboxDigest = "sha256:d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1"
+	podinfoDigest = "sha256:d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4"
+)
 
 func testSubject(t *testing.T) oci.Reference {
 	t.Helper()
@@ -79,6 +101,20 @@ func TestStatement_golden(t *testing.T) {
 	require.Equal(t, indent(t, want), indent(t, statement))
 }
 
+func TestStatement_leavesOutUnresolvedImages(t *testing.T) {
+	cfg := testConfig()
+	cfg.Images = []images.Image{{Ref: "ghcr.io/example/missing:1", Name: "ghcr.io/example/missing", Error: "not found"}}
+
+	statement, err := Statement(testSubject(t), cfg)
+	require.NoError(t, err)
+
+	var parsed struct {
+		Predicate Predicate `json:"predicate"`
+	}
+	require.NoError(t, json.Unmarshal(statement, &parsed))
+	require.Len(t, parsed.Predicate.BuildDefinition.ResolvedDependencies, 1, "only the source")
+}
+
 func TestStatement_product(t *testing.T) {
 	cfg := testConfig()
 
@@ -101,7 +137,12 @@ func TestStatement_unverifiedSource(t *testing.T) {
 
 	statement, err := Statement(testSubject(t), cfg)
 	require.NoError(t, err)
-	require.NotContains(t, string(statement), "annotations")
+
+	var parsed struct {
+		Predicate Predicate `json:"predicate"`
+	}
+	require.NoError(t, json.Unmarshal(statement, &parsed))
+	require.Empty(t, parsed.Predicate.BuildDefinition.ResolvedDependencies[0].Annotations)
 }
 
 func TestStatement_rejectsUnresolvedSource(t *testing.T) {

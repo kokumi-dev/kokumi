@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
@@ -99,6 +100,91 @@ type Overrides struct {
 	Patches PatchOverrides `json:"patches,omitzero"`
 }
 
+// ImagePolicy controls what Kokumi does with the container images the
+// rendered manifests reference.
+// +kubebuilder:validation:Enum=Record;Pin;Vendor
+type ImagePolicy string
+
+const (
+	// ImagePolicyRecord records every image by digest and leaves the
+	// manifests unchanged. Images that cannot be resolved are recorded
+	// without a digest.
+	ImagePolicyRecord ImagePolicy = "Record"
+	// ImagePolicyPin rewrites every image reference to its digest, keeping
+	// the name and tag for readability (repo:tag@sha256:...).
+	ImagePolicyPin ImagePolicy = "Pin"
+	// ImagePolicyVendor copies every image, with all platforms and its
+	// referrers, into the Preparation's repository and rewrites the
+	// references to pull it from there by digest.
+	ImagePolicyVendor ImagePolicy = "Vendor"
+)
+
+// ImageFieldSpec locates a field that holds a container image reference, in
+// the shape of a kustomize FieldSpec.
+type ImageFieldSpec struct {
+	// group is the API group of the resources. Empty matches the core group
+	// and every other group.
+	// +optional
+	// +kubebuilder:validation:MaxLength=253
+	Group string `json:"group,omitempty"`
+
+	// version is the API version of the resources. Empty matches every
+	// version.
+	// +optional
+	// +kubebuilder:validation:MaxLength=63
+	Version string `json:"version,omitempty"`
+
+	// kind is the kind of the resources, for example "Prometheus".
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	Kind string `json:"kind"`
+
+	// path is the slash-separated path to the field, with [] for every
+	// element of a list, for example "spec/image" or
+	// "spec/sidecars[]/image".
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=256
+	Path string `json:"path"`
+}
+
+// ProductImages configures how the container images of a Product's rendered
+// manifests are handled.
+type ProductImages struct {
+	// policy controls what Kokumi does with the images: Record lists them by
+	// digest, Pin also rewrites the manifests to those digests, and Vendor
+	// copies the images into each Preparation's repository and rewrites the
+	// manifests to pull them from there.
+	// +optional
+	// +kubebuilder:default=Record
+	Policy ImagePolicy `json:"policy,omitempty"`
+
+	// fieldSpecs lists the fields of custom resources that hold image
+	// references, in addition to the containers, initContainers,
+	// ephemeralContainers and image volumes of every Pod template.
+	// +optional
+	// +listType=atomic
+	// +kubebuilder:validation:MaxItems=32
+	FieldSpecs []ImageFieldSpec `json:"fieldSpecs,omitempty"`
+
+	// pullSecretRef names a kubernetes.io/dockerconfigjson Secret in the
+	// Product's namespace whose credentials are used, per registry host, to
+	// resolve and vendor the images. Like a Pod's imagePullSecrets, it lets
+	// everyone who may edit the Product use these credentials. Without it,
+	// registries are accessed anonymously.
+	// +optional
+	PullSecretRef *corev1.LocalObjectReference `json:"pullSecretRef,omitempty"`
+}
+
+// EffectivePolicy returns policy, defaulting to Record.
+func (i ProductImages) EffectivePolicy() ImagePolicy {
+	if i.Policy == "" {
+		return ImagePolicyRecord
+	}
+	return i.Policy
+}
+
 // ProductSpec defines the desired state of Product.
 // A Product is the complete definition of an application: the source artifact,
 // how it is rendered, and its base patches. Each Order is a variant of
@@ -132,6 +218,13 @@ type ProductSpec struct {
 	// +optional
 	// +kubebuilder:default={}
 	Overrides Overrides `json:"overrides,omitzero"`
+
+	// images configures how the container images the rendered manifests
+	// reference are recorded, pinned or vendored. It applies to every Order
+	// of the Product.
+	// +optional
+	// +kubebuilder:default={}
+	Images ProductImages `json:"images,omitzero"`
 }
 
 // ProductSourceStatus is the source address advertised by the Product.

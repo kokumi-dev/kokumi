@@ -3,6 +3,7 @@ import { getManifest, getManifestFiles } from '../../api/client'
 import type { ArtifactFile, Preparation } from '../../api/types'
 import { computeDiff, filterContext } from '../../utils/diff'
 import { filterCRDDocuments, hasCRDDocuments } from '../../utils/manifest'
+import { diffImages, type ImageChange } from '../../utils/images'
 import { Button } from '../ui'
 import DiffView from '../shared/DiffView'
 import layout from '../layout/layout.module.css'
@@ -65,9 +66,12 @@ export default function PreparationDiff({ base, target }: Props) {
 
   const hasCRDs = hasCRDDocuments(current.before) || hasCRDDocuments(current.after)
   const context = showFull ? Infinity : CONTEXT_SIZE
+  const imageChanges = diffImages(base.images, target.images)
 
   return (
     <>
+      {imageChanges.length > 0 && <ImageChanges changes={imageChanges} />}
+
       <div className={styles.toolbar}>
         <span className={styles.toolbarLabel}>
           {base.name} → {target.name}
@@ -97,5 +101,41 @@ export default function PreparationDiff({ base, target }: Props) {
         <DiffView lines={filterContext(allLines, context)} />
       )}
     </>
+  )
+}
+
+const changeLabels: Record<ImageChange['kind'], string> = {
+  added: 'Added',
+  removed: 'Removed',
+  changed: 'Changed',
+}
+
+/** Where an image is pulled from: its vendored location, else its digest. */
+function imageTarget(image?: { digest?: string; vendored?: string }): string {
+  return image?.vendored ?? image?.digest ?? 'not resolved'
+}
+
+/**
+ * ImageChanges lists the images that differ between the two Preparations,
+ * including digests that changed without any change to the manifests.
+ */
+function ImageChanges({ changes }: { changes: ImageChange[] }) {
+  return (
+    <div className={styles.images}>
+      <span className={styles.toolbarLabel}>Image changes</span>
+      <ul className={styles.imageList}>
+        {changes.map((c) => (
+          <li key={c.ref} className={styles.imageChange}>
+            <span className={`${styles.changeKind} ${styles[c.kind]}`}>{changeLabels[c.kind]}</span>
+            <span className={styles.mono}>{c.ref}</span>
+            <span className={`${styles.mono} ${layout.muted}`}>
+              {c.kind === 'changed'
+                ? `${imageTarget(c.before)} → ${imageTarget(c.after)}`
+                : imageTarget(c.after ?? c.before)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }

@@ -20,12 +20,18 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"strings"
+	"time"
+	"unicode/utf8"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -35,6 +41,7 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/approval"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/credential"
+	"github.com/kokumi-dev/kokumi/internal/images"
 	"github.com/kokumi-dev/kokumi/internal/index"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/resolve"
@@ -47,12 +54,30 @@ const (
 	automatedCommitMessage = "Automatically generated"
 )
 
+const (
+	// orderConcurrency is how many Orders reconcile at a time. Renders wait
+	// on registries more than on the CPU, above all when they vendor images.
+	orderConcurrency = 4
+	// renderTimeout bounds one render, so a registry that stalls cannot hold
+	// a worker forever. A retry resumes vendoring where it stopped, since
+	// copies skip what the destination holds already.
+	renderTimeout = 30 * time.Minute
+)
+
 // OrderReconciler reconciles an Order object.
 type OrderReconciler struct {
 	client.Client
+	// APIReader bypasses the cache. Before a render, it confirms that the
+	// cached Order is the latest and reads the Preparation whose images the
+	// render locks, which the cache may not hold yet.
+	APIReader      client.Reader
 	Scheme         *runtime.Scheme
 	Pipeline       *artifact.Pipeline
 	PantryResolver credential.PantryResolver
+	// Recorder records Events on Orders.
+	Recorder events.EventRecorder
+	// InstallNamespace holds the Kitchen, whose image mirrors renders use.
+	InstallNamespace string
 	// BuilderID identifies this controller as the builder of the artifacts
 	// it renders.
 	BuilderID string
@@ -66,7 +91,9 @@ type OrderReconciler struct {
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=products,verbs=get;list;watch
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=pantries,verbs=get;list;watch
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=servings,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=kitchens,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -222,6 +249,18 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 		return ctrl.Result{}, r.ensureServing(ctx, order)
 	}
 
+	// A cache that lags behind the status of the previous render would
+	// render it again, without its parent and image locks. The watch event
+	// of the newer Order reconciles it again.
+	latest, err := r.isLatest(ctx, order)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if !latest {
+		logger.Info("Skipping render until the cache holds the latest Order")
+		return ctrl.Result{}, nil
+	}
+
 	if err := statusUpdater.Processing(ctx, order, specHash); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -241,10 +280,21 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 		return ctrl.Result{}, err
 	}
 
+	imageOpts, err := r.imageOptions(ctx, order, effective.Images, spec.Images)
+	if err != nil {
+		if uerr := statusUpdater.Failed(ctx, order, err); uerr != nil {
+			logger.Error(uerr, "Failed to update Order status")
+		}
+		return ctrl.Result{}, err
+	}
+
 	renderer := rendererFor(effective.Render, r.BuilderID)
 	config := artifactConfig(order, effective, intent, specHash, renderer)
 
-	result, err := r.Pipeline.Render(ctx, artifact.RenderRequest{
+	renderCtx, cancel := context.WithTimeout(ctx, renderTimeout)
+	defer cancel()
+
+	result, err := r.Pipeline.Render(renderCtx, artifact.RenderRequest{
 		Source:           artifact.Source{OCI: sourceURL, Version: spec.Source.Version, Digest: spec.Source.Digest},
 		SourceClient:     sourceClient,
 		Destination:      artifact.Destination{OCI: resolvedDest},
@@ -252,6 +302,7 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 		Render:           spec.Render,
 		Patches:          spec.Patches,
 		Edits:            spec.Edits,
+		Images:           imageOpts,
 		Name:             order.Name,
 		Namespace:        order.Namespace,
 		Description:      commitMessage,
@@ -269,7 +320,7 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 		return ctrl.Result{}, err
 	}
 
-	preparation, err := r.createPreparation(ctx, order, result.SourceRef, result.DestRef, renderer, commitMessage, parentDigest, specHash, deliveryv1alpha1.GitSource{Repo: result.SCM.Repo, Tag: result.SCM.Tag, CommitHash: result.SCM.CommitHash})
+	preparation, err := r.createPreparation(ctx, order, result, renderer, commitMessage, parentDigest, specHash)
 	if err != nil {
 		logger.Error(err, "Failed to create Preparation")
 		if uerr := statusUpdater.Failed(ctx, order, fmt.Errorf("failed to create revision: %w", err)); uerr != nil {
@@ -280,6 +331,7 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 	}
 
 	logger.Info("Created Preparation", "revision", preparation.Name)
+	r.recordUnresolvedImages(order, preparation, result.Images)
 
 	if err := statusUpdater.Ready(ctx, order, specHash, preparation.Name, result.DestRef.Digest, fmt.Sprintf("Successfully pushed to %s", result.DestRef)); err != nil {
 		return ctrl.Result{}, err
@@ -339,19 +391,107 @@ func (r *OrderReconciler) reconcileDelete(ctx context.Context, order *deliveryv1
 	return ctrl.Result{}, nil
 }
 
+// isLatest reports whether order, as read from the cache, is the version the
+// API server holds. An Order deleted meanwhile is not.
+func (r *OrderReconciler) isLatest(ctx context.Context, order *deliveryv1alpha1.Order) (bool, error) {
+	live := &deliveryv1alpha1.Order{}
+	if err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(order), live); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to get Order: %w", err)
+	}
+	return live.ResourceVersion == order.ResourceVersion, nil
+}
+
+// imageOptions completes the image options of a render with the registry
+// client of the Product's pull secret, the Kitchen's mirrors, and, under Pin
+// and Vendor, the images of the Order's latest Preparation, whose digests the
+// render keeps.
+func (r *OrderReconciler) imageOptions(ctx context.Context, order *deliveryv1alpha1.Order, spec deliveryv1alpha1.ProductImages, opts artifact.ImageOptions) (artifact.ImageOptions, error) {
+	if ref := spec.PullSecretRef; ref != nil {
+		creds, err := r.PantryResolver.CredentialsForSecret(ctx, order.Namespace, ref.Name)
+		if err != nil {
+			return opts, fmt.Errorf("failed to read image pull Secret: %w", err)
+		}
+		opts.Client = oci.NewAuthenticatedORASClient(creds)
+	}
+
+	kitchen := &deliveryv1alpha1.Kitchen{}
+	err := r.Get(ctx, client.ObjectKey{Namespace: r.InstallNamespace, Name: deliveryv1alpha1.DefaultKitchenName}, kitchen)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return opts, fmt.Errorf("failed to get Kitchen: %w", err)
+	}
+	opts.Mirrors = resolve.ImageMirrors(kitchen)
+
+	if spec.EffectivePolicy() == deliveryv1alpha1.ImagePolicyRecord || order.Status.LatestPreparationName == "" {
+		return opts, nil
+	}
+
+	parent := &deliveryv1alpha1.Preparation{}
+	err = r.APIReader.Get(ctx, client.ObjectKey{Namespace: order.Namespace, Name: order.Status.LatestPreparationName}, parent)
+	switch {
+	case err == nil:
+		opts.Locked = resolve.LockedImages(parent)
+	case !apierrors.IsNotFound(err):
+		return opts, fmt.Errorf("failed to get latest Preparation: %w", err)
+	}
+
+	return opts, nil
+}
+
+// maxEventNote is the longest note events.k8s.io/v1 accepts.
+const maxEventNote = 1024
+
+// recordUnresolvedImages records one Warning Event on order for the images
+// of preparation that could not be resolved, which only the Record policy
+// lets pass. The note lists as many of them as fit; the artifact's config
+// blob records them all. Naming the Preparation as the related object keeps
+// the Events of two renders apart: client-go merges Events that differ only
+// in their note into one series that keeps the first note.
+func (r *OrderReconciler) recordUnresolvedImages(order *deliveryv1alpha1.Order, preparation *deliveryv1alpha1.Preparation, imgs []images.Image) {
+	var unresolved []string
+	for _, img := range imgs {
+		if img.Error != "" {
+			unresolved = append(unresolved, img.Ref+": "+img.Error)
+		}
+	}
+	if len(unresolved) == 0 {
+		return
+	}
+
+	note := fmt.Sprintf("Could not resolve %d of %d images: %s", len(unresolved), len(imgs), strings.Join(unresolved, "; "))
+	r.Recorder.Eventf(order, preparation, corev1.EventTypeWarning, deliveryv1alpha1.ReasonImageNotResolved, "Render", "%s", truncateNote(note))
+}
+
+// truncateNote cuts note to maxEventNote bytes at a rune boundary, marking
+// the cut with an ellipsis.
+func truncateNote(note string) string {
+	if len(note) <= maxEventNote {
+		return note
+	}
+
+	const ellipsis = "…"
+	cut := maxEventNote - len(ellipsis)
+	for cut > 0 && !utf8.RuneStart(note[cut]) {
+		cut--
+	}
+	return note[:cut] + ellipsis
+}
+
 // createPreparation creates a Preparation for the rendered artifact.
 // If a Preparation with the same name already exists it is returned unchanged.
 func (r *OrderReconciler) createPreparation(
 	ctx context.Context,
 	order *deliveryv1alpha1.Order,
-	sourceRef, destRef oci.Reference,
+	result *artifact.RenderResult,
 	renderer deliveryv1alpha1.Renderer,
 	commitMessage string,
 	parentDigest string,
 	configHash string,
-	gitSource deliveryv1alpha1.GitSource,
 ) (*deliveryv1alpha1.Preparation, error) {
 	logger := log.FromContext(ctx)
+	sourceRef, destRef := result.SourceRef, result.DestRef
 
 	revisionName := fmt.Sprintf("%s-%s", order.Name, destRef.ShortDigest())
 
@@ -388,8 +528,9 @@ func (r *OrderReconciler) createPreparation(
 			},
 			CommitMessage:  commitMessage,
 			ParentDigest:   parentDigest,
-			GitSource:      gitSource,
+			GitSource:      deliveryv1alpha1.GitSource{Repo: result.SCM.Repo, Tag: result.SCM.Tag, CommitHash: result.SCM.CommitHash},
 			ApprovalPolicy: order.ApprovalPolicy().DeepCopy(),
+			Images:         preparationImages(result.Images),
 		},
 	}
 
@@ -402,6 +543,26 @@ func (r *OrderReconciler) createPreparation(
 	}
 
 	return preparation, nil
+}
+
+// preparationImages converts the images of a render into their Preparation
+// form, which leaves out why an image could not be resolved.
+func preparationImages(imgs []images.Image) []deliveryv1alpha1.PreparationImage {
+	if len(imgs) == 0 {
+		return nil
+	}
+
+	out := make([]deliveryv1alpha1.PreparationImage, 0, len(imgs))
+	for _, img := range imgs {
+		out = append(out, deliveryv1alpha1.PreparationImage{
+			Ref:       img.Ref,
+			Name:      img.Name,
+			Digest:    img.Digest,
+			MediaType: img.MediaType,
+			Vendored:  img.Vendored,
+		})
+	}
+	return out
 }
 
 // rendererFor returns the identity of the renderer that processes render,
@@ -499,5 +660,6 @@ func (r *OrderReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&deliveryv1alpha1.Product{}, r.enqueueOrdersForProduct()).
 		Watches(&deliveryv1alpha1.Pantry{}, r.enqueueOrdersForPantry()).
 		Named("order").
+		WithOptions(controller.Options{MaxConcurrentReconciles: orderConcurrency}).
 		Complete(r)
 }

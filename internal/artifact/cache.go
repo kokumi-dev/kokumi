@@ -105,8 +105,11 @@ func (c *pullCache) restore(entryDir, workDir string) error {
 	return nil
 }
 
-// put writes the pulled artifact and its metadata to the cache. Errors are
-// non-fatal and only logged as informational messages.
+// put writes the pulled artifact and its metadata to the cache. The entry is
+// written to a temporary directory and renamed into place, so that concurrent
+// renders never restore a half-written entry. put only runs after a cache
+// miss, so it replaces the entry that is there, which is missing or invalid.
+// Errors are non-fatal and only logged as informational messages.
 func (c *pullCache) put(ctx context.Context, mediaType, digest string, annotations map[string]string, ref oci.Reference, layout Layout, workDir string) {
 	logger := log.FromContext(ctx)
 
@@ -115,12 +118,18 @@ func (c *pullCache) put(ctx context.Context, mediaType, digest string, annotatio
 	}
 
 	entryDir := filepath.Join(c.dir, pullCacheKey(ref, layout))
-	metaPath := filepath.Join(entryDir, "meta.json")
 
-	if err := c.fs.MkdirAll(entryDir, 0700); err != nil {
+	tmpDir, err := afero.TempDir(c.fs, c.dir, ".tmp-")
+	if err != nil {
 		logger.Info("Could not create cache entry directory, skipping cache", "error", err)
 		return
 	}
+	// RemoveAll finds nothing once the entry is renamed into place.
+	defer func() {
+		if err := c.fs.RemoveAll(tmpDir); err != nil {
+			logger.Info("Could not remove temporary cache directory", "error", err)
+		}
+	}()
 
 	infos, err := afero.ReadDir(c.fs, workDir)
 	if err != nil {
@@ -139,7 +148,7 @@ func (c *pullCache) put(ctx context.Context, mediaType, digest string, annotatio
 			return
 		}
 
-		if err := afero.WriteFile(c.fs, filepath.Join(entryDir, info.Name()), data, 0600); err != nil {
+		if err := afero.WriteFile(c.fs, filepath.Join(tmpDir, info.Name()), data, 0600); err != nil {
 			logger.Info("Could not write artifact to cache, skipping cache", "error", err)
 			return
 		}
@@ -150,7 +159,18 @@ func (c *pullCache) put(ctx context.Context, mediaType, digest string, annotatio
 		return
 	}
 
-	if err := afero.WriteFile(c.fs, metaPath, metaBytes, 0600); err != nil {
+	if err := afero.WriteFile(c.fs, filepath.Join(tmpDir, "meta.json"), metaBytes, 0600); err != nil {
 		logger.Info("Could not write cache metadata, skipping cache", "error", err)
+		return
+	}
+
+	if err := c.fs.RemoveAll(entryDir); err != nil {
+		logger.Info("Could not replace cache entry, skipping cache", "error", err)
+		return
+	}
+	// Another render may have put the same entry in the meantime; either
+	// one is complete.
+	if err := c.fs.Rename(tmpDir, entryDir); err != nil {
+		logger.Info("Could not move cache entry into place, skipping cache", "error", err)
 	}
 }
