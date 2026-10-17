@@ -1,13 +1,14 @@
-import { useState, type ReactNode } from 'react'
+import { useState } from 'react'
 import type { ArtifactGraph, ArtifactNode, Descriptor } from '../../api/types'
-import { CloseIcon, CopyIcon, Disclosure, IconButton } from '../ui'
+import { CopyIcon, Disclosure, IconButton } from '../ui'
+import { Code, Disclosures, Fact, FactLabel, Facts, Inspector, Mono, Prose } from '../graph/Inspector'
 import { formatBytes, formatDate, shortDigest } from '../../utils/format'
 import {
   createdAt, isEvidence, isIndex, kindLabel, kindOf, signatures, statusOf, tagExplanation,
 } from './artifactKinds'
-import { ArtifactIcon, SignerMark, StatusMark } from './parts'
+import { ArtifactIcon, SignerMark } from './parts'
 import { signersOf } from './signer'
-import styles from './ArtifactView.module.css'
+import styles from './ArtifactDetails.module.css'
 
 interface Props {
   graph: ArtifactGraph
@@ -54,15 +55,6 @@ function trustText(node: ArtifactNode): string | undefined {
   return 'No signature Kokumi could verify is attached to it.'
 }
 
-function Fact({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className={styles.fact}>
-      <dt className={styles.factLabel}>{label}</dt>
-      <dd className={styles.factValue}>{children}</dd>
-    </div>
-  )
-}
-
 /** ArtifactDetails is the inspector of one node: what it is, how it is attached, and who vouches for it. */
 export default function ArtifactDetails({ graph, node, parent, keySource, onClose }: Props) {
   const [open, setOpen] = useState<string | null>(null)
@@ -80,27 +72,24 @@ export default function ArtifactDetails({ graph, node, parent, keySource, onClos
   const trust = trustText(node)
 
   return (
-    <aside className={styles.inspector} aria-label={`${kind.label} details`} data-artifact-details>
-      <div className={styles.inspectorHead}>
-        <ArtifactIcon kind={kind.icon} size="lg" muted={status.tone !== 'ok'} />
-        <div className={styles.inspectorTitle}>
-          <span>{kind.label}</span>
-          <StatusMark status={status} />
-        </div>
-        <IconButton aria-label="Close details" onClick={onClose}><CloseIcon /></IconButton>
-      </div>
-
-      <div className={styles.prose}>
+    <Inspector
+      label={`${kind.label} details`}
+      icon={<ArtifactIcon kind={kind.icon} size="lg" muted={status.tone !== 'ok'} />}
+      title={kind.label}
+      status={status}
+      onClose={onClose}
+    >
+      <Prose>
         <p>{linkText(node, parent)}</p>
         {trust && <p>{trust}</p>}
         {tagText && <p>{tagText}</p>}
-      </div>
+      </Prose>
 
       {signers.length > 0 && (
         <div className={styles.signers}>
           {signers.map((s) => (
             <div key={s.full} className={styles.signerBlock}>
-              <span className={styles.factLabel}>{s.keyless ? 'Signed keyless by' : 'Signed with key'}</span>
+              <FactLabel>{s.keyless ? 'Signed keyless by' : 'Signed with key'}</FactLabel>
               <SignerMark signer={s} detail />
               <span className={styles.signerFull}>{s.full}</span>
             </div>
@@ -108,54 +97,54 @@ export default function ArtifactDetails({ graph, node, parent, keySource, onClos
         </div>
       )}
 
-      <dl className={styles.facts}>
+      <Facts>
         <Fact label="Digest">
           <span className={styles.digestRow}>
-            <span className={styles.monoWrap}>{node.digest}</span>
+            <Mono>{node.digest}</Mono>
             <IconButton size="xs" aria-label="Copy digest" onClick={() => void navigator.clipboard?.writeText(node.digest).catch(() => {})}>
               <CopyIcon />
             </IconButton>
           </span>
         </Fact>
-        {node.artifactType && <Fact label="Type"><span className={styles.monoWrap}>{node.artifactType}</span></Fact>}
-        {node.predicateType && <Fact label="Statement"><span className={styles.monoWrap}>{node.predicateType}</span></Fact>}
+        {node.artifactType && <Fact label="Type"><Mono>{node.artifactType}</Mono></Fact>}
+        {node.predicateType && <Fact label="Statement"><Mono>{node.predicateType}</Mono></Fact>}
         <Fact label="Size">{formatBytes(node.size)} manifest{blobs.length > 0 ? `, ${formatBytes(blobs.reduce((s, [, b]) => s + b.size, 0))} content` : ''}</Fact>
         {created && <Fact label="Created">{formatDate(created)}</Fact>}
         {isIndex(node) && <Fact label="Contains">{node.manifests?.length ?? 0} manifests</Fact>}
-      </dl>
+      </Facts>
 
-      <div className={styles.disclosures}>
+      <Disclosures>
         {blobs.length > 0 && (
           <Disclosure tone="inline" label={`Blobs · ${blobs.length}`} open={open === 'blobs'} onOpenChange={toggle('blobs')}>
-            <dl className={styles.facts}>
+            <Facts>
               {blobs.map(([role, blob]) => (
                 <Fact key={`${role}:${blob.digest}`} label={`${role} · ${formatBytes(blob.size)}`}>
-                  <span className={styles.monoWrap}>{blob.mediaType}</span>
-                  <span className={styles.monoWrap}>{blob.digest}</span>
+                  <Mono>{blob.mediaType}</Mono>
+                  <Mono>{blob.digest}</Mono>
                 </Fact>
               ))}
-            </dl>
+            </Facts>
           </Disclosure>
         )}
         {annotations.length > 0 && (
           <Disclosure tone="inline" label={`Annotations · ${annotations.length}`} open={open === 'annotations'} onOpenChange={toggle('annotations')}>
-            <dl className={styles.facts}>
+            <Facts>
               {annotations.map(([key, value]) => (
                 <Fact key={key} label={key}>
-                  <span className={styles.monoWrap}>{value}</span>
+                  <Mono>{value}</Mono>
                 </Fact>
               ))}
-            </dl>
+            </Facts>
           </Disclosure>
         )}
         {node.verification?.verified && node.payload !== undefined && (
           <Disclosure tone="inline" label="Signed statement" open={open === 'statement'} onOpenChange={toggle('statement')}>
-            <pre className={styles.code}>{JSON.stringify(node.payload, null, 2)}</pre>
+            <Code>{JSON.stringify(node.payload, null, 2)}</Code>
           </Disclosure>
         )}
-      </div>
+      </Disclosures>
 
       {node.error && <p className={styles.error}>Not everything attached could be read: {node.error}</p>}
-    </aside>
+    </Inspector>
   )
 }

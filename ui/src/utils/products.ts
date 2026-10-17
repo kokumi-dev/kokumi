@@ -7,6 +7,12 @@ export function productOf(products: Product[] | null, order: Order): Product | u
   return products?.find((p) => p.namespace === order.namespace && p.name === order.productRef.name)
 }
 
+/** Where an Order pushes its Preparations, e.g. "pantry: shared" or the default registry. */
+export function orderDestinationLabel(order: Order): string {
+  if (order.destination?.pantryRef && !order.destination.oci) return `pantry: ${order.destination.pantryRef.name}`
+  return order.destination?.oci || `${order.effectiveDestination ?? ''} (default)`
+}
+
 /** Key that groups Orders under their Product. */
 export function productKey(namespace: string, name: string): string {
   return `${namespace}/${name}`

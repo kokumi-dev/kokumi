@@ -1,0 +1,198 @@
+/* ── Icon tiles ── */
+
+.icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: var(--color-fill);
+  color: var(--color-text-on-light);
+}
+
+.icon svg {
+  width: 55%;
+  height: 55%;
+}
+
+.icon_md {
+  width: 32px;
+  height: 32px;
+}
+
+.icon_lg {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+}
+
+.tone_accent {
+  background: var(--color-accent-tint);
+  color: var(--color-accent);
+}
+
+.tone_success {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.tone_warning {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+}
+
+.tone_muted {
+  background: var(--color-fill);
+  color: var(--color-text-muted-light);
+}
+
+/* ── Status ── */
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 0.78rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.status svg {
+  flex: none;
+  width: 13px;
+  height: 13px;
+}
+
+.status_ok {
+  color: var(--color-success);
+}
+
+.status_neutral {
+  color: var(--color-text-muted-light);
+}
+
+.status_bad {
+  color: var(--color-danger);
+}
+
+.statusLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.statusQuiet {
+  font-weight: 400;
+}
+
+/* ── Node summary ── */
+
+.summaryText {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.summaryTitle {
+  overflow: hidden;
+  font-size: 0.875rem;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--color-text-on-light);
+}
+
+.summaryLine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* ── Node button and cards ── */
+
+.nodeButton {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.nodeButton:focus-visible {
+  outline: none;
+  box-shadow: var(--control-focus-ring);
+}
+
+.card {
+  min-width: 240px;
+  max-width: 340px;
+  padding: 10px 14px 10px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-bg-main);
+  box-shadow: var(--shadow-xs);
+}
+
+.card:hover {
+  border-color: var(--color-border-emphasis);
+}
+
+.staticCard,
+.staticCard:hover {
+  border-color: var(--color-border);
+}
+
+.selected,
+.selected:hover {
+  border-color: var(--color-accent);
+  box-shadow: var(--control-focus-ring);
+}
+
+/* ── Chip ── */
+
+.chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px 2px 7px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  background: var(--color-bg-main);
+  font-size: 0.76rem;
+  color: var(--color-text-on-light);
+  white-space: nowrap;
+}
+
+.chip svg {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  color: var(--color-text-muted-light);
+}
+
+.chip_accent {
+  border-color: transparent;
+  background: var(--color-accent-tint);
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.chip_faded {
+  border-style: dashed;
+  color: var(--color-text-muted-light);
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.74rem;
+}

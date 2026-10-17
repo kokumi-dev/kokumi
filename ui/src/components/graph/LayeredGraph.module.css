@@ -1,0 +1,61 @@
+/*
+ * The ranks sit side by side, centred on each other; the cards of a rank
+ * share its width and the height of its tallest card. With equal heights
+ * the middle of a rank is the middle of its middle card, so an edge from a
+ * lone node to the middle card of the next rank runs straight. The edges
+ * are drawn behind them, in the colour --edge of the graph view.
+ */
+.graph {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: max-content;
+}
+
+.edges {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.line {
+  fill: none;
+  stroke: var(--edge);
+  stroke-width: 1.5;
+}
+
+.arrow {
+  fill: var(--edge);
+}
+
+.dashed .line {
+  stroke-dasharray: 5 4;
+}
+
+.dotted .line {
+  stroke-dasharray: 0 3.5;
+  stroke-linecap: round;
+}
+
+.rank {
+  position: relative;
+  display: grid;
+  grid-auto-rows: 1fr;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.node {
+  display: flex;
+  flex-direction: column;
+}
+
+/* The card fills its row, so the row's middle is the card's middle. */
+.node > * {
+  flex: 1;
+}

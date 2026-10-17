@@ -1,7 +1,8 @@
 import type { ArtifactGraph, ArtifactNode } from '../../api/types'
 import { formatBytes, shortDigest } from '../../utils/format'
 import { attachedTo } from './artifactKinds'
-import { NodeButton, NodeSummary, SignerMark, TagPill, type BlobLinks, type Reference } from './parts'
+import { NodeButton, NodeCard } from '../graph/parts'
+import { ArtifactSummary, SignerMark, TagPill, type BlobLinks, type Reference } from './parts'
 import { signersOf } from './signer'
 import styles from './ArtifactTree.module.css'
 
@@ -37,8 +38,8 @@ export default function ArtifactTree({ graph, selected, onSelect, references, bl
       <div className={`${styles.branch} ${styles.branchRoot}`}>
         <div className={`${styles.rootCard} ${selected === root.digest ? styles.selected : ''}`}>
           <div className={styles.rootHeader}>
-            <NodeButton digest={root.digest} selected={selected === root.digest} className={styles.rootButton} onClick={() => onSelect(root)}>
-              <NodeSummary node={root} />
+            <NodeButton nodeKey={root.digest} selected={selected === root.digest} className={styles.rootButton} onClick={() => onSelect(root)}>
+              <ArtifactSummary node={root} />
             </NodeButton>
             <TagPill graph={graph} />
           </div>
@@ -86,14 +87,9 @@ function Attached({ node, selected, onSelect }: { node: ArtifactNode; selected?:
         <li key={child.digest} className={`${styles.item} ${child.link ? linkClass[child.link] : ''}`}>
           <span className={styles.elbow} aria-hidden />
           <div className={styles.branch}>
-            <NodeButton
-              digest={child.digest}
-              selected={selected === child.digest}
-              className={`${styles.card} ${selected === child.digest ? styles.selected : ''}`}
-              onClick={() => onSelect(child)}
-            >
-              <NodeSummary node={child} />
-            </NodeButton>
+            <NodeCard nodeKey={child.digest} selected={selected === child.digest} onClick={() => onSelect(child)}>
+              <ArtifactSummary node={child} />
+            </NodeCard>
             <Attached node={child} selected={selected} onSelect={onSelect} />
           </div>
         </li>

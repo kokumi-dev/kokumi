@@ -1,0 +1,85 @@
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* Sits at the right of a card, e.g. a version. */
+.trail {
+  margin-left: auto;
+}
+
+.muted {
+  font-size: 0.78rem;
+  color: var(--color-text-muted-light);
+  white-space: nowrap;
+}
+
+/* ── Product ── */
+
+.product {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Below the name, after the icon. It takes the width the head leaves and never widens the card. */
+.source {
+  width: 0;
+  min-width: 100%;
+  overflow: hidden;
+  padding-left: 42px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.74rem;
+  color: var(--color-text-muted-light);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ── Order ── */
+
+/* A newer Preparation waits for promotion. */
+.update {
+  flex: none;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-accent);
+  white-space: nowrap;
+}
+
+/* ── New Order ── */
+
+.add {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 240px;
+  padding: 10px 14px 10px 10px;
+  border: 1px dashed var(--color-border-emphasis);
+  border-radius: 12px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text-muted-light);
+  text-decoration: none;
+}
+
+a.add:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+a.add:focus-visible {
+  outline: none;
+  box-shadow: var(--control-focus-ring);
+}
+
+/* The next step of a Product without Orders stands out. */
+a.addFirst {
+  color: var(--color-accent);
+}
+
+.addDisabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
