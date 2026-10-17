@@ -13,7 +13,7 @@ require (
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/oras-project/oras-go/v3 v3.0.0-rc.1
 	github.com/sigstore/cosign/v3 v3.1.3
-	github.com/sigstore/protobuf-specs v0.5.1
+	github.com/sigstore/protobuf-specs v0.5.2
 	github.com/sigstore/sigstore v1.10.8
 	github.com/sigstore/sigstore-go v1.3.0
 	github.com/spf13/afero v1.15.0
