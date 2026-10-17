@@ -17,8 +17,9 @@ const (
 	// PolicyPin rewrites every reference to its digest, keeping the name and
 	// tag as written.
 	PolicyPin Policy = "Pin"
-	// PolicyVendor copies every image into the destination repository and
-	// rewrites the references to pull it from there by digest.
+	// PolicyVendor copies every image into a repository of its own below the
+	// destination (see vendoredRepository), tagged with the tag its reference
+	// names, and rewrites the references to pull it from there by digest.
 	PolicyVendor Policy = "Vendor"
 )
 
@@ -53,7 +54,7 @@ type Image struct {
 	// MediaType is the media type of the manifest Digest names.
 	MediaType string `json:"mediaType,omitempty"`
 	// Vendored is the reference the manifests pull the image from after it
-	// was copied into the destination repository.
+	// was copied into its repository below the destination.
 	Vendored string `json:"vendored,omitempty"`
 	// Error tells why Ref could not be resolved.
 	Error string `json:"error,omitempty"`

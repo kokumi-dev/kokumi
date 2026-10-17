@@ -1,7 +1,7 @@
 ---
 title: Container Images
 weight: 5
-description: Record the images every Preparation runs by digest, pin the manifests to those digests, or vendor the images into the Preparation's own repository.
+description: Record the images every Preparation runs by digest, pin the manifests to those digests, or vendor each image into a repository of its own below the Order's destination.
 ---
 
 A chart that references `nginx:1.27` deploys whatever that tag points to when
@@ -14,7 +14,7 @@ a digest, and records the result in the Preparation. A Product's
 |---|---|---|
 | `Record` (default) | unchanged | the image is listed without a digest, and one Warning Event `ImageNotResolved` per render lists the images on the Order |
 | `Pin` | `repo:tag` becomes `repo:tag@sha256:…`; the tag stays for readability | the render fails |
-| `Vendor` | `repo:tag` becomes `<destination repository>@sha256:…` | the render fails |
+| `Vendor` | `repo:tag` becomes `<destination>/images/<full image name>:tag@sha256:…` | the render fails |
 
 ```yaml
 apiVersion: delivery.kokumi.dev/v1alpha1
@@ -113,9 +113,29 @@ them; see [Container Images](../../operator-guide/images/) in the operator guide
 
 ## Vendoring
 
-Under `Vendor`, every image is copied into the Order's destination repository,
-the same repository as the rendered manifests, by digest and untagged:
+Under `Vendor`, every image is copied into a repository of its own below the
+Order's destination repository, named after the image's full name, and tagged
+with the tag its reference names:
 
+| In the source manifests | Pulled from after vendoring (destination `<registry>/shop/podinfo-prod`) |
+|---|---|
+| `ghcr.io/stefanprodan/podinfo:6.14.1` | `<registry>/shop/podinfo-prod/images/ghcr.io/stefanprodan/podinfo:6.14.1@sha256:…` |
+| `nginx:1.27` | `<registry>/shop/podinfo-prod/images/docker.io/library/nginx:1.27@sha256:…` |
+| `nginx` | `<registry>/shop/podinfo-prod/images/docker.io/library/nginx:latest@sha256:…` |
+| `ghcr.io/example/app@sha256:…` | `<registry>/shop/podinfo-prod/images/ghcr.io/example/app@sha256:…`, untagged |
+
+The cluster therefore shows which image runs, under its own name and tag; only
+the registry and the prefix change. The node pulls by digest, so the tag only
+names what is pulled.
+
+- The tag is the tag of the reference, nothing else. When a later render
+  vendors another digest under the same tag, for example after an upstream
+  `latest` moved, the tag moves to it; the earlier digest stays in the
+  repository and the Preparations that pin it keep pulling it by digest.
+- A registry port in the image's name is written as `_<port>`, since a
+  repository path cannot hold a colon: `registry.example.com:5000/app` is
+  vendored to `…/images/registry.example.com_5000/app`. A repository path
+  longer than 255 characters fails the render before anything is copied.
 - An image index stays an index, so all platforms are copied.
 - Upstream signatures, SBOMs and attestations come along as OCI referrers.
   Legacy cosign `sha256-<hex>.sig` tags are not copied.
@@ -126,7 +146,15 @@ The manifests then pull every image from the destination registry by digest,
 so a release runs without any other registry. **The cluster nodes must be able
 to pull from the destination registry.** The bundled registry is reached as
 `kokumi-registry.kokumi.svc.cluster.local:5000` over plain HTTP, which nodes
-cannot resolve without extra configuration; see the operator guide.
+cannot resolve without extra configuration; see the operator guide. The
+destination registry must also create repositories on their first push below
+the destination's path.
+
+The list of vendored images, each with its original name, digest and vendored
+reference, is recorded in the artifact's config blob and in its provenance,
+both covered by the Preparation's signature. Copying a release with its
+images to another registry follows that list; `oras cp` of the Preparation's
+artifact copies the manifests and their evidence, not the images.
 
 ## Sources with a kustomization file
 

@@ -286,9 +286,12 @@ spec:
 - `Record` lists every image by digest in the Preparation and leaves the
   manifests unchanged.
 - `Pin` rewrites `repo:tag` to `repo:tag@sha256:…`.
-- `Vendor` copies every image, with all platforms and its referrers, into the
-  Order's destination repository and rewrites the reference to pull it from
-  there by digest.
+- `Vendor` copies every image, with all platforms and its referrers, into a
+  repository of its own below the Order's destination,
+  `<destination>/images/<image name>`, tagged with the tag its reference
+  names, and rewrites the reference to pull it from there by digest:
+  `ghcr.io/stefanprodan/podinfo:6.14.1` becomes
+  `<destination>/images/ghcr.io/stefanprodan/podinfo:6.14.1@sha256:…`.
 
 Images are resolved once per render. A tag that moves upstream does not render
 a new Preparation; promotion and rollback run exactly the digests a
@@ -413,9 +416,12 @@ kokumi-registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod
 │   ├─ predicate https://slsa.dev/provenance/v1                   SLSA v1 provenance
 │   └─ predicate https://kokumi.dev/attestations/approval/v1      written on promotion
 │
-├─ sha256:aa…  image index, untagged, with its platforms and referrers   (images.policy: Vendor)
-│
 └─ tag 6.10.2 → sha256:c3…
+
+kokumi-registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod/images/ghcr.io/stefanprodan/podinfo
+│                                                                          (images.policy: Vendor)
+├─ sha256:aa…  image index with its platforms and its upstream referrers
+└─ tag 6.10.2 → sha256:aa…
 ```
 
 - The **referrers** (Signature, provenance, approvals) are Sigstore bundles,
@@ -430,9 +436,13 @@ kokumi-registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod
 - The **tag** is the source version. A later Preparation of the same version
   moves it; the digest of this one never changes.
 - The **vendored images**, under `images.policy: Vendor`: every image the
-  manifests pull, by digest and untagged, with all its platforms and its
-  referrers. They are not part of the Preparation's graph; the manifests
-  reference them.
+  manifests pull, with all its platforms and its referrers, in a repository
+  of its own below the Preparation's, tagged with the tag its reference
+  names. They are not part of the Preparation's graph; the manifests
+  reference them by digest, and the config blob and the provenance list them.
+  Both are covered by the Preparation's signature, and an image is identified
+  by its digest wherever it is copied, so the signed list pins every image the
+  Preparation runs.
 
 The **Artifact** tab of a Preparation draws this graph live from the
 registry, including anything else attached to the artifact, and verifies every
@@ -462,7 +472,7 @@ fetching a blob.
     {
       "ref": "ghcr.io/stefanprodan/podinfo:6.10.2", "name": "ghcr.io/stefanprodan/podinfo",
       "digest": "sha256:aa…", "mediaType": "application/vnd.oci.image.index.v1+json",
-      "vendored": "kokumi-registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod@sha256:aa…"
+      "vendored": "kokumi-registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod/images/ghcr.io/stefanprodan/podinfo:6.10.2@sha256:aa…"
     }
   ]
 }

@@ -157,7 +157,7 @@ func TestLockedImagesAs(t *testing.T) {
 		Name:      webPreparation,
 		Namespace: nsA,
 		Spec: deliveryv1alpha1.PreparationSpec{Images: []deliveryv1alpha1.PreparationImage{
-			{Ref: nginxRef, Name: nginxName, Digest: digest, Vendored: "registry/shop/web@" + digest},
+			{Ref: nginxRef, Name: nginxName, Digest: digest, Vendored: "registry/shop/web/images/docker.io/library/nginx:1.27@" + digest},
 		}},
 	}
 	c := fake.NewClientBuilder().WithScheme(unionScheme(t)).WithObjects(order, prep).Build()
@@ -167,7 +167,7 @@ func TestLockedImagesAs(t *testing.T) {
 	ctx := context.Background()
 
 	require.Equal(t, []images.Image{
-		{Ref: nginxRef, Name: nginxName, Digest: digest, Vendored: "registry/shop/web@" + digest},
+		{Ref: nginxRef, Name: nginxName, Digest: digest, Vendored: "registry/shop/web/images/docker.io/library/nginx:1.27@" + digest},
 	}, lockedImagesAs(ctx, deps, uc, pin, nsA, "web"))
 	require.Nil(t, lockedImagesAs(ctx, deps, uc, deliveryv1alpha1.ProductImages{}, nsA, "web"), "Record locks nothing")
 	require.Nil(t, lockedImagesAs(ctx, deps, uc, pin, nsA, "new"), "a new Order locks nothing")

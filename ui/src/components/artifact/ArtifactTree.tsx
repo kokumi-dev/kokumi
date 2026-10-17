@@ -62,7 +62,7 @@ export default function ArtifactTree({ graph, selected, onSelect, references, bl
           {references.length > 0 && (
             <ul className={styles.rows} aria-label="References">
               {references.map((ref) => (
-                <li key={ref.label} className={styles.row}>
+                <li key={ref.key ?? ref.label} className={styles.row}>
                   <span className={styles.rowLabel}>{ref.label}</span>
                   <span className={styles.refArrow} aria-hidden />
                   <span className={styles.rowRef}>{ref.value}</span>

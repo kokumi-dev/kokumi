@@ -10,6 +10,26 @@ export function isMultiPlatform(image: PreparationImage): boolean {
   return !!image.mediaType && indexMediaTypes.has(image.mediaType)
 }
 
+/** The tag the reference names: latest when it names neither a tag nor a digest, none when it names only a digest. */
+export function imageTag(image: PreparationImage): string | undefined {
+  const path = image.ref.split('@')[0]
+  const colon = path.lastIndexOf(':')
+  if (colon > path.lastIndexOf('/')) return path.slice(colon + 1)
+  return image.ref.includes('@') ? undefined : 'latest'
+}
+
+/** The image's full name with its tag, e.g. ghcr.io/stefanprodan/podinfo:6.14.1. */
+export function imageFullName(image: PreparationImage): string {
+  const tag = imageTag(image)
+  const name = image.name ?? image.ref
+  return tag ? `${name}:${tag}` : name
+}
+
+/** The image's short name with its tag, e.g. podinfo:6.14.1. */
+export function imageShortName(image: PreparationImage): string {
+  return imageFullName(image).split('/').pop() ?? image.ref
+}
+
 /** The reference that pulls exactly this image: the vendored copy, or the name at its digest. */
 export function pinnedReference(image: PreparationImage): string | undefined {
   if (image.vendored) return image.vendored

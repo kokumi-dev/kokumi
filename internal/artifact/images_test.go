@@ -21,9 +21,10 @@ const (
 	testKustomizationFile = "kustomization.yaml"
 	testKustomization     = "resources:\n- deployment.yaml\n"
 
-	nginxDigest   = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	workloadYAML  = "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec:\n  template:\n    spec:\n      containers:\n        - name: web\n          image: nginx:1.27\n"
-	vendoredNginx = "registry.svc.cluster.local:5000/preparation/app@" + nginxDigest
+	nginxDigest       = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	workloadYAML      = "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec:\n  template:\n    spec:\n      containers:\n        - name: web\n          image: nginx:1.27\n"
+	nginxVendoredRepo = "registry.svc.cluster.local:5000/preparation/app/images/docker.io/library/nginx"
+	vendoredNginx     = nginxVendoredRepo + ":1.27@" + nginxDigest
 )
 
 // filesClient pulls an artifact made of files and captures what is pushed.
@@ -81,7 +82,7 @@ func TestPipeline_Render_images(t *testing.T) {
 		assert.Contains(t, client.lastPushedFiles[testManifestFile], "image: nginx:1.27@"+nginxDigest+"\n")
 	})
 
-	t.Run("vendor copies the images into the destination repository", func(t *testing.T) {
+	t.Run("vendor copies each image into its repository below the destination", func(t *testing.T) {
 		p, client := newFilesPipeline(map[string]string{testManifestFile: workloadYAML})
 		registry := imageRegistry()
 
@@ -93,7 +94,7 @@ func TestPipeline_Render_images(t *testing.T) {
 
 		require.Len(t, registry.Copies, 1)
 		assert.Equal(t, "docker.io/library/nginx@"+nginxDigest, registry.Copies[0].Source.String())
-		assert.Equal(t, vendoredNginx, registry.Copies[0].Target.String())
+		assert.Equal(t, nginxVendoredRepo+":1.27", registry.Copies[0].Target.String(), "into the image's own repository, under its tag")
 		assert.Equal(t, vendoredNginx, result.Images[0].Vendored)
 		assert.Contains(t, client.lastPushedFiles[testManifestFile], "image: "+vendoredNginx+"\n")
 	})

@@ -492,7 +492,7 @@ spec:
 			Eventually(sourceVerified).Should(Equal("True/True"))
 		})
 
-		It("should vendor images into the Preparation's repository and run them from there", func() {
+		It("should vendor images into repositories of their own and run them from there", func() {
 			host := forwardRegistry()
 
 			By("pushing a source whose Pod runs an upstream image")
@@ -553,13 +553,15 @@ spec:
 				g.Expect(fields[1]).To(Equal(upstreamImage))
 				artifactDigest, imageDigest, vendored = fields[0], fields[2], fields[3]
 			}, 5*time.Minute).Should(Succeed())
-			Expect(vendored).To(Equal(fmt.Sprintf("%s/e2e/vendored@%s", inClusterRegistry, imageDigest)))
+			imageRepository := "e2e/vendored/images/" + strings.TrimSuffix(upstreamImage, ":6.14.1")
+			Expect(vendored).To(Equal(fmt.Sprintf("%s/%s:6.14.1@%s", inClusterRegistry, imageRepository, imageDigest)),
+				"the image keeps its name and tag in a repository of its own")
 
 			ctx := context.Background()
 			client := oci.NewORASClient()
 
-			By("finding the image, with all its platforms, in the Preparation's repository by digest")
-			copied, err := oci.Parse(fmt.Sprintf("%s/e2e/vendored@%s", host, imageDigest))
+			By("finding the image, with all its platforms, under its own tag in its own repository")
+			copied, err := oci.Parse(fmt.Sprintf("%s/%s:6.14.1", host, imageRepository))
 			Expect(err).NotTo(HaveOccurred())
 			desc, err := client.Resolve(ctx, copied)
 			Expect(err).NotTo(HaveOccurred())

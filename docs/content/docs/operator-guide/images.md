@@ -5,8 +5,9 @@ description: Mirrors for image resolution, letting nodes pull vendored images, a
 ---
 
 Every render resolves the container images of its manifests to digests, and
-Products with `spec.images.policy: Vendor` copy them into the Preparation's
-repository. See [Container Images](../../user-guide/images/) in the user guide.
+Products with `spec.images.policy: Vendor` copy each into a repository of its
+own below the Order's destination, `<destination>/images/<image name>`. See
+[Container Images](../../user-guide/images/) in the user guide.
 This page covers what an installation needs for it.
 
 ## Mirrors
@@ -97,19 +98,35 @@ Kokumi cannot check from the controller whether nodes can pull. A vendored
 image that nodes cannot pull shows up as `ImagePullBackOff` and in the Argo CD
 health of the Serving.
 
+## Destination registries
+
+Vendoring pushes to one repository per image below the Order's destination,
+such as `shop/podinfo-prod/images/ghcr.io/stefanprodan/podinfo`. The
+destination registry must create repositories on the first push and accept
+the destination's credentials for them:
+
+- The bundled registry, distribution, Harbor (within a project) and Google
+  Artifact Registry do.
+- GitHub Container Registry creates a package per repository; new packages
+  are private until their visibility is changed or they are linked to a
+  repository.
+- Amazon ECR needs a repository creation template for the destination's
+  prefix.
+
 ## Registry storage
 
-Vendoring copies every image of every Preparation, with all platforms, into
-the Preparation's repository. Within one registry, identical blobs are stored
-once, so a new Preparation of the same images adds only manifests. Still, the
-registry's `PersistentVolumeClaim` grows with every new image version. Size it
-for the images of all retained Preparations; Kokumi does not garbage-collect
-the registry.
+Vendoring copies every image of every Preparation, with all platforms. Within
+one registry, identical blobs are stored once, so a new Preparation of the
+same images adds only manifests. Still, the registry's `PersistentVolumeClaim`
+grows with every new image version. Size it for the images of all retained
+Preparations; Kokumi does not garbage-collect the registry.
 
-Vendored images are pushed by digest, without a tag. Until releases are
-bundled into a tagged index, do not run the registry's garbage collection
-with `--delete-untagged`: it would delete vendored images that Preparations
-still pull.
+Do not run the registry's garbage collection with `--delete-untagged` on
+repositories Kokumi writes to. A tag points at the newest artifact or image
+pushed under it: a later Preparation of the same source version moves the
+version tag, and a later image under the same tag moves the image's tag. The
+earlier digests become untagged while older Preparations still pull them by
+digest, and rolling back to one of them would fail.
 
 ## Vendored private images
 
