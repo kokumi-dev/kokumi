@@ -704,6 +704,11 @@ Rendering a source runs these stages:
 pull ──▶ render (Helm) ──▶ patches ──▶ edits ──▶ images ──▶ push
 ```
 
+The patches and edits stages process the manifests one YAML document at a
+time and write every document back with 2-space indentation, whether a patch
+matches it or not, so the same source always renders the same bytes. A document
+that is not valid YAML fails the render with its file and document number.
+
 The images stage resolves, pins or vendors the images of the final manifests
 (see [Images](#images)).
 

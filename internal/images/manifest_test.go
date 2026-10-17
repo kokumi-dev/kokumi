@@ -76,23 +76,7 @@ data:
   image: not-an-image-field
 `
 
-func TestParseManifest_findsDefaultImageFields(t *testing.T) {
-	manifest, err := ParseManifest([]byte(workloads), nil)
-	require.NoError(t, err)
-
-	assert.Equal(t, []string{
-		"ghcr.io/example/migrate:2.0",
-		nginxRef,
-		"registry.example.com/tools/backup@sha256:1111111111111111111111111111111111111111111111111111111111111111",
-		appName,
-		"busybox",
-		"alpine:3.20",
-		"ghcr.io/example/data:1",
-	}, manifest.References())
-}
-
-func TestParseManifest_skipsCustomResourceDefinitionsAndEmptyFields(t *testing.T) {
-	content := `apiVersion: apiextensions.k8s.io/v1
+const crdAndEmptyFields = `apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: things.example.com
@@ -118,13 +102,8 @@ spec:
 ---
 # A comment-only document
 `
-	manifest, err := ParseManifest([]byte(content), nil)
-	require.NoError(t, err)
-	assert.Empty(t, manifest.References())
-}
 
-func TestParseManifest_fieldSpecs(t *testing.T) {
-	content := `apiVersion: monitoring.coreos.com/v1
+const prometheuses = `apiVersion: monitoring.coreos.com/v1
 kind: Prometheus
 metadata:
   name: main
@@ -140,13 +119,36 @@ metadata:
 spec:
   image: should-not-match
 `
-	specs := []FieldSpec{
-		{Group: monitoringGroup, Kind: prometheusKind, Path: "spec/image"},
-		{Group: monitoringGroup, Kind: prometheusKind, Path: "spec/sidecars[]/image"},
-		{Group: monitoringGroup, Kind: prometheusKind, Path: "spec/missing/image"},
-	}
 
-	manifest, err := ParseManifest([]byte(content), specs)
+var prometheusSpecs = []FieldSpec{
+	{Group: monitoringGroup, Kind: prometheusKind, Path: "spec/image"},
+	{Group: monitoringGroup, Kind: prometheusKind, Path: "spec/sidecars[]/image"},
+	{Group: monitoringGroup, Kind: prometheusKind, Path: "spec/missing/image"},
+}
+
+func TestParseManifest_findsDefaultImageFields(t *testing.T) {
+	manifest, err := ParseManifest([]byte(workloads), nil)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{
+		"ghcr.io/example/migrate:2.0",
+		nginxRef,
+		"registry.example.com/tools/backup@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+		appName,
+		"busybox",
+		"alpine:3.20",
+		"ghcr.io/example/data:1",
+	}, manifest.References())
+}
+
+func TestParseManifest_skipsCustomResourceDefinitionsAndEmptyFields(t *testing.T) {
+	manifest, err := ParseManifest([]byte(crdAndEmptyFields), nil)
+	require.NoError(t, err)
+	assert.Empty(t, manifest.References())
+}
+
+func TestParseManifest_fieldSpecs(t *testing.T) {
+	manifest, err := ParseManifest([]byte(prometheuses), prometheusSpecs)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"quay.io/prometheus/prometheus:v3.0.0", "quay.io/thanos/thanos:v0.36.0"}, manifest.References())
 }
@@ -167,7 +169,7 @@ spec:
 }
 
 func TestManifest_rewriteKeepsTheFormattingOfTheRenderPipeline(t *testing.T) {
-	normalized, err := renderer.NormalizeYAML([]byte(workloads))
+	normalized, err := renderer.Process(t.Context(), []byte(workloads), nil)
 	require.NoError(t, err)
 
 	manifest, err := ParseManifest(normalized, nil)
@@ -190,4 +192,53 @@ func TestManifest_rewriteKeepsTheFormattingOfTheRenderPipeline(t *testing.T) {
 func TestParseManifest_invalidYAML(t *testing.T) {
 	_, err := ParseManifest([]byte("kind: [unclosed"), nil)
 	require.Error(t, err)
+}
+
+func TestManifest_encodeWithoutDocuments(t *testing.T) {
+	manifest, err := ParseManifest([]byte("# A comment-only file\n"), nil)
+	require.NoError(t, err)
+
+	content, err := manifest.Encode()
+	require.NoError(t, err)
+	assert.Empty(t, content)
+}
+
+func TestFindReferences_matchesParseManifest(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		specs   []FieldSpec
+	}{
+		{name: "workloads", content: workloads},
+		{name: "stage manifest", content: stageManifest},
+		{name: "CRDs and empty fields", content: crdAndEmptyFields},
+		{name: "field specs", content: prometheuses, specs: prometheusSpecs},
+		{name: "duplicates across documents", content: workloads + "---\n" + podManifest(nginxRef, "busybox")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manifest, err := ParseManifest([]byte(tt.content), tt.specs)
+			require.NoError(t, err)
+
+			refs, err := FindReferences([]byte(tt.content), tt.specs)
+			require.NoError(t, err)
+			if want := manifest.References(); len(want) > 0 {
+				assert.Equal(t, want, refs)
+			} else {
+				assert.Empty(t, refs)
+			}
+		})
+	}
+}
+
+func TestFindReferences_fieldSpecOnObjectFails(t *testing.T) {
+	_, err := FindReferences([]byte(podManifest(nginxRef)), []FieldSpec{{Kind: "Pod", Path: "spec"}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not locate a string")
+}
+
+func TestFindReferences_syntaxErrorNamesTheDocument(t *testing.T) {
+	_, err := FindReferences([]byte(workloads+"---\nkind: [unclosed\n"), nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "document 6")
 }

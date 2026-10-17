@@ -30,43 +30,89 @@ type Manifest struct {
 // every container, init container and ephemeral container at any depth of
 // any object, the reference of every image volume, and the fields specs
 // locate. CustomResourceDefinitions are skipped, as kustomize does, since
-// their schemas mention the same field names.
+// their schemas mention the same field names. The manifest keeps every
+// document so that Rewrite can change them; FindReferences finds the same
+// references without keeping any.
 func ParseManifest(content []byte, specs []FieldSpec) (*Manifest, error) {
 	m := &Manifest{}
 	seen := map[*yaml.Node]bool{}
-	add := func(node *yaml.Node) {
-		if !seen[node] && node.Value != "" && node.ShortTag() != "!!null" {
-			seen[node] = true
-			m.fields = append(m.fields, node)
-		}
-	}
 
-	decoder := yaml.NewDecoder(bytes.NewReader(content))
-	for {
-		doc := &yaml.Node{}
-		if err := decoder.Decode(doc); err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return nil, fmt.Errorf("failed to parse manifest: %w", err)
-		}
+	err := eachDocument(content, func(doc *yaml.Node) error {
 		m.docs = append(m.docs, doc)
-
-		if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
-			continue
-		}
-		root := doc.Content[0]
-		if kind := scalarField(root, "kind"); kind != nil && kind.Value == "CustomResourceDefinition" {
-			continue
-		}
-
-		findDefault(root, add)
-		if err := findSpecified(root, specs, add); err != nil {
-			return nil, err
-		}
+		return findFields(doc, specs, func(node *yaml.Node) {
+			if !seen[node] {
+				seen[node] = true
+				m.fields = append(m.fields, node)
+			}
+		})
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return m, nil
+}
+
+// FindReferences returns the image references of content, as
+// ParseManifest(content, specs).References() does. It decodes one document
+// at a time and drops it before decoding the next, so its memory follows the
+// largest document instead of the whole content.
+func FindReferences(content []byte, specs []FieldSpec) ([]string, error) {
+	var refs []string
+	seen := map[string]bool{}
+
+	err := eachDocument(content, func(doc *yaml.Node) error {
+		return findFields(doc, specs, func(node *yaml.Node) {
+			if !seen[node.Value] {
+				seen[node.Value] = true
+				refs = append(refs, node.Value)
+			}
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return refs, nil
+}
+
+// eachDocument decodes content one document at a time and calls fn with
+// each. A document that does not parse fails with its 1-based index.
+func eachDocument(content []byte, fn func(doc *yaml.Node) error) error {
+	decoder := yaml.NewDecoder(bytes.NewReader(content))
+	for i := 1; ; i++ {
+		doc := &yaml.Node{}
+		if err := decoder.Decode(doc); err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return fmt.Errorf("failed to parse document %d: %w", i, err)
+		}
+		if err := fn(doc); err != nil {
+			return err
+		}
+	}
+}
+
+// findFields calls add for every non-empty image field of the object doc
+// holds, unless it is a CustomResourceDefinition.
+func findFields(doc *yaml.Node, specs []FieldSpec, add func(*yaml.Node)) error {
+	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return nil
+	}
+	root := doc.Content[0]
+	if kind := scalarField(root, "kind"); kind != nil && kind.Value == "CustomResourceDefinition" {
+		return nil
+	}
+
+	addSet := func(node *yaml.Node) {
+		if node.Value != "" && node.ShortTag() != "!!null" {
+			add(node)
+		}
+	}
+
+	findDefault(root, addSet)
+	return findSpecified(root, specs, addSet)
 }
 
 // findDefault calls add for the image fields of containers and image volumes
@@ -183,21 +229,27 @@ func (m *Manifest) Rewrite(rewrites map[string]string) bool {
 }
 
 // Encode returns the manifest as YAML, formatted as the render pipeline
-// formats every manifest.
+// formats every manifest: each document with its own encoder, separated by
+// "---". One encoder for all documents would keep every event it emitted
+// until the end.
 func (m *Manifest) Encode() ([]byte, error) {
 	var out bytes.Buffer
 
-	encoder := yaml.NewEncoder(&out)
-	encoder.SetIndent(2)
+	for i, doc := range m.docs {
+		if i > 0 {
+			out.WriteString("---\n")
+		}
 
-	for _, doc := range m.docs {
+		encoder := yaml.NewEncoder(&out)
+		encoder.SetIndent(2)
+
 		if err := encoder.Encode(doc); err != nil {
 			return nil, fmt.Errorf("failed to encode manifest: %w", err)
 		}
-	}
 
-	if err := encoder.Close(); err != nil {
-		return nil, fmt.Errorf("failed to encode manifest: %w", err)
+		if err := encoder.Close(); err != nil {
+			return nil, fmt.Errorf("failed to encode manifest: %w", err)
+		}
 	}
 
 	return out.Bytes(), nil

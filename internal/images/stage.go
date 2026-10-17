@@ -91,26 +91,29 @@ type vendorJob struct {
 	locked bool
 }
 
-// Run resolves every image reference in manifests and records the outcome.
-// Under PolicyPin it rewrites the references to their digests; under
-// PolicyVendor it copies the images to the destination, with all platforms
-// and their referrers, and rewrites the references to pull them from there.
-// Both fail when an image cannot be resolved, unless the stage is a dry run.
-// Run fails before any lookup when the manifests reference more images, or
-// longer references, than a Preparation can record. The images are returned
-// sorted by reference.
-func (s Stage) Run(ctx context.Context, manifests []*Manifest) ([]Image, error) {
-	refs, err := uniqueRefs(manifests)
+// Run resolves refs, the image references of the manifests as written, and
+// records the outcome. Under PolicyPin it returns the rewrites that pin every
+// reference to its digest; under PolicyVendor it copies the images to the
+// destination, with all platforms and their referrers, and returns the
+// rewrites that pull them from there. Manifest.Rewrite applies them. Both
+// fail when an image cannot be resolved, unless the stage is a dry run.
+// PolicyRecord returns no rewrites. Run fails before any lookup when refs
+// hold more images, or longer references, than a Preparation can record.
+// The images are returned sorted by reference.
+func (s Stage) Run(ctx context.Context, refs []string) ([]Image, map[string]string, error) {
+	refs, err := uniqueRefs(refs)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	policy := cmp.Or(s.Policy, PolicyRecord)
 	results := s.resolveAll(ctx, refs, s.locks(policy))
 
+	var rewrites map[string]string
 	if policy != PolicyRecord {
-		if err := s.rewrite(ctx, policy, results, manifests); err != nil {
-			return nil, err
+		rewrites, err = s.rewrite(ctx, policy, results)
+		if err != nil {
+			return nil, nil, err
 		}
 	}
 
@@ -118,33 +121,31 @@ func (s Stage) Run(ctx context.Context, manifests []*Manifest) ([]Image, error) 
 	for _, result := range results {
 		images = append(images, result.Image)
 	}
-	return images, nil
+	return images, rewrites, nil
 }
 
-// uniqueRefs returns the image references of manifests, sorted and without
-// duplicates. It fails when they exceed what a Preparation can record.
-func uniqueRefs(manifests []*Manifest) ([]string, error) {
+// uniqueRefs returns refs sorted and without duplicates. It fails when they
+// exceed what a Preparation can record.
+func uniqueRefs(refs []string) ([]string, error) {
 	seen := map[string]bool{}
-	var refs []string
-	for _, manifest := range manifests {
-		for _, ref := range manifest.References() {
-			if seen[ref] {
-				continue
-			}
-			if len(ref) > MaxRefLength {
-				return nil, fmt.Errorf("image reference %.64q... is longer than %d characters", ref, MaxRefLength)
-			}
-			seen[ref] = true
-			refs = append(refs, ref)
+	unique := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if seen[ref] {
+			continue
 		}
+		if len(ref) > MaxRefLength {
+			return nil, fmt.Errorf("image reference %.64q... is longer than %d characters", ref, MaxRefLength)
+		}
+		seen[ref] = true
+		unique = append(unique, ref)
 	}
 
-	if len(refs) > MaxImages {
-		return nil, fmt.Errorf("the manifests reference %d images, more than the %d a Preparation can record", len(refs), MaxImages)
+	if len(unique) > MaxImages {
+		return nil, fmt.Errorf("the manifests reference %d images, more than the %d a Preparation can record", len(unique), MaxImages)
 	}
 
-	slices.Sort(refs)
-	return refs, nil
+	slices.Sort(unique)
+	return unique, nil
 }
 
 // locks returns the locked images by reference, under the policies that
@@ -267,8 +268,9 @@ func unreachable(err error) bool {
 	return errors.As(err, &netErr) || errors.Is(err, context.DeadlineExceeded)
 }
 
-// rewrite pins or vendors the resolved images and rewrites the manifests.
-func (s Stage) rewrite(ctx context.Context, policy Policy, results []resolved, manifests []*Manifest) error {
+// rewrite pins or vendors the resolved images and returns the rewrites of
+// their references.
+func (s Stage) rewrite(ctx context.Context, policy Policy, results []resolved) (map[string]string, error) {
 	if !s.DryRun {
 		var errs []error
 		for _, result := range results {
@@ -277,7 +279,7 @@ func (s Stage) rewrite(ctx context.Context, policy Policy, results []resolved, m
 			}
 		}
 		if len(errs) > 0 {
-			return fmt.Errorf("could not resolve every image under the %s image policy: %w", policy, errors.Join(errs...))
+			return nil, fmt.Errorf("could not resolve every image under the %s image policy: %w", policy, errors.Join(errs...))
 		}
 	}
 
@@ -316,15 +318,11 @@ func (s Stage) rewrite(ctx context.Context, policy Policy, results []resolved, m
 
 	if !s.DryRun {
 		if err := s.vendorAll(ctx, jobs); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
-	for _, manifest := range manifests {
-		manifest.Rewrite(rewrites)
-	}
-
-	return nil
+	return rewrites, nil
 }
 
 // vendorAll copies the images of jobs to the destination, a few at a time.
