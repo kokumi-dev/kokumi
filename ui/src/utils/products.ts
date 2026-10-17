@@ -79,7 +79,7 @@ export function describeImagePolicy(policy: ImagePolicy): string {
     case 'Pin':
       return 'Every image reference is pinned to its digest; name and tag stay for readability'
     case 'Vendor':
-      return "Every image is copied into each Preparation's repository and pulled from there by digest"
+      return "Every image is copied into a repository of its own below the Order's destination, under its name and tag, and pulled from there by digest"
     default:
       return 'Every image is listed by digest; the manifests stay unchanged'
   }

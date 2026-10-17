@@ -93,7 +93,7 @@ func TestPreparationToDTO_images(t *testing.T) {
 		Name:      nginxName,
 		Digest:    "sha256:1111111111111111111111111111111111111111111111111111111111111111",
 		MediaType: "application/vnd.oci.image.index.v1+json",
-		Vendored:  "registry.example.com/shop/app@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+		Vendored:  "registry.example.com/shop/app/images/docker.io/library/nginx:1.27@sha256:1111111111111111111111111111111111111111111111111111111111111111",
 	}}
 
 	dto := preparationToDTO(deliveryv1alpha1.Preparation{Spec: deliveryv1alpha1.PreparationSpec{Images: images}}, false)

@@ -114,8 +114,9 @@ const (
 	// the name and tag for readability (repo:tag@sha256:...).
 	ImagePolicyPin ImagePolicy = "Pin"
 	// ImagePolicyVendor copies every image, with all platforms and its
-	// referrers, into the Preparation's repository and rewrites the
-	// references to pull it from there by digest.
+	// referrers, into a repository of its own below the Order's destination,
+	// <destination>/images/<image name>, tagged with the tag its reference
+	// names, and rewrites the references to pull it from there by digest.
 	ImagePolicyVendor ImagePolicy = "Vendor"
 )
 
@@ -154,7 +155,8 @@ type ImageFieldSpec struct {
 type ProductImages struct {
 	// policy controls what Kokumi does with the images: Record lists them by
 	// digest, Pin also rewrites the manifests to those digests, and Vendor
-	// copies the images into each Preparation's repository and rewrites the
+	// copies each image into a repository of its own below the Order's
+	// destination, <destination>/images/<image name>, and rewrites the
 	// manifests to pull them from there.
 	// +optional
 	// +kubebuilder:default=Record

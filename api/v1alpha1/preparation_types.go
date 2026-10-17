@@ -204,8 +204,9 @@ type PreparationImage struct {
 	MediaType string `json:"mediaType,omitempty"`
 
 	// vendored is the reference the manifests pull the image from after it
-	// was copied into the Preparation's repository. Set under the Vendor
-	// policy only.
+	// was copied into its repository below the Order's destination, such as
+	// <destination>/images/ghcr.io/example/app:1.0@sha256:.... Set under the
+	// Vendor policy only.
 	// +optional
 	// +kubebuilder:validation:MaxLength=2048
 	Vendored string `json:"vendored,omitempty"`

@@ -10,6 +10,8 @@ import styles from './parts.module.css'
 export interface Reference {
   label: string
   value: ReactNode
+  /** Tells apart references with the same label; defaults to the label. */
+  key?: string
 }
 
 /** What the root's config and layers link to, e.g. the tab that shows them. */

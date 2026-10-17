@@ -55,7 +55,8 @@ type RenderRequest struct {
 	// Edits are applied on top of patches.
 	Edits []PatchSpec
 	// Images configures the image stage, which runs after the edits.
-	// Vendored images are copied to the destination repository.
+	// Vendored images are copied into repositories of their own below the
+	// destination.
 	Images ImageOptions
 	// Name and Namespace are used as Helm releaseName/namespace fallbacks
 	// when the Render spec does not set them explicitly.

@@ -45,9 +45,11 @@ type Stage struct {
 	Client oci.Client
 	// Mirrors redirect lookups and copies.
 	Mirrors []Mirror
-	// Destination is the repository vendored images are copied into and
-	// pulled from. Under PolicyVendor without a destination, as in a preview
-	// of a Product, references are pinned instead.
+	// Destination is the repository of the rendered manifests. Each
+	// vendored image is copied into, and pulled from, a repository of its
+	// own below it (see vendoredRepository), tagged with the tag its
+	// reference names. Under PolicyVendor without a destination, as in a
+	// preview of a Product, references are pinned instead.
 	Destination *oci.Reference
 	// DestClient writes to Destination.
 	DestClient oci.Client
@@ -67,6 +69,9 @@ type resolved struct {
 	// source is where the image is read from, pinned to its digest once it
 	// is resolved.
 	source oci.Reference
+	// tag is the tag the reference names: "latest" when it names neither a
+	// tag nor a digest, empty when it names only a digest.
+	tag string
 	// unreachable reports that the lookup failed before the registry
 	// answered.
 	unreachable bool
@@ -82,12 +87,15 @@ func (r *resolved) pin(digest, mediaType string) {
 	r.source.Digest = digest
 }
 
-// vendorJob is the copy of one image to the destination.
+// vendorJob is the copy of one image to its vendored repository.
 type vendorJob struct {
 	source oci.Reference
+	// target is the image's vendored repository, with its digest.
 	target oci.Reference
-	// locked reports that the previous render vendored the image to
-	// target already.
+	// tags are the tags the image's references name, sorted.
+	tags []string
+	// locked reports that the previous render vendored every reference of
+	// the image exactly so.
 	locked bool
 }
 
@@ -229,6 +237,7 @@ func (s Stage) prepare(ref string, locks map[string]Image) resolved {
 		return result
 	}
 	result.Name = parsed.name
+	result.tag = parsed.tag
 
 	result.source, err = parsed.source(s.Mirrors)
 	if err != nil {
@@ -285,7 +294,10 @@ func (s Stage) rewrite(ctx context.Context, policy Policy, results []resolved) (
 
 	vendor := policy == PolicyVendor && s.Destination != nil
 	rewrites := map[string]string{}
-	var jobs []vendorJob
+	var (
+		jobs []vendorJob
+		errs []error
+	)
 	queued := map[string]int{}
 
 	for i := range results {
@@ -301,22 +313,40 @@ func (s Stage) rewrite(ctx context.Context, policy Policy, results []resolved) (
 			continue
 		}
 
-		target := *s.Destination
-		target.Tag = ""
-		target.Digest = result.Digest
-		result.Vendored = target.String()
-		rewrites[result.Ref] = result.Vendored
-
-		locked := result.lockedVendored == result.Vendored
-		if j, ok := queued[result.Digest]; ok {
-			jobs[j].locked = jobs[j].locked || locked
+		// A render fails below, before any copy; a preview leaves the
+		// reference as written.
+		repository, err := vendoredRepository(*s.Destination, result.Name)
+		if err != nil {
+			errs = append(errs, err)
 			continue
 		}
-		queued[result.Digest] = len(jobs)
-		jobs = append(jobs, vendorJob{source: result.source, target: target, locked: locked})
+		vendored := repository
+		vendored.Tag, vendored.Digest = result.tag, result.Digest
+		result.Vendored = vendored.String()
+		rewrites[result.Ref] = result.Vendored
+
+		// References written differently can name the same image, under
+		// the same tag, another tag, or only its digest: it is copied once
+		// and tagged with each tag.
+		target := repository
+		target.Digest = result.Digest
+		j, ok := queued[target.String()]
+		if !ok {
+			j = len(jobs)
+			queued[target.String()] = j
+			jobs = append(jobs, vendorJob{source: result.source, target: target, locked: true})
+		}
+		jobs[j].locked = jobs[j].locked && result.lockedVendored == result.Vendored
+		if result.tag != "" && !slices.Contains(jobs[j].tags, result.tag) {
+			jobs[j].tags = append(jobs[j].tags, result.tag)
+			slices.Sort(jobs[j].tags)
+		}
 	}
 
 	if !s.DryRun {
+		if len(errs) > 0 {
+			return nil, fmt.Errorf("could not vendor every image: %w", errors.Join(errs...))
+		}
 		if err := s.vendorAll(ctx, jobs); err != nil {
 			return nil, err
 		}
@@ -363,29 +393,44 @@ func (s Stage) vendorAll(ctx context.Context, jobs []vendorJob) error {
 	return nil
 }
 
-// vendor copies the image of job, with its referrers, to the target, unless
-// the previous render already vendored it there and it is still present.
+// vendor copies the image of job, with its referrers, to its repository and
+// tags it with the tags its references name, unless the previous render
+// already vendored it so and it is still present. Copy pushes to a tag when
+// the destination names one, by digest otherwise; only the first copy
+// transfers content.
 func (s Stage) vendor(ctx context.Context, job vendorJob) error {
 	if job.locked && s.present(ctx, job.target) {
 		return nil
 	}
 
-	log.FromContext(ctx).Info("Vendoring image", "source", job.source.String(), "destination", job.target.String())
+	log.FromContext(ctx).Info("Vendoring image", "source", job.source.String(), "destination", job.target.String(), "tags", job.tags)
 
 	ctx, cancel := context.WithTimeout(ctx, copyTimeout)
 	defer cancel()
 
-	if err := s.Client.Copy(ctx, s.DestClient, job.source, job.target, oci.CopyOptions{IncludeReferrers: true}); err != nil {
-		return fmt.Errorf("failed to vendor image %s: %w", job.source, err)
+	destinations := []oci.Reference{job.target}
+	if len(job.tags) > 0 {
+		destinations = destinations[:0]
+		for _, tag := range job.tags {
+			tagged := job.target
+			tagged.Tag, tagged.Digest = tag, ""
+			destinations = append(destinations, tagged)
+		}
+	}
+
+	for _, dst := range destinations {
+		if err := s.Client.Copy(ctx, s.DestClient, job.source, dst, oci.CopyOptions{IncludeReferrers: true}); err != nil {
+			return fmt.Errorf("failed to vendor image %s: %w", job.source, err)
+		}
 	}
 	return nil
 }
 
-// present reports whether the destination still holds target.
-func (s Stage) present(ctx context.Context, target oci.Reference) bool {
+// present reports whether the destination still holds the image at ref.
+func (s Stage) present(ctx context.Context, ref oci.Reference) bool {
 	ctx, cancel := context.WithTimeout(ctx, resolveTimeout)
 	defer cancel()
 
-	_, err := s.DestClient.Resolve(ctx, target)
+	_, err := s.DestClient.Resolve(ctx, ref)
 	return err == nil
 }

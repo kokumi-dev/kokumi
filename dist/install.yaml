@@ -1370,8 +1370,9 @@ spec:
                     vendored:
                       description: |-
                         vendored is the reference the manifests pull the image from after it
-                        was copied into the Preparation's repository. Set under the Vendor
-                        policy only.
+                        was copied into its repository below the Order's destination, such as
+                        <destination>/images/ghcr.io/example/app:1.0@sha256:.... Set under the
+                        Vendor policy only.
                       maxLength: 2048
                       type: string
                   required:
@@ -1798,7 +1799,8 @@ spec:
                     description: |-
                       policy controls what Kokumi does with the images: Record lists them by
                       digest, Pin also rewrites the manifests to those digests, and Vendor
-                      copies the images into each Preparation's repository and rewrites the
+                      copies each image into a repository of its own below the Order's
+                      destination, <destination>/images/<image name>, and rewrites the
                       manifests to pull them from there.
                     enum:
                     - Record

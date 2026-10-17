@@ -12,7 +12,7 @@ points at it, and who signed it.
 
 | Where | What it shows |
 |---|---|
-| Preparation → **Artifact** | The rendered artifact, its config (the intent) and layer (the YAML), and the signature, provenance and approvals attached to it. |
+| Preparation → **Artifact** | The rendered artifact, its config (the intent) and layer (the YAML), the images its config records, and the signature, provenance and approvals attached to it. |
 | Product → **Artifact** | The source at its source location with what its publisher attached, and the vendored copy. |
 | Pantry → **Tags** → **Structure** | The artifact behind any tag of the Pantry's repository. |
 
@@ -103,7 +103,7 @@ its content.
 | Box below | An artifact attached to the one above it, with its kind and status. |
 | Solid line with an arrow pointing up | A referrer: it names the manifest above it as its `subject`. |
 | Dashed line | Attached by a cosign tag name, not by `subject`. |
-| Dotted arrow | A digest inside the manifest: an image index entry, `kokumi.dev/parent`, or `org.opencontainers.image.base.digest`. |
+| Dotted arrow | A digest inside the manifest: an image index entry, `kokumi.dev/parent`, `org.opencontainers.image.base.digest`, or, on a Preparation, an image its config records. |
 | Tag | The tag the artifact was looked up by. It is dashed, and says where it moved, once it points elsewhere. |
 | Signer | Who signed the artifact, on the top box: a key icon and the key's name, or, for a keyless signature, the platform's icon and the repository (for example the GitHub workflow that released it). Hover it for the full identity. |
 
@@ -114,6 +114,14 @@ and, folded away, its blobs, annotations and signed statement. A click
 anywhere else, or Escape, closes them. On a Preparation, the config links to
 the **Intent** tab, the layer to the **Files** tab, `kokumi.dev/parent` to the
 Preparation rendered before it, and the base digest to the Product's source.
+Below them, one `image` row per container image the config blob records with a
+digest, such as `podinfo:6.14.1@f9537f72…`, links to the **Images** tab; after
+six, the card says how many more there are. The config blob is covered by the
+Preparation's signature, so these rows show what the signature pins. Under
+`Pin` and `Vendor` the manifests pull exactly these digests; under `Record`
+they pull the tags, and the rows show what the tags resolved to when the
+Preparation was rendered. The images live in repositories of their own and
+are not part of the graph.
 
 A view stops after four levels of referrers and 64 artifacts, since anyone who
 can push can attach any number of them. It says so when it leaves something

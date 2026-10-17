@@ -21,6 +21,7 @@ import (
 
 const (
 	appName         = "ghcr.io/example/app"
+	appRef          = appName + ":2.0"
 	nginxRef        = "nginx:1.27"
 	dockerHub       = "docker.io"
 	prometheusKind  = "Prometheus"
@@ -56,7 +57,7 @@ spec:
 func registry() *oci.FakeClient {
 	return &oci.FakeClient{Resolved: map[string]oci.Descriptor{
 		"docker.io/library/nginx:1.27":     {Digest: nginxDigest, MediaType: ocispec.MediaTypeImageIndex},
-		"ghcr.io/example/app:2.0":          {Digest: appDigest, MediaType: ocispec.MediaTypeImageManifest},
+		appRef:                             {Digest: appDigest, MediaType: ocispec.MediaTypeImageManifest},
 		"ghcr.io/example/app@" + appDigest: {Digest: appDigest, MediaType: ocispec.MediaTypeImageManifest},
 	}}
 }
@@ -111,7 +112,7 @@ func TestStage_recordResolvesWithoutRewriting(t *testing.T) {
 	require.Len(t, images, 5)
 	assert.Equal(t, Image{Ref: "UPPER:case", Error: images[0].Error}, images[0])
 	assert.Contains(t, images[0].Error, "invalid image reference")
-	assert.Equal(t, Image{Ref: "ghcr.io/example/app:2.0", Name: appName, Digest: appDigest, MediaType: ocispec.MediaTypeImageManifest}, images[1])
+	assert.Equal(t, Image{Ref: appRef, Name: appName, Digest: appDigest, MediaType: ocispec.MediaTypeImageManifest}, images[1])
 	assert.Equal(t, Image{Ref: "ghcr.io/example/app@" + appDigest, Name: appName, Digest: appDigest, MediaType: ocispec.MediaTypeImageManifest}, images[2])
 	assert.Equal(t, "ghcr.io/example/missing:1", images[3].Ref)
 	assert.Empty(t, images[3].Digest)
@@ -143,7 +144,7 @@ func TestStage_pinFailsOnUnresolvedImages(t *testing.T) {
 	assert.Contains(t, err.Error(), "Pin image policy")
 }
 
-func TestStage_vendorCopiesEachDigestOnceAndRewrites(t *testing.T) {
+func TestStage_vendorCopiesEachImageIntoItsRepository(t *testing.T) {
 	client := registry()
 	dest := &oci.FakeClient{}
 	destination, err := oci.Parse("oci://kokumi-registry.kokumi.svc.cluster.local:5000/shop/web")
@@ -154,25 +155,97 @@ func TestStage_vendorCopiesEachDigestOnceAndRewrites(t *testing.T) {
 	images, err := run(Stage{Policy: PolicyVendor, Client: client, Destination: &destination, DestClient: dest}, manifest)
 	require.NoError(t, err)
 
-	vendoredApp := "kokumi-registry.kokumi.svc.cluster.local:5000/shop/web@" + appDigest
-	vendoredNginx := "kokumi-registry.kokumi.svc.cluster.local:5000/shop/web@" + nginxDigest
+	appRepository := bundled + "/images/ghcr.io/example/app"
+	nginxRepository := bundled + "/images/docker.io/library/nginx"
 
 	assert.ElementsMatch(t, []string{
-		"ghcr.io/example/app@" + appDigest + " -> " + vendoredApp,
-		"docker.io/library/nginx@" + nginxDigest + " -> " + vendoredNginx,
-	}, copies(client))
+		"ghcr.io/example/app@" + appDigest + " -> " + appRepository + ":2.0",
+		"docker.io/library/nginx@" + nginxDigest + " -> " + nginxRepository + ":1.27",
+	}, copies(client), "one copy per image, tagged as its reference")
 	for _, c := range client.Copies {
 		assert.True(t, c.Options.IncludeReferrers)
 	}
 
-	assert.Equal(t, vendoredApp, images[0].Vendored)
-	assert.Equal(t, vendoredApp, images[1].Vendored)
-	assert.Equal(t, vendoredNginx, images[2].Vendored)
+	assert.Equal(t, appRepository+":2.0@"+appDigest, images[0].Vendored)
+	assert.Equal(t, appRepository+"@"+appDigest, images[1].Vendored, "a reference by digest names no tag")
+	assert.Equal(t, nginxRepository+":1.27@"+nginxDigest, images[2].Vendored)
 
 	out := encode(t, manifest)
-	assert.Contains(t, out, "image: "+vendoredNginx+"\n")
-	assert.Contains(t, out, "image: "+vendoredApp+"\n")
-	assert.NotContains(t, out, "ghcr.io")
+	assert.Contains(t, out, "image: "+nginxRepository+":1.27@"+nginxDigest+"\n")
+	assert.Contains(t, out, "image: "+appRepository+":2.0@"+appDigest+"\n")
+	assert.Contains(t, out, "image: "+appRepository+"@"+appDigest+"\n")
+	assert.NotContains(t, out, "image: ghcr.io")
+	assert.NotContains(t, out, "image: nginx")
+}
+
+func TestStage_vendorTagsEveryTagOfAnImage(t *testing.T) {
+	client := &oci.FakeClient{Resolved: map[string]oci.Descriptor{
+		appRef:                      {Digest: appDigest, MediaType: ocispec.MediaTypeImageManifest},
+		"ghcr.io/example/app:2.0.1": {Digest: appDigest, MediaType: ocispec.MediaTypeImageManifest},
+		"ghcr.io/example/app":       {Digest: appDigest, MediaType: ocispec.MediaTypeImageManifest},
+	}}
+	client.Resolved["ghcr.io/example/app:latest"] = client.Resolved["ghcr.io/example/app"]
+
+	images, err := run(Stage{Policy: PolicyVendor, Client: client, Destination: bundledDestination(t), DestClient: &oci.FakeClient{}},
+		parse(t, podManifest(appRef, "ghcr.io/example/app:2.0.1", "ghcr.io/example/app")))
+	require.NoError(t, err)
+
+	repository := bundled + "/images/ghcr.io/example/app"
+	assert.Equal(t, []string{
+		"ghcr.io/example/app@" + appDigest + " -> " + repository + ":2.0",
+		"ghcr.io/example/app@" + appDigest + " -> " + repository + ":2.0.1",
+		"ghcr.io/example/app@" + appDigest + " -> " + repository + ":latest",
+	}, copies(client), "every tag the references name, in = out")
+	assert.Equal(t, repository+":latest@"+appDigest, images[0].Vendored, "a reference without tag or digest names latest")
+}
+
+func TestStage_vendorCopiesAnImageReferencedByDigestByDigest(t *testing.T) {
+	client := registry()
+
+	_, err := run(Stage{Policy: PolicyVendor, Client: client, Destination: bundledDestination(t), DestClient: &oci.FakeClient{}},
+		parse(t, podManifest("ghcr.io/example/app@"+appDigest)))
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"ghcr.io/example/app@" + appDigest + " -> " + bundled + "/images/ghcr.io/example/app@" + appDigest}, copies(client))
+}
+
+func TestStage_vendorFailsBeforeCopyingWhenARepositoryNameIsTooLong(t *testing.T) {
+	client := registry()
+	destination, err := oci.Parse("oci://registry.example.com/" + strings.Repeat("a", 230))
+	require.NoError(t, err)
+
+	_, err = run(Stage{Policy: PolicyVendor, Client: client, Destination: &destination, DestClient: &oci.FakeClient{}}, parse(t, stageManifest))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "could not vendor every image")
+	assert.Empty(t, client.Copies)
+}
+
+func TestVendoredRepository(t *testing.T) {
+	destination, err := oci.Parse("oci://" + bundled + ":1.0.0@" + appDigest)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name    string
+		want    string
+		wantErr bool
+	}{
+		{name: nginxName, want: bundled + "/images/docker.io/library/nginx"},
+		{name: "ghcr.io/external-secrets/external-secrets", want: bundled + "/images/ghcr.io/external-secrets/external-secrets"},
+		{name: "registry.example.com:5000/team/app", want: bundled + "/images/registry.example.com_5000/team/app"},
+		{name: "Registry.Example.com/team/app", want: bundled + "/images/registry.example.com/team/app"},
+		{name: "ghcr.io/" + strings.Repeat("a", 250), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := vendoredRepository(destination, tt.name)
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got.String(), "the repository, without the destination's tag and digest")
+		})
+	}
 }
 
 func TestStage_dryRunNeverCopiesOrFails(t *testing.T) {
@@ -188,7 +261,7 @@ func TestStage_dryRunNeverCopiesOrFails(t *testing.T) {
 
 	assert.Empty(t, client.Copies)
 	out := encode(t, manifest)
-	assert.Contains(t, out, "image: registry.example.com/shop/web@"+nginxDigest+"\n")
+	assert.Contains(t, out, "image: registry.example.com/shop/web/images/docker.io/library/nginx:1.27@"+nginxDigest+"\n")
 	assert.Contains(t, out, "image: ghcr.io/example/missing:1\n")
 }
 
@@ -330,7 +403,7 @@ func TestStage_unreachableRegistryIsTriedOnce(t *testing.T) {
 	}
 	manifest := parse(t, podManifest(
 		"dead.example.com/a:1", "dead.example.com/b:1", "dead.example.com/c:1",
-		"ghcr.io/example/app:2.0", "ghcr.io/example/gone:1", "ghcr.io/example/gone:2",
+		appRef, "ghcr.io/example/gone:1", "ghcr.io/example/gone:2",
 	))
 
 	images, err := run(Stage{Client: client}, manifest)
@@ -382,7 +455,7 @@ func TestStage_recordIgnoresLocks(t *testing.T) {
 func TestStage_vendorSkipsImagesTheLockVendoredAlready(t *testing.T) {
 	client := registry()
 	dest := &oci.FakeClient{}
-	vendoredNginx := bundled + "@" + nginxDigest
+	vendoredNginx := bundled + "/images/docker.io/library/nginx:1.27@" + nginxDigest
 	locked := []Image{{Ref: nginxRef, Name: nginxName, Digest: nginxDigest, MediaType: ocispec.MediaTypeImageIndex, Vendored: vendoredNginx}}
 
 	images, err := run(Stage{
@@ -391,38 +464,53 @@ func TestStage_vendorSkipsImagesTheLockVendoredAlready(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, vendoredNginx, images[2].Vendored)
-	assert.Equal(t, []string{"ghcr.io/example/app@" + appDigest + " -> " + bundled + "@" + appDigest}, copies(client))
+	assert.Equal(t, []string{"ghcr.io/example/app@" + appDigest + " -> " + bundled + "/images/ghcr.io/example/app:2.0"}, copies(client))
 	require.Len(t, dest.Resolves, 1)
-	assert.Equal(t, vendoredNginx, dest.Resolves[0].String(), "the vendored copy is checked to be still there")
+	assert.Equal(t, bundled+"/images/docker.io/library/nginx@"+nginxDigest, dest.Resolves[0].String(), "the vendored copy is checked to be still there")
 }
 
 func TestStage_vendorCopiesLockedImagesThatAreGone(t *testing.T) {
 	client := registry()
 	dest := &oci.FakeClient{Resolved: map[string]oci.Descriptor{}}
-	locked := []Image{{Ref: nginxRef, Name: nginxName, Digest: nginxDigest, Vendored: bundled + "@" + nginxDigest}}
+	locked := []Image{{Ref: nginxRef, Name: nginxName, Digest: nginxDigest, Vendored: bundled + "/images/docker.io/library/nginx:1.27@" + nginxDigest}}
 
 	_, err := run(Stage{
 		Policy: PolicyVendor, Client: client, Destination: bundledDestination(t), DestClient: dest, Locked: locked,
 	}, parse(t, stageManifest))
 	require.NoError(t, err)
 
-	assert.Contains(t, copies(client), nginxName+"@"+nginxDigest+" -> "+bundled+"@"+nginxDigest)
+	assert.Contains(t, copies(client), nginxName+"@"+nginxDigest+" -> "+bundled+"/images/docker.io/library/nginx:1.27")
 }
 
 func TestStage_vendorCopiesLockedImagesToANewDestination(t *testing.T) {
 	client := registry()
-	locked := []Image{{Ref: nginxRef, Name: nginxName, Digest: movedDigest, Vendored: "registry.example.com/old/web@" + movedDigest}}
+	locked := []Image{{Ref: nginxRef, Name: nginxName, Digest: movedDigest, Vendored: "registry.example.com/old/web/images/docker.io/library/nginx:1.27@" + movedDigest}}
 
 	_, err := run(Stage{
 		Policy: PolicyVendor, Client: client, Destination: bundledDestination(t), DestClient: &oci.FakeClient{}, Locked: locked,
 	}, parse(t, stageManifest))
 	require.NoError(t, err)
 
-	assert.Contains(t, copies(client), nginxName+"@"+movedDigest+" -> "+bundled+"@"+movedDigest,
+	assert.Contains(t, copies(client), nginxName+"@"+movedDigest+" -> "+bundled+"/images/docker.io/library/nginx:1.27",
 		"the locked digest is copied from its source")
 	for _, ref := range client.Resolves {
 		assert.NotEqual(t, nginxSource, ref.String())
 	}
+}
+
+func TestStage_vendorMovesImagesVendoredIntoTheDestinationItself(t *testing.T) {
+	client := registry()
+	dest := &oci.FakeClient{}
+	locked := []Image{{Ref: nginxRef, Name: nginxName, Digest: nginxDigest, Vendored: bundled + "@" + nginxDigest}}
+
+	images, err := run(Stage{
+		Policy: PolicyVendor, Client: client, Destination: bundledDestination(t), DestClient: dest, Locked: locked,
+	}, parse(t, stageManifest))
+	require.NoError(t, err)
+
+	assert.Equal(t, bundled+"/images/docker.io/library/nginx:1.27@"+nginxDigest, images[2].Vendored)
+	assert.Contains(t, copies(client), nginxName+"@"+nginxDigest+" -> "+bundled+"/images/docker.io/library/nginx:1.27",
+		"the locked digest is copied into the image's own repository")
 }
 
 // barrierClient holds every Copy until maxParallelCopies copies are in
