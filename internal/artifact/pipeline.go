@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"time"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -222,40 +221,6 @@ type PreviewRequest struct {
 // Preview pulls and renders the source artifact without pushing, and returns
 // the processed files individually, preserving the artifact's file layout.
 func (p *Pipeline) Preview(ctx context.Context, req PreviewRequest) ([]File, error) {
-	files, err := p.preview(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(files) == 0 {
-		return nil, fmt.Errorf("no YAML files found in artifact")
-	}
-
-	return files, nil
-}
-
-// PreviewManifest behaves like Preview but concatenates the rendered files
-// into a single multi-document YAML manifest.
-func (p *Pipeline) PreviewManifest(ctx context.Context, req PreviewRequest) ([]byte, error) {
-	files, err := p.preview(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(files) == 0 {
-		return nil, fmt.Errorf("no YAML files found in artifact")
-	}
-
-	var out strings.Builder
-	for _, file := range files {
-		fmt.Fprintf(&out, "---\n# Source: %s\n%s\n", file.Path, strings.TrimSpace(file.Content))
-	}
-
-	return []byte(out.String()), nil
-}
-
-// preview runs the shared pull+render flow used by Preview and PreviewManifest.
-func (p *Pipeline) preview(ctx context.Context, req PreviewRequest) ([]File, error) {
 	srcClient := cmp.Or(req.SourceClient, p.store.client)
 
 	sourceRef, err := req.Source.ref()
@@ -277,7 +242,16 @@ func (p *Pipeline) preview(ctx context.Context, req PreviewRequest) ([]File, err
 		return nil, err
 	}
 
-	return listFiles(p.store.fs, pulled.dir)
+	files, err := listFiles(p.store.fs, pulled.dir)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(files) == 0 {
+		return nil, fmt.Errorf("no YAML files found in artifact")
+	}
+
+	return files, nil
 }
 
 // previewImages pins or vendors the images in dir as the render would,

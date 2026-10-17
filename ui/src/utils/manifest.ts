@@ -1,10 +1,23 @@
+import type { ArtifactFile } from '../api/types'
+
 const CRD_PATTERN = /^kind:\s+CustomResourceDefinition\s*$/m
 const DOC_SEPARATOR = /(?:^|\n)---[ \t]*(?:\n|$)/
 
 /**
+ * Joins an artifact's files into one multi-document YAML text. A single file
+ * is its content alone; several files each start a document under a
+ * `# Source: <path>` header. Every view and diff of rendered manifests joins
+ * files here, so both sides of a diff always match in format.
+ */
+export function joinFiles(files: ArtifactFile[]): string {
+  if (files.length === 1) return files[0].content
+  return files.map((f) => `---\n# Source: ${f.path}\n${f.content.trim()}\n`).join('')
+}
+
+/**
  * Splits a multi-document YAML string into individual documents.
- * Handles both leading `---` markers (common in Helm output) and
- * `\n---\n` separators used by the server when concatenating files.
+ * Handles both leading `---` markers (common in Helm output) and the
+ * separators joinFiles writes between files.
  */
 function splitDocuments(manifest: string): string[] {
   return manifest

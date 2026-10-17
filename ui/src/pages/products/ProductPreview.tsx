@@ -1,4 +1,4 @@
-import { previewProduct, previewProductFiles } from '../../api/client'
+import { previewProduct } from '../../api/client'
 import Section from '../../components/layout/Section'
 import PreviewTab from '../../components/shared/PreviewTab'
 import { useProductContext } from './productFormat'
@@ -17,8 +17,7 @@ export default function ProductPreview() {
           patches: product.patches,
           images: product.images,
         }}
-        renderManifest={previewProduct}
-        renderFiles={previewProductFiles}
+        render={previewProduct}
       />
     </Section>
   )

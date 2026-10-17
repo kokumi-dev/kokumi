@@ -113,10 +113,9 @@ func handleGetChartInfo(deps *apiDeps) http.HandlerFunc {
 // handleGetRegistryArtifact handles GET /api/v1/registry/artifact?ref=<oci-ref>&version=<tag>.
 // It pulls the OCI artifact at the given tag, resolves its manifest digest, and
 // classifies it as a Helm chart or a pre-rendered manifest bundle. For Helm
-// charts it returns chart metadata, the default values, the README, and the
-// manifest rendered with the default values. For manifest bundles it returns the
-// concatenated manifest YAML. Optional pantryName/pantryNamespace select a
-// Pantry for authenticated access.
+// charts it returns chart metadata, the default values and the README. For
+// manifest bundles it returns the bundle's files. Optional
+// pantryName/pantryNamespace select a Pantry for authenticated access.
 func handleGetRegistryArtifact(deps *apiDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if deps == nil {
@@ -156,17 +155,11 @@ func handleGetRegistryArtifact(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		files := make([]ArtifactFileDTO, 0, len(result.Files))
-		for _, f := range result.Files {
-			files = append(files, ArtifactFileDTO{Path: f.Path, Content: f.Content})
-		}
-
 		respondJSON(w, http.StatusOK, ArtifactInfoDTO{
 			IsHelm:     false,
 			IsManifest: true,
 			Digest:     result.Digest,
-			Manifest:   result.Manifest,
-			Files:      files,
+			Files:      artifactFilesToDTO(result.Files),
 		})
 	}
 }

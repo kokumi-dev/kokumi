@@ -11,7 +11,7 @@ import PatchesEditor from '../shared/PatchesEditor'
 import DiffTab from './DiffTab'
 import type { Order, OrderFormData, OrderPreviewRequest, OverridePolicy, Product } from '../../api/types'
 import { emptyOrderForm, orderToFormData } from '../../api/types'
-import { previewOrder, previewOrderFiles } from '../../api/client'
+import { previewOrder } from '../../api/client'
 import { useChartInfo } from '../../hooks/useChartInfo'
 import { assertKnownKeys, patchesFromYaml, patchesToYaml } from '../../utils/yaml'
 import {
@@ -299,8 +299,7 @@ export default function OrderForm({ order, initialProduct, products, onCancel, o
         {tab === 'preview' && (
           <PreviewTab
             request={previewRequest(formData)}
-            renderManifest={previewOrder}
-            renderFiles={previewOrderFiles}
+            render={previewOrder}
             placeholder="Pick a Product to preview the rendered manifest."
           />
         )}

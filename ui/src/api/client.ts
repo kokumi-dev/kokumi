@@ -171,85 +171,25 @@ export function listPreparations(
 
 // ── Previews (rendered on the server, nothing is pushed) ──────────────────────
 
-/** Posts a preview request and returns the rendered manifest as text. */
-function previewManifest(path: string, body: unknown): Promise<string> {
-  return fetch(`${BASE}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify(body),
-  }).then(async (res) => {
-    if (!res.ok) {
-      handleUnauthorized(res.status)
-      let message = `HTTP ${res.status}`
-      try {
-        const body = (await res.json()) as { error?: string }
-        if (body.error) message = body.error
-      } catch {
-        // ignore
-      }
-      throw new Error(message)
-    }
-    return res.text()
-  })
-}
-
-/** Renders an Order over its Product into a single manifest. */
-export function previewOrder(req: OrderPreviewRequest): Promise<string> {
-  return previewManifest('/orders/preview', req)
-}
-
-/** Renders an Order over its Product into its individual files. */
-export function previewOrderFiles(req: OrderPreviewRequest): Promise<ArtifactFile[]> {
-  return request<ArtifactFile[]>('/orders/preview/files', {
+/** Renders an Order over its Product into its files. */
+export function previewOrder(req: OrderPreviewRequest): Promise<ArtifactFile[]> {
+  return request<ArtifactFile[]>('/orders/preview', {
     method: 'POST',
     body: JSON.stringify(req),
   })
 }
 
-/** Renders a Product on its own into a single manifest. */
-export function previewProduct(req: ProductPreviewRequest): Promise<string> {
-  return previewManifest('/products/preview', req)
-}
-
-/** Renders a Product on its own into its individual files. */
-export function previewProductFiles(req: ProductPreviewRequest): Promise<ArtifactFile[]> {
-  return request<ArtifactFile[]>('/products/preview/files', {
+/** Renders a Product on its own into its files. */
+export function previewProduct(req: ProductPreviewRequest): Promise<ArtifactFile[]> {
+  return request<ArtifactFile[]>('/products/preview', {
     method: 'POST',
     body: JSON.stringify(req),
   })
 }
 
-export function getManifest(
-  namespace: string,
-  prepName: string,
-): Promise<string> {
-  return fetch(`${BASE}/preparations/${namespace}/${prepName}/manifest`, {
-    headers: { ...authHeaders() },
-  }).then(
-    async (res) => {
-      if (!res.ok) {
-        handleUnauthorized(res.status)
-        let message = `HTTP ${res.status}`
-        try {
-          const body = (await res.json()) as { error?: string }
-          if (body.error) message = body.error
-        } catch {
-          // ignore
-        }
-        throw new Error(message)
-      }
-      return res.text()
-    },
-  )
-}
-
-export function getManifestFiles(
-  namespace: string,
-  prepName: string,
-): Promise<ArtifactFile[]> {
-  return request<ArtifactFile[]>(
-    `/preparations/${namespace}/${prepName}/manifest/files`,
-  )
+/** Returns the files of a Preparation's rendered artifact. */
+export function getManifest(namespace: string, prepName: string): Promise<ArtifactFile[]> {
+  return request<ArtifactFile[]>(`/preparations/${namespace}/${prepName}/manifest`)
 }
 
 // ── Artifact graphs and intent ────────────────────────────────────────────────

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { getManifest, previewOrder } from '../../api/client'
 import type { Order, OrderPreviewRequest } from '../../api/types'
 import { computeDiff, filterContext } from '../../utils/diff'
-import { filterCRDDocuments, hasCRDDocuments } from '../../utils/manifest'
+import { filterCRDDocuments, hasCRDDocuments, joinFiles } from '../../utils/manifest'
 import { Button } from '../ui'
 import DiffView from '../shared/DiffView'
 import styles from './DiffTab.module.css'
@@ -39,10 +39,10 @@ export default function DiffTab({ request, order }: Props) {
         getManifest(order.namespace, activePrepName),
         previewOrder(req),
       ])
-        .then(([activeMani, previewMani]) => {
+        .then(([active, preview]) => {
           if (cancelled) return
-          setBefore(activeMani)
-          setAfter(previewMani)
+          setBefore(joinFiles(active))
+          setAfter(joinFiles(preview))
           setLoading(false)
         })
         .catch((e: Error) => {

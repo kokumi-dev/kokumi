@@ -2,9 +2,15 @@ package server
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-logr/logr"
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -12,9 +18,91 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/images"
+	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/resolve"
 )
+
+const (
+	webPreparation = "web-aaaaaaaaaaaa"
+	// fakeManifestFile is the one file every pull of oci.FakeClient writes.
+	fakeManifestFile = "manifest.yaml"
+)
+
+// serveAsAdmin routes req through the API as the admin login, which may read
+// objs. Every artifact pull returns fakeManifestFile.
+func serveAsAdmin(t *testing.T, req *http.Request, objs ...client.Object) *httptest.ResponseRecorder {
+	t.Helper()
+	fs := afero.NewMemMapFs()
+	store := artifact.NewStore(oci.NewFakeClient(fs), fs, "")
+	imp := newImpersonator(nil, nil, capsInstallNamespace)
+	imp.clients[adminServiceAccountName] = fake.NewClientBuilder().WithScheme(unionScheme(t)).WithObjects(objs...).Build()
+	deps := &apiDeps{
+		store:        store,
+		pipeline:     artifact.NewPipeline(store),
+		logger:       logr.Discard(),
+		impersonator: imp,
+		saList: func() []*corev1.ServiceAccount {
+			return []*corev1.ServiceAccount{{Name: adminServiceAccountName}}
+		},
+		kitchen: func() (*deliveryv1alpha1.Kitchen, error) { return nil, errors.New("no Kitchen") },
+	}
+
+	mux := http.NewServeMux()
+	addRoutes(mux, nil, deps, nil, capsInstallNamespace)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req.WithContext(withIdentity(req.Context(), adminLogin)))
+	return rec
+}
+
+// requireFiles asserts that rec is a JSON list of files with the given paths.
+func requireFiles(t *testing.T, rec *httptest.ResponseRecorder, paths ...string) {
+	t.Helper()
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
+	var files []ArtifactFileDTO
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &files))
+	got := make([]string, len(files))
+	for i, f := range files {
+		got[i] = f.Path
+	}
+	require.Equal(t, paths, got)
+}
+
+func TestHandlePreview(t *testing.T) {
+	const source = "oci://registry.example.com/charts/web"
+	product := &deliveryv1alpha1.Product{
+		Name:      "web",
+		Namespace: nsA,
+		Status: deliveryv1alpha1.ProductStatus{
+			Source: &deliveryv1alpha1.ProductSourceStatus{OCI: source, Version: "1.0.0"},
+		},
+	}
+
+	tests := []struct {
+		name string
+		path string
+		body string
+	}{
+		{
+			name: "Order",
+			path: "/api/v1/orders/preview",
+			body: `{"namespace":"` + nsA + `","name":"web-dev","productRef":{"name":"web"}}`,
+		},
+		{
+			name: "Product",
+			path: "/api/v1/products/preview",
+			body: `{"namespace":"` + nsA + `","name":"web","source":{"oci":"` + source + `","version":"1.0.0"},"images":{}}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, tt.path, strings.NewReader(tt.body))
+			requireFiles(t, serveAsAdmin(t, req, product), fakeManifestFile)
+		})
+	}
+}
 
 func TestPreviewRequest(t *testing.T) {
 	helm := func(values string) *deliveryv1alpha1.Render {
@@ -64,9 +152,9 @@ func TestPreviewRequest(t *testing.T) {
 func TestLockedImagesAs(t *testing.T) {
 	const digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	order := newOrder("web", nsA)
-	order.Status.LatestPreparationName = "web-aaaaaaaaaaaa"
+	order.Status.LatestPreparationName = webPreparation
 	prep := &deliveryv1alpha1.Preparation{
-		Name:      "web-aaaaaaaaaaaa",
+		Name:      webPreparation,
 		Namespace: nsA,
 		Spec: deliveryv1alpha1.PreparationSpec{Images: []deliveryv1alpha1.PreparationImage{
 			{Ref: nginxRef, Name: nginxName, Digest: digest, Vendored: "registry/shop/web@" + digest},

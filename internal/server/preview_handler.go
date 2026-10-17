@@ -67,64 +67,21 @@ type resolvePreviewFunc func(deps *apiDeps, w http.ResponseWriter, r *http.Reque
 
 // handlePreviewOrder handles POST /api/v1/orders/preview.
 // It merges the Order over its Product, pulls and renders the source
-// artifact, applies patches and edits, and returns the resulting manifest as
-// text/plain. Nothing is pushed to a registry.
+// artifact, applies patches and edits, and returns the rendered files.
+// Nothing is pushed to a registry.
 func handlePreviewOrder(deps *apiDeps) http.HandlerFunc {
-	return handlePreviewManifest(deps, resolveOrderPreview)
-}
-
-// handlePreviewOrderFiles handles POST /api/v1/orders/preview/files.
-// It runs the same pipeline as the preview endpoint but returns the rendered
-// files individually, preserving the source artifact's file layout.
-func handlePreviewOrderFiles(deps *apiDeps) http.HandlerFunc {
-	return handlePreviewFiles(deps, resolveOrderPreview)
+	return handlePreview(deps, resolveOrderPreview)
 }
 
 // handlePreviewProduct handles POST /api/v1/products/preview. It renders a
-// Product on its own and returns the manifest as text/plain.
+// Product on its own and returns the rendered files.
 func handlePreviewProduct(deps *apiDeps) http.HandlerFunc {
-	return handlePreviewManifest(deps, resolveProductPreview)
+	return handlePreview(deps, resolveProductPreview)
 }
 
-// handlePreviewProductFiles handles POST /api/v1/products/preview/files.
-func handlePreviewProductFiles(deps *apiDeps) http.HandlerFunc {
-	return handlePreviewFiles(deps, resolveProductPreview)
-}
-
-// handlePreviewManifest renders a preview into a single manifest.
-func handlePreviewManifest(deps *apiDeps, resolvePreview resolvePreviewFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if deps == nil {
-			unavailable(w)
-			return
-		}
-
-		p, ok := resolvePreview(deps, w, r)
-		if !ok {
-			return
-		}
-
-		req, err := p.request()
-		if err != nil {
-			respondError(w, http.StatusUnprocessableEntity, err.Error())
-			return
-		}
-
-		manifest, err := deps.pipeline.PreviewManifest(r.Context(), req)
-		if err != nil {
-			deps.logger.Error(err, "Failed to render preview", "namespace", p.namespace, "name", p.name)
-			respondError(w, http.StatusBadGateway, fmt.Sprintf("failed to render preview: %s", err))
-			return
-		}
-
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(manifest)
-	}
-}
-
-// handlePreviewFiles renders a preview into its individual files.
-func handlePreviewFiles(deps *apiDeps, resolvePreview resolvePreviewFunc) http.HandlerFunc {
+// handlePreview renders a preview and returns its files in the source
+// artifact's layout. A single rendered manifest is one file, manifest.yaml.
+func handlePreview(deps *apiDeps, resolvePreview resolvePreviewFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if deps == nil {
 			unavailable(w)
@@ -144,17 +101,12 @@ func handlePreviewFiles(deps *apiDeps, resolvePreview resolvePreviewFunc) http.H
 
 		files, err := deps.pipeline.Preview(r.Context(), req)
 		if err != nil {
-			deps.logger.Error(err, "Failed to render preview files", "namespace", p.namespace, "name", p.name)
+			deps.logger.Error(err, "Failed to render preview", "namespace", p.namespace, "name", p.name)
 			respondError(w, http.StatusBadGateway, fmt.Sprintf("failed to render preview: %s", err))
 			return
 		}
 
-		out := make([]ArtifactFileDTO, 0, len(files))
-		for _, f := range files {
-			out = append(out, ArtifactFileDTO{Path: f.Path, Content: f.Content})
-		}
-
-		respondJSON(w, http.StatusOK, out)
+		respondJSON(w, http.StatusOK, artifactFilesToDTO(files))
 	}
 }
 

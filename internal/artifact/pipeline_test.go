@@ -336,11 +336,10 @@ func TestPipeline_FileLayoutMulti(t *testing.T) {
 			},
 		}
 
-		preview, err := p.PreviewManifest(context.Background(), req)
+		files, err := p.Preview(context.Background(), req)
 		require.NoError(t, err)
-		assert.Contains(t, string(preview), "# Source: deployment.yaml")
-		assert.Contains(t, string(preview), "# Source: service.yaml")
-		assert.Contains(t, string(preview), "replicas: 3")
+		require.Equal(t, []string{testDeploymentFile, testServiceFile}, filePaths(files))
+		assert.Contains(t, files[0].Content, "replicas: 3")
 	})
 
 	t.Run("kustomization.yaml prevents merge even with Single layout", func(t *testing.T) {
@@ -357,10 +356,9 @@ func TestPipeline_FileLayoutMulti(t *testing.T) {
 			Namespace: testNamespaceName,
 		}
 
-		preview, err := p.PreviewManifest(context.Background(), req)
+		files, err := p.Preview(context.Background(), req)
 		require.NoError(t, err)
-		assert.Contains(t, string(preview), "# Source: deployment.yaml")
-		assert.Contains(t, string(preview), "# Source: kustomization.yaml")
+		assert.Equal(t, []string{testDeploymentFile, testKustomizationFile}, filePaths(files))
 	})
 
 	t.Run("default still merges into manifest.yaml", func(t *testing.T) {
@@ -377,10 +375,11 @@ func TestPipeline_FileLayoutMulti(t *testing.T) {
 			Namespace: testNamespaceName,
 		}
 
-		preview, err := p.PreviewManifest(context.Background(), req)
+		files, err := p.Preview(context.Background(), req)
 		require.NoError(t, err)
-		assert.Contains(t, string(preview), "# Source: deployment.yaml")
-		assert.Contains(t, string(preview), "# Source: service.yaml")
+		require.Equal(t, []string{"manifest.yaml"}, filePaths(files))
+		assert.Contains(t, files[0].Content, "# Source: deployment.yaml")
+		assert.Contains(t, files[0].Content, "# Source: service.yaml")
 	})
 }
 
@@ -404,13 +403,20 @@ func TestPipeline_FluxKustomizeArtifact(t *testing.T) {
 		},
 	}
 
-	preview, err := p.PreviewManifest(context.Background(), req)
+	files, err := p.Preview(context.Background(), req)
 	require.NoError(t, err)
 
-	assert.Contains(t, string(preview), "# Source: deployment.yaml")
-	assert.Contains(t, string(preview), "# Source: service.yaml")
-	assert.Contains(t, string(preview), "# Source: kustomization.yaml")
-	assert.Contains(t, string(preview), "replicas: 2")
+	require.Equal(t, []string{testDeploymentFile, testKustomizationFile, testServiceFile}, filePaths(files))
+	assert.Contains(t, files[0].Content, "replicas: 2")
+}
+
+// filePaths returns the paths of files in order.
+func filePaths(files []artifact.File) []string {
+	paths := make([]string, len(files))
+	for i, f := range files {
+		paths[i] = f.Path
+	}
+	return paths
 }
 
 func TestStore_ResolveDigest(t *testing.T) {
