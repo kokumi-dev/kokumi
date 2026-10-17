@@ -7,6 +7,7 @@ import { Button, Chevron, TabButtons } from '../ui'
 import Modal from '../shared/Modal'
 import YamlEditor from '../shared/YamlEditor'
 import FileInspector from '../shared/FileInspector'
+import { joinFiles } from '../../utils/manifest'
 import ArtifactView from '../artifact/ArtifactView'
 import styles from './PantryContents.module.css'
 
@@ -171,6 +172,8 @@ export default function PantryContents({ pantry }: Props) {
 
 function ArtifactDetail({ pantry, tag, info, onViewManifest }: { pantry: Pantry; tag: string; info: ArtifactInfo; onViewManifest: (content: string) => void }) {
   const [tab, setTab] = useState<Tab>(info.isHelm ? 'readme' : 'manifest')
+  const files = info.files ?? []
+  const manifest = joinFiles(files)
 
   return (
     <div className={styles.artifact}>
@@ -207,12 +210,12 @@ function ArtifactDetail({ pantry, tag, info, onViewManifest }: { pantry: Pantry;
         {tab === 'structure' && <TagStructure pantry={pantry} tag={tag} />}
         {tab === 'manifest' && (
           <div className={styles.manifestInline}>
-            {info.files && info.files.length > 1 ? (
-              <FileInspector files={info.files} />
+            {files.length > 1 ? (
+              <FileInspector files={files} />
             ) : (
               <>
-                <pre className={styles.pre}>{info.manifest}</pre>
-                <Button variant="secondary" size="sm" onClick={() => onViewManifest(info.manifest ?? '')}>
+                <pre className={styles.pre}>{manifest}</pre>
+                <Button variant="secondary" size="sm" onClick={() => onViewManifest(manifest)}>
                   Open in viewer
                 </Button>
               </>

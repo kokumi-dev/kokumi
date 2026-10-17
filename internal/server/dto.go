@@ -504,7 +504,7 @@ type UpdatePantryRequest struct {
 	SecretRef   string `json:"secretRef,omitempty"`
 }
 
-// ArtifactFileDTO is a single file of a raw manifest bundle artifact.
+// ArtifactFileDTO is a single file of a manifest bundle or rendered artifact.
 type ArtifactFileDTO struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
@@ -515,7 +515,6 @@ type ArtifactInfoDTO struct {
 	IsHelm     bool              `json:"isHelm"`
 	IsManifest bool              `json:"isManifest"`
 	Digest     string            `json:"digest,omitempty"`
-	Manifest   string            `json:"manifest,omitempty"`
 	Files      []ArtifactFileDTO `json:"files,omitempty"`
 	ChartInfo  *ChartInfoDTO     `json:"chartInfo,omitempty"`
 }

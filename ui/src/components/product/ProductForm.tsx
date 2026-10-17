@@ -25,7 +25,7 @@ import type {
   SourceVerify,
 } from '../../api/types'
 import { emptyProductForm, imagePolicies, overridePolicies, productToFormData } from '../../api/types'
-import { getChartInfo, listOCITags, previewProduct, previewProductFiles } from '../../api/client'
+import { getChartInfo, listOCITags, previewProduct } from '../../api/client'
 import { cleanTags } from '../../api/ociTags'
 import { usePantries } from '../../hooks/usePantries'
 import { assertKnownKeys, patchesFromYaml, patchesToYaml } from '../../utils/yaml'
@@ -449,8 +449,7 @@ export default function ProductForm({ product, onCancel, onSubmit, onDirtyChange
         {tab === 'preview' && (
           <PreviewTab
             request={previewRequest(formData)}
-            renderManifest={previewProduct}
-            renderFiles={previewProductFiles}
+            render={previewProduct}
             placeholder="Fill in the source and version to preview the rendered manifest."
           />
         )}

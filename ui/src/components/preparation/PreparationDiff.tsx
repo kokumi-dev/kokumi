@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { getManifest, getManifestFiles } from '../../api/client'
+import { getManifest } from '../../api/client'
 import type { ArtifactFile, Preparation } from '../../api/types'
 import { computeDiff, filterContext } from '../../utils/diff'
-import { filterCRDDocuments, hasCRDDocuments } from '../../utils/manifest'
+import { filterCRDDocuments, hasCRDDocuments, joinFiles } from '../../utils/manifest'
 import { diffImages, type ImageChange } from '../../utils/images'
 import { Button } from '../ui'
 import DiffView from '../shared/DiffView'
@@ -19,7 +19,7 @@ const CONTEXT_SIZE = 5
 type State =
   | { status: 'loading' }
   | { status: 'error'; message: string }
-  | { status: 'ready'; before: string; after: string; beforeFiles: ArtifactFile[] | null; afterFiles: ArtifactFile[] | null }
+  | { status: 'ready'; before: ArtifactFile[]; after: ArtifactFile[] }
 
 /**
  * PreparationDiff renders a git-style diff of two Preparations' manifests.
@@ -35,11 +35,9 @@ export default function PreparationDiff({ base, target }: Props) {
     Promise.all([
       getManifest(base.namespace, base.name),
       getManifest(target.namespace, target.name),
-      getManifestFiles(base.namespace, base.name).catch(() => null),
-      getManifestFiles(target.namespace, target.name).catch(() => null),
     ])
-      .then(([before, after, beforeFiles, afterFiles]) => {
-        if (!cancelled) setState({ status: 'ready', before, after, beforeFiles, afterFiles })
+      .then(([before, after]) => {
+        if (!cancelled) setState({ status: 'ready', before, after })
       })
       .catch((e: Error) => !cancelled && setState({ status: 'error', message: e.message }))
     return () => { cancelled = true }
@@ -48,23 +46,28 @@ export default function PreparationDiff({ base, target }: Props) {
   const current = state
 
   const fileDiffs = useMemo(() => {
-    if (current.status !== 'ready' || !current.beforeFiles || !current.afterFiles) return null
-    if (current.beforeFiles.length <= 1 && current.afterFiles.length <= 1) return null
-    const beforeMap = new Map(current.beforeFiles.map((f) => [f.path, f.content]))
-    const afterMap = new Map(current.afterFiles.map((f) => [f.path, f.content]))
+    if (current.status !== 'ready') return null
+    if (current.before.length <= 1 && current.after.length <= 1) return null
+    const beforeMap = new Map(current.before.map((f) => [f.path, f.content]))
+    const afterMap = new Map(current.after.map((f) => [f.path, f.content]))
     const all = [...new Set([...beforeMap.keys(), ...afterMap.keys()])].sort()
     return all.map((path) => ({ path, lines: computeDiff(beforeMap.get(path) ?? '', afterMap.get(path) ?? '') }))
   }, [current])
 
+  const joined = useMemo(() => {
+    if (current.status !== 'ready') return null
+    return { before: joinFiles(current.before), after: joinFiles(current.after) }
+  }, [current])
+
   const allLines = useMemo(() => {
-    if (current.status !== 'ready') return []
-    return computeDiff(filterCRDDocuments(current.before, hideCRDs), filterCRDDocuments(current.after, hideCRDs))
-  }, [current, hideCRDs])
+    if (joined === null) return []
+    return computeDiff(filterCRDDocuments(joined.before, hideCRDs), filterCRDDocuments(joined.after, hideCRDs))
+  }, [joined, hideCRDs])
 
-  if (current.status === 'loading') return <p className={layout.muted}>Loading manifests…</p>
   if (current.status === 'error') return <p className={layout.error}>Failed to load manifests: {current.message}</p>
+  if (joined === null) return <p className={layout.muted}>Loading manifests…</p>
 
-  const hasCRDs = hasCRDDocuments(current.before) || hasCRDDocuments(current.after)
+  const hasCRDs = hasCRDDocuments(joined.before) || hasCRDDocuments(joined.after)
   const context = showFull ? Infinity : CONTEXT_SIZE
   const imageChanges = diffImages(base.images, target.images)
 

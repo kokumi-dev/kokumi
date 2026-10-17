@@ -757,3 +757,13 @@ func pantriesFromList(list deliveryv1alpha1.PantryList) []PantryDTO {
 	slices.SortFunc(out, func(a, b PantryDTO) int { return compareKeys(a.Namespace, a.Name, b.Namespace, b.Name) })
 	return out
 }
+
+// artifactFilesToDTO converts an artifact's files to their DTO representation.
+// It never returns nil, so an empty artifact encodes as [] rather than null.
+func artifactFilesToDTO(files []artifact.File) []ArtifactFileDTO {
+	out := make([]ArtifactFileDTO, len(files))
+	for i, f := range files {
+		out[i] = ArtifactFileDTO{Path: f.Path, Content: f.Content}
+	}
+	return out
+}

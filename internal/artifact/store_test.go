@@ -195,27 +195,6 @@ func TestPipeline_Preview_Files(t *testing.T) {
 		assert.Contains(t, err.Error(), "no YAML files found")
 	})
 
-	t.Run("PreviewManifest concatenates with Source headers", func(t *testing.T) {
-		fs := afero.NewMemMapFs()
-		client := &multiFileFakeClient{fs: fs}
-		p := artifact.NewPipeline(artifact.NewStore(client, fs, ""))
-
-		manifest, err := p.PreviewManifest(context.Background(), artifact.PreviewRequest{
-			Source: artifact.Source{
-				OCI:     "oci://registry.svc.cluster.local:5000/order/multi-file-app",
-				Version: testVersion,
-			},
-			Render: &artifact.RenderSpec{
-				Manifest: &artifact.ManifestSpec{Layout: artifact.LayoutMulti},
-			},
-			Name:      "multi-file-app",
-			Namespace: testNamespaceName,
-		})
-		require.NoError(t, err)
-		assert.Contains(t, string(manifest), "---\n# Source: deployment.yaml\n")
-		assert.Contains(t, string(manifest), "---\n# Source: service.yaml\n")
-	})
-
 	t.Run("helm chart renders without pushing", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
 		client := &helmFakeClient{fs: fs}

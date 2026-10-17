@@ -52,7 +52,8 @@ func handleListPreparations(deps *apiDeps) http.HandlerFunc {
 }
 
 // handleGetPreparationManifest handles GET /api/v1/preparations/{namespace}/{name}/manifest.
-// It fetches the rendered Kubernetes YAML from the Preparation's OCI artifact.
+// It returns the files of the Preparation's OCI artifact in their layout. A
+// single rendered manifest is one file, manifest.yaml.
 func handleGetPreparationManifest(deps *apiDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if deps == nil {
@@ -88,52 +89,6 @@ func handleGetPreparationManifest(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = w.Write([]byte(result.Manifest))
-	}
-}
-
-// handleGetPreparationManifestFiles handles GET /api/v1/preparations/{namespace}/{name}/manifest/files.
-// It returns the individual YAML files of the Preparation's OCI artifact,
-// preserving the artifact's file layout.
-func handleGetPreparationManifestFiles(deps *apiDeps) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if deps == nil {
-			unavailable(w)
-			return
-		}
-
-		namespace := r.PathValue("namespace")
-		name := r.PathValue("name")
-
-		uc, err := deps.resolveUserClient(r)
-		if err != nil {
-			respondForbiddenOrError(w, err, "failed to resolve identity")
-			return
-		}
-
-		prep := &deliveryv1alpha1.Preparation{}
-		if err := uc.get(r.Context(), types.NamespacedName{Namespace: namespace, Name: name}, prep); err != nil {
-			if client.IgnoreNotFound(err) == nil {
-				respondError(w, http.StatusNotFound, fmt.Sprintf("preparation %s/%s not found", namespace, name))
-				return
-			}
-			respondForbiddenOrError(w, err, "failed to get preparation")
-			return
-		}
-
-		result, err := deps.store.Inspect(r.Context(), prep.Spec.Artifact.OCIRef, nil)
-		if err != nil {
-			deps.logger.Error(err, "Failed to read manifest files", "ociRef", prep.Spec.Artifact.OCIRef)
-			respondError(w, http.StatusBadGateway, "could not read manifest files: "+err.Error())
-			return
-		}
-
-		files := make([]ArtifactFileDTO, 0, len(result.Files))
-		for _, f := range result.Files {
-			files = append(files, ArtifactFileDTO{Path: f.Path, Content: f.Content})
-		}
-
-		respondJSON(w, http.StatusOK, files)
+		respondJSON(w, http.StatusOK, artifactFilesToDTO(result.Files))
 	}
 }

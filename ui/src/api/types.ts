@@ -444,7 +444,6 @@ export interface ArtifactInfo {
   isHelm: boolean
   isManifest: boolean
   digest?: string
-  manifest?: string
   files?: ArtifactFile[]
   chartInfo?: {
     name: string

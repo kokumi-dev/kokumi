@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { ArtifactFile } from '../../api/types'
-import { filterCRDDocuments, hasCRDDocuments } from '../../utils/manifest'
+import { filterCRDDocuments, hasCRDDocuments, joinFiles } from '../../utils/manifest'
 import { Button } from '../ui'
 import YamlEditor from './YamlEditor'
 import FileInspector from './FileInspector'
@@ -9,8 +9,8 @@ import styles from './PreviewTab.module.css'
 interface Props<T> {
   /** What to render; null while too little is filled in to render anything. */
   request: T | null
-  renderManifest: (request: T) => Promise<string>
-  renderFiles: (request: T) => Promise<ArtifactFile[]>
+  /** Renders the request into the artifact's files. */
+  render: (request: T) => Promise<ArtifactFile[]>
   /** Shown while request is null. */
   placeholder?: string
 }
@@ -21,9 +21,8 @@ const DEBOUNCE_MS = 600
  * Renders a preview request on the server and shows the resulting manifest,
  * or a file browser when the result has several files. Nothing is pushed.
  */
-export default function PreviewTab<T>({ request, renderManifest, renderFiles, placeholder }: Props<T>) {
+export default function PreviewTab<T>({ request, render, placeholder }: Props<T>) {
   const [loading, setLoading] = useState(false)
-  const [content, setContent] = useState<string | null>(null)
   const [files, setFiles] = useState<ArtifactFile[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [hideCRDs, setHideCRDs] = useState(true)
@@ -38,10 +37,10 @@ export default function PreviewTab<T>({ request, renderManifest, renderFiles, pl
     const timer = setTimeout(() => {
       setLoading(true)
       setError(null)
-      renderManifest(req)
-        .then((text) => {
+      render(req)
+        .then((f) => {
           if (cancelled) return
-          setContent(text)
+          setFiles(f)
           setLoading(false)
         })
         .catch((e: Error) => {
@@ -49,18 +48,13 @@ export default function PreviewTab<T>({ request, renderManifest, renderFiles, pl
           setError(e.message)
           setLoading(false)
         })
-      renderFiles(req)
-        .then((f) => { if (!cancelled) setFiles(f) })
-        .catch(() => { if (!cancelled) setFiles(null) })
     }, DEBOUNCE_MS)
 
     return () => {
       cancelled = true
       clearTimeout(timer)
     }
-  }, [key, renderManifest, renderFiles])
-
-  const multiFile = files !== null && files.length > 1
+  }, [key, render])
 
   if (!key) {
     return <div className={styles.placeholder}>{placeholder}</div>
@@ -78,27 +72,26 @@ export default function PreviewTab<T>({ request, renderManifest, renderFiles, pl
     return <p className={styles.error}>Failed to load preview: {error}</p>
   }
 
-  if (content === null) {
+  if (files === null) {
     return null
   }
 
-  const hasCRDs = hasCRDDocuments(content)
-  const displayed = filterCRDDocuments(content, hideCRDs)
+  if (files.length > 1) {
+    return <FileInspector files={files} />
+  }
+
+  const content = joinFiles(files)
 
   return (
     <div>
-      {hasCRDs && !multiFile && (
+      {hasCRDDocuments(content) && (
         <div className={styles.toolbar}>
           <Button variant="secondary" size="sm" onClick={() => setHideCRDs((v) => !v)}>
             {hideCRDs ? 'Show CRDs' : 'Hide CRDs'}
           </Button>
         </div>
       )}
-      {multiFile && files ? (
-        <FileInspector files={files} />
-      ) : (
-        <YamlEditor value={displayed} readOnly tall />
-      )}
+      <YamlEditor value={filterCRDDocuments(content, hideCRDs)} readOnly tall />
     </div>
   )
 }

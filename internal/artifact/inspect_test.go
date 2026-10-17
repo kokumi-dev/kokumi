@@ -187,8 +187,8 @@ func TestStore_Inspect(t *testing.T) {
 		assert.Equal(t, "base/deployment.yaml", result.Files[0].Path)
 		assert.Equal(t, "config.json", result.Files[1].Path)
 		assert.Equal(t, "service.yaml", result.Files[2].Path)
-		assert.Contains(t, result.Manifest, "kind: Deployment")
-		assert.Contains(t, result.Manifest, `"port": 80`)
+		assert.Contains(t, result.Files[0].Content, "kind: Deployment")
+		assert.Contains(t, result.Files[1].Content, `"port": 80`)
 	})
 
 	t.Run("invalid ref rejected", func(t *testing.T) {

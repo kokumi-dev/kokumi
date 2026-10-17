@@ -24,8 +24,6 @@ type InspectResult struct {
 	ChartInfo *renderer.ChartInfo
 	// Files are the artifact's .yaml/.yml/.json files (recursive, sorted).
 	Files []File
-	// Manifest is the files joined with "---" separators.
-	Manifest string
 	// IsHelm reports whether the artifact is a Helm chart.
 	IsHelm bool
 }
@@ -76,7 +74,6 @@ func (s *Store) Inspect(ctx context.Context, refURL string, client oci.Client) (
 	}
 
 	result.Files = files
-	result.Manifest = joinFiles(files)
 
 	return result, nil
 }

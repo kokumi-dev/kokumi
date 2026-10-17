@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
-import { getManifest, getManifestFiles, saveOrderEdits } from '../../api/client'
+import { useEffect, useMemo, useState } from 'react'
+import { getManifest, saveOrderEdits } from '../../api/client'
 import type { ArtifactFile, Order, Patch, Preparation } from '../../api/types'
 import { computeEdits } from '../../utils/edits'
-import { filterCRDDocuments, hasCRDDocuments } from '../../utils/manifest'
+import { filterCRDDocuments, hasCRDDocuments, joinFiles } from '../../utils/manifest'
 import { Button, CopyIcon, EditIcon } from '../ui'
 import YamlEditor from '../shared/YamlEditor'
 import FileInspector from '../shared/FileInspector'
@@ -21,7 +21,6 @@ interface Props {
  * Order is given, changes are turned into structured patches on spec.edits.
  */
 export default function ManifestPanel({ preparation: prep, order }: Props) {
-  const [content, setContent] = useState<string | null>(null)
   const [files, setFiles] = useState<ArtifactFile[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [hideCRDs, setHideCRDs] = useState(true)
@@ -32,14 +31,12 @@ export default function ManifestPanel({ preparation: prep, order }: Props) {
   useEffect(() => {
     let cancelled = false
     getManifest(prep.namespace, prep.name)
-      .then((c) => !cancelled && setContent(c))
-      .catch((e: Error) => !cancelled && setError(e.message))
-    getManifestFiles(prep.namespace, prep.name)
       .then((f) => !cancelled && setFiles(f))
-      .catch(() => !cancelled && setFiles(null))
+      .catch((e: Error) => !cancelled && setError(e.message))
     return () => { cancelled = true }
   }, [prep.namespace, prep.name])
 
+  const content = useMemo(() => (files !== null ? joinFiles(files) : null), [files])
   const multiFile = files !== null && files.length > 1
   const hasCRDs = content !== null && hasCRDDocuments(content)
   const displayContent = content !== null ? filterCRDDocuments(content, hideCRDs) : null
@@ -65,8 +62,7 @@ export default function ManifestPanel({ preparation: prep, order }: Props) {
 
   function handleFileSave(editedFiles: ArtifactFile[]) {
     if (!order || content === null) return
-    const joined = editedFiles.map((f) => f.content).join('\n---\n')
-    setPendingEdits(computeEdits(content, joined, order.edits ?? []))
+    setPendingEdits(computeEdits(content, joinFiles(editedFiles), order.edits ?? []))
   }
 
   async function commit(message: string) {

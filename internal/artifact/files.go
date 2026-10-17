@@ -65,16 +65,6 @@ func manifestPaths(fs afero.Fs, dir string) ([]string, error) {
 	return paths, nil
 }
 
-// joinFiles concatenates file contents with "---" separators.
-func joinFiles(files []File) string {
-	parts := make([]string, 0, len(files))
-	for _, f := range files {
-		parts = append(parts, f.Content)
-	}
-
-	return strings.Join(parts, "\n---\n")
-}
-
 // mergeYAMLFiles merges all top-level YAML files in dir into a single
 // manifest.yaml. Kustomization files are excluded from the merge.
 func mergeYAMLFiles(fs afero.Fs, dir string) error {
