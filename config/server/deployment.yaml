@@ -37,6 +37,11 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            - name: GOMEMLIMIT
+              valueFrom:
+                resourceFieldRef:
+                  containerName: server
+                  resource: limits.memory
           ports:
             - containerPort: 8080
               name: http
@@ -55,10 +60,10 @@ spec:
             periodSeconds: 10
           resources:
             limits:
-              memory: 128Mi
+              memory: 512Mi
             requests:
               cpu: 50m
-              memory: 128Mi
+              memory: 512Mi
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
