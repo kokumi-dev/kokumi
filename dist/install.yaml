@@ -4064,10 +4064,10 @@ spec:
           periodSeconds: 10
         resources:
           limits:
-            memory: 256Mi
+            memory: 512Mi
           requests:
             cpu: 100m
-            memory: 256Mi
+            memory: 512Mi
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
@@ -4192,6 +4192,11 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        - name: GOMEMLIMIT
+          valueFrom:
+            resourceFieldRef:
+              containerName: server
+              resource: limits.memory
         image: ghcr.io/kokumi-dev/kokumi:latest
         imagePullPolicy: IfNotPresent
         livenessProbe:
@@ -4213,10 +4218,10 @@ spec:
           periodSeconds: 10
         resources:
           limits:
-            memory: 128Mi
+            memory: 512Mi
           requests:
             cpu: 50m
-            memory: 128Mi
+            memory: 512Mi
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
