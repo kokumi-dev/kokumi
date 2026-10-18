@@ -7,7 +7,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
@@ -78,9 +77,8 @@ func TestProductToDTO(t *testing.T) {
 
 	t.Run("image settings round-trip", func(t *testing.T) {
 		images := deliveryv1alpha1.ProductImages{
-			Policy:        deliveryv1alpha1.ImagePolicyVendor,
-			FieldSpecs:    []deliveryv1alpha1.ImageFieldSpec{{Group: "monitoring.coreos.com", Kind: prometheusKind, Path: imagePath}},
-			PullSecretRef: &corev1.LocalObjectReference{Name: "registry-credentials"},
+			Policy:     deliveryv1alpha1.ImagePolicyVendor,
+			FieldSpecs: []deliveryv1alpha1.ImageFieldSpec{{Group: "monitoring.coreos.com", Kind: prometheusKind, Path: imagePath}},
 		}
 
 		require.Equal(t, images, productImagesFromDTO(productImagesToDTO(images)))
@@ -141,18 +139,21 @@ func TestListConverters_sortByNamespaceAndName(t *testing.T) {
 		orders := make([]deliveryv1alpha1.Order, 0, len(sortedKeys))
 		servings := make([]deliveryv1alpha1.Serving, 0, len(sortedKeys))
 		products := make([]deliveryv1alpha1.Product, 0, len(sortedKeys))
-		var pantries deliveryv1alpha1.PantryList
+		registries := make([]deliveryv1alpha1.Registry, 0, len(sortedKeys))
+		repositories := make([]deliveryv1alpha1.Repository, 0, len(sortedKeys))
 		for _, m := range shuffledMeta() {
 			orders = append(orders, deliveryv1alpha1.Order{ObjectMeta: m})
 			servings = append(servings, deliveryv1alpha1.Serving{ObjectMeta: m})
 			products = append(products, deliveryv1alpha1.Product{ObjectMeta: m})
-			pantries.Items = append(pantries.Items, deliveryv1alpha1.Pantry{ObjectMeta: m})
+			registries = append(registries, deliveryv1alpha1.Registry{ObjectMeta: m})
+			repositories = append(repositories, deliveryv1alpha1.Repository{ObjectMeta: m})
 		}
 
 		assert.Equal(t, sortedKeys, keysOf(enrichOrders(orders, nil), func(d OrderDTO) [2]string { return [2]string{d.Namespace, d.Name} }))
 		assert.Equal(t, sortedKeys, keysOf(servingsToDTO(servings), func(d ServingDTO) [2]string { return [2]string{d.Namespace, d.Name} }))
 		assert.Equal(t, sortedKeys, keysOf(productsToDTO(products), func(d ProductDTO) [2]string { return [2]string{d.Namespace, d.Name} }))
-		assert.Equal(t, sortedKeys, keysOf(pantriesFromList(pantries), func(d PantryDTO) [2]string { return [2]string{d.Namespace, d.Name} }))
+		assert.Equal(t, sortedKeys, keysOf(registriesToDTO(registries), func(d RegistryDTO) [2]string { return [2]string{d.Namespace, d.Name} }))
+		assert.Equal(t, sortedKeys, keysOf(repositoriesToDTO(repositories), func(d RepositoryDTO) [2]string { return [2]string{d.Namespace, d.Name} }))
 	}
 }
 

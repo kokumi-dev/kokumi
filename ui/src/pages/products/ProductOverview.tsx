@@ -2,6 +2,7 @@ import Section from '../../components/layout/Section'
 import PropertyList from '../../components/layout/PropertyList'
 import ConditionList from '../../components/layout/ConditionList'
 import PatchList from '../../components/shared/PatchList'
+import RegistryAccessList from '../../components/shared/RegistryAccessList'
 import { Counter } from '../../components/ui'
 import { formatDate } from '../../utils/format'
 import { objectToYaml } from '../../utils/yaml'
@@ -43,7 +44,7 @@ export default function ProductOverview() {
           items={[
             {
               label: 'Source',
-              value: <span className={layout.mono}>{source.pantryRef?.name ? `pantry: ${source.pantryRef.name}` : source.oci}</span>,
+              value: <span className={layout.mono}>{source.url}</span>,
             },
             { label: 'Version', value: source.version },
             { label: 'Verification', value: verifyLabel(source.verify) },
@@ -51,6 +52,12 @@ export default function ProductOverview() {
               label: 'Vendoring',
               value: product.vendor && <span className={layout.mono}>{vendorLabel(product.vendor)}</span>,
               show: !!product.vendor,
+            },
+            {
+              label: 'Registries',
+              value: product.registryRefs?.length
+                ? product.registryRefs.map((r) => r.name).join(', ')
+                : <span className={layout.muted}>None: anonymous</span>,
             },
             { label: 'Created', value: formatDate(product.createdAt) },
           ]}
@@ -64,7 +71,7 @@ export default function ProductOverview() {
         {resolvedSource ? (
           <PropertyList
             items={[
-              { label: 'OCI', value: <span className={layout.mono}>{resolvedSource.oci}</span> },
+              { label: 'URL', value: <span className={layout.mono}>{resolvedSource.url}</span> },
               { label: 'Version', value: resolvedSource.version },
               {
                 label: 'Digest',
@@ -72,7 +79,6 @@ export default function ProductOverview() {
                   ? <span className={layout.mono}>{resolvedSource.digest}</span>
                   : <span className={layout.muted}>Not resolved; the registry could not be reached</span>,
               },
-              { label: 'Pantry', value: resolvedSource.pantryRef?.name, show: !!resolvedSource.pantryRef },
               {
                 label: 'Signature',
                 value: resolvedSource.verified
@@ -130,11 +136,6 @@ export default function ProductOverview() {
                 </>
               ),
             },
-            {
-              label: 'Pull Secret',
-              value: <span className={layout.mono}>{product.images?.pullSecretRef?.name}</span>,
-              show: !!product.images?.pullSecretRef?.name,
-            },
           ]}
         />
       </Section>
@@ -165,6 +166,14 @@ export default function ProductOverview() {
             },
           ]}
         />
+      </Section>
+
+      <Section
+        title="Registry access"
+        description="Where Kokumi pulls the source and pushes its vendored copy, and the Registry it connects through; each Order lists its own, images included"
+        flush
+      >
+        <RegistryAccessList access={product.registryAccess} namespace={product.namespace} />
       </Section>
 
       <Section title="Conditions">

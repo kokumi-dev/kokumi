@@ -10,7 +10,7 @@ spec:
     name: external-secrets-verified
 
   destination:
-    oci: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/external-secrets-verified
+    url: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/external-secrets-verified
 
   promotion:
     mode: Manual

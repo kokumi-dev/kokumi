@@ -36,7 +36,7 @@ export default function ProductsList() {
   // Products that match only through one of their Orders open by themselves.
   const matchedViaOrder = new Set<string>()
   const filtered = (products ?? []).filter((p) => {
-    if (matchesFilter(query, p.name, p.namespace, p.source.oci, p.source.pantryRef?.name, p.source.version)) return true
+    if (matchesFilter(query, p.name, p.namespace, p.source.url, p.source.version)) return true
     if (!ordersOf(p).some((o) => matchesFilter(query, o.name))) return false
     matchedViaOrder.add(productKey(p.namespace, p.name))
     return true
@@ -92,7 +92,7 @@ export default function ProductsList() {
                 cell: (p) => <NameCell to={paths.product(p.namespace, p.name)} name={p.name} secondary={p.namespace} />,
               },
               { header: 'Status', width: '110px', cell: (p) => <StatusIndicator state={p.state} /> },
-              { header: 'Source', truncate: true, title: (p) => p.source.oci || productSourceRef(p), cell: productSourceRef },
+              { header: 'Source', truncate: true, title: (p) => p.source.url || productSourceRef(p), cell: productSourceRef },
               {
                 header: 'Version',
                 width: '110px',

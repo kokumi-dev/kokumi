@@ -35,19 +35,15 @@ const (
 	PromotionModeManual PromotionMode = "Manual"
 )
 
-// OCISource defines the OCI location of the base manifest artifact
-// +kubebuilder:validation:XValidation:rule="(has(self.oci) && !has(self.pantryRef)) || (!has(self.oci) && has(self.pantryRef))",message="exactly one of oci or pantryRef must be set"
+// OCISource defines the OCI artifact a Product is built from.
 type OCISource struct {
-	// oci is the full OCI URL for the source manifests.
-	// Mutually exclusive with pantryRef.
-	// +optional
-	// +kubebuilder:validation:XValidation:rule="self == '' || (isURL(self) && url(self).getScheme() == 'oci')",message="must be a valid OCI URL"
-	OCI string `json:"oci,omitempty"`
-
-	// pantryRef references a Pantry resource whose URL is used as the source.
-	// Mutually exclusive with oci.
-	// +optional
-	PantryRef *PantryRef `json:"pantryRef,omitempty"`
+	// url is the oci:// URL of the repository of the source artifact. The
+	// Product connects to it through the Registry among its registryRefs
+	// that covers it.
+	// +required
+	// +kubebuilder:validation:MaxLength=2048
+	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() == 'oci'",message="must be a valid OCI URL"
+	URL string `json:"url"`
 
 	// version is the semantic version or tag of the artifact
 	// The controller will resolve this to a digest
@@ -120,13 +116,6 @@ type OIDCIdentityMatch struct {
 	Subject string `json:"subject"`
 }
 
-// PantryRef references a Pantry resource for authentication.
-type PantryRef struct {
-	// name is the name of the Pantry resource.
-	// +kubebuilder:validation:Required
-	Name string `json:"name"`
-}
-
 // HelmRender defines Helm-specific rendering options for the source artifact.
 type HelmRender struct {
 	// releaseName is the Helm release name passed to helm template.
@@ -190,19 +179,13 @@ type Render struct {
 }
 
 // OCIDestination defines the OCI repository an artifact is pushed to.
-// When neither oci nor pantryRef is set, the in-cluster registry is used.
-// +kubebuilder:validation:XValidation:rule="!(has(self.oci) && has(self.pantryRef))",message="oci and pantryRef are mutually exclusive"
 type OCIDestination struct {
-	// oci is the OCI registry URL the artifact is pushed to.
-	// Mutually exclusive with pantryRef.
+	// url is the oci:// URL of the repository the artifact is pushed to.
+	// When omitted, a repository of the bundled registry is used.
 	// +optional
-	// +kubebuilder:validation:XValidation:rule="self == '' || (isURL(self) && url(self).getScheme() == 'oci')",message="must be a valid OCI URL"
-	OCI string `json:"oci,omitempty"`
-
-	// pantryRef references a Pantry resource whose URL is used as the destination.
-	// Mutually exclusive with oci.
-	// +optional
-	PantryRef *PantryRef `json:"pantryRef,omitempty"`
+	// +kubebuilder:validation:MaxLength=2048
+	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() == 'oci'",message="must be a valid OCI URL"
+	URL string `json:"url,omitempty"`
 }
 
 // PatchTarget identifies which resource to patch
@@ -265,6 +248,16 @@ type OrderSpec struct {
 	// When omitted, the in-cluster registry is used automatically.
 	// +optional
 	Destination *OCIDestination `json:"destination,omitempty"`
+
+	// registryRefs lists Registries in the Order's namespace. Kokumi
+	// connects to the destination through the one whose url covers it,
+	// the longest when several do. The source, the images and the vendor
+	// location belong to the Product, and its registryRefs connect to them.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	// +kubebuilder:validation:MaxItems=16
+	RegistryRefs []corev1.LocalObjectReference `json:"registryRefs,omitempty"`
 
 	// patches are merged over the Product's patches, per target, before
 	// producing a Preparation. Subject to the Product's overrides.
@@ -340,6 +333,19 @@ type OrderStatus struct {
 	// policy after merging the Order over its Product.
 	// +optional
 	LatestConfigHash string `json:"latestConfigHash,omitempty"`
+
+	// registryAccess lists the registry locations the Order needs: where
+	// Kokumi pushes the Preparation and through which Registry, where Argo
+	// CD pulls it from, and where the kubelet pulls the images of the
+	// latest Preparation from. Argo CD and the kubelet need their own
+	// credentials for the locations listed for them.
+	// +optional
+	// +listType=map
+	// +listMapKey=url
+	// +listMapKey=operation
+	// +listMapKey=client
+	// +kubebuilder:validation:MaxItems=32
+	RegistryAccess []RegistryAccess `json:"registryAccess,omitempty"`
 
 	// conditions represent the current state of the Order resource.
 	// +listType=map

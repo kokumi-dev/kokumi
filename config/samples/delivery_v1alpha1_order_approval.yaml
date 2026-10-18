@@ -17,7 +17,7 @@ spec:
         .spec.replicas: "2"
 
   destination:
-    oci: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/external-secrets-approval
+    url: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/external-secrets-approval
 
   promotion:
     mode: Manual

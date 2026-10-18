@@ -7,6 +7,7 @@ import PropertyList from '../../components/layout/PropertyList'
 import ConditionList from '../../components/layout/ConditionList'
 import PatchList from '../../components/shared/PatchList'
 import CommitBox from '../../components/shared/CommitBox'
+import RegistryAccessList from '../../components/shared/RegistryAccessList'
 import { Button, Counter } from '../../components/ui'
 import { paths } from '../../routes/paths'
 import { formatDate } from '../../utils/format'
@@ -88,14 +89,18 @@ export default function OrderOverview() {
             {
               label: 'Source',
               value: product && (
-                <span className={layout.mono}>
-                  {product.source.pantryRef?.name ? `pantry: ${product.source.pantryRef.name}` : product.source.oci}
-                </span>
+                <span className={layout.mono}>{product.source.url}</span>
               ),
               show: !!product,
             },
             { label: 'Version', value: product?.source.version, show: !!product },
             { label: 'Destination', value: <span className={layout.mono}>{orderDestinationLabel(order)}</span> },
+            {
+              label: 'Registries',
+              value: order.registryRefs?.length
+                ? order.registryRefs.map((r) => r.name).join(', ')
+                : <span className={layout.muted}>None: the destination is written anonymously</span>,
+            },
             {
               label: 'Values',
               value: <pre className={layout.code}>{objectToYaml(order.values ?? {})}</pre>,
@@ -143,6 +148,14 @@ export default function OrderOverview() {
           </div>
         </Section>
       )}
+
+      <Section
+        title="Registry access"
+        description="The locations this Order and its images need, who pulls or pushes them, and the Registry Kokumi connects through"
+        flush
+      >
+        <RegistryAccessList access={order.registryAccess} namespace={order.namespace} />
+      </Section>
 
       <Section title="Conditions">
         <ConditionList conditions={order.conditions} />

@@ -60,7 +60,7 @@ func attach(t *testing.T, client Client, subject Reference, artifactType, create
 
 func TestWalk(t *testing.T) {
 	ctx := context.Background()
-	client := NewORASClient()
+	client := NewClient(Options{PlainHTTP: true})
 	host := newTestRegistry(t, true)
 
 	ref, err := Parse("oci://" + host + "/shop/podinfo:1.0.0")
@@ -202,7 +202,7 @@ func pushedRoot(ref Reference) Reference {
 
 func TestWalk_ReferrersTagSchema(t *testing.T) {
 	ctx := context.Background()
-	client := NewORASClient()
+	client := NewClient(Options{PlainHTTP: true})
 	host := newTestRegistry(t, false)
 
 	ref, err := Parse("oci://" + host + "/shop/podinfo:1.0.0")

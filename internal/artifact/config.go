@@ -64,9 +64,6 @@ type ConfigSource struct {
 	Version string `json:"version"`
 	// Digest is the manifest digest the tag resolved to.
 	Digest string `json:"digest"`
-	// PantryRef names the Pantry the source was resolved through, if any.
-	// It is recorded for restore and is not part of the intent.
-	PantryRef string `json:"pantryRef,omitempty"`
 	// Verified records who signed the source, when the Product verified its
 	// signature. It is not part of the intent.
 	Verified *ConfigVerification `json:"verified,omitempty"`
@@ -89,9 +86,6 @@ type ConfigVerification struct {
 type ConfigDestination struct {
 	// OCI is the oci:// URL of the destination repository.
 	OCI string `json:"oci"`
-	// PantryRef names the Pantry the destination was resolved through, if
-	// any. It is recorded for restore and is not part of the intent.
-	PantryRef string `json:"pantryRef,omitempty"`
 }
 
 // ConfigProduct identifies a Product and the state it was in.

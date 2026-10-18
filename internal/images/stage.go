@@ -13,7 +13,9 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/registry"
 )
 
 const (
@@ -41,17 +43,22 @@ const (
 type Stage struct {
 	// Policy is what to do with the images. Empty means PolicyRecord.
 	Policy Policy
-	// Client reads the images' registries and their mirrors.
+	// Scope connects to the images' registries, their mirrors and the
+	// vendor location: the Product's Registries.
+	Scope registry.Scope
+	// Client reads where Scope connects without a client, as the zero
+	// Scope does.
 	Client oci.Client
 	// Mirrors redirect lookups and copies.
 	Mirrors []Mirror
-	// Destination is the repository of the rendered manifests. Each
-	// vendored image is copied into, and pulled from, a repository of its
-	// own below it (see vendoredRepository), tagged with the tag its
-	// reference names. Under PolicyVendor without a destination, as in a
-	// preview of a Product, references are pinned instead.
-	Destination *oci.Reference
-	// DestClient writes to Destination.
+	// VendorRoot is the location images are vendored below. Each vendored
+	// image is copied into, and pulled from, a repository of its own at
+	// <VendorRoot>/images/<name> (see vendoredRepository), tagged with the
+	// tag its reference names. Under PolicyVendor without a VendorRoot
+	// references are pinned instead.
+	VendorRoot *oci.Reference
+	// DestClient writes to VendorRoot where Scope connects without a
+	// client.
 	DestClient oci.Client
 	// Locked are the images of the previous render. Under PolicyPin and
 	// PolicyVendor, a reference written the same way keeps the digest it
@@ -259,7 +266,13 @@ func (s Stage) lookup(ctx context.Context, result *resolved) {
 	ctx, cancel := context.WithTimeout(ctx, resolveTimeout)
 	defer cancel()
 
-	desc, err := s.Client.Resolve(ctx, result.source)
+	conn, err := s.connect(result.source, s.Client)
+	if err != nil {
+		result.Error = err.Error()
+		return
+	}
+
+	desc, err := conn.Client.Resolve(ctx, result.source)
 	if err != nil {
 		result.Error = err.Error()
 		result.unreachable = unreachable(err)
@@ -292,7 +305,7 @@ func (s Stage) rewrite(ctx context.Context, policy Policy, results []resolved) (
 		}
 	}
 
-	vendor := policy == PolicyVendor && s.Destination != nil
+	vendor := policy == PolicyVendor && s.VendorRoot != nil
 	rewrites := map[string]string{}
 	var (
 		jobs []vendorJob
@@ -315,7 +328,7 @@ func (s Stage) rewrite(ctx context.Context, policy Policy, results []resolved) (
 
 		// A render fails below, before any copy; a preview leaves the
 		// reference as written.
-		repository, err := vendoredRepository(*s.Destination, result.Name)
+		repository, err := vendoredRepository(*s.VendorRoot, result.Name)
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -397,10 +410,28 @@ func (s Stage) vendorAll(ctx context.Context, jobs []vendorJob) error {
 // tags it with the tags its references name, unless the previous render
 // already vendored it so and it is still present. Copy pushes to a tag when
 // the destination names one, by digest otherwise; only the first copy
-// transfers content.
+// transfers content. A private image is not copied to a location Kokumi
+// writes without credentials, where anyone could pull it.
 func (s Stage) vendor(ctx context.Context, job vendorJob) error {
-	if job.locked && s.present(ctx, job.target) {
+	source, err := s.connect(job.source, s.Client)
+	if err != nil {
+		return err
+	}
+	target, err := s.connect(job.target, s.DestClient)
+	if err != nil {
+		return err
+	}
+
+	if job.locked && present(ctx, target.Client, job.target) {
 		return nil
+	}
+
+	if !target.Authenticated() && s.Scope.Private(ctx, source, job.source) {
+		return &registry.Error{
+			Reason: deliveryv1alpha1.ReasonCredentialsRequired,
+			Err: fmt.Errorf("image %s is private, and vendoring it to %s, which Kokumi writes without credentials, would make it public: list a Registry with credentials for %s in the Product's registryRefs",
+				job.source.RepositoryReference(), job.target.RepositoryReference(), job.target.RepositoryReference()),
+		}
 	}
 
 	log.FromContext(ctx).Info("Vendoring image", "source", job.source.String(), "destination", job.target.String(), "tags", job.tags)
@@ -419,18 +450,31 @@ func (s Stage) vendor(ctx context.Context, job vendorJob) error {
 	}
 
 	for _, dst := range destinations {
-		if err := s.Client.Copy(ctx, s.DestClient, job.source, dst, oci.CopyOptions{IncludeReferrers: true}); err != nil {
+		if err := source.Client.Copy(ctx, target.Client, job.source, dst, oci.CopyOptions{IncludeReferrers: true}); err != nil {
 			return fmt.Errorf("failed to vendor image %s: %w", job.source, err)
 		}
 	}
 	return nil
 }
 
-// present reports whether the destination still holds the image at ref.
-func (s Stage) present(ctx context.Context, ref oci.Reference) bool {
+// connect returns the connection to ref, with fallback as its client when
+// the Scope gives none.
+func (s Stage) connect(ref oci.Reference, fallback oci.Client) (registry.Connection, error) {
+	conn, err := s.Scope.Connect(ref.RepositoryReference())
+	if err != nil {
+		return registry.Connection{}, err
+	}
+	if conn.Client == nil {
+		conn.Client = fallback
+	}
+	return conn, nil
+}
+
+// present reports whether client still finds the image at ref.
+func present(ctx context.Context, client oci.Client, ref oci.Reference) bool {
 	ctx, cancel := context.WithTimeout(ctx, resolveTimeout)
 	defer cancel()
 
-	_, err := s.DestClient.Resolve(ctx, ref)
+	_, err := client.Resolve(ctx, ref)
 	return err == nil
 }

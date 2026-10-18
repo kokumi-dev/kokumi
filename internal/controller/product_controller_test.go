@@ -24,7 +24,6 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/oras-project/oras-go/v3/registry/remote/credentials"
 	"github.com/spf13/afero"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -36,8 +35,8 @@ import (
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/attestation"
-	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/registry"
 	"github.com/kokumi-dev/kokumi/internal/resolve"
 	"github.com/kokumi-dev/kokumi/internal/signing"
 	"github.com/kokumi-dev/kokumi/internal/signing/signingtest"
@@ -67,9 +66,9 @@ type fakeSourceVerifier struct {
 	err      error
 }
 
-func (f *fakeSourceVerifier) Verify(ctx context.Context, client oci.Client, creds credentials.Store, ref oci.Reference, policy *signingsource.Policy, trust *signing.TrustSet) (*signingsource.Report, error) {
+func (f *fakeSourceVerifier) Verify(ctx context.Context, conn registry.Connection, ref oci.Reference, policy *signingsource.Policy, trust *signing.TrustSet) (*signingsource.Report, error) {
 	if policy == nil {
-		return signingsource.NewVerifier().Verify(ctx, client, creds, ref, nil, trust)
+		return signingsource.NewVerifier().Verify(ctx, conn, ref, nil, trust)
 	}
 	f.policies = append(f.policies, *policy)
 	if f.err != nil {
@@ -106,8 +105,7 @@ var _ = Describe("Product Controller", func() {
 			Client:         k8sClient,
 			Scheme:         k8sClient.Scheme(),
 			Store:          artifact.NewStore(fake, fs, ""),
-			PantryResolver: credential.NewKubeResolver(k8sClient),
-			OCIClient:      fake,
+			Registries:     fakeRegistries(fake),
 			Signing:        testSigning,
 			SourceVerifier: verifier,
 		}
@@ -152,7 +150,7 @@ var _ = Describe("Product Controller", func() {
 
 	It("allows Orders no changes unless overrides say otherwise", func() {
 		const name = "product-defaults"
-		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion}})
+		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion}})
 
 		overrides := getProduct(name).Spec.Overrides
 		Expect(overrides.Values.Policy).To(Equal(deliveryv1alpha1.OverridePolicyNone))
@@ -161,7 +159,7 @@ var _ = Describe("Product Controller", func() {
 		invalid := func(overrides deliveryv1alpha1.Overrides) error {
 			return k8sClient.Create(ctx, &deliveryv1alpha1.Product{
 				Name: "product-invalid-overrides", Namespace: ns,
-				Spec: deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion}, Overrides: overrides},
+				Spec: deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion}, Overrides: overrides},
 			})
 		}
 		Expect(invalid(deliveryv1alpha1.Overrides{
@@ -176,13 +174,13 @@ var _ = Describe("Product Controller", func() {
 
 	It("publishes the upstream source and protects the Product", func() {
 		const name = "product-upstream"
-		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion}})
+		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion}})
 
 		Expect(reconcileProduct(name)).To(Succeed())
 
 		product := getProduct(name)
 		Expect(product.Finalizers).To(ContainElement(deliveryv1alpha1.FinalizerProductProtection))
-		Expect(product.Status.Source.OCI).To(Equal(testOCIRef))
+		Expect(product.Status.Source.URL).To(Equal(testOCIRef))
 		Expect(product.Status.Source.Version).To(Equal(testVersion))
 		Expect(product.Status.Source.Digest).To(Equal(oci.FakeDigest), "Orders render exactly this artifact")
 		Expect(product.Status.ConfigHash).To(HavePrefix("sha256:"))
@@ -195,7 +193,7 @@ var _ = Describe("Product Controller", func() {
 
 	It("verifies a source signed by a key the Kitchen trusts", func() {
 		const name = "product-signed-by-kokumi"
-		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion}})
+		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion}})
 		signSource(testSigner)
 
 		Expect(reconcileProduct(name)).To(Succeed())
@@ -210,7 +208,7 @@ var _ = Describe("Product Controller", func() {
 
 	It("records the verdict of every signature in the graph of the source", func() {
 		const name = "product-signatures"
-		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion}})
+		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion}})
 		signSource(testSigner)
 		source, err := oci.Parse(testOCIRef + "@" + oci.FakeDigest)
 		Expect(err).NotTo(HaveOccurred())
@@ -241,7 +239,7 @@ var _ = Describe("Product Controller", func() {
 
 	It("does not verify a source signed by an untrusted key", func() {
 		const name = "product-signed-by-stranger"
-		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion}})
+		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion}})
 		signSource(signingtest.NewSigner(GinkgoT()))
 
 		Expect(reconcileProduct(name)).To(Succeed())
@@ -254,7 +252,7 @@ var _ = Describe("Product Controller", func() {
 
 	It("renders nothing from an unverified source when the Kitchen requires verification", func() {
 		const name = "product-must-verify"
-		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion}})
+		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion}})
 		state, err := testSigning.State(ctx)
 		Expect(err).NotTo(HaveOccurred())
 		state.RequireSourceVerification = true
@@ -290,7 +288,7 @@ var _ = Describe("Product Controller", func() {
 		Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 		DeferCleanup(func() { _ = k8sClient.Delete(ctx, secret) })
 		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{
-			OCI: testOCIRef, Version: testVersion,
+			URL: testOCIRef, Version: testVersion,
 			Verify: &deliveryv1alpha1.OCISourceVerification{SecretRef: &corev1.LocalObjectReference{Name: secretName}},
 		}})
 		verifier.signer = &signingsource.Signer{KeyID: testKeyID}
@@ -310,7 +308,7 @@ var _ = Describe("Product Controller", func() {
 		const name = "product-verify-keyless"
 		create(name, deliveryv1alpha1.ProductSpec{
 			Source: deliveryv1alpha1.OCISource{
-				OCI: testOCIRef, Version: testVersion,
+				URL: testOCIRef, Version: testVersion,
 				Verify: &deliveryv1alpha1.OCISourceVerification{MatchOIDCIdentity: []deliveryv1alpha1.OIDCIdentityMatch{{
 					Issuer: "^https://token\\.actions\\.githubusercontent\\.com$", Subject: "^https://github\\.com/example/.*$",
 				}}},
@@ -346,7 +344,7 @@ var _ = Describe("Product Controller", func() {
 		Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 		DeferCleanup(func() { _ = k8sClient.Delete(ctx, secret) })
 		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{
-			OCI: testOCIRef, Version: testVersion,
+			URL: testOCIRef, Version: testVersion,
 			Verify: &deliveryv1alpha1.OCISourceVerification{SecretRef: &corev1.LocalObjectReference{Name: secretName}},
 		}})
 		signature := "sha256:" + strings.Repeat("5", 64)
@@ -370,12 +368,12 @@ var _ = Describe("Product Controller", func() {
 
 	It("keeps the recorded verification while the registry cannot be read", func() {
 		const name = "product-signed-registry-down"
-		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion}})
+		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion}})
 		signSource(testSigner)
 		Expect(reconcileProduct(name)).To(Succeed())
 		Expect(getProduct(name).Status.Source.Verified).NotTo(BeNil())
 
-		r.OCIClient = unlistableClient{fake}
+		r.Registries = fakeRegistries(unlistableClient{fake})
 		Expect(reconcileProduct(name)).To(Succeed())
 		Expect(getProduct(name).Status.Source.Verified.KeyID).To(Equal(testSigner.KeyID()))
 		Expect(sourceVerifiedOf(name).Status).To(Equal(metav1.ConditionTrue))
@@ -391,7 +389,7 @@ var _ = Describe("Product Controller", func() {
 
 	It("withdraws the verification when the trust no longer holds", func() {
 		const name = "product-trust-withdrawn"
-		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion}})
+		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion}})
 		other := signingtest.NewSigner(GinkgoT())
 		signSource(other)
 		r.Signing = signingtest.NewProvider(GinkgoT(), testSigner, other)
@@ -412,14 +410,14 @@ var _ = Describe("Product Controller", func() {
 			vendorURL = "oci://registry.kokumi.svc.cluster.local:5000/vendor/product"
 		)
 		create(name, deliveryv1alpha1.ProductSpec{
-			Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion},
-			Vendor: &deliveryv1alpha1.OCIDestination{OCI: vendorURL},
+			Source: deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion},
+			Vendor: &deliveryv1alpha1.OCIDestination{URL: vendorURL},
 		})
 
 		Expect(reconcileProduct(name)).To(Succeed())
 
 		source := getProduct(name).Status.Source
-		Expect(source.OCI).To(Equal(vendorURL))
+		Expect(source.URL).To(Equal(vendorURL))
 		Expect(source.Version).To(Equal(testVersion))
 		Expect(source.Digest).To(HavePrefix("sha256:"))
 		Expect(readyOf(name).Reason).To(Equal("Vendored"))
@@ -432,10 +430,12 @@ var _ = Describe("Product Controller", func() {
 
 	It("fails while the source digest cannot be resolved", func() {
 		const name = "product-unresolvable"
-		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion}})
+		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion}})
 
 		fs := afero.NewMemMapFs()
-		r.Store = artifact.NewStore(unresolvableClient{oci.NewFakeClient(fs)}, fs, "")
+		unresolvable := unresolvableClient{oci.NewFakeClient(fs)}
+		r.Store = artifact.NewStore(unresolvable, fs, "")
+		r.Registries = fakeRegistries(unresolvable)
 
 		Expect(reconcileProduct(name)).NotTo(Succeed())
 		Expect(readyOf(name).Status).To(Equal(metav1.ConditionFalse))
@@ -446,7 +446,7 @@ var _ = Describe("Product Controller", func() {
 	It("marks a spec change that keeps the source ready without vendoring again", func() {
 		const name = "product-patched"
 		create(name, deliveryv1alpha1.ProductSpec{
-			Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion},
+			Source: deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion},
 			Vendor: &deliveryv1alpha1.OCIDestination{},
 		})
 		Expect(reconcileProduct(name)).To(Succeed())
@@ -471,7 +471,7 @@ var _ = Describe("Product Controller", func() {
 
 	It("does not mark a spec change ready that it did not resolve", func() {
 		const name = "product-changed-while-resolving"
-		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion}})
+		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion}})
 		resolving := getProduct(name)
 
 		By("changing the version while the old one is being resolved")
@@ -479,7 +479,7 @@ var _ = Describe("Product Controller", func() {
 		changed.Spec.Source.Version = "2.0.0"
 		Expect(k8sClient.Update(ctx, changed)).To(Succeed())
 
-		source := &deliveryv1alpha1.ProductSourceStatus{OCI: testOCIRef, Version: testVersion, Digest: oci.FakeDigest}
+		source := &deliveryv1alpha1.ProductSourceStatus{URL: testOCIRef, Version: testVersion, Digest: oci.FakeDigest}
 		Expect(status.NewProductUpdater(k8sClient).Ready(ctx, resolving, "sha256:old", source)).To(Succeed())
 
 		product := getProduct(name)
@@ -491,52 +491,104 @@ var _ = Describe("Product Controller", func() {
 	It("vendors into the in-cluster registry when no destination is set", func() {
 		const name = "product-vendored-default"
 		create(name, deliveryv1alpha1.ProductSpec{
-			Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion},
+			Source: deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion},
 			Vendor: &deliveryv1alpha1.OCIDestination{},
 		})
 
 		Expect(reconcileProduct(name)).To(Succeed())
-		Expect(getProduct(name).Status.Source.OCI).To(Equal(artifact.DefaultVendorDestination(ns, name)))
+		Expect(getProduct(name).Status.Source.URL).To(Equal(artifact.DefaultVendorDestination(ns, name)))
 	})
 
-	It("resolves again when the source Pantry URL changes", func() {
+	It("resolves again when the source URL changes", func() {
 		const (
-			name       = "product-pantry"
-			pantryName = "product-pantry-src"
-			firstURL   = "oci://registry.kokumi.svc.cluster.local:5000/charts/product"
-			secondURL  = "oci://registry.kokumi.svc.cluster.local:5000/charts/product-v2"
+			name      = "product-source-url"
+			secondURL = "oci://registry.kokumi.svc.cluster.local:5000/charts/product-v2"
 		)
-		pantry := &deliveryv1alpha1.Pantry{Name: pantryName, Namespace: ns, Spec: deliveryv1alpha1.PantrySpec{URL: firstURL}}
-		Expect(k8sClient.Create(ctx, pantry)).To(Succeed())
-		DeferCleanup(func() { _ = k8sClient.Delete(ctx, pantry) })
-		create(name, deliveryv1alpha1.ProductSpec{
-			Source: deliveryv1alpha1.OCISource{PantryRef: &deliveryv1alpha1.PantryRef{Name: pantryName}, Version: testVersion},
-		})
+		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion}})
 
 		Expect(reconcileProduct(name)).To(Succeed())
 		first := getProduct(name).Status
-		Expect(first.Source.OCI).To(Equal(firstURL))
-		Expect(first.Source.PantryRef.Name).To(Equal(pantryName))
 
-		pantry.Spec.URL = secondURL
-		Expect(k8sClient.Update(ctx, pantry)).To(Succeed())
+		product := getProduct(name)
+		product.Spec.Source.URL = secondURL
+		Expect(k8sClient.Update(ctx, product)).To(Succeed())
 
 		Expect(reconcileProduct(name)).To(Succeed())
 		second := getProduct(name).Status
-		Expect(second.Source.OCI).To(Equal(secondURL))
+		Expect(second.Source.URL).To(Equal(secondURL))
 		Expect(second.ConfigHash).NotTo(Equal(first.ConfigHash))
 	})
 
-	It("fails while the source Pantry is missing", func() {
-		const name = "product-missing-pantry"
+	It("records where it connects and through which Registry", func() {
+		const (
+			name      = "product-registry-access"
+			vendorURL = "oci://ghcr.io/kokumi-test/mirror/app"
+		)
+		reg := &deliveryv1alpha1.Registry{
+			Name: name, Namespace: ns,
+			Spec: deliveryv1alpha1.RegistrySpec{URL: "oci://ghcr.io/kokumi-test"},
+		}
+		Expect(k8sClient.Create(ctx, reg)).To(Succeed())
+		DeferCleanup(func() { _ = k8sClient.Delete(ctx, reg) })
 		create(name, deliveryv1alpha1.ProductSpec{
-			Source: deliveryv1alpha1.OCISource{PantryRef: &deliveryv1alpha1.PantryRef{Name: "does-not-exist"}, Version: testVersion},
+			Source:       deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion},
+			Vendor:       &deliveryv1alpha1.OCIDestination{URL: vendorURL},
+			RegistryRefs: []corev1.LocalObjectReference{{Name: name}},
 		})
 
-		Expect(reconcileProduct(name)).NotTo(Succeed())
+		Expect(reconcileProduct(name)).To(Succeed())
+
+		Expect(getProduct(name).Status.RegistryAccess).To(Equal([]deliveryv1alpha1.RegistryAccess{
+			{URL: testOCIRef, Operation: deliveryv1alpha1.RegistryOperationPull, Client: deliveryv1alpha1.RegistryClientKokumi},
+			{URL: vendorURL, Operation: deliveryv1alpha1.RegistryOperationPush, Client: deliveryv1alpha1.RegistryClientKokumi, Registry: name},
+		}))
+	})
+
+	It("waits while a Registry it lists is missing", func() {
+		const name = "product-missing-registry"
+		create(name, deliveryv1alpha1.ProductSpec{
+			Source:       deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion},
+			RegistryRefs: []corev1.LocalObjectReference{{Name: "does-not-exist"}},
+		})
+
+		Expect(reconcileProduct(name)).To(Succeed(), "the Registry watch reconciles it again")
 		Expect(readyOf(name).Status).To(Equal(metav1.ConditionFalse))
-		Expect(readyOf(name).Reason).To(Equal("Failed"))
+		Expect(readyOf(name).Reason).To(Equal(deliveryv1alpha1.ReasonRegistryNotFound))
 		Expect(getProduct(name).Status.Source).To(BeNil())
+	})
+
+	It("does not vendor a private source to a location without credentials", func() {
+		const name = "product-private-anonymous-vendor"
+		secret := testPullSecret(name, "ghcr.io")
+		reg := &deliveryv1alpha1.Registry{
+			Name: name, Namespace: ns,
+			Spec: deliveryv1alpha1.RegistrySpec{URL: "oci://ghcr.io/kokumi-test", SecretRef: &corev1.LocalObjectReference{Name: name}},
+		}
+		Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+		Expect(k8sClient.Create(ctx, reg)).To(Succeed())
+		DeferCleanup(func() {
+			_ = k8sClient.Delete(ctx, reg)
+			_ = k8sClient.Delete(ctx, secret)
+		})
+		denied := &oci.FakeClient{Resolved: map[string]oci.Descriptor{}}
+		r.Registries = testRegistries(func(opts oci.Options) oci.Client {
+			if opts.Credential.Username == "" {
+				return denied
+			}
+			return fake
+		})
+		create(name, deliveryv1alpha1.ProductSpec{
+			Source:       deliveryv1alpha1.OCISource{URL: "oci://ghcr.io/kokumi-test/charts/app", Version: testVersion},
+			Vendor:       &deliveryv1alpha1.OCIDestination{},
+			RegistryRefs: []corev1.LocalObjectReference{{Name: name}},
+		})
+
+		Expect(reconcileProduct(name)).To(Succeed())
+
+		Expect(readyOf(name).Reason).To(Equal(deliveryv1alpha1.ReasonCredentialsRequired))
+		Expect(readyOf(name).Message).To(ContainSubstring(artifact.DefaultVendorDestination(ns, name)))
+		Expect(fake.Copies).To(BeEmpty())
+		Expect(denied.Copies).To(BeEmpty())
 	})
 
 	It("is only deleted once no Order references it", func() {
@@ -544,7 +596,7 @@ var _ = Describe("Product Controller", func() {
 			name      = "product-in-use"
 			orderName = "order-of-product-in-use"
 		)
-		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion}})
+		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion}})
 		order := &deliveryv1alpha1.Order{
 			Name: orderName, Namespace: ns,
 			Spec: deliveryv1alpha1.OrderSpec{ProductRef: deliveryv1alpha1.ProductRef{Name: name}},

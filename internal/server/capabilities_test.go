@@ -159,10 +159,10 @@ func TestCapabilities(t *testing.T) {
 			want:  []Capability{},
 		},
 		{
-			name:  "pantry update maps to patch",
+			name:  "registry update maps to patch",
 			id:    personalLogin,
-			rbacs: []rbacFunc{allowOnly("patch", "pantries")},
-			want:  []Capability{CapPantriesUpdate},
+			rbacs: []rbacFunc{allowOnly("patch", "registries")},
+			want:  []Capability{CapRegistriesUpdate},
 		},
 		{
 			name: "namespace-scoped grants do not count",
@@ -227,9 +227,9 @@ func TestCapabilities(t *testing.T) {
 
 func TestNamespacedCapabilities(t *testing.T) {
 	const teamA = "team-a"
-	// pantryCredentialsRBAC mirrors a RoleBinding of kokumi-pantry-credentials
-	// in the namespace teamA.
-	pantryCredentialsRBAC := func(ra authorizationv1.ResourceAttributes) (bool, error) {
+	// registryCredentialsRBAC mirrors a RoleBinding of
+	// kokumi-registry-credentials in the namespace teamA.
+	registryCredentialsRBAC := func(ra authorizationv1.ResourceAttributes) (bool, error) {
 		return ra.Group == "" && ra.Resource == secretsResource && ra.Namespace == teamA &&
 			slices.Contains([]string{"get", "create", "patch"}, ra.Verb), nil
 	}
@@ -240,8 +240,8 @@ func TestNamespacedCapabilities(t *testing.T) {
 		rbacs     []rbacFunc
 		want      []Capability
 	}{
-		{name: "bound in the namespace", namespace: teamA, rbacs: []rbacFunc{pantryCredentialsRBAC}, want: []Capability{CapPantriesCredentialsUpdate}},
-		{name: "bound in another namespace", namespace: "team-b", rbacs: []rbacFunc{pantryCredentialsRBAC}, want: []Capability{}},
+		{name: "bound in the namespace", namespace: teamA, rbacs: []rbacFunc{registryCredentialsRBAC}, want: []Capability{CapRegistriesCredentialsUpdate}},
+		{name: "bound in another namespace", namespace: "team-b", rbacs: []rbacFunc{registryCredentialsRBAC}, want: []Capability{}},
 		{name: "built-in editor", namespace: teamA, rbacs: []rbacFunc{func(ra authorizationv1.ResourceAttributes) (bool, error) {
 			// server-editor-role grants no Secret access.
 			return ra.Group == "delivery.kokumi.dev", nil

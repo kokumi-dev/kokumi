@@ -80,7 +80,13 @@ func handleGetPreparationManifest(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		result, err := deps.store.Inspect(r.Context(), prep.Spec.Artifact.OCIRef, nil)
+		conn, err := deps.preparationConnection(r.Context(), uc, prep)
+		if err != nil {
+			respondConnectError(w, err)
+			return
+		}
+
+		result, err := deps.store.Inspect(r.Context(), prep.Spec.Artifact.OCIRef, conn.Client)
 		if err != nil {
 			deps.logger.Error(err, "Failed to fetch manifest from OCI",
 				"namespace", namespace, "name", name,

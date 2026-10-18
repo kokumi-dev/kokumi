@@ -13,6 +13,7 @@ import (
 
 	"github.com/kokumi-dev/kokumi/internal/images"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/registry"
 	"github.com/kokumi-dev/kokumi/internal/renderer"
 )
 
@@ -39,14 +40,14 @@ func NewPipeline(store *Store) *Pipeline {
 type RenderRequest struct {
 	// Source is the artifact to pull and render.
 	Source Source
-	// SourceClient optionally overrides the store's default client for
-	// pulling. Nil falls back to the default.
-	SourceClient oci.Client
 	// Destination is where the rendered artifact is pushed.
 	Destination Destination
-	// DestClient optionally overrides the store's default client for
-	// pushing. Nil falls back to the default.
-	DestClient oci.Client
+	// Product connects to the source, the images and their vendor
+	// location. Where it gives no client, as the zero Scope does, the
+	// store's default client is used.
+	Product registry.Scope
+	// Order connects to the destination, with the same fallback.
+	Order registry.Scope
 	// Render configures Helm or manifest rendering. Nil treats the source
 	// as a pre-rendered manifest bundle.
 	Render *RenderSpec
@@ -55,8 +56,6 @@ type RenderRequest struct {
 	// Edits are applied on top of patches.
 	Edits []PatchSpec
 	// Images configures the image stage, which runs after the edits.
-	// Vendored images are copied into repositories of their own below the
-	// destination.
 	Images ImageOptions
 	// Name and Namespace are used as Helm releaseName/namespace fallbacks
 	// when the Render spec does not set them explicitly.
@@ -73,7 +72,7 @@ type RenderRequest struct {
 	// ArtifactType is the artifactType of the pushed manifest.
 	ArtifactType string
 	// Config is pushed as the artifact's config blob. The caller fills what
-	// it knows (Order, ConfigHash, Product, Renderer, Intent, Pantry names);
+	// it knows (Order, ConfigHash, Product, Renderer, Intent);
 	// Render fills the source, destination, parent, commit message, and
 	// creation time.
 	Config Config
@@ -98,8 +97,14 @@ type RenderResult struct {
 func (p *Pipeline) Render(ctx context.Context, req RenderRequest) (*RenderResult, error) {
 	logger := log.FromContext(ctx)
 
-	srcClient := cmp.Or(req.SourceClient, p.store.client)
-	dstClient := cmp.Or(req.DestClient, p.store.client)
+	srcClient, err := p.connect(req.Product, req.Source.OCI)
+	if err != nil {
+		return nil, err
+	}
+	dstClient, err := p.connect(req.Order, req.Destination.OCI)
+	if err != nil {
+		return nil, err
+	}
 
 	sourceRef, err := req.Source.ref()
 	if err != nil {
@@ -126,10 +131,7 @@ func (p *Pipeline) Render(ctx context.Context, req RenderRequest) (*RenderResult
 		return nil, err
 	}
 
-	imgs, err := p.processImages(ctx, pulled.dir, req.Images, images.Stage{
-		Destination: &destRef,
-		DestClient:  dstClient,
-	})
+	imgs, err := p.processImages(ctx, pulled.dir, req.Images, images.Stage{Scope: req.Product})
 	if err != nil {
 		return nil, err
 	}
@@ -198,8 +200,9 @@ func completeConfig(req RenderRequest, sourceRef, destRef oci.Reference, created
 type PreviewRequest struct {
 	// Source is the artifact to pull and render.
 	Source Source
-	// SourceClient optionally overrides the store's default client.
-	SourceClient oci.Client
+	// Product connects to the source and the images. Where it gives no
+	// client, as the zero Scope does, the store's default client is used.
+	Product registry.Scope
 	// Render configures Helm or manifest rendering. Nil treats the source
 	// as a pre-rendered manifest bundle.
 	Render *RenderSpec
@@ -211,9 +214,6 @@ type PreviewRequest struct {
 	// images but copies none, and leaves the references it cannot resolve
 	// as written.
 	Images ImageOptions
-	// Destination is the oci:// URL of the repository images would be
-	// vendored into. Without it, the Vendor policy pins the references.
-	Destination string
 	// Name and Namespace are used as Helm releaseName/namespace fallbacks.
 	Name      string
 	Namespace string
@@ -222,7 +222,10 @@ type PreviewRequest struct {
 // Preview pulls and renders the source artifact without pushing, and returns
 // the processed files individually, preserving the artifact's file layout.
 func (p *Pipeline) Preview(ctx context.Context, req PreviewRequest) ([]File, error) {
-	srcClient := cmp.Or(req.SourceClient, p.store.client)
+	srcClient, err := p.connect(req.Product, req.Source.OCI)
+	if err != nil {
+		return nil, err
+	}
 
 	sourceRef, err := req.Source.ref()
 	if err != nil {
@@ -263,20 +266,21 @@ func (p *Pipeline) previewImages(ctx context.Context, dir string, req PreviewReq
 		return nil
 	}
 
-	stage := images.Stage{DryRun: true}
-	if req.Destination != "" {
-		destination, err := oci.Parse(req.Destination)
-		if err != nil {
-			return fmt.Errorf("failed to parse destination ref: %w", err)
-		}
-		stage.Destination = &destination
-	}
-
 	ctx, cancel := context.WithTimeout(ctx, p.PreviewImagesTimeout)
 	defer cancel()
 
-	_, err := p.processImages(ctx, dir, req.Images, stage)
+	_, err := p.processImages(ctx, dir, req.Images, images.Stage{Scope: req.Product, DryRun: true})
 	return err
+}
+
+// connect returns the client scope connects to url with, or the store's
+// default client when it gives none.
+func (p *Pipeline) connect(scope registry.Scope, url string) (oci.Client, error) {
+	conn, err := scope.Connect(url)
+	if err != nil {
+		return nil, err
+	}
+	return cmp.Or(conn.Client, p.store.client), nil
 }
 
 // ref returns the reference the source is pulled by: its digest when pinned,
@@ -369,16 +373,23 @@ func manifestFiles(fs afero.Fs, dir string) ([]string, error) {
 }
 
 // processImages runs the image stage over the manifest files in dir and
-// writes back what it rewrote. stage carries the destination and whether the
-// stage is a dry run; opts fills in the rest. Pin and Vendor need fully
-// rendered manifests: they fail on a source with a kustomization file, whose
-// image transformer and remote bases Argo CD applies later.
+// writes back what it rewrote. stage carries the Scope and whether the stage
+// is a dry run; opts fills in the rest. Pin and Vendor need fully rendered
+// manifests: they fail on a source with a kustomization file, whose image
+// transformer and remote bases Argo CD applies later.
 func (p *Pipeline) processImages(ctx context.Context, dir string, opts ImageOptions, stage images.Stage) ([]images.Image, error) {
 	stage.Policy = cmp.Or(opts.Policy, images.PolicyRecord)
-	stage.Client = cmp.Or(opts.Client, p.store.client)
+	stage.Client = p.store.client
+	stage.DestClient = p.store.client
 	stage.Mirrors = opts.Mirrors
 	stage.Locked = opts.Locked
-	stage.DestClient = cmp.Or(stage.DestClient, p.store.client)
+	if opts.VendorURL != "" {
+		root, err := oci.Parse(opts.VendorURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse vendor URL: %w", err)
+		}
+		stage.VendorRoot = &root
+	}
 
 	if stage.Policy != images.PolicyRecord && hasKustomization(p.store.fs, dir) {
 		return nil, fmt.Errorf("the %s image policy needs rendered manifests, but the source has a kustomization file that Argo CD renders later", stage.Policy)

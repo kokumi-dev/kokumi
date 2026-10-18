@@ -40,11 +40,11 @@ import (
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/controller"
-	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/deployer"
 	"github.com/kokumi-dev/kokumi/internal/index"
 	"github.com/kokumi-dev/kokumi/internal/namespace"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/registry"
 	"github.com/kokumi-dev/kokumi/internal/signing"
 	signingsource "github.com/kokumi-dev/kokumi/internal/signing/source"
 	"github.com/kokumi-dev/kokumi/internal/version"
@@ -201,36 +201,39 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "Recipe")
 		os.Exit(1)
 	}
-	ociClient := oci.NewORASClient()
 	installNamespace := namespace.Current(os.Getenv)
+
+	// One Clients keeps the clients of all Registries, so that their
+	// tokens are shared between controllers.
+	registries := registry.NewClients(artifact.DefaultRegistryHost)
 
 	// The Kitchen controller reloads the signing state; every controller that
 	// signs or verifies reads it from here.
 	signingProvider := signing.NewProvider(mgr.GetAPIReader(), installNamespace, deliveryv1alpha1.SigningKeyNamespace)
 
 	if err := (&controller.PreparationReconciler{
-		Client:         mgr.GetClient(),
-		Scheme:         mgr.GetScheme(),
-		APIReader:      mgr.GetAPIReader(),
-		OCIClient:      ociClient,
-		PantryResolver: credential.NewKubeResolver(mgr.GetClient()),
-		Signing:        signingProvider,
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		APIReader:  mgr.GetAPIReader(),
+		Registries: registries,
+		Signing:    signingProvider,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Preparation")
 		os.Exit(1)
 	}
 	if err := (&controller.ServingReconciler{
-		Client:         mgr.GetClient(),
-		Scheme:         mgr.GetScheme(),
-		Deployer:       deployer.NewArgoCD(mgr.GetClient()),
-		OCIClient:      ociClient,
-		PantryResolver: credential.NewKubeResolver(mgr.GetClient()),
-		Signing:        signingProvider,
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		Deployer:   deployer.NewArgoCD(mgr.GetClient()),
+		Registries: registries,
+		Signing:    signingProvider,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Serving")
 		os.Exit(1)
 	}
-	artifactStore := artifact.NewStore(ociClient, afero.NewOsFs(), "/tmp/kokumi-pull-cache")
+	// Every registry access connects through a Registry; the store's own
+	// client is an anonymous fallback.
+	artifactStore := artifact.NewStore(oci.NewClient(oci.Options{}), afero.NewOsFs(), "/tmp/kokumi-pull-cache")
 	artifactPipeline := artifact.NewPipeline(artifactStore)
 
 	builderID := version.BuilderID(context.Background(), os.Getenv, mgr.GetAPIReader())
@@ -241,7 +244,7 @@ func main() {
 		APIReader:        mgr.GetAPIReader(),
 		Scheme:           mgr.GetScheme(),
 		Pipeline:         artifactPipeline,
-		PantryResolver:   credential.NewKubeResolver(mgr.GetClient()),
+		Registries:       registries,
 		Recorder:         mgr.GetEventRecorder("kokumi-order-controller"),
 		InstallNamespace: installNamespace,
 		BuilderID:        builderID,
@@ -253,19 +256,11 @@ func main() {
 		Client:         mgr.GetClient(),
 		Scheme:         mgr.GetScheme(),
 		Store:          artifactStore,
-		PantryResolver: credential.NewKubeResolver(mgr.GetClient()),
-		OCIClient:      ociClient,
+		Registries:     registries,
 		Signing:        signingProvider,
 		SourceVerifier: signingsource.NewVerifier(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Product")
-		os.Exit(1)
-	}
-	if err := (&controller.PantryReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "Pantry")
 		os.Exit(1)
 	}
 	if err := (&controller.KitchenReconciler{
@@ -283,6 +278,23 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "approval")
+		os.Exit(1)
+	}
+	if err := (&controller.RegistryReconciler{
+		Client:      mgr.GetClient(),
+		Scheme:      mgr.GetScheme(),
+		Registries:  registries,
+		Namespace:   installNamespace,
+		BundledHost: artifact.DefaultRegistryHost,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "registry")
+		os.Exit(1)
+	}
+	if err := (&controller.RepositoryReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "repository")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

@@ -36,7 +36,7 @@ func resolvedProduct(render *deliveryv1alpha1.Render) *deliveryv1alpha1.Product 
 	return &deliveryv1alpha1.Product{
 		Name: "app",
 		Spec: deliveryv1alpha1.ProductSpec{
-			Source: deliveryv1alpha1.OCISource{OCI: hashSource, Version: hashVersion},
+			Source: deliveryv1alpha1.OCISource{URL: hashSource, Version: hashVersion},
 			Render: render,
 			Overrides: deliveryv1alpha1.Overrides{
 				Values:  deliveryv1alpha1.ValueOverrides{Policy: deliveryv1alpha1.OverridePolicyAll},
@@ -45,7 +45,7 @@ func resolvedProduct(render *deliveryv1alpha1.Render) *deliveryv1alpha1.Product 
 		},
 		Status: deliveryv1alpha1.ProductStatus{
 			ConfigHash: "sha256:product",
-			Source:     &deliveryv1alpha1.ProductSourceStatus{OCI: hashSource, Version: hashVersion, Digest: hashDigest},
+			Source:     &deliveryv1alpha1.ProductSourceStatus{URL: hashSource, Version: hashVersion, Digest: hashDigest},
 		},
 	}
 }
@@ -56,21 +56,22 @@ func orderOf(spec deliveryv1alpha1.OrderSpec) *deliveryv1alpha1.Order {
 	return &deliveryv1alpha1.Order{Spec: spec}
 }
 
-// hashOf returns the config hash of order rendered from product.
-func hashOf(t *testing.T, product *deliveryv1alpha1.Product, order *deliveryv1alpha1.Order, source, dest string) string {
+// hashOf returns the config hash of order rendered from product to dest.
+func hashOf(t *testing.T, product *deliveryv1alpha1.Product, order *deliveryv1alpha1.Order, dest string) string {
 	t.Helper()
 
-	return resolve.CalculateSpecHash(canonicalOf(t, product, order, source, dest))
+	return resolve.CalculateSpecHash(canonicalOf(t, product, order, dest))
 }
 
-// canonicalOf returns the canonical intent of order rendered from product.
-func canonicalOf(t *testing.T, product *deliveryv1alpha1.Product, order *deliveryv1alpha1.Order, source, dest string) []byte {
+// canonicalOf returns the canonical intent of order rendered from product
+// to dest.
+func canonicalOf(t *testing.T, product *deliveryv1alpha1.Product, order *deliveryv1alpha1.Order, dest string) []byte {
 	t.Helper()
 
 	effective, err := resolve.ForProduct(product, order)
 	require.NoError(t, err)
 
-	canonical, err := resolve.NewIntent(order, effective, source, dest).Canonical()
+	canonical, err := resolve.NewIntent(order, effective, dest).Canonical()
 	require.NoError(t, err)
 
 	return canonical
@@ -88,37 +89,41 @@ func TestCalculateSpecHash(t *testing.T) {
 	}
 	order := func() *deliveryv1alpha1.Order { return orderOf(deliveryv1alpha1.OrderSpec{}) }
 
-	base := hashOf(t, product(), order(), hashSource, hashDest)
+	base := hashOf(t, product(), order(), hashDest)
 	require.Regexp(t, `^sha256:[a-f0-9]{64}$`, base)
 
 	t.Run("same inputs produce same hash", func(t *testing.T) {
-		require.Equal(t, base, hashOf(t, product(), order(), hashSource, hashDest))
+		require.Equal(t, base, hashOf(t, product(), order(), hashDest))
 	})
 
 	t.Run("source URL change produces different hash", func(t *testing.T) {
-		require.NotEqual(t, base, hashOf(t, product(), order(), hashSource+"-v2", hashDest))
+		p := product()
+		p.Status.Source.URL = hashSource + "-v2"
+		require.NotEqual(t, base, hashOf(t, p, order(), hashDest))
 	})
 
 	t.Run("dest URL change produces different hash", func(t *testing.T) {
-		require.NotEqual(t, base, hashOf(t, product(), order(), hashSource, hashDest+"-v2"))
+		require.NotEqual(t, base, hashOf(t, product(), order(), hashDest+"-v2"))
 	})
 
 	t.Run("version change produces different hash", func(t *testing.T) {
 		p := product()
 		p.Status.Source.Version = nextVersion
-		require.NotEqual(t, base, hashOf(t, p, order(), hashSource, hashDest))
+		require.NotEqual(t, base, hashOf(t, p, order(), hashDest))
 	})
 
-	t.Run("pantryRef name is not hashed", func(t *testing.T) {
+	t.Run("Registries are not hashed", func(t *testing.T) {
 		p := product()
-		p.Status.Source.PantryRef = &deliveryv1alpha1.PantryRef{Name: "other-charts"}
-		require.Equal(t, base, hashOf(t, p, order(), hashSource, hashDest))
+		p.Spec.RegistryRefs = []corev1.LocalObjectReference{{Name: "charts"}}
+		o := order()
+		o.Spec.RegistryRefs = []corev1.LocalObjectReference{{Name: "destination"}}
+		require.Equal(t, base, hashOf(t, p, o, hashDest))
 	})
 
 	t.Run("key order of inline values is not hashed", func(t *testing.T) {
 		p := product()
 		p.Spec.Render = helmRender(`{"image": {"tag": "1.0.0"}, "replicaCount": 2}`)
-		require.Equal(t, base, hashOf(t, p, order(), hashSource, hashDest))
+		require.Equal(t, base, hashOf(t, p, order(), hashDest))
 	})
 
 	t.Run("large numbers in inline values are kept as written", func(t *testing.T) {
@@ -126,9 +131,9 @@ func TestCalculateSpecHash(t *testing.T) {
 		p.Spec.Render = helmRender(`{"id":9007199254740993,"note":"<a&b>"}`)
 		neighbour := product()
 		neighbour.Spec.Render = helmRender(`{"id":9007199254740992,"note":"<a&b>"}`)
-		require.NotEqual(t, hashOf(t, p, order(), hashSource, hashDest), hashOf(t, neighbour, order(), hashSource, hashDest))
+		require.NotEqual(t, hashOf(t, p, order(), hashDest), hashOf(t, neighbour, order(), hashDest))
 
-		canonical := canonicalOf(t, p, order(), hashSource, hashDest)
+		canonical := canonicalOf(t, p, order(), hashDest)
 		require.Contains(t, string(canonical), `"id":9007199254740993`)
 		require.Contains(t, string(canonical), `"note":"<a&b>"`)
 	})
@@ -136,16 +141,13 @@ func TestCalculateSpecHash(t *testing.T) {
 	t.Run("promotion mode is not hashed", func(t *testing.T) {
 		o := order()
 		o.Spec.Promotion = &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeAutomatic}
-		require.Equal(t, base, hashOf(t, product(), o, hashSource, hashDest))
+		require.Equal(t, base, hashOf(t, product(), o, hashDest))
 	})
 
 	t.Run("the default image policy is not hashed", func(t *testing.T) {
 		p := product()
-		p.Spec.Images = deliveryv1alpha1.ProductImages{
-			Policy:        deliveryv1alpha1.ImagePolicyRecord,
-			PullSecretRef: &corev1.LocalObjectReference{Name: "registry-credentials"},
-		}
-		require.Equal(t, base, hashOf(t, p, order(), hashSource, hashDest))
+		p.Spec.Images = deliveryv1alpha1.ProductImages{Policy: deliveryv1alpha1.ImagePolicyRecord}
+		require.Equal(t, base, hashOf(t, p, order(), hashDest))
 	})
 
 	t.Run("image policy and field specs produce different hashes", func(t *testing.T) {
@@ -156,7 +158,7 @@ func TestCalculateSpecHash(t *testing.T) {
 		specs := product()
 		specs.Spec.Images.FieldSpecs = []deliveryv1alpha1.ImageFieldSpec{{Kind: "Prometheus", Path: "spec/image"}}
 
-		hashes := []string{base, hashOf(t, pin, order(), hashSource, hashDest), hashOf(t, vendor, order(), hashSource, hashDest), hashOf(t, specs, order(), hashSource, hashDest)}
+		hashes := []string{base, hashOf(t, pin, order(), hashDest), hashOf(t, vendor, order(), hashDest), hashOf(t, specs, order(), hashDest)}
 		require.Len(t, slices.Compact(slices.Sorted(slices.Values(hashes))), 4)
 	})
 
@@ -165,11 +167,11 @@ func TestCalculateSpecHash(t *testing.T) {
 		o.Spec.Promotion = &deliveryv1alpha1.PromotionSpec{
 			Approvals: &deliveryv1alpha1.ApprovalPolicy{RequiredApprovals: 1},
 		}
-		one := hashOf(t, product(), o, hashSource, hashDest)
+		one := hashOf(t, product(), o, hashDest)
 		require.NotEqual(t, base, one)
 
 		o.Spec.Promotion.Approvals.RequiredApprovals = 2
-		require.NotEqual(t, one, hashOf(t, product(), o, hashSource, hashDest))
+		require.NotEqual(t, one, hashOf(t, product(), o, hashDest))
 	})
 }
 
@@ -181,91 +183,75 @@ func TestCalculateSpecHash_product(t *testing.T) {
 		Values: &apiextensionsv1.JSON{Raw: []byte(`{"image":{"tag":"1.0.0"}}`)},
 	})
 
-	base := hashOf(t, product(), order, hashSource, hashDest)
+	base := hashOf(t, product(), order, hashDest)
 
 	t.Run("product version change produces different hash", func(t *testing.T) {
 		p := product()
 		p.Status.Source.Version = nextVersion
-		require.NotEqual(t, base, hashOf(t, p, order, hashSource, hashDest))
+		require.NotEqual(t, base, hashOf(t, p, order, hashDest))
 	})
 
 	t.Run("product digest change produces different hash", func(t *testing.T) {
 		p := product()
 		p.Status.Source.Digest = "sha256:" + strings.Repeat("2", 64)
-		require.NotEqual(t, base, hashOf(t, p, order, hashSource, hashDest))
+		require.NotEqual(t, base, hashOf(t, p, order, hashDest))
 	})
 
 	t.Run("product values change produces different hash", func(t *testing.T) {
 		p := product()
 		p.Spec.Render = helmRender(`{"replicaCount":3}`)
-		require.NotEqual(t, base, hashOf(t, p, order, hashSource, hashDest))
+		require.NotEqual(t, base, hashOf(t, p, order, hashDest))
 	})
 
 	t.Run("order values change produces different hash", func(t *testing.T) {
 		o := order.DeepCopy()
 		o.Spec.Values = &apiextensionsv1.JSON{Raw: []byte(`{"image":{"tag":"1.0.1"}}`)}
-		require.NotEqual(t, base, hashOf(t, product(), o, hashSource, hashDest))
+		require.NotEqual(t, base, hashOf(t, product(), o, hashDest))
 	})
 
 	t.Run("product change that leaves the merge untouched is not hashed", func(t *testing.T) {
 		p := product()
 		p.Status.ConfigHash = "sha256:other"
 		p.Spec.Overrides.Values = deliveryv1alpha1.ValueOverrides{Policy: deliveryv1alpha1.OverridePolicyListed, Paths: []string{"image.tag"}}
-		require.Equal(t, base, hashOf(t, p, order, hashSource, hashDest))
+		require.Equal(t, base, hashOf(t, p, order, hashDest))
 	})
 
 	t.Run("where a value is set is not hashed, only the merged result", func(t *testing.T) {
 		merged := resolvedProduct(helmRender(`{"image":{"tag":"1.0.0"},"replicaCount":1}`))
-		require.Equal(t, base, hashOf(t, merged, orderOf(deliveryv1alpha1.OrderSpec{}), hashSource, hashDest))
+		require.Equal(t, base, hashOf(t, merged, orderOf(deliveryv1alpha1.OrderSpec{}), hashDest))
 	})
 }
 
 func TestCalculateProductHash(t *testing.T) {
-	spec := func() deliveryv1alpha1.ProductSpec {
-		return deliveryv1alpha1.ProductSpec{
-			Source: deliveryv1alpha1.OCISource{PantryRef: &deliveryv1alpha1.PantryRef{Name: "charts"}, Version: hashVersion},
-			Render: helmRender(`{"replicaCount":1}`),
-		}
+	source := func() deliveryv1alpha1.OCISource {
+		return deliveryv1alpha1.OCISource{URL: hashSource, Version: hashVersion}
 	}
-	hash := func(t *testing.T, spec deliveryv1alpha1.ProductSpec, sourceOCI, vendorOCI string) string {
+	hash := func(t *testing.T, source deliveryv1alpha1.OCISource, vendorURL string) string {
 		t.Helper()
-		h, err := resolve.CalculateProductHash(spec.Source, spec.Vendor, sourceOCI, vendorOCI)
+		h, err := resolve.CalculateProductHash(source, vendorURL)
 		require.NoError(t, err)
 		return h
 	}
 
-	base := hash(t, spec(), hashSource, "")
+	base := hash(t, source(), "")
 	require.Regexp(t, `^sha256:[a-f0-9]{64}$`, base)
-	require.Equal(t, base, hash(t, spec(), hashSource, ""))
+	require.Equal(t, base, hash(t, source(), ""))
 
-	t.Run("source change produces different hash", func(t *testing.T) {
-		s := spec()
-		s.Source.Version = nextVersion
-		require.NotEqual(t, base, hash(t, s, hashSource, ""))
+	t.Run("version change produces different hash", func(t *testing.T) {
+		s := source()
+		s.Version = nextVersion
+		require.NotEqual(t, base, hash(t, s, ""))
 	})
 
-	t.Run("vendor change produces different hash", func(t *testing.T) {
-		s := spec()
-		s.Vendor = &deliveryv1alpha1.OCIDestination{}
-		require.NotEqual(t, base, hash(t, s, hashSource, ""))
+	t.Run("source URL change produces different hash", func(t *testing.T) {
+		s := source()
+		s.URL = hashSource + "-v2"
+		require.NotEqual(t, base, hash(t, s, ""))
 	})
 
-	t.Run("resolved source URL change produces different hash", func(t *testing.T) {
-		require.NotEqual(t, base, hash(t, spec(), hashSource+"-v2", ""))
-	})
-
-	t.Run("resolved vendor URL change produces different hash", func(t *testing.T) {
-		s := spec()
-		s.Vendor = &deliveryv1alpha1.OCIDestination{PantryRef: &deliveryv1alpha1.PantryRef{Name: "mirror"}}
-		require.NotEqual(t, hash(t, s, hashSource, hashDest), hash(t, s, hashSource, hashDest+"-v2"))
-	})
-
-	t.Run("render, patches, and overrides do not change the hash", func(t *testing.T) {
-		s := spec()
-		s.Render = helmRender(`{"replicaCount":2}`)
-		s.Patches = []deliveryv1alpha1.Patch{{Target: deliveryv1alpha1.PatchTarget{Kind: "Service", Name: "svc"}, Set: map[string]string{".spec.type": "NodePort"}}}
-		s.Overrides.Values.Policy = deliveryv1alpha1.OverridePolicyAll
-		require.Equal(t, base, hash(t, s, hashSource, ""))
+	t.Run("vendor URL change produces different hash", func(t *testing.T) {
+		require.NotEqual(t, base, hash(t, source(), hashDest))
+		require.NotEqual(t, hash(t, source(), hashDest), hash(t, source(), hashDest+"-v2"))
 	})
 }
 
@@ -303,10 +289,10 @@ func TestIntent_golden(t *testing.T) {
 		Set:    map[string]string{".spec.replicas": "1", ".metadata.labels.tier": "web"},
 	}}
 	product.Spec.Images = deliveryv1alpha1.ProductImages{
-		Policy:        deliveryv1alpha1.ImagePolicyVendor,
-		FieldSpecs:    []deliveryv1alpha1.ImageFieldSpec{{Group: "monitoring.coreos.com", Kind: "Prometheus", Path: "spec/image"}},
-		PullSecretRef: &corev1.LocalObjectReference{Name: "registry-credentials"},
+		Policy:     deliveryv1alpha1.ImagePolicyVendor,
+		FieldSpecs: []deliveryv1alpha1.ImageFieldSpec{{Group: "monitoring.coreos.com", Kind: "Prometheus", Path: "spec/image"}},
 	}
+	product.Spec.RegistryRefs = []corev1.LocalObjectReference{{Name: "registry-credentials"}}
 
 	order := orderOf(deliveryv1alpha1.OrderSpec{
 		Values: &apiextensionsv1.JSON{Raw: []byte(`{"replicaCount": 2, "id": 9007199254740993}`)},
@@ -324,7 +310,7 @@ func TestIntent_golden(t *testing.T) {
 		},
 	})
 
-	canonical := canonicalOf(t, product, order, hashSource, hashDest)
+	canonical := canonicalOf(t, product, order, hashDest)
 
 	golden := filepath.Join("testdata", "intent.golden.json")
 	if *update {

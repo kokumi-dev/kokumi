@@ -1,5 +1,5 @@
 import { authHeaders, refresh } from './auth'
-import type { Order, Preparation, OrderFormData, OrderPreviewRequest, Product, ProductFormData, ProductPreviewRequest, Patch, Render, ChartInfo, Pantry, PantryFormData, ArtifactInfo, ArtifactFile, Approval, ApprovalDecision, ArtifactConfig, ArtifactGraph, ProductSourceArtifact } from './types'
+import type { Order, Preparation, OrderFormData, OrderPreviewRequest, Product, ProductFormData, ProductPreviewRequest, Patch, Render, ChartInfo, Registry, RegistryFormData, Repository, RepositoryFormData, ArtifactInfo, ArtifactFile, Approval, ApprovalDecision, ArtifactConfig, ArtifactGraph, ProductSourceArtifact } from './types'
 
 // All API calls are relative so they work both in dev (proxied by Vite) and
 // in production (served from the same Go binary).
@@ -75,6 +75,7 @@ export function createOrder(data: OrderFormData, commitMessage?: string): Promis
       productRef: data.productRef,
       values: valuesBody(data.values),
       destination: data.destination,
+      registryRefs: data.registryRefs,
       patches: data.patches,
       mode: data.mode,
       approvals: data.approvals,
@@ -95,6 +96,7 @@ export function updateOrder(
     body: JSON.stringify({
       values: valuesBody(data.values),
       destination: data.destination,
+      registryRefs: data.registryRefs,
       patches: data.patches,
       edits: data.edits,
       mode: data.mode,
@@ -121,43 +123,42 @@ export function saveOrderEdits(
 }
 
 export function getDefaultRegistry(): Promise<{ baseURL: string }> {
-  return request<{ baseURL: string }>('/registry/default')
+  return request<{ baseURL: string }>('/oci/default')
 }
 
-export function listOCITags(
-  ref: string,
-  pantryName?: string,
-  namespace?: string,
-): Promise<string[]> {
-  let url = `/registry/tags?ref=${encodeURIComponent(ref)}`
-  if (pantryName) {
-    url += `&pantryName=${encodeURIComponent(pantryName)}`
-    if (namespace) url += `&pantryNamespace=${encodeURIComponent(namespace)}`
-  }
-  return request<{ tags: string[] }>(url).then((r) => r.tags)
+/**
+ * The Registries a read of any OCI location connects through: those of the
+ * namespace named in registryRefs, the longest matching url winning. Without
+ * one the location is read anonymously; a user who may not get a named
+ * Registry's Secret is refused, never read anonymously.
+ */
+export interface OCIReadScope {
+  namespace?: string
+  registryRefs?: string[]
 }
 
-export function getArtifactInfo(
-  ref: string,
-  version: string,
-  pantryName?: string,
-  namespace?: string,
-): Promise<ArtifactInfo> {
-  let url = `/registry/artifact?ref=${encodeURIComponent(ref)}&version=${encodeURIComponent(version)}`
-  if (pantryName) {
-    url += `&pantryName=${encodeURIComponent(pantryName)}`
-    if (namespace) url += `&pantryNamespace=${encodeURIComponent(namespace)}`
-  }
-  return request<ArtifactInfo>(url)
+function ociQuery(params: Record<string, string>, scope?: OCIReadScope): string {
+  const q = new URLSearchParams(params)
+  if (scope?.namespace) q.set('namespace', scope.namespace)
+  if (scope?.registryRefs?.length) q.set('registryRefs', scope.registryRefs.join(','))
+  return q.toString()
 }
 
-export function getChartInfo(ref: string, version: string, pantryName?: string, namespace?: string): Promise<ChartInfo> {
-  let url = `/registry/chart-info?ref=${encodeURIComponent(ref)}&version=${encodeURIComponent(version)}`
-  if (pantryName) {
-    url += `&pantryName=${encodeURIComponent(pantryName)}`
-    if (namespace) url += `&pantryNamespace=${encodeURIComponent(namespace)}`
-  }
-  return request<ChartInfo>(url)
+export function listOCITags(ref: string, scope?: OCIReadScope): Promise<string[]> {
+  return request<{ tags: string[] }>(`/oci/tags?${ociQuery({ ref }, scope)}`).then((r) => r.tags)
+}
+
+export function getArtifactInfo(ref: string, version: string, scope?: OCIReadScope): Promise<ArtifactInfo> {
+  return request<ArtifactInfo>(`/oci/artifact?${ociQuery({ ref, version }, scope)}`)
+}
+
+export function getChartInfo(ref: string, version: string, scope?: OCIReadScope): Promise<ChartInfo> {
+  return request<ChartInfo>(`/oci/chart-info?${ociQuery({ ref, version }, scope)}`)
+}
+
+/** The read scope of a Repository: its namespace and its Registry. */
+export function repositoryScope(r: Repository): OCIReadScope {
+  return { namespace: r.namespace, registryRefs: r.registryRef ? [r.registryRef] : [] }
 }
 
 // ── Preparations ──────────────────────────────────────────────────────────────
@@ -204,9 +205,9 @@ export function getProductSourceArtifact(namespace: string, name: string): Promi
   return request<ProductSourceArtifact>(`/products/${namespace}/${name}/source/artifact`)
 }
 
-/** Returns the graph of the artifact behind a tag of a Pantry's repository. */
-export function getPantryArtifact(namespace: string, name: string, tag: string): Promise<ArtifactGraph> {
-  return request<ArtifactGraph>(`/pantries/${namespace}/${name}/artifact?tag=${encodeURIComponent(tag)}`)
+/** Returns the graph of the artifact behind a tag of a Repository. */
+export function getRepositoryArtifact(namespace: string, name: string, tag: string): Promise<ArtifactGraph> {
+  return request<ArtifactGraph>(`/repositories/${namespace}/${name}/artifact?tag=${encodeURIComponent(tag)}`)
 }
 
 /** Returns the config blob of a Preparation's artifact. */
@@ -271,6 +272,7 @@ function productSpecBody(data: ProductFormData) {
     patches: data.patches,
     overrides: data.overrides,
     images: data.images,
+    registryRefs: data.registryRefs,
   }
 }
 
@@ -293,36 +295,72 @@ export function deleteProduct(namespace: string, name: string): Promise<void> {
   return request<void>(`/products/${namespace}/${name}`, { method: 'DELETE' })
 }
 
-// ── Pantries ──────────────────────────────────────────────────────────────────
+// ── Registries ────────────────────────────────────────────────────────────────
 
-export function listPantries(): Promise<Pantry[]> {
-  return request<Pantry[]>('/pantries')
+export function listRegistries(): Promise<Registry[]> {
+  return request<Registry[]>('/registries')
 }
 
-export function getPantry(namespace: string, name: string): Promise<Pantry> {
-  return request<Pantry>(`/pantries/${namespace}/${name}`)
+/**
+ * The request body of a Registry form. Typed-in credentials go into a
+ * Secret the Registry owns; blank ones keep that Secret as it is.
+ */
+function registryBody(data: RegistryFormData, current?: Registry) {
+  const body: Record<string, string> = { url: data.url, scheme: data.scheme, certSecretRef: data.certSecretRef }
+  if (data.credentialMode === 'secretRef') {
+    body.secretRef = data.secretRef
+  } else if (data.credentialMode === 'direct') {
+    if (data.username && data.password) {
+      body.username = data.username
+      body.password = data.password
+    } else if (current?.secretRef) {
+      body.secretRef = current.secretRef
+    }
+  }
+  return body
 }
 
-export function createPantry(data: PantryFormData): Promise<Pantry> {
-  return request<Pantry>('/pantries', {
+export function createRegistry(data: RegistryFormData): Promise<Registry> {
+  return request<Registry>('/registries', {
+    method: 'POST',
+    body: JSON.stringify({ name: data.name, namespace: data.namespace, ...registryBody(data) }),
+  })
+}
+
+export function updateRegistry(current: Registry, data: RegistryFormData): Promise<Registry> {
+  return request<Registry>(`/registries/${current.namespace}/${current.name}`, {
+    method: 'PUT',
+    body: JSON.stringify(registryBody(data, current)),
+  })
+}
+
+/** Deletes a Registry and the credentials Secret the UI stored for it. */
+export function deleteRegistry(namespace: string, name: string): Promise<void> {
+  return request<void>(`/registries/${namespace}/${name}`, { method: 'DELETE' })
+}
+
+// ── Repositories ──────────────────────────────────────────────────────────────
+
+export function listRepositories(): Promise<Repository[]> {
+  return request<Repository[]>('/repositories')
+}
+
+export function createRepository(data: RepositoryFormData): Promise<Repository> {
+  return request<Repository>('/repositories', {
     method: 'POST',
     body: JSON.stringify(data),
   })
 }
 
-export function updatePantry(
-  namespace: string,
-  name: string,
-  data: Omit<PantryFormData, 'name' | 'namespace'>,
-): Promise<Pantry> {
-  return request<Pantry>(`/pantries/${namespace}/${name}`, {
+export function updateRepository(namespace: string, name: string, data: RepositoryFormData): Promise<Repository> {
+  return request<Repository>(`/repositories/${namespace}/${name}`, {
     method: 'PUT',
-    body: JSON.stringify(data),
+    body: JSON.stringify({ url: data.url, registryRef: data.registryRef, description: data.description }),
   })
 }
 
-export function deletePantry(namespace: string, name: string): Promise<void> {
-  return request<void>(`/pantries/${namespace}/${name}`, { method: 'DELETE' })
+export function deleteRepository(namespace: string, name: string): Promise<void> {
+  return request<void>(`/repositories/${namespace}/${name}`, { method: 'DELETE' })
 }
 
 // ── Settings (singleton Kitchen) ──────────────────────────────────────────────

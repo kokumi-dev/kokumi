@@ -9,7 +9,7 @@ import (
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
-	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/registry"
 	"github.com/kokumi-dev/kokumi/internal/signing"
 )
 
@@ -17,11 +17,13 @@ import (
 // All fields may be nil when no Kubernetes configuration was found; handlers
 // return 503 Service Unavailable in that case.
 type apiDeps struct {
-	ociClient oci.Client
-	store     *artifact.Store
-	pipeline  *artifact.Pipeline
-	logger    logr.Logger
-	authMgr   *authManager
+	// registries builds the clients of the Registries the user of a
+	// request read, and of anonymous locations.
+	registries *registry.Clients
+	store      *artifact.Store
+	pipeline   *artifact.Pipeline
+	logger     logr.Logger
+	authMgr    *authManager
 
 	// impersonator builds per-ServiceAccount clients used to execute all
 	// user-facing operations as the mapped identity (Kubernetes RBAC is the

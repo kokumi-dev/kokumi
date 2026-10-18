@@ -33,7 +33,6 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/approval"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/attestation"
-	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/provenance"
 	"github.com/kokumi-dev/kokumi/internal/signing"
@@ -67,7 +66,7 @@ var _ = Describe("Preparation Controller", func() {
 							Builder: testBuilderID,
 						},
 						Source: deliveryv1alpha1.OrderSource{
-							OCI:        testOCIRef,
+							URL:        testOCIRef,
 							BaseDigest: "sha256:6c2069fa6684d3659d93538331711b09a33cb42ae305802195d6a4d58847b345",
 						},
 						Artifact: deliveryv1alpha1.Artifact{
@@ -95,12 +94,11 @@ var _ = Describe("Preparation Controller", func() {
 			fakeOCI := oci.NewFakeClient(nil)
 			seedArtifact(fakeOCI, preparation.Spec.Artifact.OCIRef, preparation.Spec.Artifact.Digest)
 			controllerReconciler := &PreparationReconciler{
-				Client:         k8sClient,
-				Scheme:         k8sClient.Scheme(),
-				APIReader:      k8sClient,
-				OCIClient:      fakeOCI,
-				PantryResolver: credential.NewKubeResolver(k8sClient),
-				Signing:        testSigning,
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				APIReader:  k8sClient,
+				Registries: fakeRegistries(fakeOCI),
+				Signing:    testSigning,
 			}
 
 			// Finalizer, signed evidence, approvals: one reconcile each.
@@ -138,12 +136,11 @@ var _ = Describe("Preparation Controller", func() {
 		)
 		reconcilePrepResult := func() (reconcile.Result, error) {
 			r := &PreparationReconciler{
-				Client:         k8sClient,
-				Scheme:         k8sClient.Scheme(),
-				APIReader:      k8sClient,
-				OCIClient:      fakeOCI,
-				PantryResolver: credential.NewKubeResolver(k8sClient),
-				Signing:        signer,
+				Client:     k8sClient,
+				Scheme:     k8sClient.Scheme(),
+				APIReader:  k8sClient,
+				Registries: fakeRegistries(fakeOCI),
+				Signing:    signer,
 			}
 			return r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 		}
@@ -457,7 +454,7 @@ func createTestPreparation(ctx context.Context, name, orderName, digest string, 
 		Spec: deliveryv1alpha1.PreparationSpec{
 			OrderName: orderName,
 			Source: deliveryv1alpha1.OrderSource{
-				OCI:        testOCIRef,
+				URL:        testOCIRef,
 				BaseDigest: digest,
 			},
 			Renderer: deliveryv1alpha1.Renderer{

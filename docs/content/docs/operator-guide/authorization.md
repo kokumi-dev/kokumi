@@ -142,7 +142,7 @@ None of the built-in roles grants access to Secrets. They are bound
 cluster-wide, which would include the `kokumi-signing` namespace, and the key
 that signs every Kokumi artifact is a Secret there: an identity that could
 read or replace it could forge trusted signatures. See
-[Pantry credentials](#pantry-credentials) for granting Secret access per
+[Registry credentials](#registry-credentials) for granting Secret access per
 namespace, and [Signing](../signing/) for how the key is protected.
 
 The built-in admin login always acts as `kokumi-admin`, regardless of the
@@ -159,39 +159,60 @@ kubectl -n kokumi annotate sa kokumi-editor \
   kokumi.dev/identity-groups=devops --overwrite
 ```
 
-## Pantry credentials
+## Registry credentials
 
-The UI stores **Pantry credentials** as docker-registry Secrets in the Pantry's
-namespace when a Pantry is saved with direct credentials, and reads them when
-previewing a Product or Order whose source references that Pantry. It does
-both with the user's identity, so the user needs Secret access in that
-namespace. The built-in roles grant none.
+A Registry lends the credentials of its Secret to every Product and Order in
+its namespace that lists it, and the controller reads them with its own
+identity. Who may name a Secret in a Registry therefore decides who may use
+it. Three things guard that:
 
-Platform admins grant it per tenant namespace by binding the
-`kokumi-pantry-credentials` ClusterRole (`get`, `create` and `patch` on
-`secrets`) with a RoleBinding:
+- **The admission policy `registry-secret-access`** admits a Registry that
+  names a Secret (`secretRef` or `certSecretRef`) only when its author may
+  `get` that Secret. An update that keeps the `url`, the `scheme` and both
+  references needs no Secret access; changing the `url` or switching to
+  `HTTP` does, because either sends the credentials somewhere else.
+- **The UI reads through a Registry with the user's identity.** Browsing a
+  Repository, a Product's source or a Preparation's artifact, and previews,
+  connect through the Registries of the object with the user's own `get` on
+  their Secrets. Without it the server answers 403 and names the Registry and
+  the Secret; it never falls back to an anonymous read. The server's pull
+  cache serves only content the caller could resolve with their own
+  credentials.
+- **The UI stores credentials as the user.** A Registry saved with a username
+  and password gets a `kubernetes.io/dockerconfigjson` Secret
+  `<registry>-credentials`, owned by the Registry. The server never
+  overwrites a Secret of that name it did not create.
+
+The built-in roles grant no Secret access. Platform admins grant it per tenant
+namespace by binding the `kokumi-registry-credentials` ClusterRole (`get`,
+`create` and `patch` on `secrets`) with a RoleBinding:
 
 ```bash
-kubectl -n team-a create rolebinding kokumi-pantry-credentials \
-  --clusterrole=kokumi-pantry-credentials \
+kubectl -n team-a create rolebinding kokumi-registry-credentials \
+  --clusterrole=kokumi-registry-credentials \
   --serviceaccount=kokumi:kokumi-editor
 ```
 
 {{< callout type="warning" >}}
-Never bind `kokumi-pantry-credentials` with a ClusterRoleBinding, in the
+Never bind `kokumi-registry-credentials` with a ClusterRoleBinding, in the
 `kokumi-signing` namespace, or in the install namespace. `kokumi-signing` holds
 the artifact signing key. The install namespace holds the Secrets of the
 Kitchen's `auth` settings: the session token signing key, the admin password
 hash and the OIDC client secret. Reading or patching them lets a user forge
 sessions or take over login. Treat the install namespace as admin-only, as
-Argo CD does with its own namespace, and keep Pantries with credentials in
+Argo CD does with its own namespace, and keep Registries with credentials in
 tenant namespaces.
 {{< /callout >}}
 
-Without the binding, Pantries can still reference an existing Secret by name
-(`spec.secretRef`), and previews of plain OCI sources work. The Pantry form
-shows whether the user may store credentials in the selected namespace, from
-the namespaced capability `pantries.credentials:update`.
+Without the binding, users can still create Registries without credentials
+and list the Registries others created in Products and Orders; the
+controller connects through them. The Registry form shows whether the user
+may use credentials in the selected namespace, from the namespaced capability
+`registries.credentials:update`.
+
+Everyone who may edit Products or Orders in a namespace can use the
+credentials of its Registries, as with `imagePullSecrets`. Keep credentials
+of different trust levels in different namespaces.
 
 ## UI capabilities
 
@@ -213,7 +234,8 @@ answer.
 | `settings.signing:update` | `update` the `kitchens/default` object in the install namespace | Settings, Signing tab |
 | `orders:create` / `orders:update` / `orders:delete` | `create` / `update` / `delete` `orders` | New, Edit, Delete Order; edits on rendered files |
 | `products:create` / `products:update` / `products:delete` | `create` / `update` / `delete` `products` | New, Edit, Delete Product |
-| `pantries:create` / `pantries:update` / `pantries:delete` | `create` / `patch` / `delete` `pantries` | New, Edit, Delete Pantry |
+| `registries:create` / `registries:update` / `registries:delete` | `create` / `patch` / `delete` `registries` | New, Edit, Delete Registry |
+| `repositories:create` / `repositories:update` / `repositories:delete` | `create` / `patch` / `delete` `repositories` | New, Edit, Delete Repository |
 | `preparations:promote` | `create` and `update` `servings` | Promote and Rollback |
 | `preparations:approve` | `approve` `preparations`, and the user signed in with OIDC | Approve and Request changes |
 
@@ -222,7 +244,7 @@ One capability holds per namespace and is reported by
 
 | Capability | Granted when a mapped ServiceAccount may | UI |
 | ---------- | ---------------------------------------- | -- |
-| `pantries.credentials:update` | `get`, `create` and `patch` `secrets` in the namespace | Direct credentials in the Pantry form |
+| `registries.credentials:update` | `get`, `create` and `patch` `secrets` in the namespace | Credentials and Secrets in the Registry form |
 
 Except for the settings and the namespaced capability, capabilities are
 evaluated **across all namespaces**:

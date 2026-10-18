@@ -24,7 +24,7 @@ metadata:
   name: external-secrets-verified
 spec:
   source:
-    oci: oci://kokumi-registry.kokumi.svc.cluster.local:5000/kokumi-dev/testdata/external-secrets
+    url: oci://kokumi-registry.kokumi.svc.cluster.local:5000/kokumi-dev/testdata/external-secrets
     version: "0.1.0"
     # Orders render the source only once its signature verifies against a key
     # in the Secret. A keyless source names the expected signer instead:
@@ -37,10 +37,14 @@ spec:
       secretRef:
         name: testdata-signing-key
 
-  # Every image is copied, with all platforms and its signatures, into the
-  # repository of each Preparation, and the manifests pull it from there by
-  # digest: the release runs from kokumi-registry alone. Nodes must be able to
-  # pull from the Order's destination registry; the Kind setup configures
-  # that for kokumi-registry (hack/kind/registry-mirror.sh).
+  # The source is copied to the vendor location, and under the Vendor image
+  # policy every image too, with all platforms and its signatures, into a
+  # repository of its own below it, <vendor url>/images/<image name>. The
+  # manifests pull the images from there by digest: the release runs from
+  # kokumi-registry alone. Nodes must be able to pull from the vendor
+  # location; the Kind setup configures that for kokumi-registry
+  # (hack/kind/registry-mirror.sh). Without a url, the vendor location is
+  # kokumi-registry/<namespace>/vendor/<product>.
+  vendor: {}
   images:
     policy: Vendor

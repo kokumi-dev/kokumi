@@ -3,6 +3,7 @@ import { load, dump } from 'js-yaml'
 import { Button, CloseIcon, Disclosure, IconButton, PlusIcon, SegmentedControl, TabButtons } from '../ui'
 import YamlEditor from '../shared/YamlEditor'
 import DestinationEditor from '../shared/DestinationEditor'
+import RegistryRefsEditor, { RegistryMatchHint } from '../shared/RegistryRefsEditor'
 import HelmValuesEditor from '../shared/HelmValuesEditor'
 import PatchesEditor, { TargetFields } from '../shared/PatchesEditor'
 import PreviewTab from '../shared/PreviewTab'
@@ -27,14 +28,16 @@ import type {
 import { emptyProductForm, imagePolicies, overridePolicies, productToFormData } from '../../api/types'
 import { getChartInfo, listOCITags, previewProduct } from '../../api/client'
 import { cleanTags } from '../../api/ociTags'
-import { usePantries } from '../../hooks/usePantries'
-import { assertKnownKeys, patchesFromYaml, patchesToYaml } from '../../utils/yaml'
+import { assertKnownKeys, patchesFromYaml, patchesToYaml, registryRefsFromYaml } from '../../utils/yaml'
+import { registryRefNames } from '../../utils/registries'
 import { describeImagePolicy, describePatchesPolicy, describeValuesPolicy } from '../../utils/products'
 import styles from '../shared/Form.module.css'
 
 interface Props {
   /** When provided the form is in "edit" mode. */
   product?: Product
+  /** Pre-fills a new Product, e.g. from a Repository. */
+  initial?: Partial<ProductFormData>
   onCancel: () => void
   onSubmit: (data: ProductFormData) => Promise<void>
   /** Reports whether the form holds unsaved changes. */
@@ -54,9 +57,7 @@ function isMapping(v: unknown): v is Record<string, unknown> {
 }
 
 function destinationToYaml(dest: OCIDestination): Record<string, unknown> {
-  if (dest.pantryRef?.name) return { pantryRef: { name: dest.pantryRef.name } }
-  if (dest.oci) return { oci: dest.oci }
-  return {}
+  return dest.url ? { url: dest.url } : {}
 }
 
 /** The verification of a source as written in YAML, in the shape of the Product spec. */
@@ -107,9 +108,7 @@ function verifyError(v?: SourceVerify): string | null {
 }
 
 function formToYaml(data: ProductFormData): string {
-  const source: Record<string, unknown> = data.source.pantryRef
-    ? { pantryRef: { name: data.source.pantryRef.name }, version: data.source.version }
-    : { oci: data.source.oci ?? '', version: data.source.version }
+  const source: Record<string, unknown> = { url: data.source.url, version: data.source.version }
   if (data.source.verify) source.verify = verifyToYaml(data.source.verify)
   const doc: Record<string, unknown> = { source }
   if (data.vendor) doc.vendor = destinationToYaml(data.vendor)
@@ -128,6 +127,7 @@ function formToYaml(data: ProductFormData): string {
   doc.overrides = overridesToYaml(data.overrides)
   const images = imagesToYaml(data.images)
   if (images) doc.images = images
+  if (data.registryRefs.length > 0) doc.registryRefs = data.registryRefs.map((r) => ({ name: r.name }))
   return dump(doc, { lineWidth: 100 })
 }
 
@@ -143,14 +143,13 @@ function imagesToYaml(i: ProductImages): Record<string, unknown> | undefined {
       path: f.path,
     }))
   }
-  if (i.pullSecretRef?.name) doc.pullSecretRef = { name: i.pullSecretRef.name }
   return Object.keys(doc).length ? doc : undefined
 }
 
 function imagesFromYaml(raw: unknown): ProductImages {
   if (raw === undefined || raw === null) return { policy: 'Record' }
   if (!isMapping(raw)) throw new Error('images must be a mapping')
-  assertKnownKeys(raw, ['policy', 'fieldSpecs', 'pullSecretRef'], 'images')
+  assertKnownKeys(raw, ['policy', 'fieldSpecs'], 'images')
   const policy = imagePolicies.find((p) => p === (raw.policy ?? 'Record'))
   if (!policy) throw new Error('images.policy must be Record, Pin or Vendor')
   const images: ProductImages = { policy }
@@ -167,18 +166,19 @@ function imagesFromYaml(raw: unknown): ProductImages {
       }
     })
   }
-  if (raw.pullSecretRef !== undefined && raw.pullSecretRef !== null) {
-    if (!isMapping(raw.pullSecretRef)) throw new Error('images.pullSecretRef must be a mapping with a name')
-    assertKnownKeys(raw.pullSecretRef, ['name'], 'images.pullSecretRef')
-    images.pullSecretRef = { name: String(raw.pullSecretRef.name ?? '') }
-  }
   return images
 }
 
-/** Why the image settings cannot be saved: every field spec needs a kind and a path. */
-function imagesError(i: ProductImages): string | null {
+/**
+ * Why the image settings cannot be saved: every field spec needs a kind and
+ * a path, and vendored images go below the vendor location.
+ */
+function imagesError(i: ProductImages, vendor?: OCIDestination): string | null {
   if (i.fieldSpecs?.some((f) => !f.kind.trim() || !f.path.trim())) {
     return 'Every image field needs a kind and a path'
+  }
+  if (i.policy === 'Vendor' && !vendor) {
+    return 'The image policy Vendor copies the images below the vendor location: turn on Vendor'
   }
   return null
 }
@@ -266,26 +266,17 @@ function overridesError(o: Overrides): string | null {
 function yamlToPartialForm(text: string): Omit<ProductFormData, 'name' | 'namespace'> {
   const doc = load(text) as Record<string, unknown>
   if (!isMapping(doc)) throw new Error('YAML must be a mapping')
-  assertKnownKeys(doc, ['source', 'vendor', 'render', 'patches', 'overrides', 'images'], '')
+  assertKnownKeys(doc, ['source', 'vendor', 'render', 'patches', 'overrides', 'images', 'registryRefs'], '')
 
-  // Source — exactly one of oci or pantryRef
   const src = isMapping(doc.source) ? doc.source : {}
-  assertKnownKeys(src, ['oci', 'pantryRef', 'version', 'verify'], 'source')
-  const srcPantryRef = src.pantryRef as Record<string, string> | undefined
-  const version = String(src.version ?? '')
-  const verify = verifyFromYaml(src.verify)
-  const source: OCISource = srcPantryRef?.name
-    ? { pantryRef: { name: srcPantryRef.name }, version, verify }
-    : { oci: String(src.oci ?? ''), version, verify }
+  assertKnownKeys(src, ['url', 'version', 'verify'], 'source')
+  const source: OCISource = { url: String(src.url ?? ''), version: String(src.version ?? ''), verify: verifyFromYaml(src.verify) }
 
   // Vendor — present means vendoring; {} is the in-cluster registry
   let vendor: OCIDestination | undefined
   if (isMapping(doc.vendor)) {
-    assertKnownKeys(doc.vendor, ['oci', 'pantryRef'], 'vendor')
-    const vendorPantryRef = doc.vendor.pantryRef as Record<string, string> | undefined
-    vendor = vendorPantryRef?.name
-      ? { pantryRef: { name: vendorPantryRef.name } }
-      : doc.vendor.oci ? { oci: String(doc.vendor.oci) } : {}
+    assertKnownKeys(doc.vendor, ['url'], 'vendor')
+    vendor = doc.vendor.url ? { url: String(doc.vendor.url) } : {}
   }
 
   const rawRender = isMapping(doc.render) ? doc.render : undefined
@@ -312,21 +303,38 @@ function yamlToPartialForm(text: string): Omit<ProductFormData, 'name' | 'namesp
   // Overrides — absent policies are None, as on the server
   const overrides = overridesFromYaml(doc.overrides)
 
-  return { source, vendor, render, patches: patchesFromYaml(doc.patches), overrides, images: imagesFromYaml(doc.images) }
+  return {
+    source,
+    vendor,
+    render,
+    patches: patchesFromYaml(doc.patches),
+    overrides,
+    images: imagesFromYaml(doc.images),
+    registryRefs: registryRefsFromYaml(doc.registryRefs),
+  }
 }
 
 function previewRequest(data: ProductFormData): ProductPreviewRequest | null {
-  if (!(data.source.oci || data.source.pantryRef?.name) || !data.source.version) return null
-  return { namespace: data.namespace, name: data.name, source: data.source, render: data.render, patches: data.patches, images: data.images }
+  if (!data.source.url || !data.source.version) return null
+  return {
+    namespace: data.namespace,
+    name: data.name,
+    source: data.source,
+    vendor: data.vendor,
+    render: data.render,
+    patches: data.patches,
+    images: data.images,
+    registryRefs: data.registryRefs,
+  }
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function ProductForm({ product, onCancel, onSubmit, onDirtyChange }: Props) {
+export default function ProductForm({ product, initial, onCancel, onSubmit, onDirtyChange }: Props) {
   const isEdit = !!product
   const [tab, setTab] = useState<Tab>('form')
   const [formData, setFormData] = useState<ProductFormData>(() =>
-    product ? productToFormData(product) : emptyProductForm(),
+    product ? productToFormData(product) : { ...emptyProductForm(), ...initial },
   )
   const [yamlText, setYamlText] = useState(() => formToYaml(formData))
   const [yamlError, setYamlError] = useState<string | null>(null)
@@ -370,7 +378,7 @@ export default function ProductForm({ product, onCancel, onSubmit, onDirtyChange
         return
       }
     }
-    const invalid = overridesError(data.overrides) ?? verifyError(data.source.verify) ?? imagesError(data.images)
+    const invalid = overridesError(data.overrides) ?? verifyError(data.source.verify) ?? imagesError(data.images, data.vendor)
     if (invalid) {
       setSubmitError(invalid)
       return
@@ -478,16 +486,13 @@ interface FormViewProps {
 const emptyHelm = (): HelmRender => ({ releaseName: '', namespace: '', includeCRDs: false, values: {} })
 
 function FormView({ formData, isEdit, onChange }: FormViewProps) {
-  const pantries = usePantries()
-
   const [isVendorOpen, setIsVendorOpen] = useState(!!formData.vendor)
   const [isVerifyOpen, setIsVerifyOpen] = useState(!!formData.source.verify)
   const [isImagesOpen, setIsImagesOpen] = useState(!!imagesToYaml(formData.images))
 
-  // Source type: 'oci' = direct URL, 'pantry' = named Pantry provides the URL
-  const [sourceMode, setSourceMode] = useState<'oci' | 'pantry'>(
-    formData.source.pantryRef ? 'pantry' : 'oci',
-  )
+  // Tags and charts are read through the selected Registries, as the user.
+  const scope = { namespace: formData.namespace, registryRefs: registryRefNames(formData.registryRefs) }
+  const scopeKey = `${scope.namespace}|${scope.registryRefs.join(',')}`
 
   const [versionTags, setVersionTags] = useState<string[]>([])
   const [versionTagsLoading, setVersionTagsLoading] = useState(false)
@@ -527,43 +532,30 @@ function FormView({ formData, isEdit, onChange }: FormViewProps) {
     setField('render', layout === 'Single' ? undefined : { manifest: { layout } })
   }
 
-  // Build the OCI ref for the current source — resolves pantry URL when in pantry mode.
-  function resolveOciRef(): string {
-    if (formData.source.pantryRef?.name) {
-      const p = (pantries ?? []).find(
-        (p) => p.name === formData.source.pantryRef!.name && p.namespace === formData.namespace,
-      )
-      return p?.url ?? ''
-    }
-    return formData.source.oci ?? ''
-  }
-
-  function fetchTags(oci: string, pantryName?: string, pantryNs?: string) {
-    const resolvedPantryName = pantryName ?? formData.source.pantryRef?.name
-    const resolvedPantryNs = pantryNs ?? formData.namespace
-    const dedupeKey = `${oci}|${resolvedPantryName ?? ''}`
-    if (!oci || dedupeKey === lastFetchedTagsRef.current) return
+  function fetchTags(url: string) {
+    const dedupeKey = `${url}|${scopeKey}`
+    if (!url || dedupeKey === lastFetchedTagsRef.current) return
     lastFetchedTagsRef.current = dedupeKey
     const seq = ++tagsSeqRef.current
     setVersionTagsLoading(true)
-    listOCITags(oci, resolvedPantryName, resolvedPantryNs)
+    listOCITags(url, scope)
       .then((tags) => {
         if (tagsSeqRef.current !== seq) return
         // Drop cosign signature/attestation tags and sort semver-desc so the
-        // newest release appears first, matching the Pantry tag browser.
+        // newest release appears first, matching the Repository tag browser.
         setVersionTags(cleanTags(tags))
       })
       .catch(() => { /* non-blocking: keep previous tags */ })
       .finally(() => { if (tagsSeqRef.current === seq) setVersionTagsLoading(false) })
   }
 
-  function fetchChartInfo(oci: string, version: string) {
-    const key = `${oci}@${version}`
-    if (!oci || !version || key === lastFetchedChartRef.current) return
+  function fetchChartInfo(url: string, version: string) {
+    const key = `${url}@${version}|${scopeKey}`
+    if (!url || !version || key === lastFetchedChartRef.current) return
     lastFetchedChartRef.current = key
     const seq = ++chartSeqRef.current
     setChartInfoLoading(true)
-    getChartInfo(oci, version, formData.source.pantryRef?.name, formData.namespace)
+    getChartInfo(url, version, scope)
       .then((info) => {
         if (chartSeqRef.current !== seq) return
         setChartInfo(info)
@@ -575,26 +567,24 @@ function FormView({ formData, isEdit, onChange }: FormViewProps) {
       .finally(() => { if (chartSeqRef.current === seq) setChartInfoLoading(false) })
   }
 
-  // On mount: load tags and chart info immediately if the source is already
-  // populated (edit mode).
+  // Load tags and chart info when the source is already populated (edit
+  // mode, or pre-filled from a Repository), and again through other Registries.
   useEffect(() => {
-    const oci = formData.source.oci ?? ''
-    const version = formData.source.version
-    if (oci) fetchTags(oci)
-    if (oci && version) fetchChartInfo(oci, version)
+    const { url, version } = formData.source
+    if (url) fetchTags(url)
+    if (url && version) fetchChartInfo(url, version)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [scopeKey])
 
-  function handleOciBlur() {
-    const oci = resolveOciRef()
-    fetchTags(oci)
-    if (formData.source.version) fetchChartInfo(oci, formData.source.version)
+  function handleUrlBlur() {
+    const { url, version } = formData.source
+    fetchTags(url)
+    if (version) fetchChartInfo(url, version)
   }
 
   function handleVersionSelect(version: string) {
     setField('source', { ...formData.source, version })
-    const oci = resolveOciRef()
-    if (oci) fetchChartInfo(oci, version)
+    if (formData.source.url) fetchChartInfo(formData.source.url, version)
   }
 
   const verify = formData.source.verify
@@ -607,8 +597,9 @@ function FormView({ formData, isEdit, onChange }: FormViewProps) {
   const imagesSummary = imageFields
     ? `${formData.images.policy}, ${imageFields} extra field${imageFields === 1 ? '' : 's'}`
     : formData.images.policy
-  const vendorSummary = formData.vendor &&
-    (formData.vendor.oci || (formData.vendor.pantryRef?.name ? `pantry: ${formData.vendor.pantryRef.name}` : 'in-cluster registry'))
+  const vendorSummary = formData.vendor && (formData.vendor.url || 'in-cluster registry')
+  const registriesSummary = formData.registryRefs.length > 0 ? formData.registryRefs.map((r) => r.name).join(', ') : 'anonymous'
+  const [isRegistriesOpen, setIsRegistriesOpen] = useState(formData.registryRefs.length > 0)
 
   return (
     <div className={styles.formGrid}>
@@ -637,61 +628,18 @@ function FormView({ formData, isEdit, onChange }: FormViewProps) {
       </div>
 
       {/* Source */}
-      <div className={styles.fieldGroup}>
-        <p className={styles.sectionTitle}>Source</p>
-        <SegmentedControl
-          aria-label="Source"
-          segments={[
-            { id: 'oci', label: 'Direct OCI URL' },
-            { id: 'pantry', label: 'From Pantry' },
-          ]}
-          value={sourceMode}
-          onChange={(m) => {
-            setSourceMode(m)
-            setField(
-              'source',
-              m === 'oci'
-                ? { oci: '', version: formData.source.version, verify: formData.source.verify }
-                : { pantryRef: { name: '' }, version: formData.source.version, verify: formData.source.verify },
-            )
-          }}
-        />
-      </div>
+      <p className={styles.sectionTitle}>Source</p>
       <div className={styles.row2}>
         <div className={styles.fieldGroup}>
-          {sourceMode === 'oci' ? (
-            <>
-              <label className={styles.label}>OCI URL</label>
-              <input
-                className={styles.input}
-                value={formData.source.oci ?? ''}
-                onChange={(e) => setField('source', { ...formData.source, oci: e.target.value })}
-                onBlur={handleOciBlur}
-                placeholder="oci://ghcr.io/my-org/charts/app"
-              />
-            </>
-          ) : (
-            <>
-              <label className={styles.label}>Pantry</label>
-              <select
-                className={styles.input}
-                value={formData.source.pantryRef?.name ?? ''}
-                onChange={(e) => {
-                  const name = e.target.value
-                  setField('source', { pantryRef: { name }, version: formData.source.version, verify: formData.source.verify })
-                  if (name) {
-                    const p = (pantries ?? []).find((p) => p.name === name && p.namespace === formData.namespace)
-                    if (p?.url) fetchTags(p.url, name, formData.namespace)
-                  }
-                }}
-              >
-                <option value="">— select a pantry —</option>
-                {(pantries ?? []).filter((p) => p.namespace === formData.namespace).map((p) => (
-                  <option key={p.name} value={p.name}>{p.name}</option>
-                ))}
-              </select>
-            </>
-          )}
+          <label className={styles.label}>OCI URL</label>
+          <input
+            className={styles.input}
+            value={formData.source.url}
+            onChange={(e) => setField('source', { ...formData.source, url: e.target.value })}
+            onBlur={handleUrlBlur}
+            placeholder="oci://ghcr.io/my-org/charts/app"
+          />
+          <RegistryMatchHint url={formData.source.url} namespace={formData.namespace} registryRefs={formData.registryRefs} operation="pull" />
         </div>
         <div className={styles.fieldGroup}>
           <label className={styles.label}>Version</label>
@@ -703,6 +651,22 @@ function FormView({ formData, isEdit, onChange }: FormViewProps) {
           />
         </div>
       </div>
+
+      {/* Registries (collapsible) */}
+      <Disclosure label="Registries" summary={registriesSummary} open={isRegistriesOpen} onOpenChange={setIsRegistriesOpen}>
+        <div className={styles.formGrid} style={{ gap: 10, marginTop: 4 }}>
+          <RegistryRefsEditor
+            namespace={formData.namespace}
+            value={formData.registryRefs}
+            onChange={(refs) => setField('registryRefs', refs)}
+            owns="the source, the images, their mirrors and the vendor location"
+            unlabeled
+          />
+          <span className={styles.hint}>
+            Each Order lists the Registries of its own destination; the kubelet needs its own credentials to pull the images.
+          </span>
+        </div>
+      </Disclosure>
 
       {/* Renderer */}
       <div>
@@ -757,7 +721,7 @@ function FormView({ formData, isEdit, onChange }: FormViewProps) {
 
       {/* Images (collapsible) */}
       <Disclosure label="Images" summary={imagesSummary} open={isImagesOpen} onOpenChange={setIsImagesOpen}>
-        <ImagesEditor images={formData.images} onChange={(images) => setField('images', images)} />
+        <ImagesEditor images={formData.images} vendor={formData.vendor} onChange={(images) => setField('images', images)} />
       </Disclosure>
 
       {/* Source verification (collapsible) */}
@@ -780,12 +744,19 @@ function FormView({ formData, isEdit, onChange }: FormViewProps) {
             Copy the source into another registry — Orders render from the copy
           </label>
           {formData.vendor && (
-            <DestinationEditor
-              destination={formData.vendor}
-              onChange={(dest) => setField('vendor', dest)}
-              namespace={formData.namespace}
-              name={`vendor/${formData.name || 'name'}`}
-            />
+            <>
+              <DestinationEditor
+                destination={formData.vendor}
+                onChange={(dest) => setField('vendor', dest)}
+                namespace={formData.namespace}
+                name={`vendor/${formData.name || 'name'}`}
+                registryRefs={formData.registryRefs}
+                defaultHint="Kokumi copies the source to the in-cluster registry"
+              />
+              <span className={styles.hint}>
+                With the image policy Vendor, the images are copied below the <code>images/</code> path of this location.
+              </span>
+            </>
           )}
         </div>
       </Disclosure>
@@ -797,15 +768,17 @@ function FormView({ formData, isEdit, onChange }: FormViewProps) {
 
 interface ImagesEditorProps {
   images: ProductImages
+  /** Vendored images go below this location. */
+  vendor?: OCIDestination
   onChange: (images: ProductImages) => void
 }
 
 /**
  * ImagesEditor edits how the container images of the rendered manifests are
- * handled: the policy, the custom resource fields that hold images, and the
- * Secret whose credentials resolve and copy them.
+ * handled: the policy and the custom resource fields that hold images. They
+ * are resolved and copied through the Product's Registries.
  */
-function ImagesEditor({ images, onChange }: ImagesEditorProps) {
+function ImagesEditor({ images, vendor, onChange }: ImagesEditorProps) {
   const fieldSpecs = images.fieldSpecs ?? []
 
   function setFieldSpecs(next: ImageFieldSpec[]) {
@@ -830,9 +803,12 @@ function ImagesEditor({ images, onChange }: ImagesEditorProps) {
           ))}
         </select>
         <span className={styles.hint}>
-          {describeImagePolicy(images.policy)}.
-          {images.policy === 'Vendor' && ' Nodes must be able to pull from each Order\'s destination registry.'}
+          {describeImagePolicy(images.policy)}. Images are resolved through the Product&apos;s Registries.
+          {images.policy === 'Vendor' && ' They are copied below the images/ path of the vendor location, which nodes must be able to pull from.'}
         </span>
+        {images.policy === 'Vendor' && !vendor && (
+          <span className={styles.fieldError}>The policy Vendor needs a vendor location: turn on Vendor below.</span>
+        )}
       </div>
 
       <div className={styles.fieldGroup}>
@@ -881,20 +857,6 @@ function ImagesEditor({ images, onChange }: ImagesEditorProps) {
         </div>
       </div>
 
-      <div className={styles.fieldGroup}>
-        <label className={styles.label}>Pull Secret (optional)</label>
-        <input
-          className={styles.input}
-          value={images.pullSecretRef?.name ?? ''}
-          onChange={(e) => onChange({ ...images, pullSecretRef: e.target.value ? { name: e.target.value } : undefined })}
-          placeholder="registry-credentials"
-        />
-        <span className={styles.hint}>
-          A <code>kubernetes.io/dockerconfigjson</code> Secret in the Product&apos;s namespace. Its
-          credentials are used per registry to resolve and vendor the images; without it,
-          registries are read anonymously.
-        </span>
-      </div>
     </div>
   )
 }

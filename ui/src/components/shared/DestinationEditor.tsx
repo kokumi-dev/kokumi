@@ -1,40 +1,39 @@
 import { useEffect, useState } from 'react'
-import type { OCIDestination } from '../../api/types'
+import type { OCIDestination, RegistryRef } from '../../api/types'
 import { getDefaultRegistry } from '../../api/client'
-import { usePantries } from '../../hooks/usePantries'
 import { SegmentedControl } from '../ui'
+import { RegistryMatchHint } from './RegistryRefsEditor'
 import styles from './Form.module.css'
 
-// Destination mode: 'default' = in-cluster registry, 'oci' = direct URL, 'pantry' = Pantry provides URL.
-type DestMode = 'default' | 'oci' | 'pantry'
+// Destination mode: 'default' = in-cluster registry, 'url' = a URL of the user's.
+type DestMode = 'default' | 'url'
 
 interface DestinationEditorProps {
   destination: OCIDestination
   onChange: (dest: OCIDestination) => void
-  /** Namespace used to filter the pantry dropdown. */
   namespace: string
   /** Resource name used in the OCI URL placeholder. */
   name?: string
+  /** The Registries that authenticate the location, to say which one matches. */
+  registryRefs: RegistryRef[]
+  /** What the in-cluster default is, e.g. "Kokumi pushes to the in-cluster registry". */
+  defaultHint: string
 }
 
 /**
- * DestinationEditor renders the shared three-tab destination picker
- * (In-cluster default / Direct OCI URL / From Pantry) used for the Order
- * destination and the Product vendor destination.
+ * DestinationEditor picks a location Kokumi pushes to: the in-cluster
+ * default or a URL. It is used for the Order destination and the Product
+ * vendor location, and says which of registryRefs authenticates the URL.
  */
 export default function DestinationEditor({
   destination,
   onChange,
   namespace,
   name,
+  registryRefs,
+  defaultHint,
 }: DestinationEditorProps) {
-  const pantries = usePantries()
-
-  const [mode, setMode] = useState<DestMode>(
-    destination.pantryRef?.name ? 'pantry'
-      : destination.oci ? 'oci'
-      : 'default',
-  )
+  const [mode, setMode] = useState<DestMode>(destination.url ? 'url' : 'default')
   const [defaultRegistry, setDefaultRegistry] = useState('')
 
   useEffect(() => {
@@ -45,14 +44,7 @@ export default function DestinationEditor({
 
   function switchMode(next: DestMode) {
     setMode(next)
-    if (next === 'default') {
-      // In-cluster default — clear explicit destination.
-      onChange({})
-    } else if (next === 'oci') {
-      onChange({ oci: destination.oci ?? '' })
-    } else {
-      onChange({ pantryRef: { name: destination.pantryRef?.name ?? '' } })
-    }
+    onChange(next === 'default' ? {} : { url: destination.url ?? '' })
   }
 
   return (
@@ -61,46 +53,29 @@ export default function DestinationEditor({
         aria-label="Destination"
         segments={[
           { id: 'default', label: 'In-cluster (default)' },
-          { id: 'oci', label: 'Direct OCI URL' },
-          { id: 'pantry', label: 'From Pantry' },
+          { id: 'url', label: 'OCI URL' },
         ]}
         value={mode}
         onChange={switchMode}
       />
-      {mode === 'oci' && (
+      {mode === 'url' && (
         <div className={styles.fieldGroup}>
-          <label className={styles.label}>Destination OCI URL</label>
+          <label className={styles.label}>OCI URL</label>
           <input
             className={styles.input}
-            value={destination.oci ?? ''}
-            onChange={(e) => onChange({ oci: e.target.value })}
+            value={destination.url ?? ''}
+            onChange={(e) => onChange({ url: e.target.value })}
             placeholder={
               defaultRegistry
                 ? `oci://${defaultRegistry}/${namespace || 'namespace'}/${name || 'name'}`
                 : 'oci://ghcr.io/my-org/rendered-output'
             }
           />
+          <RegistryMatchHint url={destination.url ?? ''} namespace={namespace} registryRefs={registryRefs} operation="push" />
         </div>
       )}
-      {mode === 'pantry' && (
-        <div className={styles.fieldGroup}>
-          <label className={styles.label}>Pantry</label>
-          <select
-            className={styles.input}
-            value={destination.pantryRef?.name ?? ''}
-            onChange={(e) => onChange({ pantryRef: { name: e.target.value } })}
-          >
-            <option value="">— select a pantry —</option>
-            {(pantries ?? []).filter((p) => p.namespace === namespace).map((p) => (
-              <option key={p.name} value={p.name}>{p.name}</option>
-            ))}
-          </select>
-        </div>
-      )}
-      {mode === 'default' && defaultRegistry && (
-        <span className={styles.hint}>
-          Kokumi will push to the in-cluster registry automatically
-        </span>
+      {mode === 'default' && (
+        <span className={styles.hint}>{defaultHint}, without credentials.</span>
       )}
     </div>
   )

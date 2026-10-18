@@ -67,30 +67,16 @@ spec:
                   destination defines where the rendered Preparation artifact will be pushed.
                   When omitted, the in-cluster registry is used automatically.
                 properties:
-                  oci:
+                  url:
                     description: |-
-                      oci is the OCI registry URL the artifact is pushed to.
-                      Mutually exclusive with pantryRef.
+                      url is the oci:// URL of the repository the artifact is pushed to.
+                      When omitted, a repository of the bundled registry is used.
+                    maxLength: 2048
                     type: string
                     x-kubernetes-validations:
                     - message: must be a valid OCI URL
-                      rule: self == '' || (isURL(self) && url(self).getScheme() ==
-                        'oci')
-                  pantryRef:
-                    description: |-
-                      pantryRef references a Pantry resource whose URL is used as the destination.
-                      Mutually exclusive with oci.
-                    properties:
-                      name:
-                        description: name is the name of the Pantry resource.
-                        type: string
-                    required:
-                    - name
-                    type: object
+                      rule: isURL(self) && url(self).getScheme() == 'oci'
                 type: object
-                x-kubernetes-validations:
-                - message: oci and pantryRef are mutually exclusive
-                  rule: '!(has(self.oci) && has(self.pantryRef))'
               edits:
                 description: |-
                   edits defines UI-driven field modifications applied after patches.
@@ -232,6 +218,33 @@ spec:
                     - Manual
                     type: string
                 type: object
+              registryRefs:
+                description: |-
+                  registryRefs lists Registries in the Order's namespace. Kokumi
+                  connects to the destination through the one whose url covers it,
+                  the longest when several do. The source, the images and the vendor
+                  location belong to the Product, and its registryRefs connect to them.
+                items:
+                  description: |-
+                    LocalObjectReference contains enough information to let you locate the
+                    referenced object inside the same namespace.
+                  properties:
+                    name:
+                      default: ""
+                      description: |-
+                        Name of the referent.
+                        This field is effectively required, but due to backwards compatibility is
+                        allowed to be empty. Instances of this type with an empty value here are
+                        almost certainly wrong.
+                        More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                      type: string
+                  type: object
+                  x-kubernetes-map-type: atomic
+                maxItems: 16
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
               values:
                 description: |-
                   values holds Helm values deep-merged over the Product's
@@ -328,6 +341,57 @@ spec:
                   by the controller
                 format: int64
                 type: integer
+              registryAccess:
+                description: |-
+                  registryAccess lists the registry locations the Order needs: where
+                  Kokumi pushes the Preparation and through which Registry, where Argo
+                  CD pulls it from, and where the kubelet pulls the images of the
+                  latest Preparation from. Argo CD and the kubelet need their own
+                  credentials for the locations listed for them.
+                items:
+                  description: |-
+                    RegistryAccess is a registry location a Product or an Order needs, who
+                    accesses it, and the Registry that authenticates Kokumi there. Kokumi
+                    gives no credentials to Argo CD and the kubelet: they need their own for
+                    the locations reported for them.
+                  properties:
+                    client:
+                      description: client is who accesses the location.
+                      enum:
+                      - Kokumi
+                      - ArgoCD
+                      - Kubelet
+                      type: string
+                    operation:
+                      description: operation is what client does there.
+                      enum:
+                      - Pull
+                      - Push
+                      type: string
+                    registry:
+                      description: |-
+                        registry names the Registry whose connection Kokumi uses there. It is
+                        empty when Kokumi accesses the location anonymously, and for the
+                        other clients.
+                      maxLength: 253
+                      type: string
+                    url:
+                      description: url is the location, or the prefix of the locations,
+                        accessed.
+                      maxLength: 2048
+                      type: string
+                  required:
+                  - client
+                  - operation
+                  - url
+                  type: object
+                maxItems: 32
+                type: array
+                x-kubernetes-list-map-keys:
+                - url
+                - operation
+                - client
+                x-kubernetes-list-type: map
             type: object
         required:
         - spec

@@ -1,0 +1,255 @@
+import { useEffect, useMemo, useState } from 'react'
+import type { ArtifactGraph, ArtifactInfo, Repository } from '../../api/types'
+import { getArtifactInfo, getRepositoryArtifact, listOCITags, repositoryScope } from '../../api/client'
+import { cleanTags } from '../../api/ociTags'
+import Badge from '../shared/Badge'
+import { Button, ButtonLink, Chevron, PlusIcon, TabButtons } from '../ui'
+import { useDeniedReason } from '../../hooks/useCapability'
+import { paths } from '../../routes/paths'
+import Modal from '../shared/Modal'
+import YamlEditor from '../shared/YamlEditor'
+import FileInspector from '../shared/FileInspector'
+import { joinFiles } from '../../utils/manifest'
+import ArtifactView from '../artifact/ArtifactView'
+import styles from './RepositoryContents.module.css'
+
+const PAGE_SIZE = 20
+
+interface Props {
+  repository: Repository
+}
+
+type Tab = 'readme' | 'values' | 'manifest' | 'structure'
+
+interface ExpandedState {
+  tag: string
+  info: ArtifactInfo | null
+  loading: boolean
+  error: string | null
+}
+
+export default function RepositoryContents({ repository }: Props) {
+  const [allTags, setAllTags] = useState<string[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
+  const [page, setPage] = useState(0)
+  const [expanded, setExpanded] = useState<ExpandedState | null>(null)
+  const [manifestModal, setManifestModal] = useState<{ tag: string; content: string } | null>(null)
+
+  const ref = repository.url
+
+  function loadTags() {
+    // No synchronous setState here: loading is initialised to true so the first
+    // render already shows the loading state, and the Refresh button sets it
+    // again from an event handler. All setState calls below run in async
+    // callbacks, which the effect lint rule permits.
+    listOCITags(ref, repositoryScope(repository))
+      .then((tags) => {
+        setAllTags(cleanTags(tags))
+        setPage(0)
+      })
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => {
+    loadTags()
+    // Switching repositories remounts this component (via key in RepositoryTags),
+    // so all state is reset without a synchronous setState here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repository.name, repository.namespace])
+
+  const filtered = useMemo(() => {
+    if (!query) return allTags
+    const q = query.toLowerCase()
+    return allTags.filter((t) => t.toLowerCase().includes(q))
+  }, [allTags, query])
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const safePage = Math.min(page, pageCount - 1)
+  const pageTags = filtered.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE)
+
+  function toggle(tag: string) {
+    if (expanded?.tag === tag) {
+      setExpanded(null)
+      return
+    }
+    setExpanded({ tag, info: null, loading: true, error: null })
+    getArtifactInfo(ref, tag, repositoryScope(repository))
+      .then((info) => setExpanded({ tag, info, loading: false, error: null }))
+      .catch((e: Error) => setExpanded({ tag, info: null, loading: false, error: e.message }))
+  }
+
+  return (
+    <div className={styles.wrap}>
+      <div className={styles.toolbar}>
+        <input
+          className={styles.search}
+          type="search"
+          placeholder="Filter tags…"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value)
+            setPage(0)
+          }}
+        />
+        <div className={styles.pager}>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={loading}
+            onClick={() => {
+              setLoading(true)
+              setError(null)
+              loadTags()
+            }}
+          >
+            Refresh
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={loading || safePage <= 0}
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+          >
+            ‹ Prev
+          </Button>
+          <span className={styles.pageIndicator}>
+            {safePage + 1} / {pageCount}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={loading || safePage >= pageCount - 1}
+            onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+          >
+            Next ›
+          </Button>
+        </div>
+      </div>
+
+      {loading && allTags.length === 0 ? (
+        <div className={styles.placeholder}>Loading tags…</div>
+      ) : error ? (
+        <div className={styles.placeholder}>{error}</div>
+      ) : filtered.length === 0 ? (
+        <div className={styles.placeholder}>No tags found</div>
+      ) : (
+        <ul className={styles.list}>
+          {pageTags.map((tag) => {
+            const isOpen = expanded?.tag === tag
+            return (
+              <li key={tag} className={styles.row}>
+                {/* eslint-disable-next-line no-restricted-syntax -- accordion list row, not an action button */}
+                <button className={styles.rowHeader} onClick={() => toggle(tag)} aria-expanded={isOpen}>
+                  <span className={styles.chevron}><Chevron open={isOpen} /></span>
+                  <span className={styles.tagName}>{tag}</span>
+                  {isOpen && expanded?.info && (
+                    <Badge state={expanded.info.isHelm ? 'Helm' : 'Manifest'} />
+                  )}
+                </button>
+
+                {isOpen && (
+                  <div className={styles.detail}>
+                    {expanded.loading && <div className={styles.placeholder}>Loading…</div>}
+                    {expanded.error && <div className={styles.placeholder}>{expanded.error}</div>}
+                    {expanded.info && <ArtifactDetail repository={repository} tag={tag} info={expanded.info} onViewManifest={(c) => setManifestModal({ tag, content: c })} />}
+                  </div>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+
+      {manifestModal && (
+        <Modal title={`Manifest — ${manifestModal.tag}`} onClose={() => setManifestModal(null)} wide>
+          <YamlEditor value={manifestModal.content} readOnly tall />
+        </Modal>
+      )}
+    </div>
+  )
+}
+
+function ArtifactDetail({ repository, tag, info, onViewManifest }: { repository: Repository; tag: string; info: ArtifactInfo; onViewManifest: (content: string) => void }) {
+  const [tab, setTab] = useState<Tab>(info.isHelm ? 'readme' : 'manifest')
+  const createProductDenied = useDeniedReason('products:create')
+  const files = info.files ?? []
+  const manifest = joinFiles(files)
+
+  return (
+    <div className={styles.artifact}>
+      {info.digest && (
+        <div className={styles.metaRow}>
+          <span className={styles.metaKey}>Digest</span>
+          <span className={styles.metaValue}>{info.digest}</span>
+        </div>
+      )}
+
+      {info.isHelm && info.chartInfo && (
+        <div className={styles.metaRow}>
+          <span className={styles.metaKey}>Chart</span>
+          <span className={styles.metaValue}>
+            {info.chartInfo.name}
+            {info.chartInfo.version ? ` ${info.chartInfo.version}` : ''}
+            {info.chartInfo.appVersion ? ` (app ${info.chartInfo.appVersion})` : ''}
+          </span>
+        </div>
+      )}
+
+      <div className={styles.metaRow}>
+        <ButtonLink variant="secondary" size="sm" icon={<PlusIcon />} to={paths.newProduct(repository, tag)} disabledReason={createProductDenied}>
+          Create Product from {tag}
+        </ButtonLink>
+      </div>
+
+      <TabButtons<Tab>
+        tabs={[
+          ...(info.isHelm ? [{ id: 'readme' as const, label: 'README' }, { id: 'values' as const, label: 'Values' }] : [{ id: 'manifest' as const, label: 'Manifest' }]),
+          { id: 'structure', label: 'Structure' },
+        ]}
+        active={tab}
+        onSelect={setTab}
+      />
+
+      <div className={styles.tabBody}>
+        {tab === 'readme' && <pre className={styles.pre}>{info.chartInfo?.readme || 'No README.'}</pre>}
+        {tab === 'values' && <pre className={styles.pre}>{info.chartInfo?.defaultValues || 'No default values.'}</pre>}
+        {tab === 'structure' && <TagStructure repository={repository} tag={tag} />}
+        {tab === 'manifest' && (
+          <div className={styles.manifestInline}>
+            {files.length > 1 ? (
+              <FileInspector files={files} />
+            ) : (
+              <>
+                <pre className={styles.pre}>{manifest}</pre>
+                <Button variant="secondary" size="sm" onClick={() => onViewManifest(manifest)}>
+                  Open in viewer
+                </Button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** TagStructure draws the artifact behind a tag and everything attached to it. */
+function TagStructure({ repository, tag }: { repository: Repository; tag: string }) {
+  const [graph, setGraph] = useState<ArtifactGraph | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    getRepositoryArtifact(repository.namespace, repository.name, tag)
+      .then((g) => !cancelled && setGraph(g))
+      .catch((e: Error) => !cancelled && setError(e.message))
+    return () => {
+      cancelled = true
+    }
+  }, [repository.namespace, repository.name, tag])
+
+  return <ArtifactView graph={graph} error={error} />
+}

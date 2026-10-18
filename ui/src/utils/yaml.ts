@@ -1,5 +1,5 @@
 import { load, dump } from 'js-yaml'
-import type { Patch } from '../api/types'
+import type { Patch, RegistryRef } from '../api/types'
 
 /**
  * Serialises a plain JS object to a YAML string.
@@ -56,5 +56,17 @@ export function patchesFromYaml(raw: unknown): Patch[] {
       target: { kind: target.kind ?? '', name: target.name ?? '', namespace: target.namespace },
       set,
     }
+  })
+}
+
+/** Reads a registryRefs list of a parsed YAML document; it must be a list of {name}. */
+export function registryRefsFromYaml(raw: unknown): RegistryRef[] {
+  if (raw === undefined || raw === null) return []
+  if (!Array.isArray(raw)) throw new Error('registryRefs must be a list')
+  return raw.map((r, i) => {
+    const ref = (r ?? {}) as Record<string, unknown>
+    assertKnownKeys(ref, ['name'], `registryRefs[${i}]`)
+    if (typeof ref.name !== 'string' || !ref.name) throw new Error(`registryRefs[${i}].name is required`)
+    return { name: ref.name }
   })
 }

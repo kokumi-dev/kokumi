@@ -80,7 +80,7 @@ metadata:
   name: external-secrets
 spec:
   source:
-    oci: oci://ghcr.io/kokumi-dev/testdata/external-secrets
+    url: oci://ghcr.io/kokumi-dev/testdata/external-secrets
     version: "0.1.0"
 
   # Orders may patch anything. Without overrides they may change nothing.
@@ -104,7 +104,7 @@ spec:
         .spec.replicas: "3"
 
   destination:
-    oci: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/external-secrets
+    url: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/external-secrets
 ```
 
 #### Example: Helm chart in OCI format
@@ -116,7 +116,7 @@ metadata:
   name: podinfo
 spec:
   source:
-    oci: oci://ghcr.io/stefanprodan/charts/podinfo
+    url: oci://ghcr.io/stefanprodan/charts/podinfo
     version: "6.14.1"
 
   render:
@@ -153,7 +153,7 @@ spec:
         .spec.replicas: "2"
 
   destination:
-    oci: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/podinfo
+    url: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/podinfo
 
   promotion:
     mode: Manual
@@ -276,7 +276,7 @@ metadata:
   name: podinfo
 spec:
   source:
-    oci: oci://ghcr.io/stefanprodan/charts/podinfo
+    url: oci://ghcr.io/stefanprodan/charts/podinfo
     version: "6.14.1"
 
   render:
@@ -338,31 +338,43 @@ time.
 
 ## Using a private registry
 
-If your source OCI artifact lives in a private registry, create a **Pantry** with
-the registry URL and credentials, then reference it on the Product's source:
+If your source lives in a private registry, store the credentials in a
+`kubernetes.io/dockerconfigjson` Secret, create a **Registry** for the part of
+the registry they are for, and list it on the Product:
+
+```bash
+kubectl create secret docker-registry ghcr-my-org -n kokumi \
+    --docker-server=ghcr.io --docker-username=<user> --docker-password=<token>
+```
 
 ```yaml
 apiVersion: delivery.kokumi.dev/v1alpha1
-kind: Pantry
+kind: Registry
 metadata:
-  name: ghcr-private
+  name: ghcr-my-org
   namespace: kokumi
 spec:
-  url: oci://ghcr.io/my-org/charts/my-app
+  url: oci://ghcr.io/my-org
   secretRef:
-    name: ghcr-creds  # kubernetes.io/dockerconfigjson Secret
-```
-
-```yaml
+    name: ghcr-my-org
+---
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Product
+metadata:
+  name: my-app
+  namespace: kokumi
 spec:
   source:
-    pantryRef:
-      name: ghcr-private
+    url: oci://ghcr.io/my-org/charts/my-app
     version: "1.2.3"
+  registryRefs:
+  - name: ghcr-my-org
 ```
 
-See [Pantry](../user-guide/pantry) for how to create the credentials Secret,
-configure an authenticated destination, and verify connectivity.
+The Product's Registries authenticate its source, its images and its vendored
+copy; an Order lists the Registries of its own destination. See
+[Registries and Repositories](../user-guide/registries/) for which credentials
+every location uses and what Argo CD and the nodes need.
 
 ## Next steps
 

@@ -13,6 +13,8 @@ import (
 // OrderUpdater updates the status of an Order object.
 type OrderUpdater struct {
 	client client.Client
+	// access, when set, is recorded with every write.
+	access *[]deliveryv1alpha1.RegistryAccess
 }
 
 // NewOrderUpdater returns an OrderUpdater backed by the given client.
@@ -26,6 +28,13 @@ func (u *OrderUpdater) Processing(ctx context.Context, order *deliveryv1alpha1.O
 		latest.Status.LatestConfigHash = configHash
 		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(latest.Generation, metav1.ConditionUnknown, "Processing", "Processing component configuration"))
 	})
+}
+
+// WithRegistryAccess returns an updater that records access, the registry
+// locations the Order needs, with every write, so that a reconcile writes
+// its status once.
+func (u *OrderUpdater) WithRegistryAccess(access []deliveryv1alpha1.RegistryAccess) *OrderUpdater {
+	return &OrderUpdater{client: u.client, access: &access}
 }
 
 // Ready marks the Order as successfully reconciled.
@@ -59,6 +68,31 @@ func (u *OrderUpdater) Failed(ctx context.Context, order *deliveryv1alpha1.Order
 	})
 }
 
+// Blocked marks the Order as not ready because of its registry setup, for
+// reason, such as RegistryNotFound or CredentialsRequired. Like Failed it
+// clears the latest config hash, so the Order renders again once the setup
+// is fixed.
+func (u *OrderUpdater) Blocked(ctx context.Context, order *deliveryv1alpha1.Order, reason, msg string) error {
+	return u.set(ctx, order, func(latest *deliveryv1alpha1.Order) {
+		latest.Status.ObservedGeneration = latest.Generation
+		latest.Status.LatestConfigHash = ""
+		meta.SetStatusCondition(&latest.Status.Conditions, NewCondition(latest.Generation, metav1.ConditionFalse, reason, msg))
+	})
+}
+
+// Observed records that the Order's generation was reconciled without
+// rendering, together with the registry locations of WithRegistryAccess.
+func (u *OrderUpdater) Observed(ctx context.Context, order *deliveryv1alpha1.Order) error {
+	return u.set(ctx, order, func(latest *deliveryv1alpha1.Order) {
+		latest.Status.ObservedGeneration = latest.Generation
+	})
+}
+
 func (u *OrderUpdater) set(ctx context.Context, order *deliveryv1alpha1.Order, mutate func(*deliveryv1alpha1.Order)) error {
-	return setCondition(ctx, u.client, order, mutate)
+	return setCondition(ctx, u.client, order, func(latest *deliveryv1alpha1.Order) {
+		mutate(latest)
+		if u.access != nil {
+			latest.Status.RegistryAccess = *u.access
+		}
+	})
 }

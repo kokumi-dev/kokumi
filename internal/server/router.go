@@ -25,10 +25,10 @@ func addRoutes(
 		mux.HandleFunc("GET /api/v1/auth/oidc/callback", handleOIDCCallback(authMgr))
 	}
 
-	mux.HandleFunc("GET /api/v1/registry/default", handleGetDefaultRegistry())
-	mux.HandleFunc("GET /api/v1/registry/tags", handleListRegistryTags(deps))
-	mux.HandleFunc("GET /api/v1/registry/artifact", handleGetRegistryArtifact(deps))
-	mux.HandleFunc("GET /api/v1/registry/chart-info", handleGetChartInfo(deps))
+	mux.HandleFunc("GET /api/v1/oci/default", handleGetDefaultRegistry())
+	mux.HandleFunc("GET /api/v1/oci/tags", handleListRegistryTags(deps))
+	mux.HandleFunc("GET /api/v1/oci/artifact", handleGetRegistryArtifact(deps))
+	mux.HandleFunc("GET /api/v1/oci/chart-info", handleGetChartInfo(deps))
 
 	// Settings (singleton Kitchen/default)
 	mux.HandleFunc("GET /api/v1/settings", handleGetSettings(deps, installNamespace))
@@ -55,13 +55,20 @@ func addRoutes(
 	mux.HandleFunc("PUT /api/v1/products/{namespace}/{name}", handleUpdateProduct(deps))
 	mux.HandleFunc("DELETE /api/v1/products/{namespace}/{name}", handleDeleteProduct(deps))
 
-	// Pantry CRUD
-	mux.HandleFunc("GET /api/v1/pantries", handleListPantries(deps))
-	mux.HandleFunc("POST /api/v1/pantries", handleCreatePantry(deps))
-	mux.HandleFunc("GET /api/v1/pantries/{namespace}/{name}", handleGetPantry(deps))
-	mux.HandleFunc("GET /api/v1/pantries/{namespace}/{name}/artifact", handleGetPantryArtifact(deps))
-	mux.HandleFunc("PUT /api/v1/pantries/{namespace}/{name}", handleUpdatePantry(deps))
-	mux.HandleFunc("DELETE /api/v1/pantries/{namespace}/{name}", handleDeletePantry(deps))
+	// Registry CRUD
+	mux.HandleFunc("GET /api/v1/registries", handleListRegistries(deps))
+	mux.HandleFunc("POST /api/v1/registries", handleCreateRegistry(deps))
+	mux.HandleFunc("GET /api/v1/registries/{namespace}/{name}", handleGetRegistry(deps))
+	mux.HandleFunc("PUT /api/v1/registries/{namespace}/{name}", handleUpdateRegistry(deps))
+	mux.HandleFunc("DELETE /api/v1/registries/{namespace}/{name}", handleDeleteRegistry(deps))
+
+	// Repository CRUD
+	mux.HandleFunc("GET /api/v1/repositories", handleListRepositories(deps))
+	mux.HandleFunc("POST /api/v1/repositories", handleCreateRepository(deps))
+	mux.HandleFunc("GET /api/v1/repositories/{namespace}/{name}", handleGetRepository(deps))
+	mux.HandleFunc("GET /api/v1/repositories/{namespace}/{name}/artifact", handleGetRepositoryArtifact(deps))
+	mux.HandleFunc("PUT /api/v1/repositories/{namespace}/{name}", handleUpdateRepository(deps))
+	mux.HandleFunc("DELETE /api/v1/repositories/{namespace}/{name}", handleDeleteRepository(deps))
 
 	// Preparations scoped to a Order
 	mux.HandleFunc("GET /api/v1/orders/{namespace}/{name}/preparations", handleListPreparations(deps))

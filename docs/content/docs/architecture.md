@@ -113,7 +113,7 @@ metadata:
   namespace: shop
 spec:
   source:
-    oci: oci://ghcr.io/stefanprodan/charts/podinfo
+    url: oci://ghcr.io/stefanprodan/charts/podinfo
     version: "6.14.1"
   render:
     helm:
@@ -131,13 +131,27 @@ spec:
 
 The Product controller resolves the source tag to a digest, verifies its
 signature when required (see [Source verification](#source-verification)), and
-publishes it in `status.source` (OCI URL, version, digest, the verified signer,
-and an optional Pantry reference for pull credentials). Orders pull the source
-by that digest, only once the Product is `Ready` for its current generation. Every variant of a Product
-therefore renders the same artifact, even if the upstream tag is moved. The
-Product resolves the tag again only when its source or vendor configuration,
-or the URL of a Pantry they use, changes; the new digest renders a new
-Preparation for every Order.
+publishes it in `status.source` (URL, version, digest and the verified
+signer). Orders pull the source by that digest, only once the Product is
+`Ready` for its current generation. Every variant of a Product therefore
+renders the same artifact, even if the upstream tag is moved. The Product
+resolves the tag again only when its source or vendor configuration changes;
+the new digest renders a new Preparation for every Order.
+
+#### Registries
+
+A Product and an Order list the Registries they connect through in
+`spec.registryRefs`. A Registry is a URL prefix with its credentials, TLS
+settings and scheme. Each location uses the Registries of its owner, the one
+with the longest matching URL winning: the Product owns its source, the
+images and their mirrors, and its vendor location; the Order owns only its
+destination. Without a matching Registry, Kokumi accesses a location
+anonymously over HTTPS, and the bundled registry over HTTP. Both objects
+report every location they need, and who accesses it, in
+`status.registryAccess`, and refuse to copy content read with credentials to
+a location written without them (`CredentialsRequired`). Registries are not
+part of the intent: a new token or Secret renders nothing. See
+[Registries and Repositories](user-guide/registries/).
 
 A Product cannot be deleted while Orders reference it. The
 `delivery.kokumi.dev/product-protection` finalizer keeps it, like
@@ -194,7 +208,7 @@ many upstream artifacts still carry:
 ```yaml
 spec:
   source:
-    oci: oci://ghcr.io/stefanprodan/charts/podinfo
+    url: oci://ghcr.io/stefanprodan/charts/podinfo
     version: "6.10.2"
     verify:
       provider: cosign                 # the only provider; the default
@@ -245,11 +259,12 @@ render from the vendored copy:
 ```yaml
 spec:
   source:
-    oci: oci://ghcr.io/kokumi-dev/testdata/external-secrets
+    url: oci://ghcr.io/kokumi-dev/testdata/external-secrets
     version: "0.1.0"
   vendor:
-    pantryRef:
-      name: internal-mirror   # or oci: oci://…; vendor: {} copies to <namespace>/vendor/<name> in the in-cluster registry
+    url: oci://harbor.corp/mirror/external-secrets   # vendor: {} copies to <namespace>/vendor/<name> in the in-cluster registry
+  registryRefs:
+  - name: harbor-mirror        # its url covers the vendor location
 ```
 
 The copy carries the referrers of the source, the OCI 1.1 way of attaching
@@ -258,18 +273,17 @@ legacy `sha256-<digest>.sig` tags are not referrers and are not copied. The
 **Artifact** tab of a Product draws the source and the vendored copy side by
 side, so you can see that both have the same digest and what came along.
 
-Upstream credentials come from `spec.source.pantryRef` when the upstream
-registry is private. The vendored reference and its pull credentials are
-published in `status.source`, so Orders need no knowledge of the vendoring
-setup. When a Pantry's URL changes, the Product resolves its source again and
-its Orders render new Preparations.
+The Product's Registries authenticate both the upstream source and the copy.
+The vendored reference is published in `status.source`, so Orders need no
+knowledge of the vendoring setup, and they pull it through the Product's
+Registries too.
 
 #### Images
 
 `spec.images` decides what happens to the container images the rendered
 manifests reference. Every render finds them, following kustomize's image
-transformer, and resolves each to a digest with the credentials of
-`images.pullSecretRef` and through the Kitchen's mirrors:
+transformer, and resolves each to a digest through the Product's Registries
+and the Kitchen's mirrors:
 
 ```yaml
 spec:
@@ -279,19 +293,21 @@ spec:
     - group: monitoring.coreos.com
       kind: Prometheus
       path: spec/image
-    pullSecretRef:             # kubernetes.io/dockerconfigjson, per registry host
-      name: registry-credentials
+  vendor: {}                   # required by Vendor: the images go below it
+  registryRefs:                # private image registries and mirrors
+  - name: dockerhub
 ```
 
 - `Record` lists every image by digest in the Preparation and leaves the
   manifests unchanged.
 - `Pin` rewrites `repo:tag` to `repo:tag@sha256:…`.
 - `Vendor` copies every image, with all platforms and its referrers, into a
-  repository of its own below the Order's destination,
-  `<destination>/images/<image name>`, tagged with the tag its reference
-  names, and rewrites the reference to pull it from there by digest:
+  repository of its own below the Product's vendored source,
+  `<vendor>/images/<image name>`, tagged with the tag its reference names,
+  and rewrites the reference to pull it from there by digest:
   `ghcr.io/stefanprodan/podinfo:6.14.1` becomes
-  `<destination>/images/ghcr.io/stefanprodan/podinfo:6.14.1@sha256:…`.
+  `<vendor>/images/ghcr.io/stefanprodan/podinfo:6.14.1@sha256:…`. It
+  requires `spec.vendor`, and all Orders of the Product share the copies.
 
 Images are resolved once per render. A tag that moves upstream does not render
 a new Preparation; promotion and rollback run exactly the digests a
@@ -327,8 +343,9 @@ spec:
   patches: []            # merged over the Product's patches, per target
   edits: []              # changes made in the UI, applied after patches
   destination:
-    pantryRef:
-      name: prod-registry
+    url: oci://ghcr.io/shop/podinfo-prod
+  registryRefs:          # authenticate the destination only
+  - name: ghcr-shop-push
   promotion:
     mode: Manual
     approvals:
@@ -344,7 +361,9 @@ spec:
 - **Edits** are applied after patches. The UI writes them when you edit a
   rendered file.
 - **Destination** and **promotion** are per Order: each variant has its own
-  Preparation history, Serving, and approval gate.
+  Preparation history, Serving, and approval gate. The Order's
+  `registryRefs` authenticate its destination; the Preparation records the
+  Registry it was pushed through in `spec.artifact.registryRef`.
 
 Every change to an Order or to its Product (a new source version, other values
 or patches) triggers a new reconciliation and, if the merged result changed, a
@@ -418,7 +437,7 @@ kokumi-registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod
 │
 └─ tag 6.10.2 → sha256:c3…
 
-kokumi-registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod/images/ghcr.io/stefanprodan/podinfo
+kokumi-registry.kokumi.svc.cluster.local:5000/shop/vendor/podinfo/images/ghcr.io/stefanprodan/podinfo
 │                                                                          (images.policy: Vendor)
 ├─ sha256:aa…  image index with its platforms and its upstream referrers
 └─ tag 6.10.2 → sha256:aa…
@@ -437,8 +456,8 @@ kokumi-registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod/images/ghcr.io/s
   moves it; the digest of this one never changes.
 - The **vendored images**, under `images.policy: Vendor`: every image the
   manifests pull, with all its platforms and its referrers, in a repository
-  of its own below the Preparation's, tagged with the tag its reference
-  names. They are not part of the Preparation's graph; the manifests
+  of its own below the Product's vendored source, tagged with the tag its
+  reference names. They are not part of the Preparation's graph; the manifests
   reference them by digest, and the config blob and the provenance list them.
   Both are covered by the Preparation's signature, and an image is identified
   by its digest wherever it is copied, so the signed list pins every image the
@@ -461,7 +480,7 @@ fetching a blob.
   "createdTime": "2026-10-12T09:14:03Z",
   "parent": "sha256:c1…",
   "source": {
-    "oci": "oci://ghcr.io/stefanprodan/charts/podinfo", "version": "6.10.2", "digest": "sha256:aa…",
+    "oci": "oci://kokumi-registry.kokumi.svc.cluster.local:5000/shop/vendor/podinfo", "version": "6.10.2", "digest": "sha256:aa…",
     "verified": { "provider": "cosign", "issuer": "https://token.actions.githubusercontent.com", "subject": "https://github.com/…" }
   },
   "destination": { "oci": "oci://kokumi-registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod" },
@@ -472,7 +491,7 @@ fetching a blob.
     {
       "ref": "ghcr.io/stefanprodan/podinfo:6.10.2", "name": "ghcr.io/stefanprodan/podinfo",
       "digest": "sha256:aa…", "mediaType": "application/vnd.oci.image.index.v1+json",
-      "vendored": "kokumi-registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod/images/ghcr.io/stefanprodan/podinfo:6.10.2@sha256:aa…"
+      "vendored": "kokumi-registry.kokumi.svc.cluster.local:5000/shop/vendor/podinfo/images/ghcr.io/stefanprodan/podinfo:6.10.2@sha256:aa…"
     }
   ]
 }
@@ -507,9 +526,11 @@ of the `intent` value as it stands in the blob.
   every Order of that Product. The source digest is part of the intent. Where a value or patch is set, on the Product or the
   Order, is not part of the intent; only the merged result is.
 - The image policy and field specs are part of the intent unless they are the
-  defaults (`Record`, no field specs). The digests images resolve to are not:
-  they are an outcome of the render, so a moved upstream tag renders nothing
-  new. The pull Secret and the Kitchen's mirrors are not part of it either.
+  defaults (`Record`, no field specs), and under `Vendor` so is the location
+  the images are copied below. The digests images resolve to are not: they
+  are an outcome of the render, so a moved upstream tag renders nothing new.
+- The Registries a Product or Order connects through, their Secrets, and the
+  Kitchen's mirrors are not part of the intent: a new token renders nothing.
 
 {{< callout type="warning" >}}
 The intent is stored inside the artifact, so **anyone who can pull the
@@ -769,7 +790,7 @@ bundle, then stores the output as an immutable Preparation artifact.
 kind: Product
 spec:
   source:
-    oci: oci://ghcr.io/stefanprodan/charts/podinfo
+    url: oci://ghcr.io/stefanprodan/charts/podinfo
     version: "6.14.1"
   render:
     helm:

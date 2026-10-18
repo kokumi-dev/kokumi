@@ -1,7 +1,7 @@
 ---
 title: Container Images
 weight: 5
-description: Record the images every Preparation runs by digest, pin the manifests to those digests, or vendor each image into a repository of its own below the Order's destination.
+description: Record the images every Preparation runs by digest, pin the manifests to those digests, or vendor each image into a repository of its own below the Product's vendor location.
 ---
 
 A chart that references `nginx:1.27` deploys whatever that tag points to when
@@ -14,7 +14,7 @@ a digest, and records the result in the Preparation. A Product's
 |---|---|---|
 | `Record` (default) | unchanged | the image is listed without a digest, and one Warning Event `ImageNotResolved` per render lists the images on the Order |
 | `Pin` | `repo:tag` becomes `repo:tag@sha256:…`; the tag stays for readability | the render fails |
-| `Vendor` | `repo:tag` becomes `<destination>/images/<full image name>:tag@sha256:…` | the render fails |
+| `Vendor` | `repo:tag` becomes `<vendor>/images/<full image name>:tag@sha256:…` | the render fails |
 
 ```yaml
 apiVersion: delivery.kokumi.dev/v1alpha1
@@ -24,7 +24,7 @@ metadata:
   namespace: shop
 spec:
   source:
-    oci: oci://ghcr.io/stefanprodan/charts/podinfo
+    url: oci://ghcr.io/stefanprodan/charts/podinfo
     version: "6.14.1"
   render:
     helm: {}
@@ -87,42 +87,49 @@ Preparation lists which fields were searched.
 
 ## Credentials
 
-Public images are read anonymously. For private registries, name a
-`kubernetes.io/dockerconfigjson` Secret in the Product's namespace; its
-credentials are used per registry host, as with a Pod's `imagePullSecrets`:
-
-```bash
-kubectl -n shop create secret docker-registry registry-credentials \
-  --docker-server=registry.example.com --docker-username=… --docker-password=…
-```
+Images are resolved and copied through the Product's Registries, the one
+whose URL covers an image's name with the longest path winning; images no
+Registry covers are read anonymously. A Registry for `oci://docker.io` with
+Docker Hub credentials avoids its rate limits:
 
 ```yaml
 spec:
-  images:
-    pullSecretRef:
-      name: registry-credentials
+  registryRefs:
+  - name: dockerhub          # url: oci://docker.io
+  - name: registry-example   # url: oci://registry.example.com
 ```
 
-Like `imagePullSecrets`, the Secret lets everyone who may edit the Product use
-its credentials, through the images the Product's manifests reference. Under
-`Vendor`, the private images are also copied into the Order's destination, so
-everyone who may pull from there can pull them too; see the operator guide.
+Everyone who may edit the Product can use the credentials of the Registries
+in its namespace, through the images the Product's manifests reference. Under
+`Vendor`, the private images are also copied below the vendor location, so
+everyone who may pull from there can pull them too; Kokumi refuses to copy a
+private image to a vendor location it writes without credentials
+(`CredentialsRequired`). See
+[Registries and Repositories](../registries/).
 
 When the Kitchen configures mirrors, images are resolved and copied through
 them; see [Container Images](../../operator-guide/images/) in the operator guide.
 
 ## Vendoring
 
-Under `Vendor`, every image is copied into a repository of its own below the
-Order's destination repository, named after the image's full name, and tagged
-with the tag its reference names:
+`Vendor` requires the Product to vendor its source (`spec.vendor`). Every
+image is copied into a repository of its own below the vendored source,
+named after the image's full name, and tagged with the tag its reference
+names. All Orders of the Product share these repositories:
 
-| In the source manifests | Pulled from after vendoring (destination `<registry>/shop/podinfo-prod`) |
+```yaml
+spec:
+  vendor: {}                 # <registry>/shop/vendor/podinfo; or url: oci://…
+  images:
+    policy: Vendor
+```
+
+| In the source manifests | Pulled from after vendoring (vendor `<registry>/shop/vendor/podinfo`) |
 |---|---|
-| `ghcr.io/stefanprodan/podinfo:6.14.1` | `<registry>/shop/podinfo-prod/images/ghcr.io/stefanprodan/podinfo:6.14.1@sha256:…` |
-| `nginx:1.27` | `<registry>/shop/podinfo-prod/images/docker.io/library/nginx:1.27@sha256:…` |
-| `nginx` | `<registry>/shop/podinfo-prod/images/docker.io/library/nginx:latest@sha256:…` |
-| `ghcr.io/example/app@sha256:…` | `<registry>/shop/podinfo-prod/images/ghcr.io/example/app@sha256:…`, untagged |
+| `ghcr.io/stefanprodan/podinfo:6.14.1` | `<registry>/shop/vendor/podinfo/images/ghcr.io/stefanprodan/podinfo:6.14.1@sha256:…` |
+| `nginx:1.27` | `<registry>/shop/vendor/podinfo/images/docker.io/library/nginx:1.27@sha256:…` |
+| `nginx` | `<registry>/shop/vendor/podinfo/images/docker.io/library/nginx:latest@sha256:…` |
+| `ghcr.io/example/app@sha256:…` | `<registry>/shop/vendor/podinfo/images/ghcr.io/example/app@sha256:…`, untagged |
 
 The cluster therefore shows which image runs, under its own name and tag; only
 the registry and the prefix change. The node pulls by digest, so the tag only
@@ -131,7 +138,8 @@ names what is pulled.
 - The tag is the tag of the reference, nothing else. When a later render
   vendors another digest under the same tag, for example after an upstream
   `latest` moved, the tag moves to it; the earlier digest stays in the
-  repository and the Preparations that pin it keep pulling it by digest.
+  repository and the Preparations that pin it keep pulling it by digest. A
+  registry with immutable tags rejects the move and fails that render.
 - A registry port in the image's name is written as `_<port>`, since a
   repository path cannot hold a colon: `registry.example.com:5000/app` is
   vendored to `…/images/registry.example.com_5000/app`. A repository path
@@ -139,16 +147,17 @@ names what is pulled.
 - An image index stays an index, so all platforms are copied.
 - Upstream signatures, SBOMs and attestations come along as OCI referrers.
   Legacy cosign `sha256-<hex>.sig` tags are not copied.
-- When source and destination share a registry, blobs are mounted instead of
-  copied.
+- When the image and the vendor location share a registry, blobs are mounted
+  instead of copied.
 
-The manifests then pull every image from the destination registry by digest,
-so a release runs without any other registry. **The cluster nodes must be able
-to pull from the destination registry.** The bundled registry is reached as
+The manifests then pull every image from the vendor registry by digest, so a
+release runs without any other registry. **The cluster nodes must be able to
+pull from the vendor registry**; `status.registryAccess` of an Order lists the
+location with the client `Kubelet`. The bundled registry is reached as
 `kokumi-registry.kokumi.svc.cluster.local:5000` over plain HTTP, which nodes
 cannot resolve without extra configuration; see the operator guide. The
-destination registry must also create repositories on their first push below
-the destination's path.
+vendor registry must also create repositories on their first push below the
+vendor location.
 
 The list of vendored images, each with its original name, digest and vendored
 reference, is recorded in the artifact's config blob and in its provenance,
@@ -167,19 +176,21 @@ references after Kokumi has seen them, so:
 
 ## In the UI
 
-- **Product form:** the Images section edits the policy, the field specs and
-  the pull Secret. The Product page shows them.
+- **Product form:** the Images section edits the policy and the field specs;
+  the Registries section picks the Registries images are read through. The
+  Product page shows them.
 - **Preparation Images tab:** every image with its digest, whether it is
   multi-platform, where it is pulled from when vendored, and why it could not
   be resolved. Copy the digest reference to pull exactly that image.
 - **Changes tab:** images that were added, removed, or resolved to another
   digest, even when the manifests themselves did not change.
 - **Previews** under `Pin` and `Vendor` resolve and rewrite the images as a
-  render would, but copy nothing. They read the pull Secret only when you may
-  read it, and leave references they cannot resolve within 20 seconds as
-  written. An Order's preview keeps the digests of the Order's latest
-  Preparation, as its render would, and shows the vendored location in its
-  destination; a Product's preview, which has no destination, pins instead.
+  render would, but copy nothing. They read through the Product's Registries
+  with your identity, so a Registry whose Secret you may not read fails the
+  preview with 403, and they leave references they cannot resolve within 20
+  seconds as written. An Order's preview keeps the digests of the Order's
+  latest Preparation, as its render would. Both show the vendored location
+  below the Product's vendor location.
   Under `Record` a render leaves the manifests unchanged, so previews look up
   no image.
 

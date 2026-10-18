@@ -115,9 +115,10 @@ Only the controller manager and cluster admins can read or write the key:
 - No Kokumi role grants read access. Only the controller is granted access to
   Secrets in `kokumi-signing`. The built-in `admin`, `editor` and `viewer`
   roles hold no Secret access, because they are bound cluster-wide, and the
-  server reads Secrets only in the install namespace. See
-  [Authorization](../authorization/#pantry-credentials) for granting Pantry
-  credentials without exposing the key.
+  server reads Secrets with its own identity only in the install namespace,
+  and Registry Secrets only as the user. See
+  [Authorization](../authorization/#registry-credentials) for granting
+  Registry credentials without exposing the key.
 - The `status-integrity` policy lets only the controller write the Kitchen
   status, which publishes the public key.
 

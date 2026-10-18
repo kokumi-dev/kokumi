@@ -25,7 +25,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/oras-project/oras-go/v3/registry/remote/credentials"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -43,9 +42,9 @@ import (
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
-	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/index"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/registry"
 	"github.com/kokumi-dev/kokumi/internal/resolve"
 	"github.com/kokumi-dev/kokumi/internal/signing"
 	signingsource "github.com/kokumi-dev/kokumi/internal/signing/source"
@@ -65,11 +64,11 @@ const (
 // ProductReconciler reconciles a Product object.
 type ProductReconciler struct {
 	client.Client
-	Scheme         *runtime.Scheme
-	Store          *artifact.Store
-	PantryResolver credential.PantryResolver
-	// OCIClient looks up signatures when the source has no credentials.
-	OCIClient oci.Client
+	Scheme *runtime.Scheme
+	Store  *artifact.Store
+	// Registries connects to the source and the vendor location through
+	// the Product's registryRefs.
+	Registries registryConnector
 	// Signing holds the keys whose signatures make a source trusted without
 	// spec.source.verify, and whether sources must verify at all.
 	Signing *signing.Provider
@@ -81,7 +80,7 @@ type ProductReconciler struct {
 // ref, pinned to its digest: against policy when it is set, else against
 // trust.
 type SourceVerifier interface {
-	Verify(ctx context.Context, registry oci.Client, creds credentials.Store, ref oci.Reference, policy *signingsource.Policy, trust *signing.TrustSet) (*signingsource.Report, error)
+	Verify(ctx context.Context, conn registry.Connection, ref oci.Reference, policy *signingsource.Policy, trust *signing.TrustSet) (*signingsource.Report, error)
 }
 
 // productConcurrency is how many Products reconcile at a time. Checking
@@ -109,7 +108,7 @@ var errTrustLookup = errors.New("could not look up trusted signatures")
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=products/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=products/finalizers,verbs=update
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=orders,verbs=get;list;watch
-// +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=pantries,verbs=get;list;watch
+// +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=registries,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
 // Reconcile resolves the source a Product's Orders render from, vendoring it
@@ -166,31 +165,31 @@ func (r *ProductReconciler) reconcileProduct(ctx context.Context, product *deliv
 		return ctrl.Result{}, statusUpdater.NotReady(ctx, product, deliveryv1alpha1.ReasonSigningKeyNotReady, err.Error())
 	}
 
-	sourceURL, sourceClient, err := r.PantryResolver.ResolveSource(ctx, product.Spec.Source, product.Namespace)
+	scope, err := registryScope(ctx, r.Client, r.Registries, product.Namespace, product.Spec.RegistryRefs)
 	if err != nil {
-		return fail(fmt.Errorf("failed to resolve source Pantry: %w", err))
+		return r.registryFailed(ctx, product, err)
 	}
-
-	var sourceCreds credentials.Store
-	if ref := product.Spec.Source.PantryRef; ref != nil {
-		if sourceCreds, err = r.PantryResolver.CredentialsForPantry(ctx, product.Namespace, ref.Name); err != nil {
-			return fail(fmt.Errorf("failed to resolve source Pantry: %w", err))
-		}
+	sourceURL := product.Spec.Source.URL
+	sourceConn, err := scope.Connect(sourceURL)
+	if err != nil {
+		return r.registryFailed(ctx, product, err)
 	}
 
 	var (
-		vendorURL    string
-		vendorClient oci.Client
+		vendorURL  string
+		vendorConn registry.Connection
 	)
-	if product.Spec.Vendor != nil {
-		vendorURL, vendorClient, err = r.PantryResolver.ResolveDestination(ctx, product.Spec.Vendor,
-			artifact.DefaultVendorDestination(product.Namespace, product.Name), product.Namespace)
-		if err != nil {
-			return fail(fmt.Errorf("failed to resolve vendor destination: %w", err))
+	if v := product.Spec.Vendor; v != nil {
+		vendorURL = cmp.Or(v.URL, artifact.DefaultVendorDestination(product.Namespace, product.Name))
+		if vendorConn, err = scope.Connect(vendorURL); err != nil {
+			return r.registryFailed(ctx, product, err)
 		}
 	}
 
-	configHash, err := resolve.CalculateProductHash(product.Spec.Source, product.Spec.Vendor, sourceURL, vendorURL)
+	// The status is written once, by whichever write ends the reconcile.
+	statusUpdater = statusUpdater.WithRegistryAccess(productRegistryAccess(sourceURL, sourceConn, vendorURL, vendorConn))
+
+	configHash, err := resolve.CalculateProductHash(product.Spec.Source, vendorURL)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -204,7 +203,7 @@ func (r *ProductReconciler) reconcileProduct(ctx context.Context, product *deliv
 		published := product.Status.Source.DeepCopy()
 		src.Digest = published.Digest
 
-		check, err := r.verifySource(ctx, product, state, src, sourceClient, sourceCreds)
+		check, err := r.verifySource(ctx, product, state, src, sourceConn)
 		switch {
 		case errors.Is(err, errTrustLookup):
 			logger.Info("Keeping the recorded verification of the Product source", "reason", err.Error())
@@ -218,13 +217,13 @@ func (r *ProductReconciler) reconcileProduct(ctx context.Context, product *deliv
 		return ctrl.Result{}, statusUpdater.Ready(ctx, product, configHash, published)
 	}
 
-	digest, err := r.Store.ResolveDigest(ctx, src, sourceClient)
+	digest, err := r.Store.ResolveDigest(ctx, src, sourceConn.Client)
 	if err != nil {
 		return fail(fmt.Errorf("failed to resolve source digest: %w", err))
 	}
 	src.Digest = digest
 
-	check, err := r.verifySource(ctx, product, state, src, sourceClient, sourceCreds)
+	check, err := r.verifySource(ctx, product, state, src, sourceConn)
 	switch {
 	case errors.Is(err, errTrustLookup):
 		logger.Info("Publishing the Product source unverified", "reason", err.Error())
@@ -234,23 +233,34 @@ func (r *ProductReconciler) reconcileProduct(ctx context.Context, product *deliv
 	}
 
 	published := &deliveryv1alpha1.ProductSourceStatus{
-		OCI:       sourceURL,
-		Version:   product.Spec.Source.Version,
-		PantryRef: product.Spec.Source.PantryRef,
-		Digest:    digest,
-		Verified:  check.verified,
+		URL:      sourceURL,
+		Version:  product.Spec.Source.Version,
+		Digest:   digest,
+		Verified: check.verified,
 	}
 	status.RecordSignatures(published, product.Status.Source, check.signatures, time.Now())
 
 	// Only a verified source is vendored. The copy keeps the digest and the
 	// signatures attached as referrers, so it verifies like the source.
 	if product.Spec.Vendor != nil {
-		vendored, err := r.Store.Copy(ctx, src, sourceClient, artifact.Destination{OCI: vendorURL}, vendorClient)
+		pinned, err := oci.Parse(sourceURL + "@" + digest)
+		if err != nil {
+			return fail(fmt.Errorf("failed to parse source reference: %w", err))
+		}
+		// A private source copied to a location Kokumi writes without
+		// credentials could be read there by anyone.
+		if !vendorConn.Authenticated() && scope.Private(ctx, sourceConn, pinned) {
+			msg := fmt.Sprintf("The source is private, and vendoring it to %s, which Kokumi writes without credentials, would make it public: "+
+				"list a Registry with credentials for %s in spec.registryRefs", vendorURL, vendorURL)
+			logger.Info("Refusing to vendor a private source without credentials", "source", sourceURL, "vendor", vendorURL)
+			return ctrl.Result{}, statusUpdater.NotReady(ctx, product, deliveryv1alpha1.ReasonCredentialsRequired, msg)
+		}
+
+		vendored, err := r.Store.Copy(ctx, src, sourceConn.Client, artifact.Destination{OCI: vendorURL}, vendorConn.Client)
 		if err != nil {
 			return fail(fmt.Errorf("failed to vendor source: %w", err))
 		}
-		published.OCI = vendorURL
-		published.PantryRef = product.Spec.Vendor.PantryRef
+		published.URL = vendorURL
 		published.Digest = vendored
 	}
 
@@ -258,8 +268,35 @@ func (r *ProductReconciler) reconcileProduct(ctx context.Context, product *deliv
 		return ctrl.Result{}, err
 	}
 
-	logger.Info("Resolved Product source", "name", product.Name, "source", published.OCI, "verified", published.Verified != nil)
+	logger.Info("Resolved Product source", "name", product.Name, "source", published.URL, "verified", published.Verified != nil)
 	return ctrl.Result{}, nil
+}
+
+// registryFailed records that the Product cannot connect to its source or
+// vendor location, for the reason err carries, such as RegistryNotFound or
+// SecretInvalid. The Registry watch reconciles the Product again once its
+// Registries change. Errors without a reason are returned to be retried.
+func (r *ProductReconciler) registryFailed(ctx context.Context, product *deliveryv1alpha1.Product, err error) (ctrl.Result, error) {
+	reason := registry.Reason(err, "")
+	if reason == "" {
+		return ctrl.Result{}, fmt.Errorf("failed to connect to the Product's registries: %w", err)
+	}
+	log.FromContext(ctx).Info("Product cannot connect to its registries", "reason", reason, "error", err.Error())
+	return ctrl.Result{}, status.NewProductUpdater(r.Client).NotReady(ctx, product, reason, err.Error())
+}
+
+// productRegistryAccess returns the registry locations of a Product: its
+// source, and its vendor location when it vendors.
+func productRegistryAccess(sourceURL string, sourceConn registry.Connection, vendorURL string, vendorConn registry.Connection) []deliveryv1alpha1.RegistryAccess {
+	access := []deliveryv1alpha1.RegistryAccess{{
+		URL: sourceURL, Operation: deliveryv1alpha1.RegistryOperationPull, Client: deliveryv1alpha1.RegistryClientKokumi, Registry: sourceConn.RegistryName(),
+	}}
+	if vendorURL != "" {
+		access = append(access, deliveryv1alpha1.RegistryAccess{
+			URL: vendorURL, Operation: deliveryv1alpha1.RegistryOperationPush, Client: deliveryv1alpha1.RegistryClientKokumi, Registry: vendorConn.RegistryName(),
+		})
+	}
+	return access
 }
 
 // verificationFailed records a source that did not verify, or returns err
@@ -293,12 +330,11 @@ type sourceCheck struct {
 // a signature by a key the Kitchen trusts verifies it: releases of this or
 // another Kokumi installation. Its verified signer is nil when the source is
 // not verified and need not be.
-func (r *ProductReconciler) verifySource(ctx context.Context, product *deliveryv1alpha1.Product, state signing.State, src artifact.Source, ociClient oci.Client, creds credentials.Store) (*sourceCheck, error) {
+func (r *ProductReconciler) verifySource(ctx context.Context, product *deliveryv1alpha1.Product, state signing.State, src artifact.Source, conn registry.Connection) (*sourceCheck, error) {
 	ref, err := oci.Parse(src.OCI + "@" + src.Digest)
 	if err != nil {
 		return nil, fmt.Errorf("parsing source reference: %w", err)
 	}
-	registry := cmp.Or(ociClient, r.OCIClient)
 
 	if verify := product.Spec.Source.Verify; verify != nil {
 		policy, err := r.verificationPolicy(ctx, product.Namespace, verify)
@@ -306,7 +342,7 @@ func (r *ProductReconciler) verifySource(ctx context.Context, product *deliveryv
 			return nil, &errSourceRejected{reason: deliveryv1alpha1.ReasonVerificationError, err: err}
 		}
 
-		report, err := r.SourceVerifier.Verify(ctx, registry, creds, ref, &policy, nil)
+		report, err := r.SourceVerifier.Verify(ctx, conn, ref, &policy, nil)
 		if err != nil {
 			// An unreachable registry and a missing signature both leave
 			// the source unverified, as with cosign.
@@ -324,7 +360,7 @@ func (r *ProductReconciler) verifySource(ctx context.Context, product *deliveryv
 		return check, nil
 	}
 
-	report, err := r.SourceVerifier.Verify(ctx, registry, creds, ref, nil, state.Trust)
+	report, err := r.SourceVerifier.Verify(ctx, conn, ref, nil, state.Trust)
 	switch {
 	case err != nil && state.RequireSourceVerification:
 		// The registry could not be read; retry without changing the status.
@@ -480,14 +516,13 @@ func (r *ProductReconciler) reconcileDelete(ctx context.Context, product *delive
 	return nil
 }
 
-// enqueueProductsForPantry enqueues the Products whose source or vendor
-// destination references the Pantry, so that a changed Pantry URL resolves
-// them again.
-func (r *ProductReconciler) enqueueProductsForPantry() handler.EventHandler {
+// enqueueProductsForRegistry enqueues the Products that list the Registry
+// in their registryRefs, so that they connect again when it changes.
+func (r *ProductReconciler) enqueueProductsForRegistry() handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
-		products, err := index.ProductsForPantry(ctx, r.Client, obj.GetNamespace(), obj.GetName())
+		products, err := index.ProductsForRegistry(ctx, r.Client, obj.GetNamespace(), obj.GetName())
 		if err != nil {
-			log.FromContext(ctx).Error(err, "Failed to list Products of Pantry", "pantry", obj.GetName())
+			log.FromContext(ctx).Error(err, "Failed to list Products of Registry", "registry", obj.GetName())
 			return nil
 		}
 
@@ -559,7 +594,7 @@ func (r *ProductReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&deliveryv1alpha1.Product{}).
-		Watches(&deliveryv1alpha1.Pantry{}, r.enqueueProductsForPantry()).
+		Watches(&deliveryv1alpha1.Registry{}, r.enqueueProductsForRegistry()).
 		Watches(&corev1.Secret{}, r.enqueueProductsForSecret()).
 		Watches(&deliveryv1alpha1.Order{}, enqueueProductOfOrder(), builder.WithPredicates(orderCreatedOrDeleted)).
 		WatchesRawSource(source.Channel(r.Signing.Changes(), handler.EnqueueRequestsFromMapFunc(r.enqueueAllProducts))).

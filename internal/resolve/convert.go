@@ -30,7 +30,7 @@ func (e *EffectiveSpec) ToArtifactSpec() (*ArtifactSpec, error) {
 	}
 
 	return &ArtifactSpec{
-		Source:  artifact.Source{OCI: e.Source.OCI, Version: e.Source.Version, Digest: e.SourceDigest},
+		Source:  artifact.Source{OCI: e.Source.URL, Version: e.Source.Version, Digest: e.SourceDigest},
 		Render:  render,
 		Patches: toPatchSpecs(e.Patches),
 		Edits:   toPatchSpecs(e.Edits),

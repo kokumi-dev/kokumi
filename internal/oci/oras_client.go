@@ -5,11 +5,12 @@ import (
 	"cmp"
 	"compress/gzip"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,34 +22,57 @@ import (
 	"github.com/oras-project/oras-go/v3/registry/remote"
 	"github.com/oras-project/oras-go/v3/registry/remote/auth"
 	"github.com/oras-project/oras-go/v3/registry/remote/credentials"
+	"github.com/oras-project/oras-go/v3/registry/remote/errcode"
 	"github.com/oras-project/oras-go/v3/registry/remote/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
-// ORASClient implements Client using the ORAS library.
-// It automatically uses plain HTTP for in-cluster Kubernetes service URLs
-// (hosts ending in .svc, .svc.<domain>, or bare IP/localhost) and HTTPS
-// for all other hosts.
+// ORASClient implements Client using the ORAS library. It talks to the
+// registries of one connection: its credential, scheme and TLS settings apply
+// to every repository it accesses.
 type ORASClient struct {
 	// authClient authenticates every repository of the client, sharing
 	// one token cache. Nil means anonymous, through auth.DefaultClient.
 	authClient *auth.Client
+	// plainHTTP accesses registries over HTTP instead of HTTPS.
+	plainHTTP bool
+	// anonymous is set when the client has no credential.
+	anonymous bool
 }
 
 var _ Client = (*ORASClient)(nil)
 
-// NewORASClient returns an anonymous ORASClient.
-func NewORASClient() *ORASClient {
-	return &ORASClient{}
+// Options configures an ORASClient. The zero value is an anonymous client
+// that uses HTTPS with the system trust store.
+type Options struct {
+	// Host is the registry host[:port] Credential belongs to. Requests to
+	// any other host are sent without it.
+	Host string
+	// Credential authenticates the requests to Host. The zero value is
+	// anonymous.
+	Credential credentials.Credential
+	// PlainHTTP accesses the registry over HTTP instead of HTTPS.
+	PlainHTTP bool
+	// TLSConfig configures HTTPS connections, for example to trust a private
+	// CA or to present a client certificate. Nil uses the system defaults.
+	TLSConfig *tls.Config
 }
 
-// NewAuthenticatedORASClient returns an ORASClient that authenticates requests
-// using the provided credential store, or an anonymous one when it is nil.
-func NewAuthenticatedORASClient(credStore credentials.Store) *ORASClient {
-	if credStore == nil {
-		return NewORASClient()
+// NewClient returns an ORASClient for opts.
+func NewClient(opts Options) *ORASClient {
+	anonymous := opts.Credential == credentials.EmptyCredential
+	if anonymous && opts.TLSConfig == nil {
+		return &ORASClient{plainHTTP: opts.PlainHTTP, anonymous: true}
 	}
-	return &ORASClient{authClient: newAuthClient(credStore)}
+
+	httpClient := retry.DefaultClient
+	if opts.TLSConfig != nil {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.TLSClientConfig = opts.TLSConfig
+		httpClient = &http.Client{Transport: retry.NewTransport(transport)}
+	}
+
+	return &ORASClient{authClient: newAuthClient(httpClient, opts.Host, opts.Credential), plainHTTP: opts.PlainHTTP, anonymous: anonymous}
 }
 
 // newRepository creates a configured remote.Repository for the given ref,
@@ -59,7 +83,7 @@ func (c *ORASClient) newRepository(ref string) (*remote.Repository, error) {
 		return nil, err
 	}
 
-	repo.Registry.PlainHTTP = IsPlainHTTP(ref)
+	repo.Registry.PlainHTTP = c.plainHTTP
 
 	if c.authClient != nil {
 		repo.Registry.Client = c.authClient
@@ -68,51 +92,108 @@ func (c *ORASClient) newRepository(ref string) (*remote.Repository, error) {
 	return repo, nil
 }
 
-// newAuthClient returns an auth client that reads credentials from credStore.
-// Like auth.DefaultClient, which anonymous clients use, it caches tokens and
+// newAuthClient returns an auth client that sends cred to host. Like
+// auth.DefaultClient, which anonymous clients use, it caches tokens and
 // retries rate-limited and failed requests. It keeps the distribution token
 // flow for username/password credentials; oras-go v3 would otherwise default
 // to the OAuth2 password grant, which not every registry serves.
-func newAuthClient(credStore credentials.Store) *auth.Client {
+func newAuthClient(httpClient *http.Client, host string, cred credentials.Credential) *auth.Client {
 	client := &auth.Client{
-		Client:         retry.DefaultClient,
-		Header:         auth.DefaultClient.Header.Clone(),
-		CredentialFunc: remote.NewCredentialFunc(credStore),
-		Cache:          auth.NewCache(),
+		Client: httpClient,
+		Header: auth.DefaultClient.Header.Clone(),
+		Cache:  auth.NewCache(),
+	}
+	if cred != credentials.EmptyCredential {
+		host = CanonicalHost(host)
+		client.CredentialFunc = func(_ context.Context, hostport string) (credentials.Credential, error) {
+			if CanonicalHost(hostport) != host {
+				return credentials.EmptyCredential, nil
+			}
+			return cred, nil
+		}
 	}
 	client.TokenFetcher = auth.NewCompositeTokenFetcher(client.Client, client.Header, client.ClientID, true)
 
 	return client
 }
 
-// IsPlainHTTP reports whether ref should be accessed over plain HTTP.
-// In-cluster Kubernetes service hostnames (*.svc, *.svc.*) and loopback /
-// bare-IP addresses are treated as plain HTTP; everything else uses HTTPS.
-func IsPlainHTTP(ref string) bool {
-	host := ref
-	if before, _, ok := strings.Cut(ref, "/"); ok {
-		host = before
-	}
+// dockerHubHost is the canonical host of Docker Hub, which is also reached
+// as index.docker.io and registry-1.docker.io.
+const dockerHubHost = "docker.io"
 
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
+// CanonicalHost returns host in lower case with the aliases of Docker Hub
+// mapped to docker.io, so that the hosts of one registry compare equal.
+func CanonicalHost(host string) string {
+	host = strings.ToLower(host)
+	switch host {
+	case "index.docker.io", "registry-1.docker.io":
+		return dockerHubHost
 	}
+	return host
+}
 
-	if host == "localhost" {
-		return true
+// Ping checks that the registry at host answers its API base endpoint with
+// this client's credential, scheme and TLS settings.
+func (c *ORASClient) Ping(ctx context.Context, host string) error {
+	reg, err := remote.NewRegistry(host)
+	if err != nil {
+		return fmt.Errorf("create registry client for %q: %w", host, err)
 	}
-
-	if net.ParseIP(host) != nil {
-		return true
-	}
-
-	parts := strings.Split(host, ".")
-	for i, p := range parts {
-		if p == "svc" && i > 0 {
-			return true
+	reg.PlainHTTP = c.plainHTTP
+	if c.anonymous {
+		if err := c.pingAnonymous(ctx, reg.Reference.Host()); err != nil {
+			return fmt.Errorf("ping %s: %w", host, err)
 		}
+		return nil
 	}
-	return false
+	if c.authClient != nil {
+		reg.Client = c.authClient
+	}
+
+	if err := reg.Ping(ctx); err != nil {
+		return fmt.Errorf("ping %s: %w", host, err)
+	}
+	return nil
+}
+
+// pingAnonymous checks that the registry at host answers its API base
+// endpoint, without logging in. A registry that asks for a bearer token
+// there still decides about anonymous access per repository: ghcr.io, for
+// example, denies an anonymous token for the base endpoint but grants one
+// for every public repository. Only a registry that asks for basic
+// credentials refuses anonymous access altogether.
+func (c *ORASClient) pingAnonymous(ctx context.Context, host string) error {
+	scheme := "https"
+	if c.plainHTTP {
+		scheme = "http"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, scheme+"://"+host+"/v2/", nil)
+	if err != nil {
+		return err
+	}
+
+	httpClient := retry.DefaultClient
+	if c.authClient != nil {
+		httpClient = c.authClient.Client
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return nil
+	case http.StatusUnauthorized:
+		challenge := strings.ToLower(resp.Header.Get("WWW-Authenticate"))
+		if strings.HasPrefix(challenge, "bearer") {
+			return nil
+		}
+		return fmt.Errorf("GET %q: %w", req.URL, auth.ErrBasicCredentialNotFound)
+	default:
+		return &errcode.ErrorResponse{Method: req.Method, URL: req.URL, StatusCode: resp.StatusCode}
+	}
 }
 
 // Pull fetches an OCI artifact from ref:tag into targetDir.
@@ -340,7 +421,9 @@ func (c *ORASClient) Resolve(ctx context.Context, ref Reference) (Descriptor, er
 // Copy copies the artifact at srcRef (in this client's registry) and
 // everything it references to dstRef (in target's registry), preserving the
 // original manifests and media types. Blobs are mounted instead of transferred
-// when both repositories live in the same registry and share this client.
+// when both repositories live in the same registry; when the registry refuses
+// the mount, for example because target's credential may not read srcRef,
+// oras falls back to transferring them.
 func (c *ORASClient) Copy(ctx context.Context, target Client, srcRef, dstRef Reference, opts CopyOptions) error {
 	dst, ok := target.(*ORASClient)
 	if !ok {
@@ -358,7 +441,7 @@ func (c *ORASClient) Copy(ctx context.Context, target Client, srcRef, dstRef Ref
 	}
 
 	graphOpts := oras.DefaultCopyGraphOptions
-	if dst == c && srcRef.Registry == dstRef.Registry && srcRef.Repository != dstRef.Repository {
+	if CanonicalHost(srcRef.Registry) == CanonicalHost(dstRef.Registry) && srcRef.Repository != dstRef.Repository {
 		graphOpts.MountFrom = func(context.Context, ocispec.Descriptor) ([]string, error) {
 			return []string{srcRef.Repository}, nil
 		}

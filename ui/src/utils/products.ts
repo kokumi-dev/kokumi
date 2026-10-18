@@ -7,10 +7,9 @@ export function productOf(products: Product[] | null, order: Order): Product | u
   return products?.find((p) => p.namespace === order.namespace && p.name === order.productRef.name)
 }
 
-/** Where an Order pushes its Preparations, e.g. "pantry: shared" or the default registry. */
+/** Where an Order pushes its Preparations: its destination URL or the default registry. */
 export function orderDestinationLabel(order: Order): string {
-  if (order.destination?.pantryRef && !order.destination.oci) return `pantry: ${order.destination.pantryRef.name}`
-  return order.destination?.oci || `${order.effectiveDestination ?? ''} (default)`
+  return order.destination?.url || `${order.effectiveDestination ?? ''} (default)`
 }
 
 /** Key that groups Orders under their Product. */
@@ -79,7 +78,7 @@ export function describeImagePolicy(policy: ImagePolicy): string {
     case 'Pin':
       return 'Every image reference is pinned to its digest; name and tag stay for readability'
     case 'Vendor':
-      return "Every image is copied into a repository of its own below the Order's destination, under its name and tag, and pulled from there by digest"
+      return "Every image is copied into a repository of its own below the Product's vendor location, under its name and tag, and pulled from there by digest"
     default:
       return 'Every image is listed by digest; the manifests stay unchanged'
   }
@@ -105,12 +104,10 @@ export function productDeletingReason(product: Product): string | undefined {
 
 /** Source with version, e.g. "oci://ghcr.io/org/app@1.2.3". */
 export function productSourceLabel(p: Product): string {
-  const where = p.source.pantryRef?.name ? `Pantry ${p.source.pantryRef.name}` : p.source.oci ?? ''
-  return p.source.version ? `${where}@${p.source.version}` : where
+  return p.source.version ? `${p.source.url}@${p.source.version}` : p.source.url
 }
 
 /** Source without version for lists, e.g. "ghcr.io/org/app". */
 export function productSourceRef(p: Product): string {
-  if (p.source.pantryRef?.name) return `Pantry ${p.source.pantryRef.name}`
-  return p.source.oci ? stripOCIScheme(p.source.oci) : '—'
+  return p.source.url ? stripOCIScheme(p.source.url) : '—'
 }

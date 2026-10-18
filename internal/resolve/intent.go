@@ -13,9 +13,9 @@ import (
 // in the artifact's config blob.
 //
 // It deliberately leaves out everything that does not change what is rendered
-// or what must hold before it is served: the Product reference, Pantry names and
-// credentials, the image pull secret and mirrors, the digests images resolve
-// to, the promotion mode, and the commit message.
+// or what must hold before it is served: the Product reference, the
+// Registries and their credentials, the image mirrors, the digests images
+// resolve to, the promotion mode, and the commit message.
 type Intent struct {
 	// Source is the resolved source artifact.
 	Source IntentSource `json:"source"`
@@ -52,6 +52,9 @@ type IntentImages struct {
 	Policy deliveryv1alpha1.ImagePolicy `json:"policy"`
 	// FieldSpecs locate image fields besides the default ones.
 	FieldSpecs []deliveryv1alpha1.ImageFieldSpec `json:"fieldSpecs,omitempty"`
+	// Vendor is the location the images are vendored below under the
+	// Vendor policy, so that moving it renders the manifests again.
+	Vendor string `json:"vendor,omitempty"`
 }
 
 // IntentPromotion holds the promotion gates that are part of an Intent.
@@ -60,19 +63,19 @@ type IntentPromotion struct {
 	Approvals *deliveryv1alpha1.ApprovalPolicy `json:"approvals,omitempty"`
 }
 
-// NewIntent builds the Intent of order from its effective spec and the
-// resolved source and destination URLs.
-func NewIntent(order *deliveryv1alpha1.Order, effective *EffectiveSpec, sourceOCI, destOCI string) Intent {
+// NewIntent builds the Intent of order from its effective spec and its
+// destination URL.
+func NewIntent(order *deliveryv1alpha1.Order, effective *EffectiveSpec, destination string) Intent {
 	intent := Intent{
-		Source:      IntentSource{OCI: sourceOCI, Version: effective.Source.Version, Digest: effective.SourceDigest},
-		Destination: destOCI,
+		Source:      IntentSource{OCI: effective.Source.URL, Version: effective.Source.Version, Digest: effective.SourceDigest},
+		Destination: destination,
 		Render:      effective.Render,
 		Patches:     effective.Patches,
 		Edits:       effective.Edits,
 	}
 
 	if policy := effective.Images.EffectivePolicy(); policy != deliveryv1alpha1.ImagePolicyRecord || len(effective.Images.FieldSpecs) > 0 {
-		intent.Images = &IntentImages{Policy: policy, FieldSpecs: effective.Images.FieldSpecs}
+		intent.Images = &IntentImages{Policy: policy, FieldSpecs: effective.Images.FieldSpecs, Vendor: effective.ImagesVendorURL}
 	}
 
 	if policy := order.ApprovalPolicy(); policy != nil {

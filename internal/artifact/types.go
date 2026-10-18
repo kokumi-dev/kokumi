@@ -2,7 +2,6 @@ package artifact
 
 import (
 	"github.com/kokumi-dev/kokumi/internal/images"
-	"github.com/kokumi-dev/kokumi/internal/oci"
 )
 
 // Source describes where an artifact is pulled from.
@@ -109,9 +108,11 @@ type ImageOptions struct {
 	Policy images.Policy
 	// FieldSpecs locate image fields besides the default ones.
 	FieldSpecs []images.FieldSpec
-	// Client reads the images' registries and mirrors. Nil falls back to
-	// the store's default client.
-	Client oci.Client
+	// VendorURL is the oci:// URL images are vendored below under the
+	// Vendor policy, each into <VendorURL>/images/<name>. Without it the
+	// Vendor policy pins the references, as a preview of a Product without
+	// a vendor location does.
+	VendorURL string
 	// Mirrors redirect image lookups and copies.
 	Mirrors []images.Mirror
 	// Locked are the images of the previous render, whose digests Pin and

@@ -34,7 +34,7 @@ export default function ProductArtifact() {
     return () => {
       cancelled = true
     }
-  }, [product.namespace, product.name, resolved?.oci, resolved?.digest])
+  }, [product.namespace, product.name, resolved?.url, resolved?.digest])
 
   const source = artifact?.source
   const vendored = artifact?.vendored

@@ -87,9 +87,18 @@ func parseRef(t *testing.T) oci.Reference {
 	return ref
 }
 
+// pinnedRef is parseRef resolved to its digest, as the cache keys it.
+func pinnedRef(t *testing.T) oci.Reference {
+	t.Helper()
+
+	ref := parseRef(t)
+	ref.Tag, ref.Digest = "", fakeDigest
+	return ref
+}
+
 func TestPullCache_CorruptMetaTriggersRepull(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	ref := parseRef(t)
+	ref := pinnedRef(t)
 
 	// First pull populates the cache.
 	require.Equal(t, 1, pullInto(t, fs, "/cache", LayoutSingle))
@@ -105,21 +114,14 @@ func TestPullCache_CorruptMetaTriggersRepull(t *testing.T) {
 
 func TestPullCache_PartialRestoreTriggersRepull(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	ref := parseRef(t)
+	ref := pinnedRef(t)
 
 	require.Equal(t, 1, pullInto(t, fs, "/cache", LayoutSingle))
 
-	// Delete the cached artifact file, leaving only meta.json: the restore
+	// Delete the cached artifact files, leaving only meta.json: the restore
 	// then fails and the store must re-pull.
 	key := pullCacheKey(ref, LayoutSingle)
-	entryDir := filepath.Join("/cache", key)
-	entries, err := afero.ReadDir(fs, entryDir)
-	require.NoError(t, err)
-	for _, info := range entries {
-		if !info.IsDir() && info.Name() != "meta.json" {
-			require.NoError(t, fs.Remove(filepath.Join(entryDir, info.Name())))
-		}
-	}
+	require.NoError(t, fs.RemoveAll(filepath.Join("/cache", key, filesDir)))
 
 	// With no artifact files left, restore must fail and force a re-pull.
 	require.Equal(t, 1, pullInto(t, fs, "/cache", LayoutSingle), "partial cache entry must trigger a re-pull")
@@ -149,7 +151,7 @@ func TestPullCache_NewStoreCreatesCacheDir(t *testing.T) {
 
 func TestPullCache_WriteFailureIsNonFatal(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	ref := parseRef(t)
+	ref := pinnedRef(t)
 
 	// First pull populates the cache normally.
 	require.Equal(t, 1, pullInto(t, fs, "/cache", LayoutSingle))
@@ -157,7 +159,7 @@ func TestPullCache_WriteFailureIsNonFatal(t *testing.T) {
 	// A file where the cache entry directory must go forces the cache write
 	// to fail on the next pull.
 	key := pullCacheKey(ref, LayoutSingle)
-	require.NoError(t, fs.Remove(filepath.Join("/cache", key)))
+	require.NoError(t, fs.RemoveAll(filepath.Join("/cache", key)))
 	require.NoError(t, afero.WriteFile(fs, filepath.Join("/cache", key), []byte("i am a file"), 0600))
 
 	// The pull must succeed regardless: cache write failures are logged,
@@ -185,7 +187,7 @@ func pullDir(t *testing.T, fs afero.Fs, cacheDir string, layout Layout) (string,
 
 func TestPullCache_EntryContent(t *testing.T) {
 	fs := afero.NewMemMapFs()
-	ref := parseRef(t)
+	ref := pinnedRef(t)
 
 	require.Equal(t, 1, pullInto(t, fs, "/cache", LayoutSingle))
 
@@ -195,6 +197,65 @@ func TestPullCache_EntryContent(t *testing.T) {
 	var entry cacheEntry
 	require.NoError(t, json.Unmarshal(metaBytes, &entry))
 	assert.Equal(t, fakeDigest, entry.Digest)
+}
+
+// nestedClient pulls an artifact with a file in a subdirectory, as a
+// kustomize base is.
+type nestedClient struct {
+	countingFakeClient
+}
+
+func (c *nestedClient) Pull(_ context.Context, _ oci.Reference, targetDir string) (string, string, map[string]string, error) {
+	c.onPull()
+	if err := afero.WriteFile(c.fs, filepath.Join(targetDir, "kustomization.yaml"), []byte("resources: [base]\n"), 0600); err != nil {
+		return "", "", nil, err
+	}
+	if err := afero.WriteFile(c.fs, filepath.Join(targetDir, "base", fileA), []byte(yamlKindA), 0600); err != nil {
+		return "", "", nil, err
+	}
+	return "", fakeDigest, nil, nil
+}
+
+func TestPullCache_KeepsNestedFiles(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	pulls := 0
+	client := &nestedClient{countingFakeClient{fs: fs, onPull: func() { pulls++ }}}
+	store := NewStore(client, fs, "/cache")
+
+	_, err := store.pull(context.Background(), client, parseRef(t), LayoutSingle, "cache-test-*")
+	require.NoError(t, err)
+	cached, err := store.pull(context.Background(), client, parseRef(t), LayoutSingle, "cache-test-*")
+	require.NoError(t, err)
+
+	require.Equal(t, 1, pulls, "the second pull is served from the cache")
+	data, err := afero.ReadFile(fs, filepath.Join(cached.dir, "base", fileA))
+	require.NoError(t, err, "a cache hit restores files in subdirectories")
+	assert.Equal(t, yamlKindA, string(data))
+}
+
+// deniedClient resolves nothing, as a client without the credentials an
+// artifact needs.
+type deniedClient struct {
+	countingFakeClient
+}
+
+func (c *deniedClient) Resolve(_ context.Context, ref oci.Reference) (oci.Descriptor, error) {
+	return oci.Descriptor{}, fmt.Errorf("resolve %s: unauthorized", ref)
+}
+
+func TestPullCache_NeedsTheCallersCredentials(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	pulls := 0
+	authenticated := &countingFakeClient{fs: fs, onPull: func() { pulls++ }}
+	anonymous := &deniedClient{countingFakeClient{fs: fs, onPull: func() { pulls++ }}}
+	store := NewStore(authenticated, fs, "/cache")
+
+	_, err := store.pull(context.Background(), authenticated, parseRef(t), LayoutSingle, "cache-test-*")
+	require.NoError(t, err)
+
+	_, err = store.pull(context.Background(), anonymous, parseRef(t), LayoutSingle, "cache-test-*")
+	require.ErrorContains(t, err, "unauthorized", "a cached artifact is not served to a caller that cannot resolve it")
+	require.Equal(t, 1, pulls)
 }
 
 func TestConsolidatePulled(t *testing.T) {

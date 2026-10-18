@@ -12,14 +12,19 @@ const (
 	// FieldProductRefName selects Orders by spec.productRef.name.
 	FieldProductRefName = "spec.productRef.name"
 
-	// FieldPantryRefNames indexes Products by the Pantries their source and
-	// vendor destination reference (cache only).
-	FieldPantryRefNames = "pantryRefNames"
+	// FieldRegistryRefNames indexes Products and Orders by the Registries
+	// their spec.registryRefs list (cache only).
+	FieldRegistryRefNames = "registryRefNames"
 
 	// FieldVerifySecretNames indexes Products by the Secrets their
 	// spec.source.verify reads keys or a trusted root from (cache only).
 	FieldVerifySecretNames = "verifySecretNames"
 
-	// FieldDestinationPantryRefName indexes Orders by spec.destination.pantryRef.name (cache only).
-	FieldDestinationPantryRefName = "spec.destination.pantryRef.name"
+	// FieldRegistrySecretNames indexes Registries by the Secrets their
+	// secretRef and certSecretRef name (cache only).
+	FieldRegistrySecretNames = "registrySecretNames"
+
+	// FieldRegistryRefName indexes Repositories by spec.registryRef.name
+	// (cache only).
+	FieldRegistryRefName = "spec.registryRef.name"
 )

@@ -36,7 +36,6 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/approval"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/attestation"
-	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/deployer"
 	"github.com/kokumi-dev/kokumi/internal/index"
 	"github.com/kokumi-dev/kokumi/internal/oci"
@@ -112,7 +111,7 @@ var _ = Describe("Serving Controller", func() {
 					Spec: deliveryv1alpha1.PreparationSpec{
 						OrderName: orderName,
 						Source: deliveryv1alpha1.OrderSource{
-							OCI:        testOCIRef,
+							URL:        testOCIRef,
 							BaseDigest: fakeDigest,
 						},
 						Renderer: deliveryv1alpha1.Renderer{
@@ -282,7 +281,7 @@ var _ = Describe("Serving Controller", func() {
 					Spec: deliveryv1alpha1.PreparationSpec{
 						OrderName: orderName,
 						Source: deliveryv1alpha1.OrderSource{
-							OCI:        testOCIRef,
+							URL:        testOCIRef,
 							BaseDigest: fakeDigest,
 						},
 						Renderer: deliveryv1alpha1.Renderer{
@@ -744,12 +743,11 @@ var _ = Describe("Serving Controller", func() {
 // registry against testSigner.
 func newServingReconciler(registry *oci.FakeClient) *ServingReconciler {
 	return &ServingReconciler{
-		Client:         k8sClient,
-		Scheme:         k8sClient.Scheme(),
-		Deployer:       deployer.NewArgoCD(k8sClient),
-		OCIClient:      registry,
-		PantryResolver: credential.NewKubeResolver(k8sClient),
-		Signing:        testSigning,
+		Client:     k8sClient,
+		Scheme:     k8sClient.Scheme(),
+		Deployer:   deployer.NewArgoCD(k8sClient),
+		Registries: fakeRegistries(registry),
+		Signing:    testSigning,
 	}
 }
 
@@ -776,7 +774,7 @@ func signTestEvidence(registry *oci.FakeClient, signer *signing.Signer, prep *de
 		SchemaVersion: artifact.ConfigSchemaVersion,
 		Order:         &artifact.ConfigObject{Namespace: namespace, Name: name},
 		CreatedTime:   "2026-10-12T09:14:03Z",
-		Source:        artifact.ConfigSource{OCI: prep.Spec.Source.OCI, Version: testVersion, Digest: prep.Spec.Source.BaseDigest},
+		Source:        artifact.ConfigSource{OCI: prep.Spec.Source.URL, Version: testVersion, Digest: prep.Spec.Source.BaseDigest},
 		Renderer:      artifact.ConfigRenderer{Type: "Manifest", Version: testRendererVersion, Builder: testBuilderID},
 	}
 	created, err := cfg.Created()

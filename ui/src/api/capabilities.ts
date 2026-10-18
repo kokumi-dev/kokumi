@@ -14,9 +14,12 @@ export const capabilities = [
   'products:create',
   'products:update',
   'products:delete',
-  'pantries:create',
-  'pantries:update',
-  'pantries:delete',
+  'registries:create',
+  'registries:update',
+  'registries:delete',
+  'repositories:create',
+  'repositories:update',
+  'repositories:delete',
   'preparations:promote',
   'preparations:approve',
 ] as const
@@ -34,9 +37,12 @@ export const deniedReasons: Record<Capability, string> = {
   'products:create': 'You are not allowed to create Products',
   'products:update': 'You are not allowed to edit Products',
   'products:delete': 'You are not allowed to delete Products',
-  'pantries:create': 'You are not allowed to create Pantries',
-  'pantries:update': 'You are not allowed to edit Pantries',
-  'pantries:delete': 'You are not allowed to delete Pantries',
+  'registries:create': 'You are not allowed to create Registries',
+  'registries:update': 'You are not allowed to edit Registries',
+  'registries:delete': 'You are not allowed to delete Registries',
+  'repositories:create': 'You are not allowed to create Repositories',
+  'repositories:update': 'You are not allowed to edit Repositories',
+  'repositories:delete': 'You are not allowed to delete Repositories',
   'preparations:promote': 'You are not allowed to promote Preparations',
   'preparations:approve': 'Approving requires a personal SSO login with approval permission',
 }
@@ -63,7 +69,7 @@ export function mergeCapabilities(
  * namespacedCapabilityCatalog in internal/server/capabilities.go.
  */
 export const namespacedCapabilities = [
-  'pantries.credentials:update',
+  'registries.credentials:update',
 ] as const
 
 export type NamespacedCapability = typeof namespacedCapabilities[number]

@@ -1,12 +1,29 @@
 // ── Mirror of Go server DTOs ──────────────────────────────────────────────────
 
-export interface PantryRef {
+/** Names a Registry in the same namespace. */
+export interface RegistryRef {
   name: string
 }
 
+/** Who accesses a registry location: Kokumi itself, Argo CD, or the kubelet. */
+export type RegistryClient = 'Kokumi' | 'ArgoCD' | 'Kubelet'
+
+/**
+ * A registry location an object needs, who reads or writes it, and the
+ * Registry Kokumi connects there through. Entries of Argo CD and the kubelet
+ * only report what they need; Kokumi does not configure them.
+ */
+export interface RegistryAccess {
+  /** A location prefix, e.g. oci://ghcr.io/org/app/images. */
+  url: string
+  operation: 'Pull' | 'Push'
+  client: RegistryClient
+  /** Absent when the location is accessed without a Registry. */
+  registry?: string
+}
+
 export interface OCISource {
-  oci?: string
-  pantryRef?: PantryRef
+  url: string
   version: string
   /** Requires the source to carry a trusted signature before it is rendered. */
   verify?: SourceVerify
@@ -38,8 +55,7 @@ export interface SourceVerification {
 }
 
 export interface OCIDestination {
-  oci?: string
-  pantryRef?: PantryRef
+  url?: string
 }
 
 export interface PatchTarget {
@@ -93,6 +109,9 @@ export interface Order {
   values?: Record<string, unknown>
   destination: OCIDestination
   effectiveDestination?: string
+  /** Registries that authenticate the destination; the longest matching url wins. */
+  registryRefs?: RegistryRef[]
+  registryAccess?: RegistryAccess[]
   patches?: Patch[]
   edits?: Patch[]
   mode: PromotionMode
@@ -164,6 +183,8 @@ export interface Approval {
 export interface Artifact {
   ociRef: string
   digest: string
+  /** The Registry the artifact was pushed through; absent without one. */
+  registryRef?: string
 }
 
 export interface Preparation {
@@ -304,8 +325,8 @@ export interface ArtifactConfig {
   commitMessage?: string
   createdTime: string
   parent?: string
-  source: { oci: string; version: string; digest: string; pantryRef?: string; verified?: SourceVerification }
-  destination: { oci: string; pantryRef?: string }
+  source: { oci: string; version: string; digest: string; verified?: SourceVerification }
+  destination: { oci: string }
   product?: { namespace: string; name: string; configHash?: string }
   renderer: Renderer
   intent?: unknown
@@ -388,15 +409,12 @@ export interface ImageFieldSpec {
 export interface ProductImages {
   policy: ImagePolicy
   fieldSpecs?: ImageFieldSpec[]
-  /** A kubernetes.io/dockerconfigjson Secret in the Product's namespace. */
-  pullSecretRef?: { name: string }
 }
 
 /** The source a Product's Orders render from: the vendored copy when vendoring is set. */
 export interface ResolvedSource {
-  oci: string
+  url: string
   version: string
-  pantryRef?: PantryRef
   digest?: string
   /** Set when the source's signature verified. */
   verified?: SourceVerification
@@ -407,13 +425,19 @@ export interface Product {
   name: string
   namespace: string
   source: OCISource
-  /** Copies the source to this destination; {} is the in-cluster registry. */
+  /**
+   * Copies the source to this location, and vendored images below its
+   * images/ path; {} is the in-cluster registry.
+   */
   vendor?: OCIDestination
   render?: Render
   patches?: Patch[]
   overrides: Overrides
   images: ProductImages
+  /** Registries that authenticate the source, the images and the vendor location. */
+  registryRefs?: RegistryRef[]
   resolvedSource?: ResolvedSource
+  registryAccess?: RegistryAccess[]
   state?: string
   conditions?: Condition[]
   createdAt?: string
@@ -421,16 +445,35 @@ export interface Product {
   deletionTimestamp?: string
 }
 
-// ── Pantry types ──────────────────────────────────────────────────────────────
+// ── Registry and Repository types ─────────────────────────────────────────────
 
-export interface Pantry {
+export type RegistryScheme = 'HTTPS' | 'HTTP'
+
+/** How Kokumi connects to the locations below a URL prefix. Its credentials are never served. */
+export interface Registry {
+  name: string
+  namespace: string
+  /** A prefix: oci://host[:port][/path]. */
+  url: string
+  scheme: RegistryScheme
+  /** A kubernetes.io/dockerconfigjson Secret in the Registry's namespace. */
+  secretRef?: string
+  /** A Secret with ca.crt, and tls.crt and tls.key for a client certificate. */
+  certSecretRef?: string
+  state: string
+  conditions?: Condition[]
+  createdAt?: string
+}
+
+/** A catalog entry: an OCI repository to browse and create Products from. */
+export interface Repository {
   name: string
   namespace: string
   url: string
-  secretRef?: string
+  /** The Registry the UI reads the repository through. */
+  registryRef?: string
   description?: string
   state: string
-  referrersAPI?: 'Supported' | 'Unsupported'
   conditions?: Condition[]
   createdAt?: string
 }
@@ -479,6 +522,7 @@ export interface OrderFormData {
   /** Helm values; only sent when the Product renders with Helm. */
   values: Record<string, unknown>
   destination: OCIDestination
+  registryRefs: RegistryRef[]
   patches: Patch[]
   edits: Patch[]
   mode: PromotionMode
@@ -491,6 +535,7 @@ export const emptyOrderForm = (product?: { namespace: string; name: string }): O
   productRef: { name: product?.name ?? '' },
   values: {},
   destination: {},
+  registryRefs: [],
   patches: [],
   edits: [],
   mode: 'Manual',
@@ -499,12 +544,15 @@ export const emptyOrderForm = (product?: { namespace: string; name: string }): O
 const copyPatches = (patches?: Patch[]): Patch[] =>
   (patches ?? []).map((p) => ({ target: { ...p.target }, set: { ...p.set } }))
 
+const copyRegistryRefs = (refs?: RegistryRef[]): RegistryRef[] => (refs ?? []).map((r) => ({ name: r.name }))
+
 export const orderToFormData = (r: Order): OrderFormData => ({
   name: r.name,
   namespace: r.namespace,
   productRef: { name: r.productRef.name },
   values: r.values ?? {},
   destination: r.destination ? { ...r.destination } : {},
+  registryRefs: copyRegistryRefs(r.registryRefs),
   patches: copyPatches(r.patches),
   edits: copyPatches(r.edits),
   mode: r.mode,
@@ -524,22 +572,23 @@ export interface ProductFormData {
   /** Lists are only set with policy Listed. */
   overrides: Overrides
   images: ProductImages
+  registryRefs: RegistryRef[]
 }
 
 export const emptyProductForm = (): ProductFormData => ({
   name: '',
   namespace: 'kokumi',
-  source: { oci: '', version: '' },
+  source: { url: '', version: '' },
   patches: [],
   overrides: { values: { policy: 'None' }, patches: { policy: 'None' } },
   images: { policy: 'Record' },
+  registryRefs: [],
 })
 
 /** A copy of a Product's image settings that leaves out what is unset. */
 const copyImages = (i?: ProductImages): ProductImages => ({
   policy: imagePolicy(i?.policy),
   ...(i?.fieldSpecs?.length ? { fieldSpecs: i.fieldSpecs.map((f) => ({ ...f })) } : {}),
-  ...(i?.pullSecretRef?.name ? { pullSecretRef: { name: i.pullSecretRef.name } } : {}),
 })
 
 /** A copy of a Product's overrides that keeps the lists only with policy Listed. */
@@ -561,7 +610,7 @@ export const productToFormData = (p: Product): ProductFormData => ({
   name: p.name,
   namespace: p.namespace,
   source: {
-    ...(p.source.pantryRef ? { pantryRef: { name: p.source.pantryRef.name } } : { oci: p.source.oci ?? '' }),
+    url: p.source.url,
     version: p.source.version,
     verify: p.source.verify
       ? {
@@ -579,6 +628,7 @@ export const productToFormData = (p: Product): ProductFormData => ({
   patches: copyPatches(p.patches),
   overrides: copyOverrides(p.overrides),
   images: copyImages(p.images),
+  registryRefs: copyRegistryRefs(p.registryRefs),
 })
 
 // ── Preview request types ─────────────────────────────────────────────────────
@@ -589,8 +639,6 @@ export interface OrderPreviewRequest {
   name: string
   productRef: ProductRef
   values?: Record<string, unknown>
-  /** Where vendored images would be pulled from; the in-cluster registry when empty. */
-  destination?: OCIDestination
   patches?: Patch[]
   edits?: Patch[]
 }
@@ -600,40 +648,77 @@ export interface ProductPreviewRequest {
   namespace: string
   name: string
   source: OCISource
+  /** Where vendored images would be pulled from. */
+  vendor?: OCIDestination
   render?: Render
   patches?: Patch[]
   images?: ProductImages
+  registryRefs?: RegistryRef[]
 }
 
-export interface PantryFormData {
+/** How a Registry form stores credentials: typed in, or an existing Secret. */
+export type CredentialMode = 'none' | 'direct' | 'secretRef'
+
+export interface RegistryFormData {
   name: string
   namespace: string
   url: string
-  description?: string
-  username?: string
-  password?: string
-  secretRef?: string
-  credentialMode?: 'direct' | 'secretRef'
+  scheme: RegistryScheme
+  certSecretRef: string
+  credentialMode: CredentialMode
+  /** Stored in a Secret the Registry owns; blank keeps stored credentials. */
+  username: string
+  password: string
+  secretRef: string
 }
 
-export const emptyPantryForm = (): PantryFormData => ({
+export const emptyRegistryForm = (): RegistryFormData => ({
   name: '',
   namespace: 'kokumi',
   url: '',
-  description: '',
+  scheme: 'HTTPS',
+  certSecretRef: '',
+  credentialMode: 'none',
   username: '',
   password: '',
   secretRef: '',
-  credentialMode: 'direct',
 })
 
-export const pantryToFormData = (p: Pantry): PantryFormData => ({
-  name: p.name,
-  namespace: p.namespace,
-  url: p.url,
-  description: p.description ?? '',
+/** The Secret a Registry form stores typed-in credentials in. */
+export const registryCredentialsSecret = (registryName: string) => `${registryName}-credentials`
+
+export const registryToFormData = (r: Registry): RegistryFormData => ({
+  name: r.name,
+  namespace: r.namespace,
+  url: r.url,
+  scheme: r.scheme,
+  certSecretRef: r.certSecretRef ?? '',
+  credentialMode: !r.secretRef ? 'none' : r.secretRef === registryCredentialsSecret(r.name) ? 'direct' : 'secretRef',
   username: '',
   password: '',
-  secretRef: p.secretRef ?? '',
-  credentialMode: p.secretRef ? 'secretRef' : 'direct',
+  secretRef: r.secretRef ?? '',
+})
+
+export interface RepositoryFormData {
+  name: string
+  namespace: string
+  url: string
+  registryRef: string
+  description: string
+}
+
+export const emptyRepositoryForm = (): RepositoryFormData => ({
+  name: '',
+  namespace: 'kokumi',
+  url: '',
+  registryRef: '',
+  description: '',
+})
+
+export const repositoryToFormData = (r: Repository): RepositoryFormData => ({
+  name: r.name,
+  namespace: r.namespace,
+  url: r.url,
+  registryRef: r.registryRef ?? '',
+  description: r.description ?? '',
 })

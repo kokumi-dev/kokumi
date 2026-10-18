@@ -314,7 +314,7 @@ var _ = Describe("Manager", Ordered, func() {
 			host := forwardRegistry()
 
 			ctx := context.Background()
-			client := oci.NewORASClient()
+			client := oci.NewClient(oci.Options{PlainHTTP: true})
 
 			By("pushing an artifact with a config blob")
 			dir := GinkgoT().TempDir()
@@ -379,7 +379,7 @@ metadata:
   namespace: %[1]s
 spec:
   source:
-    oci: oci://%[2]s/e2e/source
+    url: oci://%[2]s/e2e/source
     version: "1.0.0"
 ---
 apiVersion: delivery.kokumi.dev/v1alpha1
@@ -391,7 +391,7 @@ spec:
   productRef:
     name: signed
   destination:
-    oci: oci://%[2]s/e2e/rendered
+    url: oci://%[2]s/e2e/rendered
 `, signingNamespace, inClusterRegistry))
 
 			var digest string
@@ -463,7 +463,7 @@ metadata:
   namespace: %[1]s
 spec:
   source:
-    oci: oci://%[2]s/e2e/verified-source
+    url: oci://%[2]s/e2e/verified-source
     version: "1.0.0"
     verify:
       secretRef:
@@ -516,8 +516,10 @@ metadata:
   namespace: %[1]s
 spec:
   source:
-    oci: oci://%[2]s/e2e/workload
+    url: oci://%[2]s/e2e/workload
     version: "1.0.0"
+  vendor:
+    url: oci://%[2]s/e2e/vendor/workload
   overrides:
     patches:
       policy: Listed
@@ -539,7 +541,7 @@ spec:
   productRef:
     name: vendored
   destination:
-    oci: oci://%[2]s/e2e/vendored
+    url: oci://%[2]s/e2e/vendored
 `, imagesNamespace, inClusterRegistry))
 
 			var artifactDigest, imageDigest, vendored string
@@ -553,12 +555,12 @@ spec:
 				g.Expect(fields[1]).To(Equal(upstreamImage))
 				artifactDigest, imageDigest, vendored = fields[0], fields[2], fields[3]
 			}, 5*time.Minute).Should(Succeed())
-			imageRepository := "e2e/vendored/images/" + strings.TrimSuffix(upstreamImage, ":6.14.1")
+			imageRepository := "e2e/vendor/workload/images/" + strings.TrimSuffix(upstreamImage, ":6.14.1")
 			Expect(vendored).To(Equal(fmt.Sprintf("%s/%s:6.14.1@%s", inClusterRegistry, imageRepository, imageDigest)),
-				"the image keeps its name and tag in a repository of its own")
+				"the image keeps its name and tag in a repository of its own below the Product's vendor location")
 
 			ctx := context.Background()
-			client := oci.NewORASClient()
+			client := oci.NewClient(oci.Options{PlainHTTP: true})
 
 			By("finding the image, with all its platforms, under its own tag in its own repository")
 			copied, err := oci.Parse(fmt.Sprintf("%s/%s:6.14.1", host, imageRepository))
@@ -683,6 +685,44 @@ subjects:
 			Expect(err).NotTo(HaveOccurred())
 		})
 
+		It("should let only who may read a Secret name it in a Registry", func() {
+			const registryNamespace = "e2e-registries"
+			createNamespace(registryNamespace)
+
+			By("refusing the editor, who may not read Secrets, a Registry that names one")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "apply", "--as=system:serviceaccount:"+namespace+":kokumi-editor", "-f", "-")
+				cmd.Stdin = strings.NewReader(fmt.Sprintf(`
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Registry
+metadata:
+  name: private
+  namespace: %s
+spec:
+  url: oci://ghcr.io/kokumi-e2e
+  secretRef:
+    name: ghcr-credentials
+`, registryNamespace))
+				out, err := utils.Run(cmd)
+				g.Expect(err).To(HaveOccurred())
+				g.Expect(err.Error() + out).To(ContainSubstring("A Registry may only name a Secret its author may get"))
+			}).Should(Succeed())
+
+			By("letting the editor create a Registry without credentials")
+			cmd := exec.Command("kubectl", "apply", "--as=system:serviceaccount:"+namespace+":kokumi-editor", "-f", "-")
+			cmd.Stdin = strings.NewReader(fmt.Sprintf(`
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Registry
+metadata:
+  name: public
+  namespace: %s
+spec:
+  url: oci://ghcr.io/kokumi-e2e
+`, registryNamespace))
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+		})
+
 		// +kubebuilder:scaffold:e2e-webhooks-checks
 
 		// TODO: Customize the e2e test suite with scenarios specific to your project.
@@ -757,7 +797,7 @@ func pushManifest(host, repository, manifest string) string {
 
 	ref, err := oci.Parse(host + "/" + repository + ":1.0.0")
 	Expect(err).NotTo(HaveOccurred())
-	digest, err := oci.NewORASClient().Push(context.Background(), ref, dir, oci.PushOptions{})
+	digest, err := oci.NewClient(oci.Options{PlainHTTP: true}).Push(context.Background(), ref, dir, oci.PushOptions{})
 	Expect(err).NotTo(HaveOccurred())
 	return digest
 }

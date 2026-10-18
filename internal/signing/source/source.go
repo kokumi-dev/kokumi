@@ -20,10 +20,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
-	"github.com/oras-project/oras-go/v3/registry/remote/credentials"
 	"github.com/sigstore/cosign/v3/pkg/cosign"
 	cosignoci "github.com/sigstore/cosign/v3/pkg/oci"
 	ociremote "github.com/sigstore/cosign/v3/pkg/oci/remote"
@@ -37,6 +35,7 @@ import (
 
 	"github.com/kokumi-dev/kokumi/internal/attestation"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/registry"
 	"github.com/kokumi-dev/kokumi/internal/signing"
 )
 
@@ -145,18 +144,20 @@ func NewVerifier() *Verifier {
 
 // Verify walks the graph of the source at ref, which must carry a digest,
 // and verifies every signature in it: against policy when it is set, else
-// against trust, the keys the Kitchen trusts. client reads the registry;
-// creds authenticate the reads of legacy signatures, nil is anonymous.
+// against trust, the keys the Kitchen trusts. conn connects to the
+// registry: its client reads the graph, and its credential, scheme and TLS
+// settings also apply to the reads of legacy signatures.
 //
 // With policy, any signature on the source that verifies makes it signed.
 // Without, only a signature statement by a trusted key does, as Kokumi
 // writes them. Verify fails when the signatures of the source itself cannot
 // be listed, or when keyless signatures must be verified and the trusted
 // root is not available.
-func (v *Verifier) Verify(ctx context.Context, client oci.Client, creds credentials.Store, ref oci.Reference, policy *Policy, trust *signing.TrustSet) (*Report, error) {
+func (v *Verifier) Verify(ctx context.Context, conn registry.Connection, ref oci.Reference, policy *Policy, trust *signing.TrustSet) (*Report, error) {
 	if ref.Digest == "" {
 		return nil, fmt.Errorf("source %s has no digest", ref)
 	}
+	client := conn.Client
 
 	graph, err := oci.Walk(ctx, client, ref)
 	if err != nil {
@@ -170,11 +171,15 @@ func (v *Verifier) Verify(ctx context.Context, client oci.Client, creds credenti
 	repo.Tag = ""
 	repo.Digest = ""
 	c := &checker{verifier: v, client: client, repo: repo, policy: policy, trust: trust}
-	if oci.IsPlainHTTP(repo.RepositoryReference()) {
+	if conn.PlainHTTP {
 		c.nameOpts = append(c.nameOpts, name.Insecure)
 	}
 	c.registryOpts = []ociremote.Option{
-		ociremote.WithRemoteOptions(remote.WithContext(ctx), remote.WithAuthFromKeychain(keychain{ctx: ctx, store: creds})),
+		ociremote.WithRemoteOptions(
+			remote.WithContext(ctx),
+			remote.WithAuthFromKeychain(conn.Keychain()),
+			remote.WithTransport(conn.Transport()),
+		),
 		ociremote.WithNameOptions(c.nameOpts...),
 	}
 
@@ -551,32 +556,4 @@ func (v *Verifier) trustedMaterial(trustedRoot []byte) (root.TrustedMaterial, er
 		v.lastErr = fmt.Errorf("fetching the Sigstore public-good trusted root: %w", v.lastErr)
 	}
 	return v.publicGood, v.lastErr
-}
-
-// keychain authenticates go-containerregistry requests with the credentials
-// of a Pantry.
-type keychain struct {
-	ctx   context.Context
-	store credentials.Store
-}
-
-func (k keychain) Resolve(resource authn.Resource) (authn.Authenticator, error) {
-	if k.store == nil {
-		return authn.Anonymous, nil
-	}
-
-	cred, err := k.store.Get(k.ctx, resource.RegistryStr())
-	if err != nil {
-		return nil, fmt.Errorf("reading credentials for %s: %w", resource.RegistryStr(), err)
-	}
-	if cred == credentials.EmptyCredential {
-		return authn.Anonymous, nil
-	}
-
-	return authn.FromConfig(authn.AuthConfig{
-		Username:      cred.Username,
-		Password:      cred.Password,
-		IdentityToken: cred.RefreshToken,
-		RegistryToken: cred.AccessToken,
-	}), nil
 }

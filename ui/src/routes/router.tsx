@@ -29,11 +29,14 @@ import PreparationImages from '../pages/preparations/PreparationImages'
 import PreparationArtifact from '../pages/preparations/PreparationArtifact'
 import ServingsList from '../pages/servings/ServingsList'
 import ServingDetail from '../pages/servings/ServingDetail'
-import PantriesList from '../pages/pantries/PantriesList'
-import PantryLayout from '../pages/pantries/PantryLayout'
-import PantryOverview from '../pages/pantries/PantryOverview'
-import PantryTags from '../pages/pantries/PantryTags'
-import PantryEditor from '../pages/pantries/PantryEditor'
+import RepositoriesList from '../pages/repositories/RepositoriesList'
+import RepositoryLayout from '../pages/repositories/RepositoryLayout'
+import RepositoryOverview from '../pages/repositories/RepositoryOverview'
+import RepositoryTags from '../pages/repositories/RepositoryTags'
+import RepositoryEditor from '../pages/repositories/RepositoryEditor'
+import RegistriesList from '../pages/registries/RegistriesList'
+import RegistryDetail from '../pages/registries/RegistryDetail'
+import RegistryEditor from '../pages/registries/RegistryEditor'
 
 export const router = createBrowserRouter([
   {
@@ -88,17 +91,22 @@ export const router = createBrowserRouter([
       { path: 'servings', element: <ServingsList /> },
       { path: 'servings/:namespace/:name', element: <ServingDetail /> },
 
-      { path: 'pantries', element: <PantriesList /> },
-      { path: 'pantries/new', element: <RequireCapability anyOf={['pantries:create']}><PantryEditor /></RequireCapability> },
-      { path: 'pantries/:namespace/:name/edit', element: <RequireCapability anyOf={['pantries:update']}><PantryEditor /></RequireCapability> },
+      { path: 'repositories', element: <RepositoriesList /> },
+      { path: 'repositories/new', element: <RequireCapability anyOf={['repositories:create']}><RepositoryEditor /></RequireCapability> },
+      { path: 'repositories/:namespace/:name/edit', element: <RequireCapability anyOf={['repositories:update']}><RepositoryEditor /></RequireCapability> },
       {
-        path: 'pantries/:namespace/:name',
-        element: <PantryLayout />,
+        path: 'repositories/:namespace/:name',
+        element: <RepositoryLayout />,
         children: [
-          { index: true, element: <PantryOverview /> },
-          { path: 'tags', element: <PantryTags /> },
+          { index: true, element: <RepositoryOverview /> },
+          { path: 'tags', element: <RepositoryTags /> },
         ],
       },
+
+      { path: 'registries', element: <RegistriesList /> },
+      { path: 'registries/new', element: <RequireCapability anyOf={['registries:create']}><RegistryEditor /></RequireCapability> },
+      { path: 'registries/:namespace/:name/edit', element: <RequireCapability anyOf={['registries:update']}><RegistryEditor /></RequireCapability> },
+      { path: 'registries/:namespace/:name', element: <RegistryDetail /> },
 
       { path: 'settings', element: <Navigate to="/settings/general" replace /> },
       {

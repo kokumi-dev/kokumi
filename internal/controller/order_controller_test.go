@@ -21,26 +21,32 @@ import (
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
+	"path/filepath"
+	"strings"
+	"sync"
+	"unicode/utf8"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/oras-project/oras-go/v3/registry/remote/credentials"
 	"github.com/spf13/afero"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
-	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/index"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/registry"
 	"github.com/kokumi-dev/kokumi/internal/resolve"
 	"github.com/kokumi-dev/kokumi/internal/version"
 )
@@ -58,11 +64,11 @@ var _ = Describe("Order Controller", func() {
 		order := &deliveryv1alpha1.Order{}
 
 		BeforeEach(func() {
-			createTestProduct(ctx, testProductName, deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion})
+			createTestProduct(ctx, testProductName, deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion})
 
 			By("creating the custom resource for the Kind Order")
 			err := k8sClient.Get(ctx, typeNamespacedName, order)
-			if err != nil && errors.IsNotFound(err) {
+			if err != nil && apierrors.IsNotFound(err) {
 				resource := &deliveryv1alpha1.Order{
 					Name:      resourceName,
 					Namespace: testNamespace,
@@ -72,7 +78,7 @@ var _ = Describe("Order Controller", func() {
 							Mode: deliveryv1alpha1.PromotionModeManual,
 						},
 						Destination: &deliveryv1alpha1.OCIDestination{
-							OCI: "oci://registry.kokumi.svc.cluster.local:5000/preparation/test-resource",
+							URL: "oci://registry.kokumi.svc.cluster.local:5000/preparation/test-resource",
 						},
 					},
 				}
@@ -92,12 +98,13 @@ var _ = Describe("Order Controller", func() {
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
 			fs := afero.NewMemMapFs()
+			fake := oci.NewFakeClient(fs)
 			controllerReconciler := &OrderReconciler{
 				Client:           k8sClient,
 				APIReader:        k8sClient,
 				Scheme:           k8sClient.Scheme(),
-				Pipeline:         artifact.NewPipeline(artifact.NewStore(oci.NewFakeClient(fs), fs, "")),
-				PantryResolver:   credential.NewKubeResolver(k8sClient),
+				Pipeline:         artifact.NewPipeline(artifact.NewStore(fake, fs, "")),
+				Registries:       fakeRegistries(fake),
 				Recorder:         events.NewFakeRecorder(100),
 				InstallNamespace: testNamespace,
 				BuilderID:        testBuilderID,
@@ -117,39 +124,54 @@ var _ = Describe("Order Controller", func() {
 		})
 	})
 
-	Context("When the Order or its Product uses a Pantry", func() {
-		const ns = testNamespace
+	Context("When the Order or its Product lists Registries", func() {
+		const (
+			ns          = testNamespace
+			destination = "oci://ghcr.io/kokumi-test/rendered"
+			source      = "oci://ghcr.io/kokumi-test/charts/app"
+		)
 
 		ctx := context.Background()
 
+		// private serves the registries: a client with credentials resolves
+		// everything, an anonymous one nothing, as for a private registry.
+		var private *oci.FakeClient
+		denied := &oci.FakeClient{Resolved: map[string]oci.Descriptor{}}
+
 		newReconciler := func() *OrderReconciler {
-			fs := afero.NewMemMapFs()
 			return &OrderReconciler{
-				Client:           k8sClient,
-				APIReader:        k8sClient,
-				Scheme:           k8sClient.Scheme(),
-				Pipeline:         artifact.NewPipeline(artifact.NewStore(oci.NewFakeClient(fs), fs, "")),
-				PantryResolver:   credential.NewKubeResolver(k8sClient),
+				Client:    k8sClient,
+				APIReader: k8sClient,
+				Scheme:    k8sClient.Scheme(),
+				Pipeline:  artifact.NewPipeline(artifact.NewStore(denied, afero.NewMemMapFs(), "")),
+				Registries: testRegistries(func(opts oci.Options) oci.Client {
+					if opts.Credential == (credentials.Credential{}) {
+						return denied
+					}
+					return private
+				}),
 				Recorder:         events.NewFakeRecorder(100),
 				InstallNamespace: testNamespace,
 				BuilderID:        testBuilderID,
 			}
 		}
 
-		listPreparations := func(orderName string) *deliveryv1alpha1.PreparationList {
+		BeforeEach(func() {
+			private = oci.NewFakeClient(afero.NewMemMapFs())
+		})
+
+		listPreparations := func(orderName string) []deliveryv1alpha1.Preparation {
 			list := &deliveryv1alpha1.PreparationList{}
 			Expect(k8sClient.List(ctx, list,
 				client.InNamespace(ns),
 				client.MatchingLabels{deliveryv1alpha1.LabelOrder: orderName},
 			)).To(Succeed())
-			return list
+			return list.Items
 		}
 
-		reconcileOrder := func(name string) error {
-			_, err := newReconciler().Reconcile(ctx, reconcile.Request{
-				Name: name, Namespace: ns,
-			})
-			return err
+		reconcileOrder := func(name string) {
+			_, err := newReconciler().Reconcile(ctx, reconcile.Request{Name: name, Namespace: ns})
+			Expect(err).NotTo(HaveOccurred())
 		}
 
 		getOrder := func(name string) *deliveryv1alpha1.Order {
@@ -158,239 +180,145 @@ var _ = Describe("Order Controller", func() {
 			return order
 		}
 
-		createPantry := func(name, url string, secretRef *corev1.LocalObjectReference) {
-			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Pantry{
+		readyOf := func(name string) *metav1.Condition {
+			return meta.FindStatusCondition(getOrder(name).Status.Conditions, deliveryv1alpha1.ConditionTypeReady)
+		}
+
+		// createRegistry creates a Registry for url whose credentials are in
+		// a Secret of its own.
+		createRegistry := func(name, url string) {
+			secret := testPullSecret(name, "ghcr.io")
+			reg := &deliveryv1alpha1.Registry{
 				Name: name, Namespace: ns,
-				Spec: deliveryv1alpha1.PantrySpec{
-					URL:       url,
-					SecretRef: secretRef,
-				},
-			})).To(Succeed())
+				Spec: deliveryv1alpha1.RegistrySpec{URL: url, SecretRef: &corev1.LocalObjectReference{Name: name}},
+			}
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+			Expect(k8sClient.Create(ctx, reg)).To(Succeed())
+			DeferCleanup(func() {
+				_ = k8sClient.Delete(ctx, reg)
+				_ = k8sClient.Delete(ctx, secret)
+			})
 		}
 
 		// createOrder creates an Order of its own Product, named after the
-		// Order, whose source resolves to source.
-		createOrder := func(name string, source deliveryv1alpha1.OCISource, dest *deliveryv1alpha1.OCIDestination) {
-			createTestProduct(ctx, name, source)
-			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Order{
+		// Order, that renders source. The Product connects through
+		// productRefs, the Order through orderRefs.
+		createOrder := func(name string, productRefs, orderRefs []corev1.LocalObjectReference, dest *deliveryv1alpha1.OCIDestination) {
+			createTestProduct(ctx, name, deliveryv1alpha1.OCISource{URL: source, Version: testVersion})
+			product := getTestProduct(ctx, name)
+			product.Spec.RegistryRefs = productRefs
+			Expect(k8sClient.Update(ctx, product)).To(Succeed())
+			resolveTestProduct(ctx, name, source, testVersion)
+
+			order := &deliveryv1alpha1.Order{
 				Name: name, Namespace: ns,
 				Spec: deliveryv1alpha1.OrderSpec{
-					ProductRef: deliveryv1alpha1.ProductRef{Name: name},
-					Promotion: &deliveryv1alpha1.PromotionSpec{
-						Mode: deliveryv1alpha1.PromotionModeManual,
-					},
-					Destination: dest,
+					ProductRef:   deliveryv1alpha1.ProductRef{Name: name},
+					Promotion:    &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
+					Destination:  dest,
+					RegistryRefs: orderRefs,
 				},
-			})).To(Succeed())
+			}
+			Expect(k8sClient.Create(ctx, order)).To(Succeed())
+			DeferCleanup(func() {
+				_ = k8sClient.DeleteAllOf(ctx, &deliveryv1alpha1.Preparation{},
+					client.InNamespace(ns), client.MatchingLabels{deliveryv1alpha1.LabelOrder: name})
+				_ = k8sClient.Delete(ctx, order)
+				deleteTestProduct(ctx, name)
+			})
 		}
 
-		cleanup := func(orderName, pantryName string, extra ...client.Object) {
-			_ = k8sClient.DeleteAllOf(ctx, &deliveryv1alpha1.Preparation{},
-				client.InNamespace(ns),
-				client.MatchingLabels{deliveryv1alpha1.LabelOrder: orderName},
-			)
-			if orderName != "" {
-				_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Order{
-					Name: orderName, Namespace: ns,
-				})
-				deleteTestProduct(ctx, orderName)
+		refs := func(names ...string) []corev1.LocalObjectReference {
+			out := make([]corev1.LocalObjectReference, 0, len(names))
+			for _, name := range names {
+				out = append(out, corev1.LocalObjectReference{Name: name})
 			}
-			if pantryName != "" {
-				_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Pantry{
-					Name: pantryName, Namespace: ns,
-				})
-			}
-			for _, obj := range extra {
-				_ = k8sClient.Delete(ctx, obj)
-			}
+			return out
 		}
 
-		It("creates a Preparation from the live Pantry URL", func() {
-			const (
-				orderName  = "order-src-pantry"
-				pantryName = "src-pantry"
-				pantryURL  = "oci://registry.kokumi.svc.cluster.local:5000/charts/app"
-			)
-			defer cleanup(orderName, pantryName)
+		It("records the Registry that authenticated the push and what each client needs", func() {
+			const orderName = "order-registries"
+			createRegistry("order-registries-src", "oci://ghcr.io/kokumi-test/charts")
+			createRegistry("order-registries-dest", destination)
+			createOrder(orderName, refs("order-registries-src"), refs("order-registries-dest"),
+				&deliveryv1alpha1.OCIDestination{URL: destination})
 
-			createPantry(pantryName, pantryURL, nil)
-			createOrder(orderName, deliveryv1alpha1.OCISource{
-				PantryRef: &deliveryv1alpha1.PantryRef{Name: pantryName},
-				Version:   testVersion,
-			}, &deliveryv1alpha1.OCIDestination{
-				OCI: "oci://registry.kokumi.svc.cluster.local:5000/preparation/app",
-			})
+			reconcileOrder(orderName)
 
-			Expect(reconcileOrder(orderName)).To(Succeed())
-
-			order := getOrder(orderName)
-			Expect(order.Status.LatestConfigHash).NotTo(BeEmpty())
-			ready := meta.FindStatusCondition(order.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)
-			Expect(ready).NotTo(BeNil())
-			Expect(ready.Status).To(Equal(metav1.ConditionTrue))
-
+			Expect(readyOf(orderName).Status).To(Equal(metav1.ConditionTrue))
 			preps := listPreparations(orderName)
-			Expect(preps.Items).To(HaveLen(1))
-			Expect(preps.Items[0].Spec.Source.OCI).To(Equal(pantryURL))
+			Expect(preps).To(HaveLen(1))
+			Expect(preps[0].Spec.Artifact.RegistryRef).To(Equal(&corev1.LocalObjectReference{Name: "order-registries-dest"}))
+			Expect(private.Pushes).To(HaveLen(1), "the push goes through the destination's Registry")
+
+			Expect(getOrder(orderName).Status.RegistryAccess).To(ConsistOf(
+				deliveryv1alpha1.RegistryAccess{URL: source, Operation: deliveryv1alpha1.RegistryOperationPull,
+					Client: deliveryv1alpha1.RegistryClientKokumi, Registry: "order-registries-src"},
+				deliveryv1alpha1.RegistryAccess{URL: destination, Operation: deliveryv1alpha1.RegistryOperationPush,
+					Client: deliveryv1alpha1.RegistryClientKokumi, Registry: "order-registries-dest"},
+				deliveryv1alpha1.RegistryAccess{URL: destination, Operation: deliveryv1alpha1.RegistryOperationPull,
+					Client: deliveryv1alpha1.RegistryClientArgoCD},
+			))
 		})
 
-		It("creates a new Preparation when the source Pantry URL changes", func() {
-			const (
-				orderName  = "order-src-url-change"
-				pantryName = "src-pantry-change"
-				firstURL   = "oci://registry.kokumi.svc.cluster.local:5000/charts/app"
-				secondURL  = "oci://registry.kokumi.svc.cluster.local:5000/charts/app-v2"
-			)
-			defer cleanup(orderName, pantryName)
+		It("does not render again when only its Registries or their credentials change", func() {
+			const orderName = "order-registries-change"
+			createRegistry("order-registries-change-src", "oci://ghcr.io/kokumi-test/charts")
+			createRegistry("order-registries-change-dest", destination)
+			createOrder(orderName, refs("order-registries-change-src"), refs("order-registries-change-dest"),
+				&deliveryv1alpha1.OCIDestination{URL: destination})
 
-			createPantry(pantryName, firstURL, nil)
-			createOrder(orderName, deliveryv1alpha1.OCISource{
-				PantryRef: &deliveryv1alpha1.PantryRef{Name: pantryName},
-				Version:   testVersion,
-			}, &deliveryv1alpha1.OCIDestination{
-				OCI: "oci://registry.kokumi.svc.cluster.local:5000/preparation/app-change",
-			})
-
-			Expect(reconcileOrder(orderName)).To(Succeed())
-			first := getOrder(orderName)
-			firstHash := first.Status.LatestConfigHash
-			Expect(firstHash).NotTo(BeEmpty())
-			Expect(listPreparations(orderName).Items).To(HaveLen(1))
-
-			pantry := &deliveryv1alpha1.Pantry{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: pantryName, Namespace: ns}, pantry)).To(Succeed())
-			pantry.Spec.URL = secondURL
-			Expect(k8sClient.Update(ctx, pantry)).To(Succeed())
-
-			Expect(reconcileOrder(orderName)).To(Succeed())
-			second := getOrder(orderName)
-			Expect(second.Status.LatestConfigHash).NotTo(Equal(firstHash))
-
-			preps := listPreparations(orderName)
-			Expect(preps.Items).To(HaveLen(2))
-			urls := []string{preps.Items[0].Spec.Source.OCI, preps.Items[1].Spec.Source.OCI}
-			Expect(urls).To(ConsistOf(firstURL, secondURL))
-		})
-
-		It("skips rebuild when the Pantry URL is unchanged", func() {
-			const (
-				orderName  = "order-src-unchanged"
-				pantryName = "src-pantry-unchanged"
-				pantryURL  = "oci://registry.kokumi.svc.cluster.local:5000/charts/stable"
-			)
-			defer cleanup(orderName, pantryName)
-
-			createPantry(pantryName, pantryURL, nil)
-			createOrder(orderName, deliveryv1alpha1.OCISource{
-				PantryRef: &deliveryv1alpha1.PantryRef{Name: pantryName},
-				Version:   testVersion,
-			}, &deliveryv1alpha1.OCIDestination{
-				OCI: "oci://registry.kokumi.svc.cluster.local:5000/preparation/stable",
-			})
-
-			Expect(reconcileOrder(orderName)).To(Succeed())
+			reconcileOrder(orderName)
 			hash := getOrder(orderName).Status.LatestConfigHash
+			Expect(listPreparations(orderName)).To(HaveLen(1))
 
-			Expect(reconcileOrder(orderName)).To(Succeed())
-			Expect(getOrder(orderName).Status.LatestConfigHash).To(Equal(hash))
-			Expect(listPreparations(orderName).Items).To(HaveLen(1))
-		})
-
-		It("creates a new Preparation when the destination Pantry URL changes", func() {
-			const (
-				orderName  = "order-dest-url-change"
-				pantryName = "dest-pantry-change"
-				firstURL   = "oci://registry.kokumi.svc.cluster.local:5000/dest/app"
-				secondURL  = "oci://registry.kokumi.svc.cluster.local:5000/dest/app-v2"
-			)
-			defer cleanup(orderName, pantryName)
-
-			createPantry(pantryName, firstURL, nil)
-			createOrder(orderName, deliveryv1alpha1.OCISource{
-				OCI:     "oci://registry.kokumi.svc.cluster.local:5000/order/app",
-				Version: testVersion,
-			}, &deliveryv1alpha1.OCIDestination{
-				PantryRef: &deliveryv1alpha1.PantryRef{Name: pantryName},
-			})
-
-			Expect(reconcileOrder(orderName)).To(Succeed())
-			firstHash := getOrder(orderName).Status.LatestConfigHash
-			Expect(listPreparations(orderName).Items).To(HaveLen(1))
-			Expect(listPreparations(orderName).Items[0].Spec.Artifact.OCIRef).
-				To(HavePrefix(fmt.Sprintf("%s:%s@", firstURL, testVersion)))
-
-			pantry := &deliveryv1alpha1.Pantry{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: pantryName, Namespace: ns}, pantry)).To(Succeed())
-			pantry.Spec.URL = secondURL
-			Expect(k8sClient.Update(ctx, pantry)).To(Succeed())
-
-			Expect(reconcileOrder(orderName)).To(Succeed())
-			Expect(getOrder(orderName).Status.LatestConfigHash).NotTo(Equal(firstHash))
-
-			preps := listPreparations(orderName)
-			Expect(preps.Items).To(HaveLen(2))
-			refs := []string{preps.Items[0].Spec.Artifact.OCIRef, preps.Items[1].Spec.Artifact.OCIRef}
-			Expect(refs).To(ContainElement(HavePrefix(fmt.Sprintf("%s:%s@", firstURL, testVersion))))
-			Expect(refs).To(ContainElement(HavePrefix(fmt.Sprintf("%s:%s@", secondURL, testVersion))))
-		})
-
-		It("does not rebuild when only Pantry credentials change", func() {
-			const (
-				orderName  = "order-secret-only"
-				pantryName = "src-pantry-secret"
-				secretName = "src-pantry-creds"
-				pantryURL  = "oci://registry.kokumi.svc.cluster.local:5000/charts/private"
-			)
-			secret := &corev1.Secret{
-				Name: secretName, Namespace: ns,
-				Type: corev1.SecretTypeOpaque,
-				Data: map[string][]byte{"placeholder": []byte("x")},
-			}
-			defer cleanup(orderName, pantryName, secret)
-
-			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
-			createPantry(pantryName, pantryURL, &corev1.LocalObjectReference{Name: secretName})
-			createOrder(orderName, deliveryv1alpha1.OCISource{
-				PantryRef: &deliveryv1alpha1.PantryRef{Name: pantryName},
-				Version:   testVersion,
-			}, &deliveryv1alpha1.OCIDestination{
-				OCI: "oci://registry.kokumi.svc.cluster.local:5000/preparation/private",
-			})
-
-			Expect(reconcileOrder(orderName)).To(Succeed())
-			hash := getOrder(orderName).Status.LatestConfigHash
-			Expect(listPreparations(orderName).Items).To(HaveLen(1))
-
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: secretName, Namespace: ns}, secret)).To(Succeed())
-			secret.Data = map[string][]byte{
-				corev1.DockerConfigJsonKey: []byte(`{"auths":{"registry.kokumi.svc.cluster.local:5000":{"auth":"bmV3OnRva2Vu"}}}`),
-			}
+			By("rotating the credentials")
+			secret := &corev1.Secret{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "order-registries-change-dest"}, secret)).To(Succeed())
+			secret.Data[corev1.DockerConfigJsonKey] = []byte(`{"auths":{"ghcr.io":{"username":"bot","password":"rotated"}}}`)
 			Expect(k8sClient.Update(ctx, secret)).To(Succeed())
+			reconcileOrder(orderName)
 
-			Expect(reconcileOrder(orderName)).To(Succeed())
+			By("listing another Registry")
+			createRegistry("order-registries-change-other", "oci://quay.io/kokumi-test")
+			order := getOrder(orderName)
+			order.Spec.RegistryRefs = refs("order-registries-change-dest", "order-registries-change-other")
+			Expect(k8sClient.Update(ctx, order)).To(Succeed())
+			reconcileOrder(orderName)
+
 			Expect(getOrder(orderName).Status.LatestConfigHash).To(Equal(hash))
-			Expect(listPreparations(orderName).Items).To(HaveLen(1))
+			Expect(getOrder(orderName).Status.ObservedGeneration).To(Equal(getOrder(orderName).Generation))
+			Expect(listPreparations(orderName)).To(HaveLen(1))
 		})
 
-		It("fails when the destination Pantry is missing", func() {
-			const orderName = "order-missing-pantry"
-			defer cleanup(orderName, "")
+		It("waits while a Registry it lists is missing", func() {
+			const orderName = "order-registry-missing"
+			createRegistry("order-registry-missing-src", "oci://ghcr.io/kokumi-test/charts")
+			createOrder(orderName, refs("order-registry-missing-src"), refs("does-not-exist"),
+				&deliveryv1alpha1.OCIDestination{URL: destination})
 
-			createOrder(orderName, deliveryv1alpha1.OCISource{
-				OCI:     "oci://registry.kokumi.svc.cluster.local:5000/order/missing",
-				Version: testVersion,
-			}, &deliveryv1alpha1.OCIDestination{
-				PantryRef: &deliveryv1alpha1.PantryRef{Name: "does-not-exist"},
-			})
+			reconcileOrder(orderName)
 
-			Expect(reconcileOrder(orderName)).NotTo(Succeed())
-
-			order := getOrder(orderName)
-			Expect(order.Status.LatestConfigHash).To(BeEmpty())
-			ready := meta.FindStatusCondition(order.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)
-			Expect(ready).NotTo(BeNil())
+			ready := readyOf(orderName)
 			Expect(ready.Status).To(Equal(metav1.ConditionFalse))
-			Expect(ready.Reason).To(Equal("ProcessingFailed"))
+			Expect(ready.Reason).To(Equal(deliveryv1alpha1.ReasonRegistryNotFound))
+			Expect(getOrder(orderName).Status.LatestConfigHash).To(BeEmpty())
+			Expect(listPreparations(orderName)).To(BeEmpty())
+		})
+
+		It("does not push a private source to a destination without credentials", func() {
+			const orderName = "order-private-anonymous"
+			createRegistry("order-private-anonymous-src", "oci://ghcr.io/kokumi-test/charts")
+			createOrder(orderName, refs("order-private-anonymous-src"), nil, nil)
+
+			reconcileOrder(orderName)
+
+			ready := readyOf(orderName)
+			Expect(ready.Reason).To(Equal(deliveryv1alpha1.ReasonCredentialsRequired))
+			Expect(ready.Message).To(ContainSubstring(artifact.DefaultDestination(ns, orderName)))
+			Expect(listPreparations(orderName)).To(BeEmpty())
+			Expect(private.Pushes).To(BeEmpty())
+			Expect(denied.Pushes).To(BeEmpty())
 		})
 	})
 
@@ -404,12 +332,13 @@ var _ = Describe("Order Controller", func() {
 
 		newReconciler := func() *OrderReconciler {
 			fs := afero.NewMemMapFs()
+			fake := oci.NewFakeClient(fs)
 			return &OrderReconciler{
 				Client:           k8sClient,
 				APIReader:        k8sClient,
 				Scheme:           k8sClient.Scheme(),
-				Pipeline:         artifact.NewPipeline(artifact.NewStore(oci.NewFakeClient(fs), fs, "")),
-				PantryResolver:   credential.NewKubeResolver(k8sClient),
+				Pipeline:         artifact.NewPipeline(artifact.NewStore(fake, fs, "")),
+				Registries:       fakeRegistries(fake),
 				Recorder:         events.NewFakeRecorder(100),
 				InstallNamespace: testNamespace,
 				BuilderID:        testBuilderID,
@@ -429,7 +358,7 @@ var _ = Describe("Order Controller", func() {
 			}()
 
 			createTestProduct(ctx, orderName, deliveryv1alpha1.OCISource{
-				OCI:     "oci://registry.kokumi.svc.cluster.local:5000/order/edit-revert",
+				URL:     "oci://registry.kokumi.svc.cluster.local:5000/order/edit-revert",
 				Version: "0.1.0",
 			})
 			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Order{
@@ -440,7 +369,7 @@ var _ = Describe("Order Controller", func() {
 						Mode: deliveryv1alpha1.PromotionModeManual,
 					},
 					Destination: &deliveryv1alpha1.OCIDestination{
-						OCI: "oci://registry.kokumi.svc.cluster.local:5000/preparation/edit-revert",
+						URL: "oci://registry.kokumi.svc.cluster.local:5000/preparation/edit-revert",
 					},
 				},
 			})).To(Succeed())
@@ -540,12 +469,13 @@ var _ = Describe("Order Controller", func() {
 			})
 
 			fs := afero.NewMemMapFs()
+			fake := oci.NewFakeClient(fs)
 			r := &OrderReconciler{
 				Client:           k8sClient,
 				APIReader:        k8sClient,
 				Scheme:           k8sClient.Scheme(),
-				Pipeline:         artifact.NewPipeline(artifact.NewStore(oci.NewFakeClient(fs), fs, "")),
-				PantryResolver:   credential.NewKubeResolver(k8sClient),
+				Pipeline:         artifact.NewPipeline(artifact.NewStore(fake, fs, "")),
+				Registries:       fakeRegistries(fake),
 				Recorder:         events.NewFakeRecorder(100),
 				InstallNamespace: testNamespace,
 				BuilderID:        testBuilderID,
@@ -585,7 +515,7 @@ var _ = Describe("Order Controller", func() {
 				APIReader:        k8sClient,
 				Scheme:           k8sClient.Scheme(),
 				Pipeline:         artifact.NewPipeline(artifact.NewStore(fake, fs, "")),
-				PantryResolver:   credential.NewKubeResolver(k8sClient),
+				Registries:       fakeRegistries(fake),
 				Recorder:         events.NewFakeRecorder(100),
 				InstallNamespace: testNamespace,
 				BuilderID:        testBuilderID,
@@ -693,7 +623,7 @@ var _ = Describe("Order Controller", func() {
 				orderName   = "order-of-product"
 				productName = "product-for-order"
 			)
-			product := createTestProduct(ctx, productName, deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion})
+			product := createTestProduct(ctx, productName, deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion})
 
 			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Order{
 				Name: orderName, Namespace: ns,
@@ -792,7 +722,7 @@ var _ = Describe("Order Controller", func() {
 			By("waiting while the Product has not resolved its source")
 			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Product{
 				Name: productName, Namespace: ns,
-				Spec: deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion}},
+				Spec: deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion}},
 			})).To(Succeed())
 			reconcileOrder()
 			Expect(readyOf().Reason).To(Equal(deliveryv1alpha1.ReasonProductNotReady))
@@ -814,7 +744,7 @@ var _ = Describe("Order Controller", func() {
 				Name: productName, Namespace: ns,
 				// Keeps the deleted Product, as the protection finalizer does.
 				Finalizers: []string{deliveryv1alpha1.FinalizerProductProtection},
-				Spec:       deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion}},
+				Spec:       deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion}},
 			})).To(Succeed())
 			resolveTestProduct(ctx, productName, testOCIRef, testVersion)
 			Expect(k8sClient.Delete(ctx, getTestProduct(ctx, productName))).To(Succeed())
@@ -826,7 +756,7 @@ var _ = Describe("Order Controller", func() {
 		})
 
 		It("does not render again when the Product comes back unchanged", func() {
-			createTestProduct(ctx, productName, deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion})
+			createTestProduct(ctx, productName, deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion})
 			reconcileOrder()
 			Expect(preparations()).To(HaveLen(1))
 
@@ -890,7 +820,7 @@ var _ = Describe("Order Controller", func() {
 		It("rejects patches the Product does not allow", func() {
 			create("order-forbidden-patch", &deliveryv1alpha1.Product{
 				Name: "product-restricted", Namespace: ns,
-				Spec: deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion}},
+				Spec: deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion}},
 			}, deliveryv1alpha1.OrderSpec{
 				Patches: []deliveryv1alpha1.Patch{{
 					Target: deliveryv1alpha1.PatchTarget{Kind: testDeploymentKind, Name: testDeploymentName},
@@ -906,7 +836,7 @@ var _ = Describe("Order Controller", func() {
 		It("rejects values on a Product that does not render with Helm", func() {
 			create("order-values-no-helm", &deliveryv1alpha1.Product{
 				Name: "product-manifests", Namespace: ns,
-				Spec: deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion}},
+				Spec: deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion}},
 			}, deliveryv1alpha1.OrderSpec{
 				Values: &apiextensionsv1.JSON{Raw: []byte(`{"replicaCount":3}`)},
 			})
@@ -956,6 +886,16 @@ const (
 	testReplicasPath   = ".spec.replicas"
 )
 
+// fakeRegistries returns Clients that serve every connection with fake.
+func fakeRegistries(fake oci.Client) *registry.Clients {
+	return testRegistries(func(oci.Options) oci.Client { return fake })
+}
+
+// testRegistries returns Clients that build every client with newClient.
+func testRegistries(newClient func(oci.Options) oci.Client) *registry.Clients {
+	return registry.NewClients(artifact.DefaultRegistryHost).WithClientFactory(newClient)
+}
+
 // newTestOrderReconciler returns an OrderReconciler pushing to fake.
 func newTestOrderReconciler(fake *oci.FakeClient) *OrderReconciler {
 	return &OrderReconciler{
@@ -963,7 +903,7 @@ func newTestOrderReconciler(fake *oci.FakeClient) *OrderReconciler {
 		APIReader:        k8sClient,
 		Scheme:           k8sClient.Scheme(),
 		Pipeline:         artifact.NewPipeline(artifact.NewStore(fake, afero.NewMemMapFs(), "")),
-		PantryResolver:   credential.NewKubeResolver(k8sClient),
+		Registries:       fakeRegistries(fake),
 		Recorder:         events.NewFakeRecorder(100),
 		InstallNamespace: testNamespace,
 		BuilderID:        testBuilderID,
@@ -985,18 +925,11 @@ func createTestProduct(ctx context.Context, name string, source deliveryv1alpha1
 			},
 		},
 	}
-	if err := k8sClient.Create(ctx, product); err != nil && !errors.IsAlreadyExists(err) {
+	if err := k8sClient.Create(ctx, product); err != nil && !apierrors.IsAlreadyExists(err) {
 		Expect(err).NotTo(HaveOccurred())
 	}
 
-	resolvedURL := source.OCI
-	if source.PantryRef != nil {
-		pantry := &deliveryv1alpha1.Pantry{}
-		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: source.PantryRef.Name}, pantry)).To(Succeed())
-		resolvedURL = pantry.Spec.URL
-	}
-
-	return resolveTestProduct(ctx, name, resolvedURL, source.Version)
+	return resolveTestProduct(ctx, name, source.URL, source.Version)
 }
 
 // resolveTestProduct publishes the source at sourceOCI and sourceVersion,
@@ -1007,10 +940,9 @@ func resolveTestProduct(ctx context.Context, name, sourceOCI, sourceVersion stri
 
 	product.Status.ConfigHash = "sha256:product-" + sourceVersion
 	product.Status.Source = &deliveryv1alpha1.ProductSourceStatus{
-		OCI:       sourceOCI,
-		Version:   sourceVersion,
-		PantryRef: product.Spec.Source.PantryRef,
-		Digest:    oci.FakeDigest,
+		URL:     sourceOCI,
+		Version: sourceVersion,
+		Digest:  oci.FakeDigest,
 	}
 	meta.SetStatusCondition(&product.Status.Conditions, metav1.Condition{
 		Type:               deliveryv1alpha1.ConditionTypeReady,
@@ -1046,7 +978,7 @@ func deleteTestProduct(ctx context.Context, name string) {
 // with the given promotion mode and optional approval policy; an existing
 // Order is left as is.
 func createTestOrder(ctx context.Context, name string, mode deliveryv1alpha1.PromotionMode, policy ...*deliveryv1alpha1.ApprovalPolicy) {
-	createTestProduct(ctx, testProductName, deliveryv1alpha1.OCISource{OCI: testOCIRef, Version: testVersion})
+	createTestProduct(ctx, testProductName, deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion})
 
 	order := &deliveryv1alpha1.Order{
 		Name:      name,
@@ -1059,7 +991,406 @@ func createTestOrder(ctx context.Context, name string, mode deliveryv1alpha1.Pro
 	if len(policy) > 0 {
 		order.Spec.Promotion.Approvals = policy[0]
 	}
-	if err := k8sClient.Create(ctx, order); err != nil && !errors.IsAlreadyExists(err) {
+	if err := k8sClient.Create(ctx, order); err != nil && !apierrors.IsAlreadyExists(err) {
 		Expect(err).NotTo(HaveOccurred())
 	}
 }
+
+// imagesMissingRef is the image of imagesManifest that only fakes that
+// resolve everything resolve.
+const imagesMissingRef = "ghcr.io/example/missing:1"
+
+const (
+	imagesNginxName = "docker.io/library/nginx"
+	imagesNginxRef  = "nginx:1.27"
+	// imagesNginxLookup is the reference nginx:1.27 is looked up by.
+	imagesNginxLookup = imagesNginxName + ":1.27"
+	imagesNginxDigest = "sha256:abababababababababababababababababababababababababababababababab"
+	imagesManifest    = `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  template:
+    spec:
+      containers:
+        - name: web
+          image: nginx:1.27
+        - name: helper
+          image: ghcr.io/example/missing:1
+`
+)
+
+// workloadClient pulls a manifest with images and resolves only nginx:1.27.
+type workloadClient struct {
+	*oci.FakeClient
+	fs afero.Fs
+	// onPull, when set, runs at each pull, while a render is in progress.
+	onPull func()
+}
+
+func (c *workloadClient) Pull(_ context.Context, ref oci.Reference, targetDir string) (string, string, map[string]string, error) {
+	c.Pulls = append(c.Pulls, ref)
+	if c.onPull != nil {
+		c.onPull()
+	}
+	if err := afero.WriteFile(c.fs, filepath.Join(targetDir, "manifest.yaml"), []byte(imagesManifest), 0600); err != nil {
+		return "", "", nil, err
+	}
+	return "", oci.FakeDigest, nil, nil
+}
+
+// Resolve resolves the source artifact, which the Product pinned to
+// oci.FakeDigest, and leaves the images to the fake's Resolved.
+func (c *workloadClient) Resolve(ctx context.Context, ref oci.Reference) (oci.Descriptor, error) {
+	if ref.Digest == oci.FakeDigest {
+		return oci.Descriptor{Digest: oci.FakeDigest, MediaType: ocispec.MediaTypeImageManifest}, nil
+	}
+	return c.FakeClient.Resolve(ctx, ref)
+}
+
+// laggingCache reads like an informer cache that has not caught up with the
+// last render: it serves the Order from a snapshot taken before, when one is
+// set, and holds none of the Preparations.
+type laggingCache struct {
+	client.Client
+	order *deliveryv1alpha1.Order
+}
+
+func (c *laggingCache) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	switch obj := obj.(type) {
+	case *deliveryv1alpha1.Order:
+		if c.order != nil && key == client.ObjectKeyFromObject(c.order) {
+			c.order.DeepCopyInto(obj)
+			return nil
+		}
+	case *deliveryv1alpha1.Preparation:
+		return apierrors.NewNotFound(deliveryv1alpha1.GroupVersion.WithResource("preparations").GroupResource(), key.Name)
+	}
+	return c.Client.Get(ctx, key, obj, opts...)
+}
+
+// capturedEvent is an Event a capturingRecorder received.
+type capturedEvent struct {
+	regarding, related              runtime.Object
+	eventType, reason, action, note string
+}
+
+// capturingRecorder records Events with the objects they name, which
+// events.FakeRecorder reduces to a string.
+type capturingRecorder struct {
+	mu     sync.Mutex
+	events []capturedEvent
+}
+
+var _ events.EventRecorder = (*capturingRecorder)(nil)
+
+func (r *capturingRecorder) Eventf(regarding, related runtime.Object, eventType, reason, action, note string, args ...any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, capturedEvent{
+		regarding: regarding, related: related,
+		eventType: eventType, reason: reason, action: action, note: fmt.Sprintf(note, args...),
+	})
+}
+
+var _ = Describe("Order images", func() {
+	ctx := context.Background()
+
+	setupImages := func(productName, orderName string, images deliveryv1alpha1.ProductImages) {
+		createTestProduct(ctx, productName, deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion})
+		DeferCleanup(deleteTestProduct, ctx, productName)
+
+		product := getTestProduct(ctx, productName)
+		product.Spec.Images = images
+		Expect(k8sClient.Update(ctx, product)).To(Succeed())
+		resolveTestProduct(ctx, productName, testOCIRef, testVersion)
+
+		order := &deliveryv1alpha1.Order{
+			Name:      orderName,
+			Namespace: testNamespace,
+			Spec:      deliveryv1alpha1.OrderSpec{ProductRef: deliveryv1alpha1.ProductRef{Name: productName}},
+		}
+		Expect(k8sClient.Create(ctx, order)).To(Succeed())
+		DeferCleanup(func() {
+			_ = k8sClient.DeleteAllOf(ctx, &deliveryv1alpha1.Preparation{}, client.InNamespace(testNamespace),
+				client.MatchingLabels{deliveryv1alpha1.LabelOrder: orderName})
+			_ = k8sClient.Delete(ctx, order)
+		})
+	}
+
+	newImagesReconciler := func(resolved map[string]oci.Descriptor) (*OrderReconciler, *workloadClient, *capturingRecorder) {
+		fs := afero.NewMemMapFs()
+		registry := &workloadClient{FakeClient: &oci.FakeClient{Resolved: resolved}, fs: fs}
+		recorder := &capturingRecorder{}
+		return &OrderReconciler{
+			Client:           k8sClient,
+			APIReader:        k8sClient,
+			Scheme:           k8sClient.Scheme(),
+			Pipeline:         artifact.NewPipeline(artifact.NewStore(registry, fs, "")),
+			Registries:       fakeRegistries(registry),
+			Recorder:         recorder,
+			InstallNamespace: testNamespace,
+			BuilderID:        testBuilderID,
+		}, registry, recorder
+	}
+
+	// render reconciles the Order twice: once to add its finalizer, once to
+	// render it.
+	render := func(r *OrderReconciler, orderName string) error {
+		key := types.NamespacedName{Namespace: testNamespace, Name: orderName}
+		if _, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key}); err != nil {
+			return err
+		}
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		return err
+	}
+
+	reconcileImages := func(productName, orderName string, images deliveryv1alpha1.ProductImages) (*workloadClient, *capturingRecorder, error) {
+		setupImages(productName, orderName, images)
+		r, registry, recorder := newImagesReconciler(map[string]oci.Descriptor{
+			imagesNginxLookup: {Digest: imagesNginxDigest, MediaType: ocispec.MediaTypeImageIndex},
+		})
+		return registry, recorder, render(r, orderName)
+	}
+
+	preparationOf := func(orderName string) deliveryv1alpha1.Preparation {
+		list := &deliveryv1alpha1.PreparationList{}
+		Expect(k8sClient.List(ctx, list, client.InNamespace(testNamespace),
+			client.MatchingLabels{deliveryv1alpha1.LabelOrder: orderName})).To(Succeed())
+		Expect(list.Items).To(HaveLen(1))
+		return list.Items[0]
+	}
+
+	It("records every image and warns about the ones it could not resolve", func() {
+		registry, recorder, err := reconcileImages("images-record", "images-record", deliveryv1alpha1.ProductImages{})
+		Expect(err).NotTo(HaveOccurred())
+
+		prep := preparationOf("images-record")
+		Expect(prep.Spec.Images).To(Equal([]deliveryv1alpha1.PreparationImage{
+			{Ref: imagesMissingRef, Name: "ghcr.io/example/missing"},
+			{Ref: imagesNginxRef, Name: imagesNginxName, Digest: imagesNginxDigest, MediaType: ocispec.MediaTypeImageIndex},
+		}))
+
+		Expect(recorder.events).To(HaveLen(1), "one Event per render")
+		event := recorder.events[0]
+		Expect(event.eventType).To(Equal(corev1.EventTypeWarning))
+		Expect(event.reason).To(Equal(deliveryv1alpha1.ReasonImageNotResolved))
+		Expect(event.note).To(HavePrefix("Could not resolve 1 of 2 images: ghcr.io/example/missing:1: "))
+		Expect(event.regarding.(*deliveryv1alpha1.Order).Name).To(Equal("images-record"))
+		Expect(event.related).To(BeAssignableToTypeOf(&deliveryv1alpha1.Preparation{}))
+		Expect(event.related.(*deliveryv1alpha1.Preparation).Name).To(Equal(prep.Name),
+			"the Event names the Preparation, so client-go keeps the Events of two renders apart")
+
+		pushed := registry.Pushes[len(registry.Pushes)-1]
+		config, err := artifact.ParseConfig(pushed.Options.ConfigMediaType, pushed.Options.Config)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(config.Images).To(HaveLen(2))
+		Expect(config.Images[0].Error).To(ContainSubstring("not found"))
+		Expect(string(config.Intent)).NotTo(ContainSubstring(`"images"`), "the default policy leaves the intent unchanged")
+	})
+
+	It("fails the render under Pin when an image cannot be resolved", func() {
+		_, _, err := reconcileImages("images-pin", "images-pin", deliveryv1alpha1.ProductImages{Policy: deliveryv1alpha1.ImagePolicyPin})
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring(imagesMissingRef))
+
+		order := &deliveryv1alpha1.Order{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: "images-pin"}, order)).To(Succeed())
+		ready := meta.FindStatusCondition(order.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)
+		Expect(ready).NotTo(BeNil())
+		Expect(ready.Status).To(Equal(metav1.ConditionFalse))
+		Expect(ready.Message).To(ContainSubstring("Pin image policy"))
+	})
+
+	It("vendors the images below the Product's vendor location", func() {
+		const (
+			name      = "images-vendor"
+			vendorURL = "oci://registry.kokumi.svc.cluster.local:5000/default/vendor/images-vendor"
+		)
+		createTestProduct(ctx, name, deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion})
+		DeferCleanup(deleteTestProduct, ctx, name)
+		product := getTestProduct(ctx, name)
+		product.Spec.Images = deliveryv1alpha1.ProductImages{Policy: deliveryv1alpha1.ImagePolicyVendor}
+		product.Spec.Vendor = &deliveryv1alpha1.OCIDestination{URL: vendorURL}
+		Expect(k8sClient.Update(ctx, product)).To(Succeed())
+		// The Product publishes its vendored copy.
+		resolveTestProduct(ctx, name, vendorURL, testVersion)
+
+		order := &deliveryv1alpha1.Order{
+			Name:      name,
+			Namespace: testNamespace,
+			Spec:      deliveryv1alpha1.OrderSpec{ProductRef: deliveryv1alpha1.ProductRef{Name: name}},
+		}
+		Expect(k8sClient.Create(ctx, order)).To(Succeed())
+		DeferCleanup(func() {
+			_ = k8sClient.DeleteAllOf(ctx, &deliveryv1alpha1.Preparation{}, client.InNamespace(testNamespace),
+				client.MatchingLabels{deliveryv1alpha1.LabelOrder: name})
+			_ = k8sClient.Delete(ctx, order)
+		})
+
+		r, registry, _ := newImagesReconciler(map[string]oci.Descriptor{
+			imagesNginxLookup: {Digest: imagesNginxDigest, MediaType: ocispec.MediaTypeImageIndex},
+			imagesMissingRef:  {Digest: imagesNginxDigest, MediaType: ocispec.MediaTypeImageIndex},
+		})
+		Expect(render(r, name)).To(Succeed())
+
+		vendoredRoot := strings.TrimPrefix(vendorURL, "oci://") + "/images/"
+		for _, img := range preparationOf(name).Spec.Images {
+			Expect(img.Vendored).To(HavePrefix(vendoredRoot), "below the vendor location, not the Order's destination")
+		}
+		Expect(registry.Copies).NotTo(BeEmpty())
+
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: name}, order)).To(Succeed())
+		Expect(order.Status.RegistryAccess).To(ContainElements(
+			deliveryv1alpha1.RegistryAccess{URL: vendorURL + "/images", Operation: deliveryv1alpha1.RegistryOperationPush, Client: deliveryv1alpha1.RegistryClientKokumi},
+			deliveryv1alpha1.RegistryAccess{URL: vendorURL + "/images", Operation: deliveryv1alpha1.RegistryOperationPull, Client: deliveryv1alpha1.RegistryClientKubelet},
+		))
+	})
+
+	It("puts the image policy into the intent", func() {
+		registry, _, err := reconcileImages("images-intent", "images-intent", deliveryv1alpha1.ProductImages{
+			FieldSpecs: []deliveryv1alpha1.ImageFieldSpec{{Kind: "Prometheus", Path: "spec/image"}},
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		pushed := registry.Pushes[len(registry.Pushes)-1]
+		config, err := artifact.ParseConfig(pushed.Options.ConfigMediaType, pushed.Options.Config)
+		Expect(err).NotTo(HaveOccurred())
+
+		var intent map[string]any
+		Expect(json.Unmarshal(config.Intent, &intent)).To(Succeed())
+		Expect(intent["images"]).To(Equal(map[string]any{
+			"policy":     "Record",
+			"fieldSpecs": []any{map[string]any{"kind": "Prometheus", "path": "spec/image"}},
+		}))
+	})
+
+	It("keeps the digests of the latest Preparation when a Pin Order renders again", func() {
+		const (
+			movedDigest   = "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+			missingDigest = "sha256:efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef"
+		)
+		setupImages("images-lock", "images-lock", deliveryv1alpha1.ProductImages{Policy: deliveryv1alpha1.ImagePolicyPin})
+		r, registry, _ := newImagesReconciler(map[string]oci.Descriptor{
+			imagesNginxLookup: {Digest: imagesNginxDigest, MediaType: ocispec.MediaTypeImageIndex},
+			imagesMissingRef:  {Digest: missingDigest, MediaType: ocispec.MediaTypeImageManifest},
+		})
+		Expect(render(r, "images-lock")).To(Succeed())
+
+		By("moving the tag upstream and changing the Order before the cache holds the first Preparation")
+		registry.Resolved[imagesNginxLookup] = oci.Descriptor{Digest: movedDigest, MediaType: ocispec.MediaTypeImageIndex}
+		order := &deliveryv1alpha1.Order{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: "images-lock"}, order)).To(Succeed())
+		first := order.Status.LatestPreparationName
+		order.Spec.Edits = []deliveryv1alpha1.Patch{{
+			Target: deliveryv1alpha1.PatchTarget{Kind: testDeploymentKind, Name: "web"},
+			Set:    map[string]string{testReplicasPath: "3"},
+		}}
+		Expect(k8sClient.Update(ctx, order)).To(Succeed())
+		registry.Resolves = nil
+		lagging := *r
+		lagging.Client = &laggingCache{Client: k8sClient}
+		Expect(render(&lagging, "images-lock")).To(Succeed())
+
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: "images-lock"}, order)).To(Succeed())
+		Expect(order.Status.LatestPreparationName).NotTo(Equal(first), "the edit renders a new Preparation")
+		prep := &deliveryv1alpha1.Preparation{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: order.Status.LatestPreparationName}, prep)).To(Succeed())
+		Expect(prep.Spec.Images).To(ContainElement(deliveryv1alpha1.PreparationImage{
+			Ref: imagesNginxRef, Name: imagesNginxName, Digest: imagesNginxDigest, MediaType: ocispec.MediaTypeImageIndex,
+		}), "the locked digest is kept, not the moved tag")
+		Expect(registry.Resolves).To(BeEmpty(), "locked references are not looked up again")
+	})
+
+	It("does not render again while the cache still holds the Order as it was while rendering", func() {
+		setupImages("images-stale", "images-stale", deliveryv1alpha1.ProductImages{})
+		r, registry, _ := newImagesReconciler(map[string]oci.Descriptor{
+			imagesNginxLookup: {Digest: imagesNginxDigest, MediaType: ocispec.MediaTypeImageIndex},
+		})
+		key := types.NamespacedName{Namespace: testNamespace, Name: "images-stale"}
+		var rendering *deliveryv1alpha1.Order
+		registry.onPull = func() {
+			rendering = &deliveryv1alpha1.Order{}
+			Expect(k8sClient.Get(ctx, key, rendering)).To(Succeed())
+		}
+		Expect(render(r, "images-stale")).To(Succeed())
+		registry.onPull = nil
+		Expect(registry.Pushes).To(HaveLen(1))
+		Expect(rendering.Status.LatestPreparationName).To(BeEmpty(), "the snapshot predates the render's Ready write")
+
+		By("reconciling with a cache that has not seen the render's Ready write")
+		lagging := *r
+		lagging.Client = &laggingCache{Client: k8sClient, order: rendering}
+		_, err := lagging.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(registry.Pushes).To(HaveLen(1), "the Order is not rendered again")
+		Expect(err).NotTo(HaveOccurred())
+		preparationOf("images-stale")
+	})
+})
+
+var _ = Describe("Image schema", func() {
+	ctx := context.Background()
+
+	It("accepts image digests with every algorithm the OCI image spec registers", func() {
+		sha512 := "sha512:" + strings.Repeat("ab", 64)
+		digest := "sha256:" + strings.Repeat("cd", 32)
+		prep := &deliveryv1alpha1.Preparation{
+			Name:      "images-sha512",
+			Namespace: testNamespace,
+			Spec: deliveryv1alpha1.PreparationSpec{
+				OrderName: "images-sha512",
+				Source:    deliveryv1alpha1.OrderSource{URL: testOCIRef, BaseDigest: digest},
+				Renderer: deliveryv1alpha1.Renderer{
+					Type:    deliveryv1alpha1.RenderTypeManifest,
+					Version: testRendererVersion,
+					Builder: testBuilderID,
+				},
+				ConfigHash: testConfigHash,
+				Artifact: deliveryv1alpha1.Artifact{
+					OCIRef: "oci://registry.kokumi.svc.cluster.local:5000/images-sha512@" + digest,
+					Digest: digest,
+				},
+				Images: []deliveryv1alpha1.PreparationImage{
+					{Ref: "ghcr.io/example/app@" + sha512, Name: "ghcr.io/example/app", Digest: sha512},
+					{Ref: imagesNginxRef, Name: imagesNginxName, Digest: imagesNginxDigest},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, prep)).To(Succeed())
+		DeferCleanup(func() { _ = k8sClient.Delete(ctx, prep) })
+	})
+
+	It("requires mirror prefixes to start with a registry host", func() {
+		kitchen := func(prefix string) *deliveryv1alpha1.Kitchen {
+			return &deliveryv1alpha1.Kitchen{
+				Name:      deliveryv1alpha1.DefaultKitchenName,
+				Namespace: testNamespace,
+				Spec: deliveryv1alpha1.KitchenSpec{Images: &deliveryv1alpha1.KitchenImages{
+					Mirrors: []deliveryv1alpha1.ImageMirror{{Prefix: prefix, Location: "oci://harbor.example.com/hub"}},
+				}},
+			}
+		}
+
+		for _, prefix := range []string{"docker.io", "docker.io/library", "localhost:5000/app", "localhost", "registry:5000"} {
+			Expect(k8sClient.Create(ctx, kitchen(prefix), client.DryRunAll)).To(Succeed(), prefix)
+		}
+		for _, prefix := range []string{"library/nginx", "nginx"} {
+			Expect(k8sClient.Create(ctx, kitchen(prefix), client.DryRunAll)).To(
+				MatchError(ContainSubstring("must start with a registry host")), prefix)
+		}
+	})
+})
+
+var _ = Describe("truncateNote", func() {
+	It("keeps notes that fit", func() {
+		Expect(truncateNote("short")).To(Equal("short"))
+	})
+
+	It("cuts long notes at a rune boundary to the limit of events.k8s.io", func() {
+		note := truncateNote(strings.Repeat("ä", maxEventNote))
+		Expect(len(note)).To(BeNumerically("<=", maxEventNote))
+		Expect(utf8.ValidString(note)).To(BeTrue())
+		Expect(note).To(HaveSuffix("…"))
+	})
+})

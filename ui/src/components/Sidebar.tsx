@@ -72,7 +72,18 @@ function IconSettings() {
   )
 }
 
-function IconPantry() {
+/** Stacked layers: an OCI registry stores artifacts as layers of content. */
+function IconRegistry() {
+  return (
+    <svg className={styles.navIcon} viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 2 16 5.5 9 9 2 5.5Z" />
+      <path d="M2 9l7 3.5L16 9" />
+      <path d="M2 12.5 9 16l7-3.5" />
+    </svg>
+  )
+}
+
+function IconRepository() {
   return (
     <svg className={styles.navIcon} viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
       <rect x="2" y="5" width="14" height="10" rx="2" />
@@ -103,7 +114,7 @@ const sections: NavSection[] = [
     items: [
       { to: '/products',     label: 'Products',     icon: <IconProduct /> },
       { to: '/orders',       label: 'Orders',       icon: <IconOrder /> },
-      { to: '/pantries',     label: 'Pantries',     icon: <IconPantry /> },
+      { to: '/repositories', label: 'Repositories', icon: <IconRepository /> },
       { to: '/preparations', label: 'Preparations', icon: <IconPreparation /> },
       { to: '/servings',     label: 'Servings',     icon: <IconServing /> },
     ],
@@ -111,6 +122,7 @@ const sections: NavSection[] = [
   {
     label: 'System',
     items: [
+      { to: '/registries', label: 'Registries', icon: <IconRegistry /> },
       {
         to: '/settings',
         label: 'Settings',
