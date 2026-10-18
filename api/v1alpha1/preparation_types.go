@@ -25,13 +25,13 @@ import (
 // OrderSource defines the immutable base artifact for a preparation
 type OrderSource struct {
 	// url is the oci:// URL of the repository of the source artifact
-	// +kubebuilder:validation:Required
+	// +required
 	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() == 'oci'",message="must be a valid OCI URL"
 	URL string `json:"url"`
 
 	// baseDigest is the SHA256 digest of the base source artifact
-	// +kubebuilder:validation:Required
+	// +required
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	BaseDigest string `json:"baseDigest"`
@@ -74,13 +74,13 @@ type Renderer struct {
 // Artifact defines the final immutable output of the rendering process
 type Artifact struct {
 	// ociRef is the full OCI reference including digest
-	// +kubebuilder:validation:Required
+	// +required
 	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:Pattern=`^oci://.*@sha256:[a-f0-9]{64}$`
 	OCIRef string `json:"ociRef"`
 
 	// digest is the SHA256 digest of the artifact
-	// +kubebuilder:validation:Required
+	// +required
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	Digest string `json:"digest"`
@@ -125,26 +125,26 @@ type GitSource struct {
 // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Preparation spec is immutable"
 type PreparationSpec struct {
 	// orderName is the name of the Order this preparation belongs to
-	// +kubebuilder:validation:Required
+	// +required
 	// +kubebuilder:validation:MaxLength=253
 	OrderName string `json:"orderName"`
 
 	// source defines the source artifact information
-	// +kubebuilder:validation:Required
+	// +required
 	Source OrderSource `json:"source"`
 
 	// renderer identifies what rendered this preparation
-	// +kubebuilder:validation:Required
+	// +required
 	Renderer Renderer `json:"renderer"`
 
 	// configHash is the SHA256 hash of the canonicalized order configuration
-	// +kubebuilder:validation:Required
+	// +required
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]+$`
 	ConfigHash string `json:"configHash"`
 
 	// artifact defines the output artifact information
-	// +kubebuilder:validation:Required
+	// +required
 	Artifact Artifact `json:"artifact"`
 
 	// commitMessage is the human-readable description of why this Preparation was created.

@@ -39,13 +39,17 @@ const (
 type AllowedPatchTarget struct {
 	// target identifies the resource that Orders may patch. A target without
 	// a namespace matches the resource in any namespace.
-	// +kubebuilder:validation:Required
+	// +required
 	Target PatchTarget `json:"target"`
 
 	// paths lists the allowed JSONPath expressions within the target
 	// (e.g. ".spec.replicas").
-	// +kubebuilder:validation:Required
+	// +required
 	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=1024
+	// +kubebuilder:validation:MaxItems=64
+	// +listType=set
 	Paths []string `json:"paths"`
 }
 
@@ -187,7 +191,7 @@ func (i ProductImages) EffectivePolicy() ImagePolicy {
 type ProductSpec struct {
 	// source defines the OCI artifact the Product is built from. Orders
 	// cannot change the source or version.
-	// +kubebuilder:validation:Required
+	// +required
 	Source OCISource `json:"source"`
 
 	// vendor optionally copies the source artifact to another OCI
@@ -209,6 +213,8 @@ type ProductSpec struct {
 	// patches defines base patches applied for every Order. Order patches
 	// are merged on top, per target.
 	// +optional
+	// +listType=atomic
+	// +kubebuilder:validation:MaxItems=128
 	Patches []Patch `json:"patches,omitempty"`
 
 	// overrides controls what Orders may change. By default Orders may not
@@ -241,19 +247,19 @@ type ProductSpec struct {
 type ProductSourceStatus struct {
 	// url is the oci:// URL of the repository of the source artifact: of
 	// the vendored copy when the Product vendors.
-	// +kubebuilder:validation:Required
+	// +required
 	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() == 'oci'",message="must be a valid OCI URL"
 	URL string `json:"url"`
 
 	// version is the tag of the source artifact.
-	// +kubebuilder:validation:Required
+	// +required
 	// +kubebuilder:validation:MinLength=1
 	Version string `json:"version"`
 
 	// digest is the digest version resolved to. Orders render exactly this
 	// artifact, so every variant of the Product renders the same source.
-	// +kubebuilder:validation:Required
+	// +required
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	Digest string `json:"digest"`
 

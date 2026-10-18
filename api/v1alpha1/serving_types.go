@@ -25,7 +25,7 @@ import (
 // taken from the Order's spec.promotion.mode.
 type ServingSpec struct {
 	// orderName is the name of the Order to serve
-	// +kubebuilder:validation:Required
+	// +required
 	OrderName string `json:"orderName"`
 
 	// preparationName is the Preparation promoted for Manual promotion.
