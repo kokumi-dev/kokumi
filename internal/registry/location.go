@@ -65,6 +65,20 @@ func (l Location) Covers(other Location) bool {
 	return l.Path == "" || other.Path == l.Path || strings.HasPrefix(other.Path, l.Path+"/")
 }
 
+// URLCovers reports whether the location registryURL covers the location
+// url, both oci:// URLs.
+func URLCovers(registryURL, url string) (bool, error) {
+	reg, err := ParseLocation(registryURL)
+	if err != nil {
+		return false, err
+	}
+	loc, err := ParseLocation(url)
+	if err != nil {
+		return false, err
+	}
+	return reg.Covers(loc), nil
+}
+
 // Match returns the Registry among registries whose url covers url with the
 // longest path, or nil when none covers it.
 func Match(registries []deliveryv1alpha1.Registry, url string) (*deliveryv1alpha1.Registry, error) {

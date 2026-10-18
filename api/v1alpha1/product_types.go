@@ -426,6 +426,16 @@ type Product struct {
 	Status ProductStatus `json:"status,omitzero"`
 }
 
+// GetConditions returns the status conditions of the Product.
+func (p *Product) GetConditions() []metav1.Condition {
+	return p.Status.Conditions
+}
+
+// SetConditions sets the status conditions of the Product.
+func (p *Product) SetConditions(conditions []metav1.Condition) {
+	p.Status.Conditions = conditions
+}
+
 // +kubebuilder:object:root=true
 
 // ProductList contains a list of Product

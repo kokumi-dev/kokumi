@@ -409,6 +409,16 @@ type Preparation struct {
 	Status PreparationStatus `json:"status,omitzero"`
 }
 
+// GetConditions returns the status conditions of the Preparation.
+func (p *Preparation) GetConditions() []metav1.Condition {
+	return p.Status.Conditions
+}
+
+// SetConditions sets the status conditions of the Preparation.
+func (p *Preparation) SetConditions(conditions []metav1.Condition) {
+	p.Status.Conditions = conditions
+}
+
 // +kubebuilder:object:root=true
 
 // PreparationList contains a list of Preparation

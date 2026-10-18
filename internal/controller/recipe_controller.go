@@ -78,10 +78,7 @@ func (r *RecipeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 }
 
 // reconcileRecipe materializes the Recipe. Behavior is reserved for future work.
-func (r *RecipeReconciler) reconcileRecipe(ctx context.Context, recipe *deliveryv1alpha1.Recipe) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
-	_ = recipe
-
+func (r *RecipeReconciler) reconcileRecipe(context.Context, *deliveryv1alpha1.Recipe) (ctrl.Result, error) {
 	return ctrl.Result{}, nil
 }
 

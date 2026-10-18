@@ -330,6 +330,16 @@ type Kitchen struct {
 	Status KitchenStatus `json:"status,omitzero"`
 }
 
+// GetConditions returns the status conditions of the Kitchen.
+func (k *Kitchen) GetConditions() []metav1.Condition {
+	return k.Status.Conditions
+}
+
+// SetConditions sets the status conditions of the Kitchen.
+func (k *Kitchen) SetConditions(conditions []metav1.Condition) {
+	k.Status.Conditions = conditions
+}
+
 // +kubebuilder:object:root=true
 
 // KitchenList contains a list of Kitchen

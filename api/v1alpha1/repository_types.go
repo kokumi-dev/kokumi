@@ -97,6 +97,16 @@ type Repository struct {
 	Status RepositoryStatus `json:"status,omitzero"`
 }
 
+// GetConditions returns the status conditions of the Repository.
+func (r *Repository) GetConditions() []metav1.Condition {
+	return r.Status.Conditions
+}
+
+// SetConditions sets the status conditions of the Repository.
+func (r *Repository) SetConditions(conditions []metav1.Condition) {
+	r.Status.Conditions = conditions
+}
+
 // +kubebuilder:object:root=true
 
 // RepositoryList contains a list of Repository

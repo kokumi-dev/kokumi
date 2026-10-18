@@ -22,24 +22,34 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"time"
 
-	"github.com/sigstore/cosign/v3/pkg/cosign"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/conditions"
+	"github.com/kokumi-dev/kokumi/internal/resources"
 	"github.com/kokumi-dev/kokumi/internal/signing"
-	"github.com/kokumi-dev/kokumi/internal/status"
 )
+
+// minTokenSigningKeyLen is the minimum accepted HMAC signing-key length (bytes).
+const minTokenSigningKeyLen = 32
+
+// kitchenSigning reloads the signing state from the Kitchen and its key.
+// *signing.Provider implements it.
+type kitchenSigning interface {
+	Load(ctx context.Context) (signing.State, error)
+}
 
 // KitchenReconciler reconciles a Kitchen object
 type KitchenReconciler struct {
@@ -51,27 +61,21 @@ type KitchenReconciler struct {
 	SigningNamespace string
 	// Signing is reloaded whenever the Kitchen or its signing key changes,
 	// so that the controllers that sign and verify use the current trust.
-	Signing *signing.Provider
+	Signing kitchenSigning
 }
-
-// minTokenSigningKeyLen is the minimum accepted HMAC signing-key length (bytes).
-const minTokenSigningKeyLen = 32
 
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=kitchens,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=kitchens/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=kitchens/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
+// Reconcile ensures the signing key and the auth Secrets of the Kitchen and
+// records its readiness.
 //
 // The Kitchen is a self-healing singleton: a missing object is recreated so
 // the UI always has a resource to read/write. There is no finalizer because
 // there is nothing to clean up.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.24.1/pkg/reconcile
-func (r *KitchenReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *KitchenReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, err error) {
 	logger := log.FromContext(ctx)
 	logger.Info("Reconciling Kitchen", "namespace", req.Namespace, "name", req.Name)
 
@@ -82,45 +86,49 @@ func (r *KitchenReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	kitchen := &deliveryv1alpha1.Kitchen{}
 	if err := r.Get(ctx, req.NamespacedName, kitchen); err != nil {
-		if !apierrors.IsNotFound(err) {
-			logger.Error(err, "Failed to get Kitchen")
-			return ctrl.Result{}, fmt.Errorf("failed to get Kitchen: %w", err)
+		if apierrors.IsNotFound(err) {
+			// Its creation reconciles it.
+			logger.Info("Kitchen resource not found, creating it")
+			return ctrl.Result{}, r.createKitchen(ctx)
 		}
-		// Ensure the singleton exists so the UI always has a resource to read/write.
-		kitchen = &deliveryv1alpha1.Kitchen{
-			Name:      deliveryv1alpha1.DefaultKitchenName,
-			Namespace: r.Namespace,
-		}
-		if err := r.Create(ctx, kitchen); err != nil && !apierrors.IsAlreadyExists(err) {
-			logger.Error(err, "Failed to create default Kitchen")
-			return ctrl.Result{}, err
-		}
+
+		logger.Error(err, "Failed to get Kitchen")
+
+		return ctrl.Result{}, fmt.Errorf("failed to get Kitchen: %w", err)
+	}
+
+	before := kitchen.Status.DeepCopy()
+	defer func() { result, err = r.patchStatus(ctx, kitchen, before, result, err) }()
+
+	if !kitchen.DeletionTimestamp.IsZero() {
+		return ctrl.Result{}, nil
 	}
 
 	return r.reconcileKitchen(ctx, kitchen)
 }
 
-// reconcileKitchen ensures the signing key and the auth-related Secrets and
-// records the Kitchen's readiness.
+// reconcileKitchen loads the signing key and checks the auth Secrets. The
+// Kitchen is ready once both are usable.
 func (r *KitchenReconciler) reconcileKitchen(ctx context.Context, kitchen *deliveryv1alpha1.Kitchen) (ctrl.Result, error) {
-	updater := status.NewKitchenUpdater(r.Client)
-
-	ready, err := r.reconcileSigningKey(ctx, kitchen, updater)
+	ready, err := r.reconcileSigningKey(ctx, kitchen)
 	if !ready || err != nil {
 		return ctrl.Result{}, err
 	}
 
 	if err := r.validateAuth(ctx, kitchen); err != nil {
-		return ctrl.Result{}, updater.Failed(ctx, kitchen, err)
+		// A change to the Kitchen or its Secrets reconciles again.
+		conditions.MarkFalse(kitchen, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonFailed, err.Error())
+		return ctrl.Result{}, nil
 	}
 
-	return ctrl.Result{}, updater.Ready(ctx, kitchen, "Kitchen is valid and available")
+	conditions.MarkTrue(kitchen, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonReady, "Kitchen is valid and available")
+	return ctrl.Result{}, nil
 }
 
 // reconcileSigningKey generates the signing key when it does not exist,
 // reloads the signing state, and publishes the public key. It reports whether
 // the key is ready.
-func (r *KitchenReconciler) reconcileSigningKey(ctx context.Context, kitchen *deliveryv1alpha1.Kitchen, updater *status.KitchenUpdater) (bool, error) {
+func (r *KitchenReconciler) reconcileSigningKey(ctx context.Context, kitchen *deliveryv1alpha1.Kitchen) (bool, error) {
 	// The key is loaded even when generating it failed, so that a deleted key
 	// is no longer used.
 	generateErr := r.ensureSigningKeySecret(ctx)
@@ -134,20 +142,30 @@ func (r *KitchenReconciler) reconcileSigningKey(ctx context.Context, kitchen *de
 			// Neither the key's namespace nor its RBAC is watched, so the
 			// error requeues the Kitchen to retry.
 			err := fmt.Errorf("generating signing key Secret: %w", generateErr)
-			return false, errors.Join(updater.SigningKeyFailed(ctx, kitchen, deliveryv1alpha1.ReasonKeyMissing, err), err)
+			markSigningKeyFailed(kitchen, deliveryv1alpha1.ReasonKeyMissing, err)
+			return false, err
 		}
 		reason := deliveryv1alpha1.ReasonKeyInvalid
 		if errors.Is(err, signing.ErrInvalidTrustedKey) {
 			reason = deliveryv1alpha1.ReasonTrustedKeyInvalid
 		}
 		log.FromContext(ctx).Error(err, "Could not load signing key")
-		return false, updater.SigningKeyFailed(ctx, kitchen, reason, err)
+		markSigningKeyFailed(kitchen, reason, err)
+		return false, nil
 	}
 
-	return true, updater.SigningKeyReady(ctx, kitchen, deliveryv1alpha1.KitchenSigningStatus{
-		KeyID:     state.Signer.KeyID(),
-		PublicKey: string(state.Signer.PublicKeyPEM()),
-	})
+	keyID := state.Signer.KeyID()
+	kitchen.Status.Signing = &deliveryv1alpha1.KitchenSigningStatus{KeyID: keyID, PublicKey: string(state.Signer.PublicKeyPEM())}
+	conditions.MarkTrue(kitchen, deliveryv1alpha1.ConditionTypeSigningKeyReady, deliveryv1alpha1.ReasonKeyReady, "Signing key "+keyID+" loaded")
+	return true, nil
+}
+
+// markSigningKeyFailed records that the signing key cannot be used, for
+// reason. The published public key is kept, since artifacts it signed still
+// verify.
+func markSigningKeyFailed(kitchen *deliveryv1alpha1.Kitchen, reason string, err error) {
+	conditions.MarkFalse(kitchen, deliveryv1alpha1.ConditionTypeSigningKeyReady, reason, err.Error())
+	conditions.MarkFalse(kitchen, deliveryv1alpha1.ConditionTypeReady, reason, err.Error())
 }
 
 // validateAuth ensures the token signing-key Secret and checks that the
@@ -196,32 +214,120 @@ func (r *KitchenReconciler) requireSecretKey(ctx context.Context, namespace, nam
 	return nil
 }
 
-// ensureDefaultRunner returns a manager.Runnable that creates the singleton
-// Kitchen/default once on startup if it does not already exist.
-func (r *KitchenReconciler) ensureDefaultRunner(mgr manager.Manager) manager.RunnableFunc {
-	return func(ctx context.Context) error {
-		// Use the uncached API reader so this works before the informer cache
-		// has started.
-		reader := mgr.GetAPIReader()
-		kitchen := &deliveryv1alpha1.Kitchen{}
-		err := reader.Get(ctx, client.ObjectKey{
-			Namespace: r.Namespace,
-			Name:      deliveryv1alpha1.DefaultKitchenName,
-		}, kitchen)
-		if err == nil {
-			return nil
+// ensureSigningKeySecret generates the signing key Secret in cosign's layout
+// when it does not exist. A key brought by a cluster admin, for example with
+// "cosign generate-key-pair k8s://kokumi-signing/kokumi-signing-key", is kept.
+func (r *KitchenReconciler) ensureSigningKeySecret(ctx context.Context) error {
+	err := r.Get(ctx, client.ObjectKey{Namespace: r.SigningNamespace, Name: deliveryv1alpha1.SigningKeySecretName}, &corev1.Secret{})
+	if err == nil || !apierrors.IsNotFound(err) {
+		return err
+	}
+
+	key, err := signing.GenerateKey()
+	if err != nil {
+		return err
+	}
+	if err := r.Create(ctx, resources.SigningKeySecret(r.SigningNamespace, key)); err != nil && !apierrors.IsAlreadyExists(err) {
+		return err
+	}
+
+	log.FromContext(ctx).Info("Generated signing key", "namespace", r.SigningNamespace, "secret", deliveryv1alpha1.SigningKeySecretName)
+	return nil
+}
+
+// ensureTokenSigningKeySecret makes sure the token signing-key Secret exists.
+func (r *KitchenReconciler) ensureTokenSigningKeySecret(ctx context.Context, kitchen *deliveryv1alpha1.Kitchen) error {
+	name := deliveryv1alpha1.DefaultTokenSigningKeySecretName
+	if ref := kitchen.Spec.Auth.TokenSigningKeySecretRef; ref != nil && ref.Name != "" {
+		name = ref.Name
+	}
+
+	secret := &corev1.Secret{}
+	key := client.ObjectKey{Namespace: kitchen.Namespace, Name: name}
+	if err := r.Get(ctx, key, secret); err == nil {
+		if len(secret.Data[resources.TokenSigningKey]) < minTokenSigningKeyLen {
+			return fmt.Errorf("token signing-key Secret %q must contain a %q of at least %d bytes", name, resources.TokenSigningKey, minTokenSigningKeyLen)
 		}
+		return nil
+	} else if !apierrors.IsNotFound(err) {
+		return err
+	}
+
+	generated, err := generateTokenSigningKey()
+	if err != nil {
+		return fmt.Errorf("generating token signing key: %w", err)
+	}
+	if err := r.Create(ctx, resources.TokenSigningKeySecret(kitchen.Namespace, name, generated)); err != nil {
+		if !apierrors.IsAlreadyExists(err) {
+			return err
+		}
+		if rerr := r.Get(ctx, key, secret); rerr != nil {
+			return rerr
+		}
+		if len(secret.Data[resources.TokenSigningKey]) < minTokenSigningKeyLen {
+			return fmt.Errorf("token signing-key Secret %q created concurrently but lacks a valid %q", name, resources.TokenSigningKey)
+		}
+	}
+	return nil
+}
+
+// generateTokenSigningKey returns a random 32-byte base64-encoded key.
+func generateTokenSigningKey() ([]byte, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return nil, err
+	}
+	out := make([]byte, base64.StdEncoding.EncodedLen(len(buf)))
+	base64.StdEncoding.Encode(out, buf)
+	return out, nil
+}
+
+// createKitchen creates the singleton Kitchen with every setting at its
+// default.
+func (r *KitchenReconciler) createKitchen(ctx context.Context) error {
+	if err := r.Create(ctx, resources.Kitchen(r.Namespace)); err != nil && !apierrors.IsAlreadyExists(err) {
+		return fmt.Errorf("failed to create Kitchen: %w", err)
+	}
+	return nil
+}
+
+// patchStatus writes the status kitchen took on in this reconcile, unless it
+// is unchanged, and returns how to requeue: as the reconcile decided, or soon
+// when the patch conflicts. The patch is locked to the version this reconcile
+// read or last wrote, so that a reconcile from a stale cache never overwrites
+// a newer status.
+func (r *KitchenReconciler) patchStatus(
+	ctx context.Context, kitchen *deliveryv1alpha1.Kitchen, before *deliveryv1alpha1.KitchenStatus, result ctrl.Result, err error,
+) (ctrl.Result, error) {
+	kitchen.Status.ObservedGeneration = kitchen.Generation
+	if equality.Semantic.DeepEqual(*before, kitchen.Status) {
+		return result, err
+	}
+
+	base := kitchen.DeepCopy()
+	base.Status = *before
+	perr := r.Status().Patch(ctx, kitchen, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
+	switch {
+	case perr == nil, apierrors.IsNotFound(perr):
+		return result, err
+	case apierrors.IsConflict(perr) && err == nil:
+		log.FromContext(ctx).V(1).Info("Kitchen changed during the reconcile, reconciling it again")
+		return ctrl.Result{RequeueAfter: time.Second}, nil
+	default:
+		return result, errors.Join(err, fmt.Errorf("failed to patch Kitchen status: %w", perr))
+	}
+}
+
+// ensureKitchen returns a Runnable that creates the singleton Kitchen once on
+// startup if it does not already exist. reader must work before the
+// informer cache has started.
+func (r *KitchenReconciler) ensureKitchen(reader client.Reader) manager.RunnableFunc {
+	return func(ctx context.Context) error {
+		err := reader.Get(ctx, client.ObjectKey{Namespace: r.Namespace, Name: deliveryv1alpha1.DefaultKitchenName}, &deliveryv1alpha1.Kitchen{})
 		if !apierrors.IsNotFound(err) {
 			return err
 		}
-		kitchen = &deliveryv1alpha1.Kitchen{
-			Name:      deliveryv1alpha1.DefaultKitchenName,
-			Namespace: r.Namespace,
-		}
-		if err := r.Create(ctx, kitchen); err != nil && !apierrors.IsAlreadyExists(err) {
-			return err
-		}
-		return nil
+		return r.createKitchen(ctx)
 	}
 }
 
@@ -251,126 +357,6 @@ func SigningInputs(reader client.Reader, namespace, keyNamespace string) signing
 	}
 }
 
-// signingChanges returns a channel that receives an event whenever provider
-// makes a state with different trust current. Controllers watch it with
-// source.Channel to verify again.
-func signingChanges(provider *signing.Provider) <-chan event.GenericEvent {
-	ch := make(chan event.GenericEvent, 1)
-	provider.OnChange(func() {
-		select {
-		case ch <- event.GenericEvent{Object: &deliveryv1alpha1.Kitchen{}}:
-		default:
-			// A notification is already pending.
-		}
-	})
-	return ch
-}
-
-// ensureSigningKeySecret generates the signing key Secret in cosign's layout
-// when it does not exist. A key brought by a cluster admin, for example with
-// "cosign generate-key-pair k8s://kokumi-signing/kokumi-signing-key", is kept.
-func (r *KitchenReconciler) ensureSigningKeySecret(ctx context.Context) error {
-	namespace := r.SigningNamespace
-	secret := &corev1.Secret{}
-	err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: deliveryv1alpha1.SigningKeySecretName}, secret)
-	if err == nil || !apierrors.IsNotFound(err) {
-		return err
-	}
-
-	password, err := generateSigningKey()
-	if err != nil {
-		return fmt.Errorf("generating signing key password: %w", err)
-	}
-	keys, err := cosign.GenerateKeyPair(func(bool) ([]byte, error) { return password, nil })
-	if err != nil {
-		return fmt.Errorf("generating signing key: %w", err)
-	}
-
-	secret = &corev1.Secret{
-		Name:      deliveryv1alpha1.SigningKeySecretName,
-		Namespace: namespace,
-		Labels:    kitchenSecretLabels("controller"),
-		Data: map[string][]byte{
-			signing.SecretPrivateKey: keys.PrivateBytes,
-			signing.SecretPassword:   password,
-			signing.SecretPublicKey:  keys.PublicBytes,
-		},
-	}
-	if err := r.Create(ctx, secret); err != nil && !apierrors.IsAlreadyExists(err) {
-		return err
-	}
-
-	log.FromContext(ctx).Info("Generated signing key", "namespace", namespace, "secret", deliveryv1alpha1.SigningKeySecretName)
-	return nil
-}
-
-// ensureTokenSigningKeySecret makes sure the token signing-key Secret exists.
-func (r *KitchenReconciler) ensureTokenSigningKeySecret(ctx context.Context, kitchen *deliveryv1alpha1.Kitchen) error {
-	namespace := kitchen.Namespace
-	name := deliveryv1alpha1.DefaultTokenSigningKeySecretName
-	if ref := kitchen.Spec.Auth.TokenSigningKeySecretRef; ref != nil && ref.Name != "" {
-		name = ref.Name
-	}
-
-	secret := &corev1.Secret{}
-	key := client.ObjectKey{Namespace: namespace, Name: name}
-	if err := r.Get(ctx, key, secret); err == nil {
-		if len(secret.Data["signing-key"]) < minTokenSigningKeyLen {
-			return fmt.Errorf("token signing-key Secret %q must contain a %q of at least %d bytes", name, "signing-key", minTokenSigningKeyLen)
-		}
-		return nil
-	} else if !apierrors.IsNotFound(err) {
-		return err
-	}
-
-	generated, err := generateSigningKey()
-	if err != nil {
-		return fmt.Errorf("generating token signing key: %w", err)
-	}
-	secret = &corev1.Secret{
-		Name:      name,
-		Namespace: namespace,
-		Labels:    kitchenSecretLabels("server"),
-		Data: map[string][]byte{
-			"signing-key": generated,
-		},
-	}
-	if err := r.Create(ctx, secret); err != nil {
-		if !apierrors.IsAlreadyExists(err) {
-			return err
-		}
-		if rerr := r.Get(ctx, key, secret); rerr != nil {
-			return rerr
-		}
-		if len(secret.Data["signing-key"]) < minTokenSigningKeyLen {
-			return fmt.Errorf("token signing-key Secret %q created concurrently but lacks a valid %q", name, "signing-key")
-		}
-	}
-	return nil
-}
-
-// kitchenSecretLabels returns the labels of a Secret the Kitchen controller
-// generates for component.
-func kitchenSecretLabels(component string) map[string]string {
-	const app = "kokumi"
-	return map[string]string{
-		"app.kubernetes.io/name":       app,
-		"app.kubernetes.io/component":  component,
-		"app.kubernetes.io/managed-by": app,
-	}
-}
-
-// generateSigningKey returns a random 32-byte base64-encoded signing key.
-func generateSigningKey() ([]byte, error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return nil, err
-	}
-	out := make([]byte, base64.StdEncoding.EncodedLen(len(buf)))
-	base64.StdEncoding.Encode(out, buf)
-	return out, nil
-}
-
 // isKitchenSecret filters Secret events to the Secrets the Kitchen depends
 // on: the auth Secrets, which may have any name in the install namespace, and
 // the signing key.
@@ -393,7 +379,7 @@ func (r *KitchenReconciler) mapSecretToKitchen(_ context.Context, _ client.Objec
 func (r *KitchenReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Ensure the singleton exists at startup so the UI always has a resource
 	// to read/write, even when no Kitchen has ever been created.
-	if err := mgr.Add(r.ensureDefaultRunner(mgr)); err != nil {
+	if err := mgr.Add(r.ensureKitchen(mgr.GetAPIReader())); err != nil {
 		return err
 	}
 

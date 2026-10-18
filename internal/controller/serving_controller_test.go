@@ -34,10 +34,9 @@ import (
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/approval"
+	"github.com/kokumi-dev/kokumi/internal/argocd"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/attestation"
-	"github.com/kokumi-dev/kokumi/internal/deployer"
-	"github.com/kokumi-dev/kokumi/internal/index"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/provenance"
 	"github.com/kokumi-dev/kokumi/internal/signing"
@@ -50,8 +49,8 @@ var argoAppGVK = schema.GroupVersionKind{
 	Kind:    "Application",
 }
 
-// argoNamespace is the namespace the ArgoCDDeployer places Applications in.
-const argoNamespace = "argocd"
+// argoNamespace is the namespace the Serving controller places Applications in.
+const argoNamespace = argocd.Namespace
 
 var _ = Describe("Serving Controller", func() {
 	Context("When reconciling a resource", func() {
@@ -670,15 +669,16 @@ var _ = Describe("Serving Controller", func() {
 		}
 		// sealPreparation stands in for the Preparation controller sealing and archiving the votes.
 		sealPreparation := func(p *deliveryv1alpha1.Preparation) {
-			approvals, err := index.ApprovalsForPreparation(ctx, k8sClient, p)
-			Expect(err).NotTo(HaveOccurred())
-			res := approval.Evaluate(p, approvals)
+			approvals := &deliveryv1alpha1.ApprovalList{}
+			Expect(k8sClient.List(ctx, approvals, client.InNamespace(p.Namespace),
+				client.MatchingFields{deliveryv1alpha1.FieldPreparationRefName: p.Name})).To(Succeed())
+			res := approval.Evaluate(p, approvals.Items)
 			Expect(res.Approved).To(BeTrue())
 
 			sealedTime := approval.NewSealTime(time.Now())
 			p.Status.Approval = res.Status
 			p.Status.Approval.SealedTime = &sealedTime
-			archived, err := approval.Archive(ctx, registry, testSigner, p, approvals)
+			archived, err := approval.Archive(ctx, registry, testSigner, p, approvals.Items)
 			Expect(err).NotTo(HaveOccurred())
 			p.Status.Approval.Attestation = &archived
 			apimeta.SetStatusCondition(&p.Status.Conditions, metav1.Condition{
@@ -787,7 +787,6 @@ func newServingReconciler(registry *oci.FakeClient) *ServingReconciler {
 	return &ServingReconciler{
 		Client:     k8sClient,
 		Scheme:     k8sClient.Scheme(),
-		Deployer:   deployer.NewArgoCD(k8sClient),
 		Registries: fakeRegistries(registry),
 		Signing:    testSigning,
 	}

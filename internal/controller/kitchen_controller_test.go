@@ -454,7 +454,8 @@ var _ = Describe("Kitchen signing key", func() {
 		Expect(k8sClient.Create(ctx, &corev1.Namespace{Name: keyNamespace})).To(Succeed())
 		reconciler := newKitchenReconciler()
 		reconciler.SigningNamespace = keyNamespace
-		reconciler.Signing = signing.NewProvider(SigningInputs(k8sClient, testNamespace, keyNamespace))
+		provider := signing.NewProvider(SigningInputs(k8sClient, testNamespace, keyNamespace))
+		reconciler.Signing = provider
 		request := reconcile.Request{Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace}
 
 		_, err := reconciler.Reconcile(ctx, request)
@@ -475,7 +476,7 @@ var _ = Describe("Kitchen signing key", func() {
 		Expect(readyCondition(kitchen).Status).To(Equal(metav1.ConditionFalse))
 		Expect(kitchen.Status.Signing).To(Equal(published), "artifacts signed by the old key still verify")
 
-		_, err = reconciler.Signing.State(ctx)
+		_, err = provider.State(ctx)
 		Expect(err).To(MatchError(signing.ErrKeyNotReady), "nothing is signed with the deleted key")
 	})
 

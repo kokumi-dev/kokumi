@@ -12,12 +12,14 @@ import (
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"errors"
 	"fmt"
 
+	"github.com/sigstore/cosign/v3/pkg/cosign"
 	"github.com/sigstore/sigstore/pkg/cryptoutils"
 )
 
@@ -32,6 +34,30 @@ const (
 	// SecretPublicKey holds the PEM public key.
 	SecretPublicKey = "cosign.pub"
 )
+
+// GeneratedKey is a new signing key in the layout of the signing key Secret.
+type GeneratedKey struct {
+	// PrivateKey is the PEM private key, encrypted with Password.
+	PrivateKey []byte
+	Password   []byte
+	PublicKey  []byte
+}
+
+// GenerateKey generates a signing key as "cosign generate-key-pair" does,
+// encrypted with a random password.
+func GenerateKey() (GeneratedKey, error) {
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return GeneratedKey{}, fmt.Errorf("generating signing key password: %w", err)
+	}
+	password := []byte(base64.StdEncoding.EncodeToString(secret))
+
+	keys, err := cosign.GenerateKeyPair(func(bool) ([]byte, error) { return password, nil })
+	if err != nil {
+		return GeneratedKey{}, fmt.Errorf("generating signing key: %w", err)
+	}
+	return GeneratedKey{PrivateKey: keys.PrivateBytes, Password: password, PublicKey: keys.PublicBytes}, nil
+}
 
 // ErrInvalidKey reports that a signing key Secret cannot be used. Retrying
 // does not help until the Secret changes.

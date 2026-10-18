@@ -34,6 +34,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/artifact"
+	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/registry"
 	"github.com/kokumi-dev/kokumi/internal/signing"
 	"github.com/kokumi-dev/kokumi/internal/signing/signingtest"
 	// +kubebuilder:scaffold:imports
@@ -119,6 +122,18 @@ var _ = AfterSuite(func() {
 		return testEnv.Stop()
 	}, time.Minute, time.Second).Should(Succeed())
 })
+
+// fakeRegistries returns a Resolver that reads Registries with k8sClient
+// and serves every connection with fake.
+func fakeRegistries(fake oci.Client) *registry.Resolver {
+	return testRegistries(func(oci.Options) oci.Client { return fake })
+}
+
+// testRegistries returns a Resolver that reads Registries with k8sClient
+// and builds every client with newClient.
+func testRegistries(newClient func(oci.Options) oci.Client) *registry.Resolver {
+	return registry.NewResolver(registry.NewClients(artifact.DefaultRegistryHost).WithClientFactory(newClient), RegistryReader(k8sClient))
+}
 
 // getFirstFoundEnvTestBinaryDir locates the first binary in the specified path.
 // ENVTEST-based tests depend on specific binaries, usually located in paths set by

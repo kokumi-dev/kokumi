@@ -79,6 +79,16 @@ type Recipe struct {
 	Status RecipeStatus `json:"status,omitzero"`
 }
 
+// GetConditions returns the status conditions of the Recipe.
+func (r *Recipe) GetConditions() []metav1.Condition {
+	return r.Status.Conditions
+}
+
+// SetConditions sets the status conditions of the Recipe.
+func (r *Recipe) SetConditions(conditions []metav1.Condition) {
+	r.Status.Conditions = conditions
+}
+
 // +kubebuilder:object:root=true
 
 // RecipeList contains a list of Recipe

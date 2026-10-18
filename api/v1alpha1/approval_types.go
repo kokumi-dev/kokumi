@@ -167,6 +167,16 @@ type Approval struct {
 	Status ApprovalStatus `json:"status,omitzero"`
 }
 
+// GetConditions returns the status conditions of the Approval.
+func (a *Approval) GetConditions() []metav1.Condition {
+	return a.Status.Conditions
+}
+
+// SetConditions sets the status conditions of the Approval.
+func (a *Approval) SetConditions(conditions []metav1.Condition) {
+	a.Status.Conditions = conditions
+}
+
 // +kubebuilder:object:root=true
 
 // ApprovalList contains a list of Approval

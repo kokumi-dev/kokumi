@@ -48,9 +48,24 @@ const (
 	AnnotationAllowedOrder = "delivery.kokumi.dev/allowed-order"
 )
 
+// Paths of the selectable fields, for field selectors against the API server
+// and for the field indexes of the controller cache.
+const (
+	// FieldOrderName selects Approvals and Preparations by spec.orderName.
+	FieldOrderName = "spec.orderName"
+
+	// FieldPreparationRefName selects Approvals by spec.preparationRef.name.
+	FieldPreparationRefName = "spec.preparationRef.name"
+
+	// FieldProductRefName selects Orders by spec.productRef.name.
+	FieldProductRefName = "spec.productRef.name"
+)
+
 // Finalizer names registered on kokumi-managed resources.
 const (
-	// Finalizer is added to Orders and Preparations.
+	// Finalizer is added to Orders, Preparations, Recipes and Servings. The
+	// Serving controller deletes the Serving's Argo CD Application, which
+	// lives in another namespace, before it removes it.
 	Finalizer = "delivery.kokumi.dev/finalizer"
 
 	// FinalizerProductProtection keeps a Product from being deleted while

@@ -403,6 +403,16 @@ func (o *Order) ApprovalPolicy() *ApprovalPolicy {
 	return o.Spec.Promotion.Approvals
 }
 
+// GetConditions returns the status conditions of the Order.
+func (o *Order) GetConditions() []metav1.Condition {
+	return o.Status.Conditions
+}
+
+// SetConditions sets the status conditions of the Order.
+func (o *Order) SetConditions(conditions []metav1.Condition) {
+	o.Status.Conditions = conditions
+}
+
 // +kubebuilder:object:root=true
 
 // OrderList contains a list of Order

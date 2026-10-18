@@ -24,7 +24,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"unicode/utf8"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -45,9 +44,7 @@ import (
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
-	"github.com/kokumi-dev/kokumi/internal/index"
 	"github.com/kokumi-dev/kokumi/internal/oci"
-	"github.com/kokumi-dev/kokumi/internal/registry"
 	"github.com/kokumi-dev/kokumi/internal/resolve"
 	"github.com/kokumi-dev/kokumi/internal/version"
 )
@@ -111,9 +108,7 @@ var _ = Describe("Order Controller", func() {
 				BuilderID:        testBuilderID,
 			}
 
-			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
-				NamespacedName: typeNamespacedName,
-			})
+			err := settleOrder(ctx, controllerReconciler, typeNamespacedName)
 			Expect(err).NotTo(HaveOccurred())
 
 			preparationList := &deliveryv1alpha1.PreparationList{}
@@ -171,7 +166,7 @@ var _ = Describe("Order Controller", func() {
 		}
 
 		reconcileOrder := func(name string) {
-			_, err := newReconciler().Reconcile(ctx, reconcile.Request{Name: name, Namespace: ns})
+			err := settleOrder(ctx, newReconciler(), types.NamespacedName{Namespace: ns, Name: name})
 			Expect(err).NotTo(HaveOccurred())
 		}
 
@@ -376,9 +371,7 @@ var _ = Describe("Order Controller", func() {
 			})).To(Succeed())
 
 			reconcile := func() {
-				_, err := newReconciler().Reconcile(ctx, reconcile.Request{
-					Name: orderName, Namespace: ns,
-				})
+				err := settleOrder(ctx, newReconciler(), types.NamespacedName{Namespace: ns, Name: orderName})
 				Expect(err).NotTo(HaveOccurred())
 			}
 
@@ -459,7 +452,7 @@ var _ = Describe("Order Controller", func() {
 			createTestOrder(ctx, orderName, deliveryv1alpha1.PromotionModeAutomatic, policy)
 			DeferCleanup(func() {
 				_ = k8sClient.DeleteAllOf(ctx, &deliveryv1alpha1.Preparation{},
-					client.InNamespace(testNamespace), client.MatchingFields{index.FieldOrderName: orderName})
+					client.InNamespace(testNamespace), client.MatchingFields{deliveryv1alpha1.FieldOrderName: orderName})
 				order := &deliveryv1alpha1.Order{}
 				if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: orderName}, order); err == nil {
 					order.SetFinalizers(nil)
@@ -481,12 +474,11 @@ var _ = Describe("Order Controller", func() {
 				InstallNamespace: testNamespace,
 				BuilderID:        testBuilderID,
 			}
-			_, err := r.Reconcile(ctx, reconcile.Request{Namespace: testNamespace, Name: orderName})
-			Expect(err).NotTo(HaveOccurred())
+			Expect(settleOrder(ctx, r, types.NamespacedName{Namespace: testNamespace, Name: orderName})).To(Succeed())
 
 			preps := &deliveryv1alpha1.PreparationList{}
 			Expect(k8sClient.List(ctx, preps, client.InNamespace(testNamespace),
-				client.MatchingFields{index.FieldOrderName: orderName})).To(Succeed())
+				client.MatchingFields{deliveryv1alpha1.FieldOrderName: orderName})).To(Succeed())
 			Expect(preps.Items).To(HaveLen(1))
 			Expect(preps.Items[0].Spec.ApprovalPolicy).To(Equal(policy))
 			Expect(preps.Items[0].Labels).NotTo(HaveKey("delivery.kokumi.dev/auto-deploy"))
@@ -514,7 +506,7 @@ var _ = Describe("Order Controller", func() {
 			createTestOrder(ctx, orderName, deliveryv1alpha1.PromotionModeManual)
 			DeferCleanup(func() {
 				_ = k8sClient.DeleteAllOf(ctx, &deliveryv1alpha1.Preparation{},
-					client.InNamespace(testNamespace), client.MatchingFields{index.FieldOrderName: orderName})
+					client.InNamespace(testNamespace), client.MatchingFields{deliveryv1alpha1.FieldOrderName: orderName})
 				order := &deliveryv1alpha1.Order{}
 				if err := k8sClient.Get(ctx, key, order); err == nil {
 					order.SetFinalizers(nil)
@@ -525,8 +517,7 @@ var _ = Describe("Order Controller", func() {
 			})
 
 			r = newTestOrderReconciler(oci.NewFakeClient(afero.NewMemMapFs()))
-			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
-			Expect(err).NotTo(HaveOccurred())
+			Expect(settleOrder(ctx, r, key)).To(Succeed())
 			Expect(k8sClient.Get(ctx, key, &deliveryv1alpha1.Serving{})).To(Satisfy(apierrors.IsNotFound),
 				"a Manual Order has no Serving before its first promote")
 		})
@@ -551,8 +542,7 @@ var _ = Describe("Order Controller", func() {
 		It("adopts the Serving, so that it goes with the Order", func() {
 			promote()
 
-			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
-			Expect(err).NotTo(HaveOccurred())
+			Expect(settleOrder(ctx, r, key)).To(Succeed())
 
 			order := &deliveryv1alpha1.Order{}
 			Expect(k8sClient.Get(ctx, key, order)).To(Succeed())
@@ -572,8 +562,7 @@ var _ = Describe("Order Controller", func() {
 			}
 			promote(deleted)
 
-			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
-			Expect(err).NotTo(HaveOccurred())
+			Expect(settleOrder(ctx, r, key)).To(Succeed())
 
 			serving := &deliveryv1alpha1.Serving{}
 			Expect(k8sClient.Get(ctx, key, serving)).To(Succeed())
@@ -607,8 +596,7 @@ var _ = Describe("Order Controller", func() {
 		})
 
 		reconcileOrder := func(name string) error {
-			_, err := r.Reconcile(ctx, reconcile.Request{Namespace: ns, Name: name})
-			return err
+			return settleOrder(ctx, r, types.NamespacedName{Namespace: ns, Name: name})
 		}
 
 		getOrder := func(name string) *deliveryv1alpha1.Order {
@@ -779,8 +767,7 @@ var _ = Describe("Order Controller", func() {
 		})
 
 		reconcileOrder := func() {
-			_, err := r.Reconcile(ctx, reconcile.Request{Namespace: ns, Name: orderName})
-			Expect(err).NotTo(HaveOccurred())
+			Expect(settleOrder(ctx, r, types.NamespacedName{Namespace: ns, Name: orderName})).To(Succeed())
 		}
 
 		readyOf := func() *metav1.Condition {
@@ -929,6 +916,80 @@ var _ = Describe("Order Controller", func() {
 		})
 	})
 
+	Context("When the Order renders", func() {
+		const orderName = "order-two-passes"
+
+		ctx := context.Background()
+		key := types.NamespacedName{Namespace: testNamespace, Name: orderName}
+
+		BeforeEach(func() {
+			createTestOrder(ctx, orderName, deliveryv1alpha1.PromotionModeManual)
+			DeferCleanup(func() {
+				_ = k8sClient.DeleteAllOf(ctx, &deliveryv1alpha1.Preparation{},
+					client.InNamespace(testNamespace), client.MatchingLabels{deliveryv1alpha1.LabelOrder: orderName})
+				order := &deliveryv1alpha1.Order{}
+				if err := k8sClient.Get(ctx, key, order); err == nil {
+					order.SetFinalizers(nil)
+					_ = k8sClient.Update(ctx, order)
+					_ = k8sClient.Delete(ctx, order)
+				}
+			})
+		})
+
+		getOrder := func() *deliveryv1alpha1.Order {
+			order := &deliveryv1alpha1.Order{}
+			Expect(k8sClient.Get(ctx, key, order)).To(Succeed())
+			return order
+		}
+
+		It("reports Processing first and renders in the reconcile that report triggers", func() {
+			fake := oci.NewFakeClient(afero.NewMemMapFs())
+			r := newTestOrderReconciler(fake)
+
+			By("reporting Processing without rendering")
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+			order := getOrder()
+			ready := meta.FindStatusCondition(order.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)
+			Expect(ready.Status).To(Equal(metav1.ConditionUnknown))
+			Expect(ready.Reason).To(Equal(deliveryv1alpha1.ReasonProcessing))
+			Expect(order.Status.LatestConfigHash).To(BeEmpty(), "the hash records finished renders only, so a crash renders again")
+			Expect(order.Status.ObservedGeneration).To(Equal(order.Generation))
+			Expect(fake.Pushes).To(BeEmpty())
+
+			By("rendering in the next reconcile")
+			_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+			order = getOrder()
+			Expect(meta.IsStatusConditionTrue(order.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)).To(BeTrue())
+			Expect(order.Status.LatestConfigHash).NotTo(BeEmpty())
+			Expect(order.Status.LatestPreparationName).NotTo(BeEmpty())
+			Expect(fake.Pushes).To(HaveLen(1))
+
+			By("writing nothing once its latest Preparation renders its intent")
+			_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(getOrder().ResourceVersion).To(Equal(order.ResourceVersion))
+			Expect(fake.Pushes).To(HaveLen(1))
+		})
+
+		It("consumes the commit message with the render", func() {
+			order := getOrder()
+			order.Annotations = map[string]string{deliveryv1alpha1.AnnotationCommitMessage: "Raise the replicas"}
+			Expect(k8sClient.Update(ctx, order)).To(Succeed())
+
+			Expect(settleOrder(ctx, newTestOrderReconciler(oci.NewFakeClient(afero.NewMemMapFs())), key)).To(Succeed())
+
+			order = getOrder()
+			Expect(order.Annotations).NotTo(HaveKey(deliveryv1alpha1.AnnotationCommitMessage))
+			Expect(meta.IsStatusConditionTrue(order.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)).To(BeTrue(),
+				"removing the annotation keeps the status of the render")
+			prep := &deliveryv1alpha1.Preparation{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: order.Status.LatestPreparationName}, prep)).To(Succeed())
+			Expect(prep.Spec.CommitMessage).To(Equal("Raise the replicas"))
+		})
+	})
+
 	Context("When the Product of an Order is changed", func() {
 		It("rejects the change", func() {
 			ctx := context.Background()
@@ -970,14 +1031,28 @@ const (
 	testReplicasPath   = ".spec.replicas"
 )
 
-// fakeRegistries returns Clients that serve every connection with fake.
-func fakeRegistries(fake oci.Client) *registry.Clients {
-	return testRegistries(func(oci.Options) oci.Client { return fake })
-}
-
-// testRegistries returns Clients that build every client with newClient.
-func testRegistries(newClient func(oci.Options) oci.Client) *registry.Clients {
-	return registry.NewClients(artifact.DefaultRegistryHost).WithClientFactory(newClient)
+// settleOrder reconciles the Order of key until a pass leaves it as it was,
+// as the watch on the Order's own writes does in a cluster: a render takes
+// one pass that reports Processing and one that renders. It returns the
+// error of the first pass that fails.
+func settleOrder(ctx context.Context, r *OrderReconciler, key types.NamespacedName) error {
+	for range 5 {
+		before := &deliveryv1alpha1.Order{}
+		if err := k8sClient.Get(ctx, key, before); err != nil {
+			return err
+		}
+		if _, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key}); err != nil {
+			return err
+		}
+		after := &deliveryv1alpha1.Order{}
+		if err := k8sClient.Get(ctx, key, after); err != nil {
+			return err
+		}
+		if after.ResourceVersion == before.ResourceVersion {
+			return nil
+		}
+	}
+	return fmt.Errorf("order %s did not settle", key)
 }
 
 // newTestOrderReconciler returns an OrderReconciler pushing to fake.
@@ -1219,15 +1294,8 @@ var _ = Describe("Order images", func() {
 		}, registry, recorder
 	}
 
-	// render reconciles the Order twice: once to add its finalizer, once to
-	// render it.
 	render := func(r *OrderReconciler, orderName string) error {
-		key := types.NamespacedName{Namespace: testNamespace, Name: orderName}
-		if _, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key}); err != nil {
-			return err
-		}
-		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
-		return err
+		return settleOrder(ctx, r, types.NamespacedName{Namespace: testNamespace, Name: orderName})
 	}
 
 	reconcileImages := func(productName, orderName string, images deliveryv1alpha1.ProductImages) (*workloadClient, *capturingRecorder, error) {
@@ -1466,16 +1534,16 @@ var _ = Describe("Image schema", func() {
 	})
 })
 
-var _ = Describe("truncateNote", func() {
-	It("keeps notes that fit", func() {
-		Expect(truncateNote("short")).To(Equal("short"))
-	})
-
-	It("cuts long notes at a rune boundary to the limit of events.k8s.io", func() {
-		note := truncateNote(strings.Repeat("ä", maxEventNote))
-		Expect(len(note)).To(BeNumerically("<=", maxEventNote))
-		Expect(utf8.ValidString(note)).To(BeTrue())
-		Expect(note).To(HaveSuffix("…"))
+var _ = Describe("Order field indexes", func() {
+	It("indexes an Order by every Registry it lists", func() {
+		const upstream, mirror = "order-upstream", "order-mirror"
+		order := &deliveryv1alpha1.Order{Spec: deliveryv1alpha1.OrderSpec{
+			ProductRef:   deliveryv1alpha1.ProductRef{Name: "chart"},
+			RegistryRefs: []corev1.LocalObjectReference{{Name: upstream}, {Name: mirror}},
+		}}
+		Expect(orderRegistryNames(order)).To(Equal([]string{upstream, mirror}))
+		Expect(orderRegistryNames(&deliveryv1alpha1.Order{})).To(BeEmpty())
+		Expect(orderProduct(order)).To(Equal([]string{"chart"}))
 	})
 })
 

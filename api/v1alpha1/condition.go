@@ -37,6 +37,41 @@ const (
 	ConditionTypeCounted = "Counted"
 )
 
+// Ready condition reasons of the objects Kokumi reconciles.
+const (
+	// ReasonReady reports that an Order, Preparation or the Kitchen is ready.
+	ReasonReady = "Ready"
+	// ReasonFailed reports on a Product or the Kitchen that it is
+	// misconfigured, or that its source could not be resolved.
+	ReasonFailed = "Failed"
+
+	// ReasonProcessing reports on an Order that it is rendering its intent.
+	ReasonProcessing = "Processing"
+	// ReasonProcessingFailed reports on an Order that its intent could not
+	// be rendered.
+	ReasonProcessingFailed = "ProcessingFailed"
+
+	// ReasonResolved reports on a Product that its source is resolved to a
+	// digest.
+	ReasonResolved = "Resolved"
+	// ReasonVendored reports on a Product that its source is resolved and
+	// copied to its vendor location.
+	ReasonVendored = "Vendored"
+
+	// ReasonPending reports on a Serving that it waits for its Order or for
+	// a Preparation to serve.
+	ReasonPending = "Pending"
+	// ReasonDeploying reports on a Serving that its deployment has not
+	// reached the target Preparation yet.
+	ReasonDeploying = "Deploying"
+	// ReasonDeployed reports on a Serving that its deployment runs the
+	// target Preparation and is healthy.
+	ReasonDeployed = "Deployed"
+	// ReasonDeploymentFailed reports on a Serving that its deployment could
+	// not be updated or is degraded.
+	ReasonDeploymentFailed = "DeploymentFailed"
+)
+
 // Condition reasons used by Products and the Orders that reference them.
 const (
 	// ReasonProductNotFound reports on an Order that its Product does not exist.
