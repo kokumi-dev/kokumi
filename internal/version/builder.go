@@ -7,7 +7,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -59,17 +58,20 @@ func FallbackBuilderID() string {
 	return "kokumi@" + Version
 }
 
+// PodGetter reads the Pod with the given namespace and name.
+type PodGetter func(ctx context.Context, namespace, name string) (*corev1.Pod, error)
+
 // BuilderID resolves the identity of the running controller, which is
 // recorded as the builder of every artifact it renders. The first match wins:
 // the KOKUMI_BUILDER_ID override, the image ID of the manager container read
 // from the controller's own Pod, and finally "kokumi@<version>".
-func BuilderID(ctx context.Context, getenv func(string) string, reader client.Reader) string {
+func BuilderID(ctx context.Context, getenv func(string) string, getPod PodGetter) string {
 	if id := strings.TrimSpace(getenv(EnvBuilderID)); id != "" {
 		return id
 	}
 
 	name, namespace := getenv(envPodName), getenv(envPodNamespace)
-	if name == "" || namespace == "" || reader == nil {
+	if name == "" || namespace == "" || getPod == nil {
 		return FallbackBuilderID()
 	}
 
@@ -82,8 +84,8 @@ func BuilderID(ctx context.Context, getenv func(string) string, reader client.Re
 			}
 		}
 
-		pod := &corev1.Pod{}
-		if err := reader.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, pod); err != nil {
+		pod, err := getPod(ctx, namespace, name)
+		if err != nil {
 			log.FromContext(ctx).Error(err, "Could not read own Pod, using the version as builder identity", "pod", name)
 			return FallbackBuilderID()
 		}
