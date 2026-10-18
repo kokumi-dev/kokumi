@@ -365,9 +365,12 @@ func (r *ServingReconciler) reconcileDelete(ctx context.Context, serving *delive
 			return ctrl.Result{}, err
 		}
 
+		// Deleting an Order deletes its Serving, Preparations and Application
+		// at once, and their events can reconcile a Serving whose finalizer is
+		// gone again from a cache that still holds it.
 		controllerutil.RemoveFinalizer(serving, deliveryv1alpha1.Finalizer)
 		if err := r.Update(ctx, serving); err != nil {
-			return ctrl.Result{}, err
+			return ctrl.Result{}, client.IgnoreNotFound(err)
 		}
 	}
 

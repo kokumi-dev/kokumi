@@ -662,6 +662,16 @@ When a Serving is reconciled, the controller:
 
 Rollback is promoting any previous Preparation. No re-rendering required.
 
+The Order controls its Serving in both promotion modes: under Automatic it
+creates it, and under Manual it adopts the Serving the first promote creates.
+Deleting the Order deletes its Preparations and its Serving, and deleting a
+Serving deletes its Argo CD Application, so Kokumi stops delivering. The
+deployed workloads keep running: the Application Kokumi creates has no
+`resources-finalizer.argocd.argoproj.io`, so Argo CD leaves its resources in
+place. A pre-existing Application without the opt-in annotation is kept.
+`kubectl delete order <name> --cascade=orphan` keeps the Serving, and a later
+Order of the same name adopts it.
+
 ### Approvals
 
 An Order can require reviews before any of its Preparations is served,
@@ -748,7 +758,7 @@ Key properties:
 
 - **Idempotent** — each reconcile produces the same output for the same input
 - **Level-triggered** — the controller always acts on observed state, not events
-- **Owner references** — Preparations are owned by their Order; clean deletion is automatic
+- **Owner references** — Preparations and the Serving are owned by their Order; clean deletion is automatic
 - **Argo CD delegates deployment** — Kokumi never applies manifests directly; it only manages the Argo CD Application resource
 
 ## OCI source formats
