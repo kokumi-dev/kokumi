@@ -53,34 +53,6 @@ var argoAppGVK = schema.GroupVersionKind{
 // argoNamespace is the namespace the ArgoCDDeployer places Applications in.
 const argoNamespace = "argocd"
 
-// buildArgoAppMap returns a map for an unstructured Argo CD Application.
-func buildArgoAppMap(name, repoURL, targetRevision string, annotations map[string]any) map[string]any {
-	meta := map[string]any{
-		"name":      name,
-		"namespace": argoNamespace,
-	}
-	if len(annotations) > 0 {
-		meta["annotations"] = annotations
-	}
-	return map[string]any{
-		"apiVersion": "argoproj.io/v1alpha1",
-		"kind":       "Application",
-		"metadata":   meta,
-		"spec": map[string]any{
-			"project": "default",
-			"source": map[string]any{
-				"repoURL":        repoURL,
-				"targetRevision": targetRevision,
-				"path":           ".",
-			},
-			"destination": map[string]any{
-				"server":    "https://kubernetes.default.svc",
-				"namespace": testNamespace,
-			},
-		},
-	}
-}
-
 var _ = Describe("Serving Controller", func() {
 	Context("When reconciling a resource", func() {
 		const resourceName = "serving"
@@ -223,6 +195,35 @@ var _ = Describe("Serving Controller", func() {
 			s := &deliveryv1alpha1.Serving{}
 			Expect(k8sClient.Get(ctx, typeNamespacedName, s)).To(Succeed())
 			return s
+		}
+
+		// buildArgoAppMap returns a map for an unstructured Argo CD
+		// Application named like the Serving, as if created out-of-band.
+		buildArgoAppMap := func(repoURL, targetRevision string, annotations map[string]any) map[string]any {
+			meta := map[string]any{
+				"name":      resourceName,
+				"namespace": argoNamespace,
+			}
+			if len(annotations) > 0 {
+				meta["annotations"] = annotations
+			}
+			return map[string]any{
+				"apiVersion": "argoproj.io/v1alpha1",
+				"kind":       "Application",
+				"metadata":   meta,
+				"spec": map[string]any{
+					"project": "default",
+					"source": map[string]any{
+						"repoURL":        repoURL,
+						"targetRevision": targetRevision,
+						"path":           ".",
+					},
+					"destination": map[string]any{
+						"server":    "https://kubernetes.default.svc",
+						"namespace": testNamespace,
+					},
+				},
+			}
 		}
 
 		It("creates an Argo CD Application with the allowed-order annotation set to the Order name", func() {
@@ -492,7 +493,7 @@ var _ = Describe("Serving Controller", func() {
 		It("refuses to update a pre-existing Argo CD Application that is missing the opt-in annotation", func() {
 			By("creating an Argo CD Application out-of-band without the opt-in annotation")
 			preExisting := &unstructured.Unstructured{
-				Object: buildArgoAppMap(resourceName, "oci://example.com/foreign", "sha256:foreign", nil),
+				Object: buildArgoAppMap("oci://example.com/foreign", "sha256:foreign", nil),
 			}
 			Expect(k8sClient.Create(ctx, preExisting)).To(Succeed())
 
@@ -539,7 +540,7 @@ var _ = Describe("Serving Controller", func() {
 		It("refuses to update an Application whose allowed-order annotation references a different Order", func() {
 			By("creating an Argo CD Application annotated for a different Order")
 			preExisting := &unstructured.Unstructured{
-				Object: buildArgoAppMap(resourceName, "oci://example.com/foreign", "sha256:foreign", map[string]any{
+				Object: buildArgoAppMap("oci://example.com/foreign", "sha256:foreign", map[string]any{
 					deliveryv1alpha1.AnnotationAllowedOrder: "some-other-order",
 				}),
 			}
@@ -562,7 +563,7 @@ var _ = Describe("Serving Controller", func() {
 		It("updates an Application whose allowed-order annotation matches the Order name", func() {
 			By("creating an Argo CD Application annotated with the matching opt-in")
 			preExisting := &unstructured.Unstructured{
-				Object: buildArgoAppMap(resourceName, "oci://example.com/stale", "sha256:stale", map[string]any{
+				Object: buildArgoAppMap("oci://example.com/stale", "sha256:stale", map[string]any{
 					deliveryv1alpha1.AnnotationAllowedOrder: orderName,
 				}),
 			}
@@ -584,6 +585,47 @@ var _ = Describe("Serving Controller", func() {
 
 			s := getServing()
 			Expect(apimeta.IsStatusConditionTrue(s.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)).To(BeTrue())
+		})
+
+		// deleteServing deletes the Serving and reconciles it, as the
+		// controller does once the deletion timestamp is set.
+		deleteServing := func() {
+			Expect(k8sClient.Delete(ctx, getServing())).To(Succeed())
+			_, err := newReconciler().Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(errors.IsNotFound(k8sClient.Get(ctx, typeNamespacedName, &deliveryv1alpha1.Serving{}))).To(BeTrue(),
+				"the finalizer must be removed")
+		}
+
+		It("deletes its Application with the Serving", func() {
+			_, err := newReconciler().Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+			getApp()
+
+			deleteServing()
+
+			app := &unstructured.Unstructured{}
+			app.SetGroupVersionKind(argoAppGVK)
+			Expect(errors.IsNotFound(k8sClient.Get(ctx, client.ObjectKey{Namespace: argoNamespace, Name: resourceName}, app))).To(BeTrue())
+		})
+
+		It("keeps an Application that is not opted in when the Serving is deleted", func() {
+			By("creating an Argo CD Application out-of-band without the opt-in annotation")
+			preExisting := &unstructured.Unstructured{
+				Object: buildArgoAppMap("oci://example.com/foreign", "sha256:foreign", nil),
+			}
+			Expect(k8sClient.Create(ctx, preExisting)).To(Succeed())
+
+			_, err := newReconciler().Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+
+			deleteServing()
+
+			app := getApp()
+			Expect(app.GetUID()).To(Equal(preExisting.GetUID()))
+			Expect(app.GetDeletionTimestamp()).To(BeNil())
+			targetRevision, _, _ := unstructured.NestedString(app.Object, "spec", "source", "targetRevision")
+			Expect(targetRevision).To(Equal("sha256:foreign"))
 		})
 	})
 

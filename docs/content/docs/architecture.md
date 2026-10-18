@@ -648,7 +648,8 @@ When a Serving is reconciled, the controller:
 4. Creates or updates the Argo CD `Application` in the `argocd` namespace,
    pointing `spec.source.repoURL` at the Preparation's OCI artifact and
    `spec.source.targetRevision` at its exact digest. A pre-existing
-   Application without the opt-in annotation is never modified.
+   Application without the opt-in annotation is never modified, and
+   deleting the Serving keeps it.
 5. Derives the Serving status from the Application and records the
    preparation as the observed (active) one: `Deploying` until the
    Application reports `Healthy` and is synced to the desired revision, then

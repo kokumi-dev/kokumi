@@ -243,7 +243,8 @@ namespace and Argo CD syncs the manifests into the cluster.
 > missing the annotation (or has a different value), Kokumi refuses to
 > modify it and surfaces the failure on the Serving's status condition with
 > the message `Cannot update Argo CD Application, opt-in annotation must
-> exist`.
+> exist`. Deleting the Serving deletes its `Application` only if it carries
+> the matching annotation; any other `Application` is kept.
 
 ```bash
 kubectl get servings
