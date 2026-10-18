@@ -66,7 +66,8 @@ type Deployer interface {
 	// Serving.
 	Status(ctx context.Context, serving *deliveryv1alpha1.Serving) (DeploymentStatus, error)
 
-	// Remove deletes the deployment for the given Serving.
+	// Remove deletes the deployment for the given Serving. A deployment that
+	// is not opted in for this Serving's Order is kept.
 	Remove(ctx context.Context, serving *deliveryv1alpha1.Serving) error
 
 	// WatchObject returns an empty object of the resource type the deployer

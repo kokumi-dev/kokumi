@@ -287,22 +287,40 @@ func (d *ArgoCDDeployer) Status(ctx context.Context, serving *deliveryv1alpha1.S
 	return status, nil
 }
 
-// Remove deletes the Argo CD Application for the Serving. Deleting a missing
-// Application is not an error.
+// Remove deletes the Argo CD Application for the Serving. A missing
+// Application is not an error. An Application that is not opted in for the
+// Serving's Order is kept. The delete is conditional on the UID and resource
+// version that passed the opt-in check, so an Application replaced or changed
+// in between is never deleted.
 func (d *ArgoCDDeployer) Remove(ctx context.Context, serving *deliveryv1alpha1.Serving) error {
 	logger := log.FromContext(ctx)
 
 	app := newArgoApp()
-	app.SetNamespace(argocdNamespace)
-	app.SetName(serving.Name)
-
-	if err := d.Delete(ctx, app); err != nil {
-		if !apierrors.IsNotFound(err) {
-			logger.Error(err, "Failed to delete Argo CD Application")
-			return err
+	if err := d.Get(ctx, client.ObjectKey{Namespace: argocdNamespace, Name: serving.Name}, app); err != nil {
+		if apierrors.IsNotFound(err) {
+			logger.Info("Argo CD Application already deleted", "name", serving.Name)
+			return nil
 		}
-		logger.Info("Argo CD Application already deleted")
+		return fmt.Errorf("failed to get Application: %w", err)
+	}
+
+	if err := assertAllowedOrderAnnotation(app, serving.Spec.OrderName); err != nil {
+		logger.Info(
+			"Keeping Argo CD Application that is not opted in for the Order",
+			"name", serving.Name,
+			"namespace", argocdNamespace,
+			"requiredAnnotation", deliveryv1alpha1.AnnotationAllowedOrder,
+			"expectedValue", serving.Spec.OrderName,
+			"actualValue", app.GetAnnotations()[deliveryv1alpha1.AnnotationAllowedOrder],
+		)
 		return nil
+	}
+
+	uid := app.GetUID()
+	resourceVersion := app.GetResourceVersion()
+	preconditions := client.Preconditions{UID: &uid, ResourceVersion: &resourceVersion}
+	if err := d.Delete(ctx, app, preconditions); client.IgnoreNotFound(err) != nil {
+		return fmt.Errorf("failed to delete Application: %w", err)
 	}
 
 	logger.Info("Deleted Argo CD Application", "name", serving.Name)
