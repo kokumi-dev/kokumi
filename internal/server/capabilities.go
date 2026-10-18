@@ -29,16 +29,20 @@ const (
 	CapProductsUpdate Capability = "products:update"
 	CapProductsDelete Capability = "products:delete"
 
-	CapPantriesCreate Capability = "pantries:create"
-	CapPantriesUpdate Capability = "pantries:update"
-	CapPantriesDelete Capability = "pantries:delete"
+	CapRegistriesCreate Capability = "registries:create"
+	CapRegistriesUpdate Capability = "registries:update"
+	CapRegistriesDelete Capability = "registries:delete"
+
+	CapRepositoriesCreate Capability = "repositories:create"
+	CapRepositoriesUpdate Capability = "repositories:update"
+	CapRepositoriesDelete Capability = "repositories:delete"
 
 	CapPreparationsPromote Capability = "preparations:promote"
 	CapPreparationsApprove Capability = "preparations:approve"
 
-	// CapPantriesCredentialsUpdate is namespaced; see
+	// CapRegistriesCredentialsUpdate is namespaced; see
 	// namespacedCapabilityCatalog.
-	CapPantriesCredentialsUpdate Capability = "pantries.credentials:update"
+	CapRegistriesCredentialsUpdate Capability = "registries.credentials:update"
 )
 
 // accessCheck is one SelfSubjectAccessReview on a resource the server
@@ -97,10 +101,14 @@ func capabilityCatalog(installNamespace string) []capabilityRule {
 		{capability: CapProductsUpdate, checks: allNamespaces("products", "update")},
 		{capability: CapProductsDelete, checks: allNamespaces("products", "delete")},
 
-		// Pantry edits are applied as a patch.
-		{capability: CapPantriesCreate, checks: allNamespaces("pantries", "create")},
-		{capability: CapPantriesUpdate, checks: allNamespaces("pantries", "patch")},
-		{capability: CapPantriesDelete, checks: allNamespaces("pantries", "delete")},
+		// Registry and Repository edits are applied as a patch.
+		{capability: CapRegistriesCreate, checks: allNamespaces(registriesResource, "create")},
+		{capability: CapRegistriesUpdate, checks: allNamespaces(registriesResource, "patch")},
+		{capability: CapRegistriesDelete, checks: allNamespaces(registriesResource, "delete")},
+
+		{capability: CapRepositoriesCreate, checks: allNamespaces(repositoriesResource, "create")},
+		{capability: CapRepositoriesUpdate, checks: allNamespaces(repositoriesResource, "patch")},
+		{capability: CapRepositoriesDelete, checks: allNamespaces(repositoriesResource, "delete")},
 
 		// Promote updates the Order's Serving, or creates it on first promotion.
 		{capability: CapPreparationsPromote, checks: allNamespaces("servings", "create", "update")},
@@ -118,11 +126,11 @@ func capabilityCatalog(installNamespace string) []capabilityRule {
 // cluster-wide.
 func namespacedCapabilityCatalog(namespace string) []capabilityRule {
 	return []capabilityRule{
-		// Pantry credentials are Secrets in the Pantry's namespace. The UI
-		// writes them, and previews read them, with the user's identity.
-		// Platform admins grant this per namespace by binding the
-		// kokumi-pantry-credentials ClusterRole.
-		{capability: CapPantriesCredentialsUpdate, checks: []accessCheck{
+		// Registry credentials are Secrets in the Registry's namespace. The
+		// UI writes them, and reads through Registries, with the user's
+		// identity. Platform admins grant this per namespace by binding the
+		// kokumi-registry-credentials ClusterRole.
+		{capability: CapRegistriesCredentialsUpdate, checks: []accessCheck{
 			{verb: "get", resource: secretsResource, namespace: namespace},
 			{verb: "create", resource: secretsResource, namespace: namespace},
 			{verb: "patch", resource: secretsResource, namespace: namespace},

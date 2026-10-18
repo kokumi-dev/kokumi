@@ -1,0 +1,12 @@
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Repository
+metadata:
+  labels:
+    app.kubernetes.io/name: kokumi
+    app.kubernetes.io/managed-by: kustomize
+  name: podinfo-chart
+spec:
+  url: oci://ghcr.io/stefanprodan/charts/podinfo
+  registryRef:
+    name: ghcr
+  description: Public podinfo Helm chart

@@ -21,7 +21,7 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Ready')].reason
       name: Reason
       type: string
-    - jsonPath: .spec.source.oci
+    - jsonPath: .spec.source.url
       name: Source
       type: string
     - jsonPath: .spec.source.version
@@ -116,33 +116,14 @@ spec:
                     description: |-
                       policy controls what Kokumi does with the images: Record lists them by
                       digest, Pin also rewrites the manifests to those digests, and Vendor
-                      copies each image into a repository of its own below the Order's
-                      destination, <destination>/images/<image name>, and rewrites the
-                      manifests to pull them from there.
+                      copies each image into a repository of its own below the Product's
+                      vendor location, <vendor url>/images/<image name>, and rewrites the
+                      manifests to pull them from there. Vendor requires spec.vendor.
                     enum:
                     - Record
                     - Pin
                     - Vendor
                     type: string
-                  pullSecretRef:
-                    description: |-
-                      pullSecretRef names a kubernetes.io/dockerconfigjson Secret in the
-                      Product's namespace whose credentials are used, per registry host, to
-                      resolve and vendor the images. Like a Pod's imagePullSecrets, it lets
-                      everyone who may edit the Product use these credentials. Without it,
-                      registries are accessed anonymously.
-                    properties:
-                      name:
-                        default: ""
-                        description: |-
-                          Name of the referent.
-                          This field is effectively required, but due to backwards compatibility is
-                          allowed to be empty. Instances of this type with an empty value here are
-                          almost certainly wrong.
-                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                        type: string
-                    type: object
-                    x-kubernetes-map-type: atomic
                 type: object
               overrides:
                 default: {}
@@ -288,6 +269,34 @@ spec:
                   - target
                   type: object
                 type: array
+              registryRefs:
+                description: |-
+                  registryRefs lists Registries in the Product's namespace. Kokumi
+                  connects to the Product's source, the registries of its images and
+                  their mirrors, and its vendor location through the one whose url
+                  covers each, the longest when several do. Orders connect to their
+                  destination through their own registryRefs.
+                items:
+                  description: |-
+                    LocalObjectReference contains enough information to let you locate the
+                    referenced object inside the same namespace.
+                  properties:
+                    name:
+                      default: ""
+                      description: |-
+                        Name of the referent.
+                        This field is effectively required, but due to backwards compatibility is
+                        allowed to be empty. Instances of this type with an empty value here are
+                        almost certainly wrong.
+                        More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                      type: string
+                  type: object
+                  x-kubernetes-map-type: atomic
+                maxItems: 16
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
               render:
                 description: |-
                   render defines optional rendering configuration for the source artifact.
@@ -346,26 +355,16 @@ spec:
                   source defines the OCI artifact the Product is built from. Orders
                   cannot change the source or version.
                 properties:
-                  oci:
+                  url:
                     description: |-
-                      oci is the full OCI URL for the source manifests.
-                      Mutually exclusive with pantryRef.
+                      url is the oci:// URL of the repository of the source artifact. The
+                      Product connects to it through the Registry among its registryRefs
+                      that covers it.
+                    maxLength: 2048
                     type: string
                     x-kubernetes-validations:
                     - message: must be a valid OCI URL
-                      rule: self == '' || (isURL(self) && url(self).getScheme() ==
-                        'oci')
-                  pantryRef:
-                    description: |-
-                      pantryRef references a Pantry resource whose URL is used as the source.
-                      Mutually exclusive with oci.
-                    properties:
-                      name:
-                        description: name is the name of the Pantry resource.
-                        type: string
-                    required:
-                    - name
-                    type: object
+                      rule: isURL(self) && url(self).getScheme() == 'oci'
                   verify:
                     description: |-
                       verify requires the artifact the version resolves to to carry a
@@ -460,46 +459,37 @@ spec:
                       The controller will resolve this to a digest
                     type: string
                 required:
+                - url
                 - version
                 type: object
-                x-kubernetes-validations:
-                - message: exactly one of oci or pantryRef must be set
-                  rule: (has(self.oci) && !has(self.pantryRef)) || (!has(self.oci)
-                    && has(self.pantryRef))
               vendor:
                 description: |-
-                  vendor optionally copies the source artifact to another OCI registry.
-                  When set, Orders render from the vendored copy. When neither oci nor
-                  pantryRef is set, the source is copied to
-                  oci://<in-cluster registry>/<namespace>/vendor/<name>.
+                  vendor optionally copies the source artifact to another OCI
+                  repository, and under the Vendor image policy also the images, below
+                  it at <url>/images. When set, Orders render from the vendored copy.
+                  Without a url, the source is copied to
+                  oci://<in-cluster registry>/<namespace>/vendor/<name>. A source read
+                  with credentials is only copied where a Registry with credentials
+                  connects to.
                 properties:
-                  oci:
+                  url:
                     description: |-
-                      oci is the OCI registry URL the artifact is pushed to.
-                      Mutually exclusive with pantryRef.
+                      url is the oci:// URL of the repository the artifact is pushed to.
+                      When omitted, a repository of the bundled registry is used.
+                    maxLength: 2048
                     type: string
                     x-kubernetes-validations:
                     - message: must be a valid OCI URL
-                      rule: self == '' || (isURL(self) && url(self).getScheme() ==
-                        'oci')
-                  pantryRef:
-                    description: |-
-                      pantryRef references a Pantry resource whose URL is used as the destination.
-                      Mutually exclusive with oci.
-                    properties:
-                      name:
-                        description: name is the name of the Pantry resource.
-                        type: string
-                    required:
-                    - name
-                    type: object
+                      rule: isURL(self) && url(self).getScheme() == 'oci'
                 type: object
-                x-kubernetes-validations:
-                - message: oci and pantryRef are mutually exclusive
-                  rule: '!(has(self.oci) && has(self.pantryRef))'
             required:
             - source
             type: object
+            x-kubernetes-validations:
+            - message: the Vendor image policy needs spec.vendor, the location the
+                images are copied below
+              rule: '!has(self.images) || !has(self.images.policy) || self.images.policy
+                != ''Vendor'' || has(self.vendor)'
           status:
             description: status defines the observed state of Product
             properties:
@@ -575,6 +565,56 @@ spec:
                   by the controller.
                 format: int64
                 type: integer
+              registryAccess:
+                description: |-
+                  registryAccess lists the registry locations the Product needs: its
+                  source and its vendor location, and the Registry Kokumi connects to
+                  each through. The images belong to the render of each Order and are
+                  listed on the Orders.
+                items:
+                  description: |-
+                    RegistryAccess is a registry location a Product or an Order needs, who
+                    accesses it, and the Registry that authenticates Kokumi there. Kokumi
+                    gives no credentials to Argo CD and the kubelet: they need their own for
+                    the locations reported for them.
+                  properties:
+                    client:
+                      description: client is who accesses the location.
+                      enum:
+                      - Kokumi
+                      - ArgoCD
+                      - Kubelet
+                      type: string
+                    operation:
+                      description: operation is what client does there.
+                      enum:
+                      - Pull
+                      - Push
+                      type: string
+                    registry:
+                      description: |-
+                        registry names the Registry whose connection Kokumi uses there. It is
+                        empty when Kokumi accesses the location anonymously, and for the
+                        other clients.
+                      maxLength: 253
+                      type: string
+                    url:
+                      description: url is the location, or the prefix of the locations,
+                        accessed.
+                      maxLength: 2048
+                      type: string
+                  required:
+                  - client
+                  - operation
+                  - url
+                  type: object
+                maxItems: 32
+                type: array
+                x-kubernetes-list-map-keys:
+                - url
+                - operation
+                - client
+                x-kubernetes-list-type: map
               source:
                 description: |-
                   source is the source address Orders render from. Absent until the
@@ -587,23 +627,6 @@ spec:
                       artifact, so every variant of the Product renders the same source.
                     pattern: ^sha256:[a-f0-9]{64}$
                     type: string
-                  oci:
-                    description: oci is the full OCI URL of the source artifact.
-                    type: string
-                    x-kubernetes-validations:
-                    - message: must be a valid OCI URL
-                      rule: isURL(self) && url(self).getScheme() == 'oci'
-                  pantryRef:
-                    description: |-
-                      pantryRef references the Pantry providing pull credentials for oci.
-                      Absent when the registry is anonymously accessible.
-                    properties:
-                      name:
-                        description: name is the name of the Pantry resource.
-                        type: string
-                    required:
-                    - name
-                    type: object
                   signatures:
                     description: |-
                       signatures lists every signature in the graph of the source: on the
@@ -686,6 +709,15 @@ spec:
                       hour.
                     format: date-time
                     type: string
+                  url:
+                    description: |-
+                      url is the oci:// URL of the repository of the source artifact: of
+                      the vendored copy when the Product vendors.
+                    maxLength: 2048
+                    type: string
+                    x-kubernetes-validations:
+                    - message: must be a valid OCI URL
+                      rule: isURL(self) && url(self).getScheme() == 'oci'
                   verified:
                     description: |-
                       verified records who signed the source, when its signature verified:
@@ -723,7 +755,7 @@ spec:
                     type: string
                 required:
                 - digest
-                - oci
+                - url
                 - version
                 type: object
             type: object

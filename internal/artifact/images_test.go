@@ -14,6 +14,7 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/images"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/registry"
 )
 
 const (
@@ -42,6 +43,12 @@ func (c *filesClient) Pull(_ context.Context, _ oci.Reference, targetDir string)
 	return "", fakeDigest, nil, nil
 }
 
+// imageScope connects to Docker Hub, the registry of the test images,
+// through client, and everywhere else through the store's client.
+func imageScope(client oci.Client) registry.Scope {
+	return registry.StaticScope(map[string]oci.Client{"docker.io": client})
+}
+
 // imageRegistry resolves nginx:1.27 and records copies.
 func imageRegistry() *oci.FakeClient {
 	return &oci.FakeClient{Resolved: map[string]oci.Descriptor{
@@ -60,7 +67,7 @@ func TestPipeline_Render_images(t *testing.T) {
 		p, client := newFilesPipeline(map[string]string{testManifestFile: workloadYAML})
 
 		req := baseRenderRequest()
-		req.Images = artifact.ImageOptions{Client: imageRegistry()}
+		req.Product = imageScope(imageRegistry())
 
 		result, err := p.Render(context.Background(), req)
 		require.NoError(t, err)
@@ -75,19 +82,21 @@ func TestPipeline_Render_images(t *testing.T) {
 		p, client := newFilesPipeline(map[string]string{testManifestFile: workloadYAML})
 
 		req := baseRenderRequest()
-		req.Images = artifact.ImageOptions{Policy: images.PolicyPin, Client: imageRegistry()}
+		req.Images = artifact.ImageOptions{Policy: images.PolicyPin}
+		req.Product = imageScope(imageRegistry())
 
 		_, err := p.Render(context.Background(), req)
 		require.NoError(t, err)
 		assert.Contains(t, client.lastPushedFiles[testManifestFile], "image: nginx:1.27@"+nginxDigest+"\n")
 	})
 
-	t.Run("vendor copies each image into its repository below the destination", func(t *testing.T) {
+	t.Run("vendor copies each image into its repository below the vendor location", func(t *testing.T) {
 		p, client := newFilesPipeline(map[string]string{testManifestFile: workloadYAML})
 		registry := imageRegistry()
 
 		req := baseRenderRequest()
-		req.Images = artifact.ImageOptions{Policy: images.PolicyVendor, Client: registry}
+		req.Images = artifact.ImageOptions{Policy: images.PolicyVendor, VendorURL: testDestOCI}
+		req.Product = imageScope(registry)
 
 		result, err := p.Render(context.Background(), req)
 		require.NoError(t, err)
@@ -103,7 +112,8 @@ func TestPipeline_Render_images(t *testing.T) {
 		p, client := newFilesPipeline(map[string]string{testManifestFile: workloadYAML})
 
 		req := baseRenderRequest()
-		req.Images = artifact.ImageOptions{Policy: images.PolicyPin, Client: &oci.FakeClient{Resolved: map[string]oci.Descriptor{}}}
+		req.Images = artifact.ImageOptions{Policy: images.PolicyPin}
+		req.Product = imageScope(&oci.FakeClient{Resolved: map[string]oci.Descriptor{}})
 
 		_, err := p.Render(context.Background(), req)
 		require.Error(t, err)
@@ -118,7 +128,8 @@ func TestPipeline_Render_images(t *testing.T) {
 		})
 
 		req := baseRenderRequest()
-		req.Images = artifact.ImageOptions{Policy: images.PolicyPin, Client: imageRegistry()}
+		req.Images = artifact.ImageOptions{Policy: images.PolicyPin}
+		req.Product = imageScope(imageRegistry())
 
 		_, err := p.Render(context.Background(), req)
 		require.Error(t, err)
@@ -132,7 +143,7 @@ func TestPipeline_Render_images(t *testing.T) {
 		})
 
 		req := baseRenderRequest()
-		req.Images = artifact.ImageOptions{Client: imageRegistry()}
+		req.Product = imageScope(imageRegistry())
 
 		result, err := p.Render(context.Background(), req)
 		require.NoError(t, err)
@@ -142,13 +153,13 @@ func TestPipeline_Render_images(t *testing.T) {
 }
 
 func TestPipeline_Preview_images(t *testing.T) {
-	previewRequest := func(destination string, registry *oci.FakeClient) artifact.PreviewRequest {
+	previewRequest := func(vendorURL string, client oci.Client) artifact.PreviewRequest {
 		return artifact.PreviewRequest{
-			Source:      artifact.Source{OCI: testSourceOCI, Version: testVersion},
-			Images:      artifact.ImageOptions{Policy: images.PolicyVendor, Client: registry},
-			Destination: destination,
-			Name:        testAppName,
-			Namespace:   testNamespaceName,
+			Source:    artifact.Source{OCI: testSourceOCI, Version: testVersion},
+			Product:   imageScope(client),
+			Images:    artifact.ImageOptions{Policy: images.PolicyVendor, VendorURL: vendorURL},
+			Name:      testAppName,
+			Namespace: testNamespaceName,
 		}
 	}
 
@@ -164,7 +175,7 @@ func TestPipeline_Preview_images(t *testing.T) {
 		assert.Empty(t, registry.Copies)
 	})
 
-	t.Run("vendor without a destination pins", func(t *testing.T) {
+	t.Run("vendor without a vendor location pins", func(t *testing.T) {
 		p, _ := newFilesPipeline(map[string]string{testManifestFile: workloadYAML})
 
 		files, err := p.Preview(context.Background(), previewRequest("", imageRegistry()))
@@ -195,9 +206,8 @@ func TestPipeline_Preview_images(t *testing.T) {
 	t.Run("lookups stop at the time limit and leave the references as written", func(t *testing.T) {
 		p, _ := newFilesPipeline(map[string]string{testManifestFile: workloadYAML})
 		p.PreviewImagesTimeout = 50 * time.Millisecond
-		req := previewRequest(testDestOCI, nil)
+		req := previewRequest(testDestOCI, stallingClient{FakeClient: &oci.FakeClient{}})
 		req.Images.Policy = images.PolicyPin
-		req.Images.Client = stallingClient{FakeClient: &oci.FakeClient{}}
 
 		start := time.Now()
 		files, err := p.Preview(context.Background(), req)

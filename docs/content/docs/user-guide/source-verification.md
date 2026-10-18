@@ -30,7 +30,7 @@ metadata:
   namespace: shop
 spec:
   source:
-    oci: oci://ghcr.io/my-org/charts/podinfo
+    url: oci://ghcr.io/my-org/charts/podinfo
     version: "6.10.2"
     verify:
       secretRef:
@@ -48,7 +48,7 @@ anchored, so anchor them with `^` and `$`. One matching identity suffices.
 ```yaml
 spec:
   source:
-    oci: oci://ghcr.io/stefanprodan/charts/podinfo
+    url: oci://ghcr.io/stefanprodan/charts/podinfo
     version: "6.10.2"
     verify:
       matchOIDCIdentity:

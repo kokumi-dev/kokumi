@@ -7,10 +7,9 @@ import (
 
 // OCISourceDTO is the data-transfer representation of an OCISource.
 type OCISourceDTO struct {
-	OCI       string           `json:"oci,omitempty"`
-	PantryRef *PantryRefDTO    `json:"pantryRef,omitempty"`
-	Version   string           `json:"version"`
-	Verify    *SourceVerifyDTO `json:"verify,omitempty"`
+	URL     string           `json:"url"`
+	Version string           `json:"version"`
+	Verify  *SourceVerifyDTO `json:"verify,omitempty"`
 }
 
 // SourceVerifyDTO is the data-transfer representation of an
@@ -42,14 +41,22 @@ type SourceVerificationDTO struct {
 
 // OCIDestinationDTO is the data-transfer representation of an OCIDestination.
 type OCIDestinationDTO struct {
-	OCI       string        `json:"oci,omitempty"`
-	PantryRef *PantryRefDTO `json:"pantryRef,omitempty"`
+	URL string `json:"url,omitempty"`
 }
 
-// PantryRefDTO is the data-transfer representation of a PantryRef
-// embedded in an Order source or destination.
-type PantryRefDTO struct {
+// RegistryRefDTO names a Registry in a registryRefs list.
+type RegistryRefDTO struct {
 	Name string `json:"name"`
+}
+
+// RegistryAccessDTO is the data-transfer representation of a RegistryAccess:
+// a registry location an object needs, who accesses it, and the Registry
+// Kokumi connects there through.
+type RegistryAccessDTO struct {
+	URL       string `json:"url"`
+	Operation string `json:"operation"`
+	Client    string `json:"client"`
+	Registry  string `json:"registry,omitempty"`
 }
 
 // SourceLinkDTO is a clickable link back to the base artifact's source SCM
@@ -117,22 +124,24 @@ type ProductRefDTO struct {
 // OrderDTO is the enriched view of a Order served to the UI.
 // ActivePreparation is derived from the linked Serving's status.observedPreparation.
 type OrderDTO struct {
-	Name                 string             `json:"name"`
-	Namespace            string             `json:"namespace"`
-	Labels               map[string]string  `json:"labels,omitempty"`
-	ProductRef           ProductRefDTO      `json:"productRef"`
-	Values               json.RawMessage    `json:"values,omitempty"`
-	Destination          OCIDestinationDTO  `json:"destination"`
-	EffectiveDestination string             `json:"effectiveDestination,omitempty"`
-	Patches              []PatchDTO         `json:"patches,omitempty"`
-	Edits                []PatchDTO         `json:"edits,omitempty"`
-	Mode                 string             `json:"mode"`
-	Approvals            *ApprovalPolicyDTO `json:"approvals,omitempty"`
-	State                string             `json:"state"`
-	LatestRevision       string             `json:"latestRevision,omitempty"`
-	ActivePreparation    string             `json:"activePreparation,omitempty"`
-	Conditions           []ConditionDTO     `json:"conditions,omitempty"`
-	CreatedAt            *time.Time         `json:"createdAt,omitempty"`
+	Name                 string              `json:"name"`
+	Namespace            string              `json:"namespace"`
+	Labels               map[string]string   `json:"labels,omitempty"`
+	ProductRef           ProductRefDTO       `json:"productRef"`
+	Values               json.RawMessage     `json:"values,omitempty"`
+	Destination          OCIDestinationDTO   `json:"destination"`
+	EffectiveDestination string              `json:"effectiveDestination,omitempty"`
+	RegistryRefs         []RegistryRefDTO    `json:"registryRefs,omitempty"`
+	RegistryAccess       []RegistryAccessDTO `json:"registryAccess,omitempty"`
+	Patches              []PatchDTO          `json:"patches,omitempty"`
+	Edits                []PatchDTO          `json:"edits,omitempty"`
+	Mode                 string              `json:"mode"`
+	Approvals            *ApprovalPolicyDTO  `json:"approvals,omitempty"`
+	State                string              `json:"state"`
+	LatestRevision       string              `json:"latestRevision,omitempty"`
+	ActivePreparation    string              `json:"activePreparation,omitempty"`
+	Conditions           []ConditionDTO      `json:"conditions,omitempty"`
+	CreatedAt            *time.Time          `json:"createdAt,omitempty"`
 }
 
 // ApprovalPolicyDTO is the data-transfer representation of an ApprovalPolicy.
@@ -202,6 +211,9 @@ type SubmitApprovalRequest struct {
 type ArtifactDTO struct {
 	OCIRef string `json:"ociRef"`
 	Digest string `json:"digest"`
+	// RegistryRef names the Registry the artifact was pushed through; empty
+	// when Kokumi pushed it without one.
+	RegistryRef string `json:"registryRef,omitempty"`
 }
 
 // PreparationDTO is the enriched view of a Preparation served to the UI.
@@ -339,6 +351,7 @@ type CreateOrderRequest struct {
 	ProductRef    ProductRefDTO      `json:"productRef"`
 	Values        json.RawMessage    `json:"values,omitempty"`
 	Destination   *OCIDestinationDTO `json:"destination,omitempty"`
+	RegistryRefs  []RegistryRefDTO   `json:"registryRefs,omitempty"`
 	Patches       []PatchDTO         `json:"patches,omitempty"`
 	Edits         []PatchDTO         `json:"edits,omitempty"`
 	Mode          string             `json:"mode"`
@@ -351,6 +364,7 @@ type CreateOrderRequest struct {
 type UpdateOrderRequest struct {
 	Values        json.RawMessage    `json:"values,omitempty"`
 	Destination   *OCIDestinationDTO `json:"destination,omitempty"`
+	RegistryRefs  []RegistryRefDTO   `json:"registryRefs,omitempty"`
 	Patches       []PatchDTO         `json:"patches,omitempty"`
 	Edits         []PatchDTO         `json:"edits,omitempty"`
 	Mode          string             `json:"mode"`
@@ -406,10 +420,9 @@ type OverridesDTO struct {
 
 // ProductSourceStatusDTO is the source a Product's Orders render from.
 type ProductSourceStatusDTO struct {
-	OCI       string        `json:"oci"`
-	Version   string        `json:"version"`
-	PantryRef *PantryRefDTO `json:"pantryRef,omitempty"`
-	Digest    string        `json:"digest,omitempty"`
+	URL     string `json:"url"`
+	Version string `json:"version"`
+	Digest  string `json:"digest,omitempty"`
 	// Verified is set when the source's signature verified.
 	Verified *SourceVerificationDTO `json:"verified,omitempty"`
 }
@@ -426,19 +439,19 @@ type ImageFieldSpecDTO struct {
 // ProductImagesDTO is the data-transfer representation of ProductImages. An
 // empty policy in a request defaults to Record.
 type ProductImagesDTO struct {
-	Policy        string              `json:"policy"`
-	FieldSpecs    []ImageFieldSpecDTO `json:"fieldSpecs,omitempty"`
-	PullSecretRef *secretRefDTO       `json:"pullSecretRef,omitempty"`
+	Policy     string              `json:"policy"`
+	FieldSpecs []ImageFieldSpecDTO `json:"fieldSpecs,omitempty"`
 }
 
 // ProductSpecDTO is the data-transfer representation of a ProductSpec.
 type ProductSpecDTO struct {
-	Source    OCISourceDTO       `json:"source"`
-	Vendor    *OCIDestinationDTO `json:"vendor,omitempty"`
-	Render    *RenderDTO         `json:"render,omitempty"`
-	Patches   []PatchDTO         `json:"patches,omitempty"`
-	Overrides OverridesDTO       `json:"overrides"`
-	Images    ProductImagesDTO   `json:"images"`
+	Source       OCISourceDTO       `json:"source"`
+	Vendor       *OCIDestinationDTO `json:"vendor,omitempty"`
+	Render       *RenderDTO         `json:"render,omitempty"`
+	Patches      []PatchDTO         `json:"patches,omitempty"`
+	Overrides    OverridesDTO       `json:"overrides"`
+	Images       ProductImagesDTO   `json:"images"`
+	RegistryRefs []RegistryRefDTO   `json:"registryRefs,omitempty"`
 }
 
 // ProductDTO is the view of a Product served to the UI.
@@ -448,6 +461,7 @@ type ProductDTO struct {
 	ProductSpecDTO
 	// ResolvedSource is status.source; absent until the Product is resolved.
 	ResolvedSource *ProductSourceStatusDTO `json:"resolvedSource,omitempty"`
+	RegistryAccess []RegistryAccessDTO     `json:"registryAccess,omitempty"`
 	State          string                  `json:"state,omitempty"`
 	Conditions     []ConditionDTO          `json:"conditions,omitempty"`
 	CreatedAt      *time.Time              `json:"createdAt,omitempty"`
@@ -468,40 +482,72 @@ type UpdateProductRequest struct {
 	ProductSpecDTO
 }
 
-// --- Pantry DTOs ---
+// --- Registry and Repository DTOs ---
 
-// PantryDTO is the view of a Pantry served to the UI.
-type PantryDTO struct {
-	Name        string `json:"name"`
-	Namespace   string `json:"namespace"`
-	URL         string `json:"url"`
-	SecretRef   string `json:"secretRef,omitempty"`
-	Description string `json:"description,omitempty"`
-	State       string `json:"state"`
-	// ReferrersAPI is "Supported" or "Unsupported"; empty while unknown.
-	ReferrersAPI string         `json:"referrersAPI,omitempty"`
-	Conditions   []ConditionDTO `json:"conditions,omitempty"`
-	CreatedAt    *time.Time     `json:"createdAt,omitempty"`
+// RegistryDTO is the view of a Registry served to the UI. Its credentials
+// are never served, only the name of their Secret.
+type RegistryDTO struct {
+	Name          string         `json:"name"`
+	Namespace     string         `json:"namespace"`
+	URL           string         `json:"url"`
+	Scheme        string         `json:"scheme"`
+	SecretRef     string         `json:"secretRef,omitempty"`
+	CertSecretRef string         `json:"certSecretRef,omitempty"`
+	State         string         `json:"state"`
+	Conditions    []ConditionDTO `json:"conditions,omitempty"`
+	CreatedAt     *time.Time     `json:"createdAt,omitempty"`
 }
 
-// CreatePantryRequest is the body for POST /api/v1/pantries.
-type CreatePantryRequest struct {
+// CreateRegistryRequest is the body for POST /api/v1/registries. Username
+// and Password store credentials in a Secret the Registry owns; SecretRef
+// names an existing Secret instead.
+type CreateRegistryRequest struct {
+	Namespace     string `json:"namespace,omitempty"`
+	Name          string `json:"name"`
+	URL           string `json:"url"`
+	Scheme        string `json:"scheme,omitempty"`
+	CertSecretRef string `json:"certSecretRef,omitempty"`
+	Username      string `json:"username,omitempty"`
+	Password      string `json:"password,omitempty"`
+	SecretRef     string `json:"secretRef,omitempty"`
+}
+
+// UpdateRegistryRequest is the body for PUT /api/v1/registries/{namespace}/{name}.
+type UpdateRegistryRequest struct {
+	URL           string `json:"url"`
+	Scheme        string `json:"scheme,omitempty"`
+	CertSecretRef string `json:"certSecretRef,omitempty"`
+	Username      string `json:"username,omitempty"`
+	Password      string `json:"password,omitempty"`
+	SecretRef     string `json:"secretRef,omitempty"`
+}
+
+// RepositoryDTO is the view of a Repository served to the UI.
+type RepositoryDTO struct {
+	Name        string         `json:"name"`
+	Namespace   string         `json:"namespace"`
+	URL         string         `json:"url"`
+	RegistryRef string         `json:"registryRef,omitempty"`
+	Description string         `json:"description,omitempty"`
+	State       string         `json:"state"`
+	Conditions  []ConditionDTO `json:"conditions,omitempty"`
+	CreatedAt   *time.Time     `json:"createdAt,omitempty"`
+}
+
+// CreateRepositoryRequest is the body for POST /api/v1/repositories.
+type CreateRepositoryRequest struct {
 	Namespace   string `json:"namespace,omitempty"`
 	Name        string `json:"name"`
 	URL         string `json:"url"`
+	RegistryRef string `json:"registryRef,omitempty"`
 	Description string `json:"description,omitempty"`
-	Username    string `json:"username,omitempty"`
-	Password    string `json:"password,omitempty"`
-	SecretRef   string `json:"secretRef,omitempty"`
 }
 
-// UpdatePantryRequest is the body for PUT /api/v1/pantries/{name}.
-type UpdatePantryRequest struct {
+// UpdateRepositoryRequest is the body for PUT /api/v1/repositories/{namespace}/{name}.
+type UpdateRepositoryRequest struct {
 	URL         string `json:"url"`
+	RegistryRef string `json:"registryRef,omitempty"`
 	Description string `json:"description,omitempty"`
-	Username    string `json:"username,omitempty"`
-	Password    string `json:"password,omitempty"`
-	SecretRef   string `json:"secretRef,omitempty"`
 }
 
 // ArtifactFileDTO is a single file of a manifest bundle or rendered artifact.

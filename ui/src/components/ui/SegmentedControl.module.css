@@ -1,6 +1,8 @@
 .track {
   display: inline-flex;
+  /* As wide as its segments, in flex and grid containers alike. */
   align-self: flex-start;
+  justify-self: start;
   gap: 2px;
   padding: var(--segmented-pad);
   border-radius: var(--segmented-radius);

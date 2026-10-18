@@ -9,6 +9,9 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/version"
 )
 
+// streamedResources are the resources the event stream discloses lists of.
+var streamedResources = []string{"orders", "preparations", "servings", "products", registriesResource, repositoriesResource}
+
 // InfoResponse is the response body for GET /api/v1/info.
 type InfoResponse struct {
 	Name          string   `json:"name"`
@@ -69,7 +72,7 @@ func handleEventsStream(h *hub, deps *apiDeps, heartbeat time.Duration) http.Han
 		readable := map[string]bool{}
 		if deps != nil {
 			if uc, err := deps.resolveUserClient(r); err == nil {
-				for _, res := range []string{"orders", "preparations", "servings", "products", "pantries"} {
+				for _, res := range streamedResources {
 					for _, sa := range uc.sas {
 						if allowed, err := deps.impersonator.authorizedFor(r.Context(), sa.Name, "list", res, "", ""); err == nil && allowed {
 							readable[res] = true
@@ -81,7 +84,7 @@ func handleEventsStream(h *hub, deps *apiDeps, heartbeat time.Duration) http.Han
 		}
 		// The counts event aggregates all resources; only users who may list
 		// everything receive it.
-		allReadable := len(readable) == 5
+		allReadable := len(readable) == len(streamedResources)
 
 		// eventResource maps event type -> resource it discloses.
 		eventResource := map[string]string{
@@ -89,7 +92,8 @@ func handleEventsStream(h *hub, deps *apiDeps, heartbeat time.Duration) http.Han
 			eventPreparations: "preparations",
 			eventServings:     "servings",
 			eventProducts:     "products",
-			eventPantries:     "pantries",
+			eventRegistries:   registriesResource,
+			eventRepositories: repositoriesResource,
 		}
 
 		sub := h.subscribe()

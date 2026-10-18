@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -208,4 +209,53 @@ func respondForbiddenOrError(w http.ResponseWriter, err error, op string) {
 		return
 	}
 	respondError(w, http.StatusInternalServerError, fmt.Sprintf("%s: %s", op, err))
+}
+
+// readerForObject returns a client.Reader restricted to the first mapped SA
+// that may perform verb on the named object in the namespace. Unlike
+// readerFor it honors RBAC rules restricted to resource names. Returns
+// errNotAuthorized when no mapped SA is permitted.
+func (u *userClient) readerForObject(ctx context.Context, verb, resource, namespace, name string) (client.Reader, error) {
+	sa, err := firstAllowed(u.sas, func(saName string) (bool, error) {
+		return u.imp.authorizedFor(ctx, saName, verb, resource, namespace, name)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if sa == "" {
+		return nil, fmt.Errorf("%w to %s %s %q", errNotAuthorized, verb, resource, name)
+	}
+	return u.imp.clientFor(sa)
+}
+
+// writerForRegistry returns the client of the first mapped SA that may
+// perform verb on Registries in the namespace and get each of secrets
+// there. The admission policy registry-secret-access requires the writer of
+// a Registry to be able to read the Secrets it names, so the write must run
+// as such a ServiceAccount.
+func (u *userClient) writerForRegistry(ctx context.Context, verb, namespace string, secrets []string) (client.Client, error) {
+	sa, err := firstAllowed(u.sas, func(saName string) (bool, error) {
+		allowed, err := u.imp.authorizedFor(ctx, saName, verb, registriesResource, namespace, "")
+		if err != nil || !allowed {
+			return false, err
+		}
+		for _, secret := range secrets {
+			allowed, err := u.imp.authorizedFor(ctx, saName, "get", secretsResource, namespace, secret)
+			if err != nil || !allowed {
+				return false, err
+			}
+		}
+		return true, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if sa == "" {
+		if len(secrets) > 0 {
+			return nil, fmt.Errorf("%w to %s Registries naming Secrets %s: the ClusterRole %s grants getting them",
+				errNotAuthorized, verb, strings.Join(secrets, ", "), registryCredentialsRole)
+		}
+		return nil, fmt.Errorf("%w to %s %s", errNotAuthorized, verb, registriesResource)
+	}
+	return u.imp.clientFor(sa)
 }

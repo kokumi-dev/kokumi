@@ -105,6 +105,24 @@ spec:
                     maxLength: 2048
                     pattern: ^oci://.*@sha256:[a-f0-9]{64}$
                     type: string
+                  registryRef:
+                    description: |-
+                      registryRef names the Registry Kokumi connected through to push the
+                      artifact. Signing, verification and the UI read the artifact through
+                      it; when it is absent, deleted or no longer covers the artifact, they
+                      use the registryRefs of the Order.
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
                 required:
                 - digest
                 - ociRef
@@ -252,8 +270,9 @@ spec:
                     maxLength: 71
                     pattern: ^sha256:[a-f0-9]{64}$
                     type: string
-                  oci:
-                    description: oci is the OCI registry URL for the source manifests
+                  url:
+                    description: url is the oci:// URL of the repository of the source
+                      artifact
                     maxLength: 2048
                     type: string
                     x-kubernetes-validations:
@@ -261,7 +280,7 @@ spec:
                       rule: isURL(self) && url(self).getScheme() == 'oci'
                 required:
                 - baseDigest
-                - oci
+                - url
                 type: object
             required:
             - artifact

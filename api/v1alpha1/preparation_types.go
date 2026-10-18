@@ -17,17 +17,18 @@ limitations under the License.
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // OrderSource defines the immutable base artifact for a preparation
 type OrderSource struct {
-	// oci is the OCI registry URL for the source manifests
+	// url is the oci:// URL of the repository of the source artifact
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() == 'oci'",message="must be a valid OCI URL"
-	OCI string `json:"oci"`
+	URL string `json:"url"`
 
 	// baseDigest is the SHA256 digest of the base source artifact
 	// +kubebuilder:validation:Required
@@ -83,6 +84,13 @@ type Artifact struct {
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	Digest string `json:"digest"`
+
+	// registryRef names the Registry Kokumi connected through to push the
+	// artifact. Signing, verification and the UI read the artifact through
+	// it; when it is absent, deleted or no longer covers the artifact, they
+	// use the registryRefs of the Order.
+	// +optional
+	RegistryRef *corev1.LocalObjectReference `json:"registryRef,omitempty"`
 }
 
 // GitSource records the SCM provenance of the base artifact that produced this

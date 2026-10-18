@@ -30,8 +30,9 @@ kubectl apply -f \
 
 This installs:
 - The Kokumi CRDs (`Product`, `Recipe`, `Order`, `Preparation`, `Serving`,
-  `Approval`, `Pantry`, `Kitchen`)
-- The controller manager in the `kokumi` namespace
+  `Approval`, `Registry`, `Repository`, `Kitchen`)
+- The controller manager in the `kokumi` namespace, which creates the
+  `Kitchen` settings and the `Registry` of the bundled registry on start
 - The API server and web UI in the `kokumi` namespace
 - RBAC roles and bindings
 
@@ -88,6 +89,35 @@ cosign generate-key-pair k8s://kokumi-signing/kokumi-signing-key
 
 See the [Operator Guide — Signing](../operator-guide/signing/) for how the key
 is protected and rotated.
+
+## Private certificate authorities
+
+A registry whose certificate a private CA signed needs that CA. For one
+Registry, put it in the Secret its `certSecretRef` names (see
+[Registries and Repositories](../user-guide/registries/)). A CA that every
+registry of the platform uses belongs into the trust store of the controller
+and the server: mount it into both containers and list its directory in
+`SSL_CERT_DIR` next to the system one, for example with a kustomize patch of
+`kokumi-controller-manager` and `kokumi-server`:
+
+```yaml
+spec:
+  template:
+    spec:
+      containers:
+      - name: manager                  # server: the container of kokumi-server
+        env:
+        - name: SSL_CERT_DIR
+          value: /etc/ssl/certs:/etc/kokumi/ca
+        volumeMounts:
+        - name: platform-ca
+          mountPath: /etc/kokumi/ca
+          readOnly: true
+      volumes:
+      - name: platform-ca
+        configMap:
+          name: platform-ca            # a ConfigMap with the CA's PEM file
+```
 
 ## Pin a specific version
 

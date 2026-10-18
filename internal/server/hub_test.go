@@ -23,7 +23,7 @@ func eventTypes(events []Event) []string {
 
 func TestHub_replaysInPublishOrder(t *testing.T) {
 	h := newHub()
-	for _, typ := range []string{eventCounts, eventOrders, eventPreparations, eventServings, eventProducts, eventPantries} {
+	for _, typ := range []string{eventCounts, eventOrders, eventPreparations, eventServings, eventProducts, eventRegistries, eventRepositories} {
 		require.NoError(t, h.publish(typ, []string{typ}))
 	}
 
@@ -31,7 +31,7 @@ func TestHub_replaysInPublishOrder(t *testing.T) {
 		sub := h.subscribe()
 		<-sub.ready()
 		assert.Equal(t,
-			[]string{eventCounts, eventOrders, eventPreparations, eventServings, eventProducts, eventPantries},
+			[]string{eventCounts, eventOrders, eventPreparations, eventServings, eventProducts, eventRegistries, eventRepositories},
 			eventTypes(sub.drain()))
 		h.unsubscribe(sub)
 	}

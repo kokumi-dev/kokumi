@@ -101,7 +101,8 @@ type ImageMirror struct {
 
 	// location is the oci:// URL the prefix is replaced with, for example
 	// "oci://harbor.example.com/dockerhub" for a pull-through cache.
-	// Credentials for it come from the Product's images.pullSecretRef.
+	// A Product connects to it through the Registry among its
+	// registryRefs that covers it.
 	// +required
 	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() == 'oci'",message="must be a valid OCI URL"

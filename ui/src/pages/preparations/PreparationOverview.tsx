@@ -54,6 +54,12 @@ export default function PreparationOverview() {
           items={[
             { label: 'Reference', value: <span className={layout.mono}>{prep.artifact.ociRef}</span> },
             { label: 'Digest', value: <span className={layout.mono}>{prep.artifact.digest}</span> },
+            {
+              label: 'Registry',
+              value: prep.artifact.registryRef
+                ? <Link className={layout.inlineLink} to={paths.registry(prep.namespace, prep.artifact.registryRef)}>{prep.artifact.registryRef}</Link>
+                : <span className={layout.muted}>None: pushed without credentials</span>,
+            },
             { label: 'Config hash', value: <span className={layout.mono}>{prep.configHash}</span> },
             {
               label: 'Signed',

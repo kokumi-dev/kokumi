@@ -10,6 +10,7 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/namespace"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/registry"
 	"github.com/spf13/afero"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -28,7 +29,8 @@ type Counts struct {
 	Preparations int `json:"preparations"`
 	Servings     int `json:"servings"`
 	Products     int `json:"products"`
-	Pantries     int `json:"pantries"`
+	Registries   int `json:"registries"`
+	Repositories int `json:"repositories"`
 }
 
 // SSE event type names.
@@ -38,7 +40,8 @@ const (
 	eventPreparations = "preparations"
 	eventServings     = "servings"
 	eventProducts     = "products"
-	eventPantries     = "pantries"
+	eventRegistries   = "registries"
+	eventRepositories = "repositories"
 	// eventHeartbeat carries no data; it only shows the stream is alive.
 	eventHeartbeat = "heartbeat"
 )
@@ -104,8 +107,8 @@ func startK8sWatcher(
 	}
 
 	deps := &apiDeps{
-		ociClient:      oci.NewORASClient(),
-		store:          artifact.NewStore(oci.NewORASClient(), afero.NewOsFs(), "/tmp/kokumi-pull-cache"),
+		registries:     registry.NewClients(artifact.DefaultRegistryHost),
+		store:          artifact.NewStore(oci.NewClient(oci.Options{}), afero.NewOsFs(), "/tmp/kokumi-pull-cache"),
 		logger:         logger,
 		approvalWriter: writer,
 	}
@@ -138,7 +141,8 @@ func startK8sWatcher(
 	prepInformer := informers.prep
 	servingInformer := informers.serving
 	productInformer := informers.product
-	pantryInformer := informers.pantry
+	registryInformer := informers.registry
+	repositoryInformer := informers.repository
 	kitchenInformer := informers.kitchen
 	secretInformer := informers.secret
 	saInformer := informers.sa
@@ -184,21 +188,29 @@ func startK8sWatcher(
 			return
 		}
 
-		pantryList := &deliveryv1alpha1.PantryList{}
-		if err := k8sCache.List(ctx, pantryList); err != nil {
-			logger.Error(err, "Failed to list Pantries from cache")
+		registryList := &deliveryv1alpha1.RegistryList{}
+		if err := k8sCache.List(ctx, registryList); err != nil {
+			logger.Error(err, "Failed to list Registries from cache")
+			return
+		}
+
+		repositoryList := &deliveryv1alpha1.RepositoryList{}
+		if err := k8sCache.List(ctx, repositoryList); err != nil {
+			logger.Error(err, "Failed to list Repositories from cache")
 			return
 		}
 
 		// Lists are published before the lists that refer to them: Orders name
-		// their Product and active Preparation, Products and Orders name
-		// Pantries. A client that applies events in arrival order then never
-		// shows a reference to an item it has not received yet.
+		// their Product and active Preparation; Repositories, Products and
+		// Orders name Registries. A client that applies events in arrival
+		// order then never shows a reference to an item it has not received
+		// yet.
 		snapshots := []struct {
 			eventType string
 			payload   any
 		}{
-			{eventPantries, pantriesFromList(*pantryList)},
+			{eventRegistries, registriesToDTO(registryList.Items)},
+			{eventRepositories, repositoriesToDTO(repositoryList.Items)},
 			{eventProducts, productsToDTO(productList.Items)},
 			{eventPreparations, enrichPreparations(prepList.Items, servingList.Items)},
 			{eventServings, servingsToDTO(servingList.Items)},
@@ -208,7 +220,8 @@ func startK8sWatcher(
 				Preparations: len(prepList.Items),
 				Servings:     len(servingList.Items),
 				Products:     len(productList.Items),
-				Pantries:     len(pantryList.Items),
+				Registries:   len(registryList.Items),
+				Repositories: len(repositoryList.Items),
 			}},
 		}
 		for _, s := range snapshots {
@@ -241,7 +254,7 @@ func startK8sWatcher(
 	secretHandler := newAuthSecretHandler(deps.authMgr, ctx, isAuthSecret)
 
 	if err := registerWatchers(
-		orderInformer, prepInformer, servingInformer, productInformer, pantryInformer,
+		orderInformer, prepInformer, servingInformer, productInformer, registryInformer, repositoryInformer,
 		kitchenInformer, secretInformer, saInformer,
 		scheduleRefresh, kitchenHandler, secretHandler,
 	); err != nil {
@@ -327,7 +340,7 @@ func newAuthSecretHandler(mgr *authManager, ctx context.Context, isAuthSecret fu
 // registerWatchers wires the SSE-refresh handler onto resource informers and the
 // auth handlers onto Kitchen/Secret informers (split out to keep startK8sWatcher small).
 func registerWatchers(
-	order, prep, serving, product, pantry, kitchen, secret, sa cache.Informer,
+	order, prep, serving, product, registryInformer, repositoryInformer, kitchen, secret, sa cache.Informer,
 	scheduleRefresh func(),
 	kitchenHandler, secretHandler toolscache.ResourceEventHandlerFuncs,
 ) error {
@@ -348,7 +361,8 @@ func registerWatchers(
 		{prep, sseHandler, "Preparation"},
 		{serving, sseHandler, "Serving"},
 		{product, sseHandler, "Product"},
-		{pantry, sseHandler, "Pantry"},
+		{registryInformer, sseHandler, "Registry"},
+		{repositoryInformer, sseHandler, "Repository"},
 		{kitchen, kitchenHandler, "Kitchen"},
 		{secret, secretHandler, "Secret"},
 		{sa, noopHandler, "ServiceAccount"},
@@ -362,14 +376,15 @@ func registerWatchers(
 
 // informers bundles the informers the server watches.
 type informers struct {
-	order   cache.Informer
-	prep    cache.Informer
-	serving cache.Informer
-	product cache.Informer
-	pantry  cache.Informer
-	kitchen cache.Informer
-	secret  cache.Informer
-	sa      cache.Informer
+	order      cache.Informer
+	prep       cache.Informer
+	serving    cache.Informer
+	product    cache.Informer
+	registry   cache.Informer
+	repository cache.Informer
+	kitchen    cache.Informer
+	secret     cache.Informer
+	sa         cache.Informer
 }
 
 // getInformers registers and returns the informers the server needs (split out to keep startK8sWatcher small).
@@ -388,8 +403,11 @@ func getInformers(ctx context.Context, c cache.Cache) (informers, error) {
 	if out.product, err = c.GetInformer(ctx, &deliveryv1alpha1.Product{}); err != nil {
 		return out, fmt.Errorf("getting Product informer: %w", err)
 	}
-	if out.pantry, err = c.GetInformer(ctx, &deliveryv1alpha1.Pantry{}); err != nil {
-		return out, fmt.Errorf("getting Pantry informer: %w", err)
+	if out.registry, err = c.GetInformer(ctx, &deliveryv1alpha1.Registry{}); err != nil {
+		return out, fmt.Errorf("getting Registry informer: %w", err)
+	}
+	if out.repository, err = c.GetInformer(ctx, &deliveryv1alpha1.Repository{}); err != nil {
+		return out, fmt.Errorf("getting Repository informer: %w", err)
 	}
 	if out.kitchen, err = c.GetInformer(ctx, &deliveryv1alpha1.Kitchen{}); err != nil {
 		return out, fmt.Errorf("getting Kitchen informer: %w", err)

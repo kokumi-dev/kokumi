@@ -6,6 +6,7 @@ import { Disclosure, TabButtons } from '../ui'
 import CommitBox from '../shared/CommitBox'
 import PreviewTab from '../shared/PreviewTab'
 import DestinationEditor from '../shared/DestinationEditor'
+import RegistryRefsEditor from '../shared/RegistryRefsEditor'
 import HelmValuesEditor from '../shared/HelmValuesEditor'
 import PatchesEditor from '../shared/PatchesEditor'
 import DiffTab from './DiffTab'
@@ -13,7 +14,7 @@ import type { Order, OrderFormData, OrderPreviewRequest, OverridePolicy, Product
 import { emptyOrderForm, orderToFormData } from '../../api/types'
 import { previewOrder } from '../../api/client'
 import { useChartInfo } from '../../hooks/useChartInfo'
-import { assertKnownKeys, patchesFromYaml, patchesToYaml } from '../../utils/yaml'
+import { assertKnownKeys, patchesFromYaml, patchesToYaml, registryRefsFromYaml } from '../../utils/yaml'
 import {
   allowedTargetLabel,
   allowsPatches,
@@ -63,11 +64,8 @@ function formToYaml(data: OrderFormData, helm: boolean | undefined): string {
   }
   if (helm !== false && hasValues(data.values)) doc.values = data.values
   if (data.patches.length > 0) doc.patches = patchesToYaml(data.patches)
-  if (data.destination?.pantryRef?.name) {
-    doc.destination = { pantryRef: { name: data.destination.pantryRef.name } }
-  } else if (data.destination?.oci) {
-    doc.destination = { oci: data.destination.oci }
-  }
+  if (data.destination?.url) doc.destination = { url: data.destination.url }
+  if (data.registryRefs.length > 0) doc.registryRefs = data.registryRefs.map((r) => ({ name: r.name }))
   doc.promotion = data.approvals ? { mode: data.mode, approvals: data.approvals } : { mode: data.mode }
   return dump(doc, { lineWidth: 100 })
 }
@@ -82,7 +80,7 @@ interface ParseContext {
 function yamlToPartialForm(text: string, ctx: ParseContext): Omit<OrderFormData, 'name' | 'namespace' | 'edits'> {
   const doc = load(text) as Record<string, unknown>
   if (!doc || typeof doc !== 'object') throw new Error('YAML must be a mapping')
-  assertKnownKeys(doc, ['productRef', 'values', 'destination', 'patches', 'promotion'], '')
+  assertKnownKeys(doc, ['productRef', 'values', 'destination', 'registryRefs', 'patches', 'promotion'], '')
 
   const rawProductRef = doc.productRef as Record<string, unknown> | undefined
   assertKnownKeys(rawProductRef, ['name'], 'productRef')
@@ -99,17 +97,9 @@ function yamlToPartialForm(text: string, ctx: ParseContext): Omit<OrderFormData,
     }
   }
 
-  // Resolve destination — at most one of oci or pantryRef
   const dst = doc.destination as Record<string, unknown> | undefined
-  let destination: OrderFormData['destination'] = {}
-  if (dst) {
-    const dstPantryRef = dst.pantryRef as Record<string, string> | undefined
-    if (dstPantryRef?.name) {
-      destination = { pantryRef: { name: dstPantryRef.name } }
-    } else {
-      destination = { oci: (dst.oci as string) ?? '' }
-    }
-  }
+  assertKnownKeys(dst, ['url'], 'destination')
+  const destination: OrderFormData['destination'] = dst?.url ? { url: String(dst.url) } : {}
 
   const promotion = doc.promotion as Record<string, unknown> | undefined
   const rawApprovals = promotion?.approvals as Record<string, unknown> | undefined
@@ -129,6 +119,7 @@ function yamlToPartialForm(text: string, ctx: ParseContext): Omit<OrderFormData,
     productRef: { name: product },
     values: (rawValues as Record<string, unknown> | null | undefined) ?? {},
     destination,
+    registryRefs: registryRefsFromYaml(doc.registryRefs),
     mode: promotion?.mode === 'Automatic' ? 'Automatic' : 'Manual',
     approvals: rawApprovals
       ? {
@@ -197,7 +188,6 @@ export default function OrderForm({ order, initialProduct, products, onCancel, o
       name: sent.name,
       productRef: sent.productRef,
       values: hasValues(sent.values) ? sent.values : undefined,
-      destination: sent.destination,
       patches: sent.patches,
       edits: sent.edits,
     }
@@ -334,14 +324,12 @@ interface FormViewProps {
 }
 
 function FormView({ formData, isEdit, product, products, deletingReason, onFieldChange }: FormViewProps) {
-  const [isDestOpen, setIsDestOpen] = useState(
-    !!(formData.destination?.oci || formData.destination?.pantryRef?.name),
-  )
+  const [isDestOpen, setIsDestOpen] = useState(!!formData.destination?.url || formData.registryRefs.length > 0)
   const [isPatchesOpen, setIsPatchesOpen] = useState(formData.patches.length > 0)
   const [groupsText, setGroupsText] = useState(formData.approvals?.allowedGroups.join(', ') ?? '')
 
   const helm = !!product?.render?.helm
-  const chart = useChartInfo(helm ? product?.resolvedSource : undefined, formData.namespace)
+  const chart = useChartInfo(helm ? product?.resolvedSource : undefined, formData.namespace, product?.registryRefs)
   // A new Order would hold up the deletion of its Product.
   const candidates = products.filter((p) => p.namespace === formData.namespace && !p.deletionTimestamp)
   // Values of an unknown Product are kept, so they stay visible; values a
@@ -454,7 +442,7 @@ function FormView({ formData, isEdit, product, products, deletingReason, onField
       {/* Destination (collapsible) */}
       <Disclosure
         label="Destination"
-        summary={formData.destination?.oci || (formData.destination?.pantryRef?.name && `pantry: ${formData.destination.pantryRef.name}`)}
+        summary={formData.destination?.url}
         open={isDestOpen}
         onOpenChange={setIsDestOpen}
       >
@@ -464,7 +452,19 @@ function FormView({ formData, isEdit, product, products, deletingReason, onField
             onChange={(dest) => onFieldChange('destination', dest)}
             namespace={formData.namespace}
             name={formData.name}
+            registryRefs={formData.registryRefs}
+            defaultHint="Kokumi pushes the Preparations to the in-cluster registry"
           />
+          <RegistryRefsEditor
+            namespace={formData.namespace}
+            value={formData.registryRefs}
+            onChange={(refs) => onFieldChange('registryRefs', refs)}
+            owns="the destination"
+          />
+          <span className={styles.hint}>
+            The source and the images are pulled through the Product's Registries; Argo CD needs its own credentials to
+            pull the destination.
+          </span>
         </div>
       </Disclosure>
 

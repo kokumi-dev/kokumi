@@ -40,13 +40,11 @@ func TestPipeline_Render_config(t *testing.T) {
 			req.ParentDigest = parent
 			req.ArtifactType = oci.PreparationArtifactType
 			req.Config = artifact.Config{
-				Order:       &artifact.ConfigObject{Namespace: "shop", Name: "podinfo-prod", UID: "6f0c"},
-				ConfigHash:  "sha256:9b1d",
-				Source:      artifact.ConfigSource{PantryRef: "upstream"},
-				Destination: artifact.ConfigDestination{PantryRef: "internal"},
-				Product:     &artifact.ConfigProduct{Namespace: "shop", Name: "podinfo", ConfigHash: "sha256:77e0"},
-				Renderer:    artifact.ConfigRenderer{Type: "Manifest", Version: "v0.17.0", Builder: "kokumi@0.17.0"},
-				Intent:      json.RawMessage(`{"destination":"oci://dest","source":{"oci":"oci://src","version":"1.0.0"}}`),
+				Order:      &artifact.ConfigObject{Namespace: "shop", Name: "podinfo-prod", UID: "6f0c"},
+				ConfigHash: "sha256:9b1d",
+				Product:    &artifact.ConfigProduct{Namespace: "shop", Name: "podinfo", ConfigHash: "sha256:77e0"},
+				Renderer:   artifact.ConfigRenderer{Type: "Manifest", Version: "v0.17.0", Builder: "kokumi@0.17.0"},
+				Intent:     json.RawMessage(`{"destination":"oci://dest","source":{"oci":"oci://src","version":"1.0.0"}}`),
 			}
 		})
 
@@ -63,12 +61,11 @@ func TestPipeline_Render_config(t *testing.T) {
 		require.Equal(t, "bump replicas to 3", got.CommitMessage)
 		require.Equal(t, parent, got.Parent)
 		require.Equal(t, artifact.ConfigSource{
-			OCI:       result.SourceRef.OCIRepositoryReference(),
-			Version:   testVersion,
-			Digest:    result.SourceRef.Digest,
-			PantryRef: "upstream",
+			OCI:     result.SourceRef.OCIRepositoryReference(),
+			Version: testVersion,
+			Digest:  result.SourceRef.Digest,
 		}, got.Source)
-		require.Equal(t, artifact.ConfigDestination{OCI: result.DestRef.OCIRepositoryReference(), PantryRef: "internal"}, got.Destination)
+		require.Equal(t, artifact.ConfigDestination{OCI: result.DestRef.OCIRepositoryReference()}, got.Destination)
 		require.JSONEq(t, `{"destination":"oci://dest","source":{"oci":"oci://src","version":"1.0.0"}}`, string(got.Intent))
 
 		created, err := got.Created()

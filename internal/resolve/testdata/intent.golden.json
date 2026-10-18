@@ -19,7 +19,8 @@
         "path": "spec/image"
       }
     ],
-    "policy": "Vendor"
+    "policy": "Vendor",
+    "vendor": "oci://ghcr.io/org/charts/app"
   },
   "patches": [
     {

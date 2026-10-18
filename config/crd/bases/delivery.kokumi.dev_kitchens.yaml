@@ -234,7 +234,8 @@ spec:
                           description: |-
                             location is the oci:// URL the prefix is replaced with, for example
                             "oci://harbor.example.com/dockerhub" for a pull-through cache.
-                            Credentials for it come from the Product's images.pullSecretRef.
+                            A Product connects to it through the Registry among its
+                            registryRefs that covers it.
                           maxLength: 2048
                           type: string
                           x-kubernetes-validations:

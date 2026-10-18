@@ -44,6 +44,10 @@ type FakeClient struct {
 	Resolves []Reference
 	// CopyErr, when set, is returned by Copy.
 	CopyErr error
+	// Pings records the hosts Ping was called with.
+	Pings []string
+	// PingErr, when set, is returned by Ping.
+	PingErr error
 }
 
 var _ Client = (*FakeClient)(nil)
@@ -159,6 +163,15 @@ func (c *FakeClient) Resolve(_ context.Context, ref Reference) (Descriptor, erro
 		return Descriptor{}, fmt.Errorf("resolve %s: not found", ref)
 	}
 	return desc, nil
+}
+
+// Ping records host and returns PingErr.
+func (c *FakeClient) Ping(_ context.Context, host string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.Pings = append(c.Pings, host)
+	return c.PingErr
 }
 
 // Copy records the copy and returns CopyErr.

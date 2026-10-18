@@ -15,18 +15,15 @@ func CalculateSpecHash(canonical []byte) string {
 }
 
 // CalculateProductHash computes a stable SHA-256 hash over the inputs a
-// Product's source is resolved from: the source and vendor configuration and
-// the OCI URLs they resolved to, so that a changed Pantry URL resolves the
-// Product again. Render config, patches, and overrides are left out; they
-// change what Orders render, not the source. vendorOCI is empty when the
-// Product does not vendor its source.
-func CalculateProductHash(source deliveryv1alpha1.OCISource, vendor *deliveryv1alpha1.OCIDestination, sourceOCI, vendorOCI string) (string, error) {
+// Product's source is resolved from: the source and the URL it is vendored
+// to. Render config, patches, overrides and the Registries are left out;
+// they change what Orders render, or how Kokumi connects, not the source.
+// vendorURL is empty when the Product does not vendor its source.
+func CalculateProductHash(source deliveryv1alpha1.OCISource, vendorURL string) (string, error) {
 	data, err := json.Marshal(struct {
-		Source    deliveryv1alpha1.OCISource       `json:"source"`
-		Vendor    *deliveryv1alpha1.OCIDestination `json:"vendor,omitempty"`
-		SourceOCI string                           `json:"sourceOCI"`
-		VendorOCI string                           `json:"vendorOCI,omitempty"`
-	}{source, vendor, sourceOCI, vendorOCI})
+		Source    deliveryv1alpha1.OCISource `json:"source"`
+		VendorURL string                     `json:"vendorURL,omitempty"`
+	}{source, vendorURL})
 	if err != nil {
 		return "", fmt.Errorf("failed to encode Product source for hashing: %w", err)
 	}

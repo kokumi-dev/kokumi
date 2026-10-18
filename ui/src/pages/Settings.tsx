@@ -266,6 +266,7 @@ function ImageMirrorsSection({ images, onSaved }: { images?: ImagesSettings; onS
             with the longest matching prefix, such as a pull-through cache or an
             air-gapped copy, and never falls back to the original registry. Manifests
             keep the original names; nodes pull through their own mirror configuration.
+            A Product reads a mirror through the Product's Registry that covers the mirror's location.
           </p>
           {mirrors.length === 0 && <p className={styles.fieldHint}>No mirrors: images are read from their own registries.</p>}
           {mirrors.map((m, i) => (

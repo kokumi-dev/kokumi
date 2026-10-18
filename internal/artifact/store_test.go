@@ -44,36 +44,34 @@ func (c *failingResolveClient) Copy(_ context.Context, _ oci.Client, _, _ oci.Re
 	return nil
 }
 
-func TestStore_Copy_ResolveFallback(t *testing.T) {
-	t.Run("target resolve fails falls back to source", func(t *testing.T) {
-		fs := afero.NewMemMapFs()
-		failing := &failingResolveClient{fs: fs}
-		working := oci.NewFakeClient(fs)
-		store := artifact.NewStore(failing, fs, "")
-
-		digest, err := store.Copy(context.Background(),
-			artifact.Source{OCI: testChartsOCI, Version: testVersion},
-			working,
-			artifact.Destination{OCI: testVendorOCI},
-			failing,
-		)
-		require.NoError(t, err)
-		assert.Equal(t, fakeDigest, digest)
-	})
-
-	t.Run("both resolves failing returns error", func(t *testing.T) {
+func TestStore_Copy_Destination(t *testing.T) {
+	t.Run("a failing resolve of the copy returns an error", func(t *testing.T) {
 		fs := afero.NewMemMapFs()
 		failing := &failingResolveClient{fs: fs}
 		store := artifact.NewStore(failing, fs, "")
 
 		_, err := store.Copy(context.Background(),
 			artifact.Source{OCI: testChartsOCI, Version: testVersion},
-			failing,
+			oci.NewFakeClient(fs),
 			artifact.Destination{OCI: testVendorOCI},
 			failing,
 		)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to resolve copied digest")
+		require.ErrorContains(t, err, "failed to resolve copied digest")
+	})
+
+	t.Run("without a destination client the source's is not used", func(t *testing.T) {
+		fs := afero.NewMemMapFs()
+		source := oci.NewFakeClient(fs)
+		store := artifact.NewStore(&failingResolveClient{fs: fs}, fs, "")
+
+		_, err := store.Copy(context.Background(),
+			artifact.Source{OCI: testChartsOCI, Version: testVersion},
+			source,
+			artifact.Destination{OCI: testVendorOCI},
+			nil,
+		)
+		require.ErrorContains(t, err, "failed to resolve copied digest", "the copy is resolved with the store's default client")
+		assert.Empty(t, source.Resolves)
 	})
 }
 

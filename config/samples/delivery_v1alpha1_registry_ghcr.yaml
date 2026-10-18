@@ -1,0 +1,16 @@
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Registry
+metadata:
+  labels:
+    app.kubernetes.io/name: kokumi
+    app.kubernetes.io/managed-by: kustomize
+  name: ghcr
+spec:
+  # Covers every repository on ghcr.io. Products and Orders that list this
+  # Registry in registryRefs connect through it to their locations there.
+  url: oci://ghcr.io
+  # For private packages, name a kubernetes.io/dockerconfigjson Secret:
+  #   kubectl create secret docker-registry ghcr-credentials \
+  #     --docker-server=ghcr.io --docker-username=<user> --docker-password=<token>
+  # secretRef:
+  #   name: ghcr-credentials

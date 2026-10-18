@@ -14,7 +14,7 @@ points at it, and who signed it.
 |---|---|
 | Preparation → **Artifact** | The rendered artifact, its config (the intent) and layer (the YAML), the images its config records, and the signature, provenance and approvals attached to it. |
 | Product → **Artifact** | The source at its source location with what its publisher attached, and the vendored copy. |
-| Pantry → **Tags** → **Structure** | The artifact behind any tag of the Pantry's repository. |
+| Repository → **Tags** → **Structure** | The artifact behind any tag of the Repository. |
 
 ## Four ideas behind every graph
 
@@ -75,7 +75,7 @@ anything, so every signature is verified:
   Without `verify`, it checks against the keys the Kitchen trusts. The diagram
   shows the verdicts it recorded. See
   [Source Verification](../source-verification/#every-signature-not-only-the-sources).
-- **Preparations and Pantry tags:** every Sigstore bundle is verified when you
+- **Preparations and Repository tags:** every Sigstore bundle is verified when you
   open the view, against the keys the Kitchen trusts (see
   [Signing](../../operator-guide/signing/)).
 

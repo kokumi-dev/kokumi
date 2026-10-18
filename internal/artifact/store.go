@@ -49,9 +49,11 @@ func NewStore(client oci.Client, fs afero.Fs, cacheDir string) *Store {
 // Copy copies the source artifact, pinned to its digest when set, to the
 // destination registry unchanged (vendor flow), together with its referrers
 // such as signatures and attestations. The pushed tag is the source version.
+// A nil client is the store's default client: the source's credentials are
+// never used to write the destination.
 func (s *Store) Copy(ctx context.Context, src Source, srcClient oci.Client, dst Destination, dstClient oci.Client) (string, error) {
 	source := cmp.Or(srcClient, s.client)
-	target := cmp.Or(dstClient, source)
+	target := cmp.Or(dstClient, s.client)
 
 	srcRef, err := src.ref()
 	if err != nil {
@@ -69,10 +71,7 @@ func (s *Store) Copy(ctx context.Context, src Source, srcClient oci.Client, dst 
 
 	desc, err := target.Resolve(ctx, dstRef)
 	if err != nil {
-		desc, err = source.Resolve(ctx, dstRef)
-		if err != nil {
-			return "", fmt.Errorf("failed to resolve copied digest: %w", err)
-		}
+		return "", fmt.Errorf("failed to resolve copied digest: %w", err)
 	}
 
 	return desc.Digest, nil
@@ -99,19 +98,32 @@ func (s *Store) ResolveDigest(ctx context.Context, src Source, client oci.Client
 	return desc.Digest, nil
 }
 
-// pull fetches the artifact. Raw layout pulls preserve the artifact's original
+// pull fetches the artifact. Raw layout pulls preserve the artifact's
 // original files; everything else consolidates per the layout.
+//
+// It first resolves ref with client and then pulls, and caches, the digest
+// it resolved to. A cache hit therefore needs a successful resolve with the
+// caller's own credentials: an artifact pulled with one Registry's
+// credentials is never served to a caller without them. Pulling the digest
+// also keeps a tag that moves in between from mixing two artifacts.
 func (s *Store) pull(ctx context.Context, client oci.Client, ref oci.Reference, layout Layout, tempPrefix string) (*pulledArtifact, error) {
+	desc, err := client.Resolve(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	pinned := ref
+	pinned.Tag, pinned.Digest = "", desc.Digest
+
 	dir, err := afero.TempDir(s.fs, "", tempPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp directory: %w", err)
 	}
 
-	if entry := s.cache.get(ctx, ref, layout, dir); entry != nil {
+	if entry := s.cache.get(ctx, pinned, layout, dir); entry != nil {
 		return &pulledArtifact{dir: dir, mediaType: entry.MediaType, digest: entry.Digest, annotations: entry.Annotations}, nil
 	}
 
-	mediaType, digest, annotations, err := client.Pull(ctx, ref, dir)
+	mediaType, digest, annotations, err := client.Pull(ctx, pinned, dir)
 	if err != nil {
 		s.cleanup(dir)
 		return nil, err
@@ -124,7 +136,7 @@ func (s *Store) pull(ctx context.Context, client oci.Client, ref oci.Reference, 
 		}
 	}
 
-	s.cache.put(ctx, mediaType, digest, annotations, ref, layout, dir)
+	s.cache.put(ctx, mediaType, digest, annotations, pinned, layout, dir)
 
 	return &pulledArtifact{dir: dir, mediaType: mediaType, digest: digest, annotations: annotations}, nil
 }

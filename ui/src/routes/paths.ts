@@ -9,7 +9,11 @@ const seg = (s: string) => encodeURIComponent(s)
 export const paths = {
   dashboard: () => '/',
   products: () => '/products',
-  newProduct: () => '/products/new',
+  /** Optionally pre-fills the source and Registry from a Repository, and the version. */
+  newProduct: (repository?: { namespace: string; name: string }, version?: string) =>
+    repository
+      ? `/products/new?repository=${seg(`${repository.namespace}/${repository.name}`)}${version ? `&version=${seg(version)}` : ''}`
+      : '/products/new',
   product: (ns: string, name: string, tab?: 'orders' | 'preview' | 'artifact' | 'edit') =>
     `/products/${seg(ns)}/${seg(name)}${tab ? `/${tab}` : ''}`,
   orders: () => '/orders',
@@ -23,9 +27,13 @@ export const paths = {
     `/preparations/${seg(ns)}/${seg(name)}${tab ? `/${tab}` : ''}`,
   servings: () => '/servings',
   serving: (ns: string, name: string) => `/servings/${seg(ns)}/${seg(name)}`,
-  pantries: () => '/pantries',
-  newPantry: () => '/pantries/new',
-  pantry: (ns: string, name: string, tab?: 'tags' | 'edit') =>
-    `/pantries/${seg(ns)}/${seg(name)}${tab ? `/${tab}` : ''}`,
+  repositories: () => '/repositories',
+  newRepository: () => '/repositories/new',
+  repository: (ns: string, name: string, tab?: 'tags' | 'edit') =>
+    `/repositories/${seg(ns)}/${seg(name)}${tab ? `/${tab}` : ''}`,
+  registries: () => '/registries',
+  newRegistry: () => '/registries/new',
+  registry: (ns: string, name: string, tab?: 'edit') =>
+    `/registries/${seg(ns)}/${seg(name)}${tab ? `/${tab}` : ''}`,
   settings: (tab: SettingsTab = 'general') => `/settings/${tab}`,
 }

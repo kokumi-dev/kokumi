@@ -99,15 +99,15 @@ func (i Image) TaggedName() string {
 }
 
 // vendoredRepository returns the repository the image with the normalized
-// name is vendored into: its own repository below destination, named after
-// the image, such as <destination>/images/ghcr.io/example/app. A registry
-// port is written as _<port>, since a repository path cannot hold a colon.
-// It fails when the repository is not a valid name or its path is longer
-// than a registry accepts.
-func vendoredRepository(destination oci.Reference, name string) (oci.Reference, error) {
-	target := destination
+// name is vendored into: its own repository below root, named after the
+// image, such as <root>/images/ghcr.io/example/app. A registry port is
+// written as _<port>, since a repository path cannot hold a colon. It fails
+// when the repository is not a valid name or its path is longer than a
+// registry accepts.
+func vendoredRepository(root oci.Reference, name string) (oci.Reference, error) {
+	target := root
 	target.Tag, target.Digest = "", ""
-	target.Repository = destination.Repository + "/images/" + strings.ToLower(strings.ReplaceAll(name, ":", "_"))
+	target.Repository = root.Repository + "/images/" + strings.ToLower(strings.ReplaceAll(name, ":", "_"))
 
 	if _, err := reference.Parse(target.RepositoryReference()); err != nil {
 		return oci.Reference{}, fmt.Errorf("cannot vendor %s into %s: %w", name, target.RepositoryReference(), err)

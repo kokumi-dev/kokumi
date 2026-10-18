@@ -24,7 +24,7 @@ func testProduct(render *deliveryv1alpha1.Render) *deliveryv1alpha1.Product {
 	return &deliveryv1alpha1.Product{
 		Name: appName,
 		Spec: deliveryv1alpha1.ProductSpec{
-			Source: deliveryv1alpha1.OCISource{OCI: "oci://registry/charts/app", Version: "1.0.0"},
+			Source: deliveryv1alpha1.OCISource{URL: "oci://registry/charts/app", Version: "1.0.0"},
 			Render: render,
 			Patches: []deliveryv1alpha1.Patch{
 				{Target: deliveryv1alpha1.PatchTarget{Kind: depKind, Name: appName}, Set: map[string]string{testPath: "1", pausedPath: "false"}},
@@ -37,10 +37,9 @@ func testProduct(render *deliveryv1alpha1.Render) *deliveryv1alpha1.Product {
 		Status: deliveryv1alpha1.ProductStatus{
 			ConfigHash: "sha256:product",
 			Source: &deliveryv1alpha1.ProductSourceStatus{
-				OCI:       "oci://mirror/charts/app",
-				Version:   "1.0.0",
-				PantryRef: &deliveryv1alpha1.PantryRef{Name: "mirror"},
-				Digest:    sourceDigest,
+				URL:     "oci://mirror/charts/app",
+				Version: "1.0.0",
+				Digest:  sourceDigest,
 			},
 		},
 	}
@@ -65,8 +64,9 @@ func TestForProduct(t *testing.T) {
 		eff, err := ForProduct(product, &deliveryv1alpha1.Order{})
 		require.NoError(t, err)
 
-		require.Equal(t, "oci://mirror/charts/app", eff.Source.OCI)
-		require.Equal(t, "mirror", eff.Source.PantryRef.Name)
+		require.Equal(t, "oci://mirror/charts/app", eff.Source.URL)
+		require.Equal(t, product.Spec.RegistryRefs, eff.RegistryRefs, "the Product's Registries connect to its source")
+		require.Empty(t, eff.ImagesVendorURL, "images are vendored only under the Vendor policy")
 		require.Equal(t, sourceDigest, eff.SourceDigest, "every variant renders the digest the Product resolved")
 		require.JSONEq(t, `{"replicaCount":1}`, string(eff.Render.Helm.Values.Raw))
 		require.Equal(t, product.Spec.Patches, eff.Patches)

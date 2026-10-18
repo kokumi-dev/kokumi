@@ -21,6 +21,7 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/images"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/registry"
 	"github.com/kokumi-dev/kokumi/internal/resolve"
 )
 
@@ -35,10 +36,12 @@ const (
 func serveAsAdmin(t *testing.T, req *http.Request, objs ...client.Object) *httptest.ResponseRecorder {
 	t.Helper()
 	fs := afero.NewMemMapFs()
-	store := artifact.NewStore(oci.NewFakeClient(fs), fs, "")
+	registryClient := oci.NewFakeClient(fs)
+	store := artifact.NewStore(registryClient, fs, "")
 	imp := newImpersonator(nil, nil, capsInstallNamespace)
 	imp.clients[adminServiceAccountName] = fake.NewClientBuilder().WithScheme(unionScheme(t)).WithObjects(objs...).Build()
 	deps := &apiDeps{
+		registries:   registry.NewClients(artifact.DefaultRegistryHost).WithClientFactory(func(oci.Options) oci.Client { return registryClient }),
 		store:        store,
 		pipeline:     artifact.NewPipeline(store),
 		logger:       logr.Discard(),
@@ -76,7 +79,7 @@ func TestHandlePreview(t *testing.T) {
 		Name:      "web",
 		Namespace: nsA,
 		Status: deliveryv1alpha1.ProductStatus{
-			Source: &deliveryv1alpha1.ProductSourceStatus{OCI: source, Version: "1.0.0"},
+			Source: &deliveryv1alpha1.ProductSourceStatus{URL: source, Version: "1.0.0"},
 		},
 	}
 
@@ -93,7 +96,7 @@ func TestHandlePreview(t *testing.T) {
 		{
 			name: "Product",
 			path: "/api/v1/products/preview",
-			body: `{"namespace":"` + nsA + `","name":"web","source":{"oci":"` + source + `","version":"1.0.0"},"images":{}}`,
+			body: `{"namespace":"` + nsA + `","name":"web","source":{"url":"` + source + `","version":"1.0.0"},"images":{}}`,
 		},
 	}
 	for _, tt := range tests {
@@ -108,10 +111,10 @@ func TestPreviewRequest(t *testing.T) {
 	helm := func(values string) *deliveryv1alpha1.Render {
 		return &deliveryv1alpha1.Render{Helm: &deliveryv1alpha1.HelmRender{Values: &apiextensionsv1.JSON{Raw: []byte(values)}}}
 	}
-	source := deliveryv1alpha1.OCISource{OCI: "oci://registry/charts/app", Version: "1.0.0"}
+	source := deliveryv1alpha1.OCISource{URL: "oci://registry/charts/app", Version: "1.0.0"}
 
 	t.Run("rejects Helm values that are not an object", func(t *testing.T) {
-		p := &preview{spec: &resolve.EffectiveSpec{Source: source, Render: helm(`[1,2]`)}, source: source}
+		p := &preview{spec: &resolve.EffectiveSpec{Source: source, Render: helm(`[1,2]`)}}
 
 		_, err := p.request()
 		require.ErrorContains(t, err, "invalid render config")
@@ -119,7 +122,7 @@ func TestPreviewRequest(t *testing.T) {
 
 	t.Run("pulls the digest the Product resolved", func(t *testing.T) {
 		const digest = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-		p := &preview{spec: &resolve.EffectiveSpec{Source: source, SourceDigest: digest, Render: helm(`{"replicaCount":2}`)}, source: source}
+		p := &preview{spec: &resolve.EffectiveSpec{Source: source, SourceDigest: digest, Render: helm(`{"replicaCount":2}`)}}
 
 		req, err := p.request()
 		require.NoError(t, err)
@@ -127,16 +130,14 @@ func TestPreviewRequest(t *testing.T) {
 		require.Equal(t, map[string]any{"replicaCount": float64(2)}, req.Render.Helm.Values)
 	})
 
-	t.Run("passes the image policy, mirrors and destination", func(t *testing.T) {
+	t.Run("passes the image policy, mirrors and vendor location", func(t *testing.T) {
 		p := &preview{
-			spec: &resolve.EffectiveSpec{Source: source, Images: deliveryv1alpha1.ProductImages{
+			spec: &resolve.EffectiveSpec{Source: source, ImagesVendorURL: "oci://registry/shop/vendor/app", Images: deliveryv1alpha1.ProductImages{
 				Policy:     deliveryv1alpha1.ImagePolicyVendor,
 				FieldSpecs: []deliveryv1alpha1.ImageFieldSpec{{Kind: prometheusKind, Path: imagePath}},
 			}},
-			source:      source,
-			mirrors:     []images.Mirror{{Prefix: dockerHub, Location: "mirror.example.com/hub"}},
-			destination: "oci://registry/shop/app",
-			locked:      []images.Image{{Ref: nginxRef, Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
+			mirrors: []images.Mirror{{Prefix: dockerHub, Location: "mirror.example.com/hub"}},
+			locked:  []images.Image{{Ref: nginxRef, Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
 		}
 
 		req, err := p.request()
@@ -145,7 +146,7 @@ func TestPreviewRequest(t *testing.T) {
 		require.Equal(t, []images.FieldSpec{{Kind: prometheusKind, Path: imagePath}}, req.Images.FieldSpecs)
 		require.Equal(t, p.mirrors, req.Images.Mirrors)
 		require.Equal(t, p.locked, req.Images.Locked)
-		require.Equal(t, "oci://registry/shop/app", req.Destination)
+		require.Equal(t, "oci://registry/shop/vendor/app", req.Images.VendorURL)
 	})
 }
 

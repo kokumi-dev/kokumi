@@ -155,9 +155,9 @@ type ImageFieldSpec struct {
 type ProductImages struct {
 	// policy controls what Kokumi does with the images: Record lists them by
 	// digest, Pin also rewrites the manifests to those digests, and Vendor
-	// copies each image into a repository of its own below the Order's
-	// destination, <destination>/images/<image name>, and rewrites the
-	// manifests to pull them from there.
+	// copies each image into a repository of its own below the Product's
+	// vendor location, <vendor url>/images/<image name>, and rewrites the
+	// manifests to pull them from there. Vendor requires spec.vendor.
 	// +optional
 	// +kubebuilder:default=Record
 	Policy ImagePolicy `json:"policy,omitempty"`
@@ -169,14 +169,6 @@ type ProductImages struct {
 	// +listType=atomic
 	// +kubebuilder:validation:MaxItems=32
 	FieldSpecs []ImageFieldSpec `json:"fieldSpecs,omitempty"`
-
-	// pullSecretRef names a kubernetes.io/dockerconfigjson Secret in the
-	// Product's namespace whose credentials are used, per registry host, to
-	// resolve and vendor the images. Like a Pod's imagePullSecrets, it lets
-	// everyone who may edit the Product use these credentials. Without it,
-	// registries are accessed anonymously.
-	// +optional
-	PullSecretRef *corev1.LocalObjectReference `json:"pullSecretRef,omitempty"`
 }
 
 // EffectivePolicy returns policy, defaulting to Record.
@@ -191,16 +183,20 @@ func (i ProductImages) EffectivePolicy() ImagePolicy {
 // A Product is the complete definition of an application: the source artifact,
 // how it is rendered, and its base patches. Each Order is a variant of
 // exactly one Product and only declares what differs.
+// +kubebuilder:validation:XValidation:rule="!has(self.images) || !has(self.images.policy) || self.images.policy != 'Vendor' || has(self.vendor)",message="the Vendor image policy needs spec.vendor, the location the images are copied below"
 type ProductSpec struct {
 	// source defines the OCI artifact the Product is built from. Orders
 	// cannot change the source or version.
 	// +kubebuilder:validation:Required
 	Source OCISource `json:"source"`
 
-	// vendor optionally copies the source artifact to another OCI registry.
-	// When set, Orders render from the vendored copy. When neither oci nor
-	// pantryRef is set, the source is copied to
-	// oci://<in-cluster registry>/<namespace>/vendor/<name>.
+	// vendor optionally copies the source artifact to another OCI
+	// repository, and under the Vendor image policy also the images, below
+	// it at <url>/images. When set, Orders render from the vendored copy.
+	// Without a url, the source is copied to
+	// oci://<in-cluster registry>/<namespace>/vendor/<name>. A source read
+	// with credentials is only copied where a Registry with credentials
+	// connects to.
 	// +optional
 	Vendor *OCIDestination `json:"vendor,omitempty"`
 
@@ -227,25 +223,33 @@ type ProductSpec struct {
 	// +optional
 	// +kubebuilder:default={}
 	Images ProductImages `json:"images,omitzero"`
+
+	// registryRefs lists Registries in the Product's namespace. Kokumi
+	// connects to the Product's source, the registries of its images and
+	// their mirrors, and its vendor location through the one whose url
+	// covers each, the longest when several do. Orders connect to their
+	// destination through their own registryRefs.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	// +kubebuilder:validation:MaxItems=16
+	RegistryRefs []corev1.LocalObjectReference `json:"registryRefs,omitempty"`
 }
 
 // ProductSourceStatus is the source address advertised by the Product.
 // Orders render from exactly what is published here.
 type ProductSourceStatus struct {
-	// oci is the full OCI URL of the source artifact.
+	// url is the oci:// URL of the repository of the source artifact: of
+	// the vendored copy when the Product vendors.
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() == 'oci'",message="must be a valid OCI URL"
-	OCI string `json:"oci"`
+	URL string `json:"url"`
 
 	// version is the tag of the source artifact.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	Version string `json:"version"`
-
-	// pantryRef references the Pantry providing pull credentials for oci.
-	// Absent when the registry is anonymously accessible.
-	// +optional
-	PantryRef *PantryRef `json:"pantryRef,omitempty"`
 
 	// digest is the digest version resolved to. Orders render exactly this
 	// artifact, so every variant of the Product renders the same source.
@@ -368,6 +372,18 @@ type ProductStatus struct {
 	// +optional
 	Source *ProductSourceStatus `json:"source,omitempty"`
 
+	// registryAccess lists the registry locations the Product needs: its
+	// source and its vendor location, and the Registry Kokumi connects to
+	// each through. The images belong to the render of each Order and are
+	// listed on the Orders.
+	// +optional
+	// +listType=map
+	// +listMapKey=url
+	// +listMapKey=operation
+	// +listMapKey=client
+	// +kubebuilder:validation:MaxItems=32
+	RegistryAccess []RegistryAccess `json:"registryAccess,omitempty"`
+
 	// conditions represent the current state of the Product resource.
 	// +listType=map
 	// +listMapKey=type
@@ -380,7 +396,7 @@ type ProductStatus struct {
 // +kubebuilder:resource:scope=Namespaced
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
 // +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].reason`
-// +kubebuilder:printcolumn:name="Source",type=string,JSONPath=`.spec.source.oci`
+// +kubebuilder:printcolumn:name="Source",type=string,JSONPath=`.spec.source.url`
 // +kubebuilder:printcolumn:name="Version",type=string,JSONPath=`.spec.source.version`
 // +kubebuilder:printcolumn:name="Verified",type=string,JSONPath=`.status.conditions[?(@.type=='SourceVerified')].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`

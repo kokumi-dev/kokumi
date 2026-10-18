@@ -22,7 +22,8 @@ It models your delivery workflow as composable primitives:
 | **Order** | Variant of a Product, such as one environment, holding only what differs |
 | **Preparation** | Immutable OCI artifact rendered from an Order |
 | **Serving** | Active deployment selecting exactly one Preparation |
-| **Pantry** | Registry credential store for private OCI registries |
+| **Registry** | A connection to an OCI registry: its URL prefix, credentials, TLS settings and scheme |
+| **Repository** | A catalog entry: an OCI repository to browse and create Products from |
 
 ## Where to start
 

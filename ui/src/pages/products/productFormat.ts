@@ -4,8 +4,7 @@ import { keyLabel } from '../../hooks/useSigningKeys'
 
 /** Where a Product vendors its source to. */
 export function vendorLabel(vendor: OCIDestination): string {
-  if (vendor.pantryRef?.name) return `Pantry ${vendor.pantryRef.name}`
-  return vendor.oci || 'In-cluster registry'
+  return vendor.url || 'In-cluster registry'
 }
 
 /** Describes the signer whose signature on a source verified. */

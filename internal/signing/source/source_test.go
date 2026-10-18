@@ -28,6 +28,7 @@ import (
 
 	"github.com/kokumi-dev/kokumi/internal/attestation"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	kregistry "github.com/kokumi-dev/kokumi/internal/registry"
 	"github.com/kokumi-dev/kokumi/internal/signing"
 	"github.com/kokumi-dev/kokumi/internal/signing/signingtest"
 )
@@ -53,7 +54,7 @@ func pushArtifact(t *testing.T, host, repository string) oci.Reference {
 	ref, err := oci.Parse("oci://" + host + "/" + repository + ":1.0.0")
 	require.NoError(t, err)
 
-	digest, err := oci.NewORASClient().Push(context.Background(), ref, dir, oci.PushOptions{})
+	digest, err := oci.NewClient(oci.Options{PlainHTTP: true}).Push(context.Background(), ref, dir, oci.PushOptions{})
 	require.NoError(t, err)
 
 	ref.Tag = ""
@@ -65,7 +66,7 @@ func pushArtifact(t *testing.T, host, repository string) oci.Reference {
 func attach(t *testing.T, subject oci.Reference, artifactType string, payload []byte) oci.Reference {
 	t.Helper()
 
-	digest, err := oci.NewORASClient().PushReferrer(context.Background(), subject, oci.ReferrerArtifact{
+	digest, err := oci.NewClient(oci.Options{PlainHTTP: true}).PushReferrer(context.Background(), subject, oci.ReferrerArtifact{
 		ArtifactType: artifactType,
 		MediaType:    artifactType,
 		Payload:      payload,
@@ -81,7 +82,7 @@ func attach(t *testing.T, subject oci.Reference, artifactType string, payload []
 func sign(t *testing.T, signer *signing.Signer, subject oci.Reference) string {
 	t.Helper()
 
-	digest, err := attestation.Sign(context.Background(), oci.NewORASClient(), signer, subject, time.Now())
+	digest, err := attestation.Sign(context.Background(), oci.NewClient(oci.Options{PlainHTTP: true}), signer, subject, time.Now())
 	require.NoError(t, err)
 	return digest
 }
@@ -98,7 +99,7 @@ func verdicts(report *Report) map[string]Verdict {
 func TestVerify(t *testing.T) {
 	host := newRegistry(t)
 	ctx := context.Background()
-	client := oci.NewORASClient()
+	conn := kregistry.Connection{Client: oci.NewClient(oci.Options{PlainHTTP: true}), PlainHTTP: true}
 	signer := signingtest.NewSigner(t)
 	verifier := NewVerifier()
 	policy := &Policy{Keys: []Key{
@@ -113,7 +114,7 @@ func TestVerify(t *testing.T) {
 		sbomSignature := sign(t, signer, sbom)
 		notary := attach(t, source, notarySignatureType, []byte("notary"))
 
-		report, err := verifier.Verify(ctx, client, nil, source, policy, nil)
+		report, err := verifier.Verify(ctx, conn, source, policy, nil)
 		require.NoError(t, err)
 		require.Equal(t, &Signer{KeyID: signer.KeyID()}, report.Signer)
 		require.Len(t, report.Verdicts, 3, "the SBOM is not a signature")
@@ -130,7 +131,7 @@ func TestVerify(t *testing.T) {
 		source := pushArtifact(t, host, "charts/stranger")
 		signature := sign(t, signingtest.NewSigner(t), source)
 
-		report, err := verifier.Verify(ctx, client, nil, source, policy, nil)
+		report, err := verifier.Verify(ctx, conn, source, policy, nil)
 		require.NoError(t, err)
 		assert.Nil(t, report.Signer)
 		assert.Equal(t, UntrustedSigner, verdicts(report)[signature].Result)
@@ -140,19 +141,19 @@ func TestVerify(t *testing.T) {
 		source := pushArtifact(t, host, "charts/kokumi")
 		signature := sign(t, signer, source)
 
-		report, err := verifier.Verify(ctx, client, nil, source, nil, signer.TrustSet())
+		report, err := verifier.Verify(ctx, conn, source, nil, signer.TrustSet())
 		require.NoError(t, err)
 		assert.Equal(t, &Signer{KeyID: signer.KeyID()}, report.Signer)
 		assert.Equal(t, Verified, verdicts(report)[signature].Result)
 
-		report, err = verifier.Verify(ctx, client, nil, source, nil, signingtest.NewSigner(t).TrustSet())
+		report, err = verifier.Verify(ctx, conn, source, nil, signingtest.NewSigner(t).TrustSet())
 		require.NoError(t, err)
 		assert.Nil(t, report.Signer)
 		assert.Equal(t, UntrustedSigner, verdicts(report)[signature].Result)
 	})
 
 	t.Run("an unsigned source has no signatures", func(t *testing.T) {
-		report, err := verifier.Verify(ctx, client, nil, pushArtifact(t, host, "charts/unsigned"), policy, nil)
+		report, err := verifier.Verify(ctx, conn, pushArtifact(t, host, "charts/unsigned"), policy, nil)
 		require.NoError(t, err)
 		assert.Nil(t, report.Signer)
 		assert.Empty(t, report.Verdicts)
@@ -164,16 +165,16 @@ func TestVerify(t *testing.T) {
 		require.NoError(t, err)
 		dir := t.TempDir()
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "signature"), []byte("not a signature"), 0600))
-		legacy, err := client.Push(ctx, tagged, dir, oci.PushOptions{})
+		legacy, err := conn.Client.Push(ctx, tagged, dir, oci.PushOptions{})
 		require.NoError(t, err)
 
-		report, err := verifier.Verify(ctx, client, nil, source, policy, nil)
+		report, err := verifier.Verify(ctx, conn, source, policy, nil)
 		require.NoError(t, err)
 		assert.Nil(t, report.Signer)
 		assert.Equal(t, UntrustedSigner, verdicts(report)[legacy].Result)
 		assert.NotEmpty(t, verdicts(report)[legacy].Message)
 
-		report, err = verifier.Verify(ctx, client, nil, source, nil, signer.TrustSet())
+		report, err = verifier.Verify(ctx, conn, source, nil, signer.TrustSet())
 		require.NoError(t, err)
 		assert.Equal(t, Unsupported, verdicts(report)[legacy].Result)
 	})
@@ -182,7 +183,7 @@ func TestVerify(t *testing.T) {
 func TestVerify_Keyless(t *testing.T) {
 	host := newRegistry(t)
 	ctx := context.Background()
-	client := oci.NewORASClient()
+	conn := kregistry.Connection{Client: oci.NewClient(oci.Options{PlainHTTP: true}), PlainHTTP: true}
 	verifier := NewVerifier()
 
 	sigstore, err := ca.NewVirtualSigstore()
@@ -201,7 +202,7 @@ func TestVerify_Keyless(t *testing.T) {
 		source := pushArtifact(t, host, "keyless/accepted")
 		signature := attach(t, source, oci.SigstoreBundleMediaType, keylessBundle(t, sigstore, identity, source.Digest))
 
-		report, err := verifier.Verify(ctx, client, nil, source, policy, nil)
+		report, err := verifier.Verify(ctx, conn, source, policy, nil)
 		require.NoError(t, err)
 		require.Equal(t, &Signer{Issuer: keylessIssuer, Subject: identity}, report.Signer)
 		assert.Equal(t, Verified, verdicts(report)[signature.Digest].Result)
@@ -212,7 +213,7 @@ func TestVerify_Keyless(t *testing.T) {
 		signature := attach(t, source, oci.SigstoreBundleMediaType,
 			keylessBundle(t, sigstore, "https://github.com/someone/else/.github/workflows/release.yml@refs/tags/v1", source.Digest))
 
-		report, err := verifier.Verify(ctx, client, nil, source, policy, nil)
+		report, err := verifier.Verify(ctx, conn, source, policy, nil)
 		require.NoError(t, err)
 		assert.Nil(t, report.Signer)
 		got := verdicts(report)[signature.Digest]
@@ -225,7 +226,7 @@ func TestVerify_Keyless(t *testing.T) {
 		other := "sha256:" + strings.Repeat("ab", 32)
 		signature := attach(t, source, oci.SigstoreBundleMediaType, keylessBundle(t, sigstore, identity, other))
 
-		report, err := verifier.Verify(ctx, client, nil, source, policy, nil)
+		report, err := verifier.Verify(ctx, conn, source, policy, nil)
 		require.NoError(t, err)
 		assert.Nil(t, report.Signer)
 		assert.Equal(t, Invalid, verdicts(report)[signature.Digest].Result)
@@ -235,7 +236,7 @@ func TestVerify_Keyless(t *testing.T) {
 		source := pushArtifact(t, host, "keyless/keys-only")
 		signature := attach(t, source, oci.SigstoreBundleMediaType, keylessBundle(t, sigstore, identity, source.Digest))
 
-		report, err := verifier.Verify(ctx, client, nil, source, &Policy{Keys: []Key{{Name: "cosign.pub", PEM: signingtest.NewSigner(t).PublicKeyPEM()}}}, nil)
+		report, err := verifier.Verify(ctx, conn, source, &Policy{Keys: []Key{{Name: "cosign.pub", PEM: signingtest.NewSigner(t).PublicKeyPEM()}}}, nil)
 		require.NoError(t, err)
 		assert.Equal(t, UntrustedSigner, verdicts(report)[signature.Digest].Result)
 	})

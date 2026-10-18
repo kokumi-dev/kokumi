@@ -71,7 +71,7 @@ func handleGetPreparationArtifact(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		prep, _ := preparationFromRequest(deps, w, r)
+		prep, uc := preparationFromRequest(deps, w, r)
 		if prep == nil {
 			return
 		}
@@ -81,7 +81,13 @@ func handleGetPreparationArtifact(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		graph, err := artifactGraph(r.Context(), deps.ociClient, trust, prep.Spec.Artifact.OCIRef, nil)
+		conn, err := deps.preparationConnection(r.Context(), uc, prep)
+		if err != nil {
+			respondConnectError(w, err)
+			return
+		}
+
+		graph, err := artifactGraph(r.Context(), conn.Client, trust, prep.Spec.Artifact.OCIRef, nil)
 		if err != nil {
 			deps.logger.Error(err, "Failed to read artifact graph", "ociRef", prep.Spec.Artifact.OCIRef)
 			respondError(w, http.StatusBadGateway, "could not read the artifact: "+err.Error())
@@ -116,7 +122,6 @@ func handleGetProductSourceArtifact(deps *apiDeps) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		ctx := r.Context()
 
 		trust := trustSetOrRespond(deps, w)
 		if trust == nil {
@@ -133,23 +138,16 @@ func handleGetProductSourceArtifact(deps *apiDeps) http.HandlerFunc {
 		}
 
 		// The source at its source location, by the digest Orders render.
-		source, sourceClient, err := resolveSourceAs(ctx, uc, product.Spec.Source, product.Namespace)
-		if err != nil {
-			result.Source = ArtifactGraphDTO{Repository: product.Spec.Source.OCI, Error: err.Error()}
-		} else {
-			ref := source.OCI + ":" + source.Version
-			if resolved != nil {
-				ref = source.OCI + ":" + resolved.Version + "@" + resolved.Digest
-			}
-			result.Source = graphOrError(ctx, cmp.Or(sourceClient, deps.ociClient), trust, ref, verdicts)
+		// The Product's Registries connect to it and to the vendored copy.
+		source := product.Spec.Source
+		ref := source.URL + ":" + source.Version
+		if resolved != nil {
+			ref = source.URL + ":" + resolved.Version + "@" + resolved.Digest
 		}
+		result.Source = deps.graphThrough(r, product, trust, ref, verdicts)
 
 		if product.Spec.Vendor != nil && resolved != nil {
-			vendorClient := deps.ociClient
-			if resolved.PantryRef != nil {
-				vendorClient = ociClientForPantryRef(ctx, deps, r, resolved.PantryRef.Name, product.Namespace)
-			}
-			vendored := graphOrError(ctx, vendorClient, trust, resolved.OCI+":"+resolved.Version+"@"+resolved.Digest, verdicts)
+			vendored := deps.graphThrough(r, product, trust, resolved.URL+":"+resolved.Version+"@"+resolved.Digest, verdicts)
 			result.Vendored = &vendored
 		}
 
@@ -157,11 +155,26 @@ func handleGetProductSourceArtifact(deps *apiDeps) http.HandlerFunc {
 	}
 }
 
-// handleGetPantryArtifact handles
-// GET /api/v1/pantries/{namespace}/{name}/artifact?tag=<tag>.
-// It returns the graph of the artifact behind a tag of the Pantry's
-// repository, read with the Pantry's credentials.
-func handleGetPantryArtifact(deps *apiDeps) http.HandlerFunc {
+// graphThrough returns the graph of the artifact at ref, read through the
+// Product's Registries as the user of r, or a graph that carries why it
+// could not be read.
+func (deps *apiDeps) graphThrough(r *http.Request, product *deliveryv1alpha1.Product, trust *signing.TrustSet, ref string, verdicts map[string]deliveryv1alpha1.SignatureVerdict) ArtifactGraphDTO {
+	conn, err := deps.connectFor(r, product.Namespace, product.Spec.RegistryRefs, ref)
+	if err != nil {
+		repository := ref
+		if parsed, perr := oci.Parse(ref); perr == nil {
+			repository = parsed.OCIRepositoryReference()
+		}
+		return ArtifactGraphDTO{Repository: repository, Error: err.Error()}
+	}
+	return graphOrError(r.Context(), conn.Client, trust, ref, verdicts)
+}
+
+// handleGetRepositoryArtifact handles
+// GET /api/v1/repositories/{namespace}/{name}/artifact?tag=<tag>.
+// It returns the graph of the artifact behind a tag of the Repository, read
+// through its Registry.
+func handleGetRepositoryArtifact(deps *apiDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if deps == nil {
 			unavailable(w)
@@ -182,13 +195,13 @@ func handleGetPantryArtifact(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		pantry := &deliveryv1alpha1.Pantry{}
-		if err := uc.get(r.Context(), types.NamespacedName{Namespace: namespace, Name: name}, pantry); err != nil {
+		repo := &deliveryv1alpha1.Repository{}
+		if err := uc.get(r.Context(), types.NamespacedName{Namespace: namespace, Name: name}, repo); err != nil {
 			if client.IgnoreNotFound(err) == nil {
-				respondError(w, http.StatusNotFound, fmt.Sprintf("pantry %s/%s not found", namespace, name))
+				respondError(w, http.StatusNotFound, fmt.Sprintf("repository %s/%s not found", namespace, name))
 				return
 			}
-			respondForbiddenOrError(w, err, "failed to get pantry")
+			respondForbiddenOrError(w, err, "failed to get repository")
 			return
 		}
 
@@ -197,10 +210,15 @@ func handleGetPantryArtifact(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		ociClient := ociClientForPantryRef(r.Context(), deps, r, name, namespace)
-		graph, err := artifactGraph(r.Context(), ociClient, trust, pantry.Spec.URL+":"+tag, nil)
+		conn, err := deps.connectFor(r, namespace, repositoryRegistryRefs(repo), repo.Spec.URL)
 		if err != nil {
-			deps.logger.Error(err, "Failed to read artifact graph", "pantry", name, "tag", tag)
+			respondConnectError(w, err)
+			return
+		}
+
+		graph, err := artifactGraph(r.Context(), conn.Client, trust, repo.Spec.URL+":"+tag, nil)
+		if err != nil {
+			deps.logger.Error(err, "Failed to read artifact graph", "repository", name, "tag", tag)
 			respondError(w, http.StatusBadGateway, "could not read the artifact: "+err.Error())
 			return
 		}
@@ -409,7 +427,13 @@ func handleGetPreparationIntent(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		mediaType, data, err := deps.ociClient.FetchConfig(r.Context(), subject)
+		conn, err := deps.preparationConnection(r.Context(), uc, prep)
+		if err != nil {
+			respondConnectError(w, err)
+			return
+		}
+
+		mediaType, data, err := conn.Client.FetchConfig(r.Context(), subject)
 		if err != nil {
 			deps.logger.Error(err, "Failed to fetch intent", "ociRef", prep.Spec.Artifact.OCIRef)
 			respondError(w, http.StatusBadGateway, "could not fetch intent: "+err.Error())

@@ -43,8 +43,10 @@ spec:
   installation never waits for a registry it cannot reach.
 - Manifests and records keep the original names. Nodes pull through their own
   mirror configuration (containerd `hosts.toml`, CRI-O `registries.conf`).
-- Credentials for a mirror come from the Product's `images.pullSecretRef`,
-  looked up by the mirror's host.
+- Credentials for a mirror come from the Product's Registries, matched against
+  the mirror's location, so the Registry for `oci://harbor.example.com`
+  authenticates both mirrors above. Whether an image is private is judged by
+  its original name.
 - Mirrors are not part of the intent: changing them renders nothing new.
 
 ## Unreachable registries
@@ -69,15 +71,15 @@ images up nor copies them again.
 
 ## Letting nodes pull vendored images
 
-Under `Vendor`, manifests pull every image from the Order's destination
+Under `Vendor`, manifests pull every image from the Product's vendor
 registry. The kubelet resolves the image's host with node DNS, not cluster
 DNS, and expects TLS. The bundled registry is reached as
 `kokumi-registry.kokumi.svc.cluster.local:5000` over plain HTTP, so nodes
 cannot pull from it without one of these:
 
-- **An external registry as the destination.** Point the Orders'
-  `spec.destination` at a registry the nodes can reach, for example through a
-  Pantry.
+- **An external registry as the vendor location.** Point the Products'
+  `spec.vendor.url` at a registry the nodes can reach, and give the nodes
+  credentials for it when it requires them.
 - **A containerd mirror entry on every node.** Map the name to the registry's
   NodePort (30050) over HTTP, in
   `/etc/containerd/certs.d/kokumi-registry.kokumi.svc.cluster.local:5000/hosts.toml`:
@@ -92,26 +94,28 @@ cannot pull from it without one of these:
   setup and the e2e tests are configured this way by
   `hack/kind/registry-mirror.sh`.
 - **An Ingress with TLS** in front of the bundled registry, under a name the
-  nodes resolve, used as the destination.
+  nodes resolve, used as the vendor location.
 
 Kokumi cannot check from the controller whether nodes can pull. A vendored
 image that nodes cannot pull shows up as `ImagePullBackOff` and in the Argo CD
 health of the Serving.
 
-## Destination registries
+## Vendor registries
 
-Vendoring pushes to one repository per image below the Order's destination,
-such as `shop/podinfo-prod/images/ghcr.io/stefanprodan/podinfo`. The
-destination registry must create repositories on the first push and accept
-the destination's credentials for them:
+Vendoring pushes to one repository per image below the Product's vendor
+location, such as `shop/vendor/podinfo/images/ghcr.io/stefanprodan/podinfo`.
+The vendor registry must create repositories on the first push and accept the
+credentials of the Registry that covers the vendor location for them:
 
 - The bundled registry, distribution, Harbor (within a project) and Google
   Artifact Registry do.
 - GitHub Container Registry creates a package per repository; new packages
   are private until their visibility is changed or they are linked to a
   repository.
-- Amazon ECR needs a repository creation template for the destination's
+- Amazon ECR needs a repository creation template for the vendor location's
   prefix.
+- Registries with immutable tags reject a tag that moves, for example when an
+  upstream `latest` resolves to a new digest; that render fails.
 
 ## Registry storage
 
@@ -130,13 +134,15 @@ digest, and rolling back to one of them would fail.
 
 ## Vendored private images
 
-A Product's `images.pullSecretRef` lets Kokumi read private images. Under
-`Vendor`, those images are copied into the Order's destination, and from then
-on anyone who may pull from the destination can pull them, without the
-Product's credentials. The bundled registry has no authentication and is
-reachable on NodePort 30050 of every node. Give Orders that vendor private
-images a destination with access control, such as a Pantry for a registry
-that requires credentials.
+A Product's Registries let Kokumi read private images. Under `Vendor`, those
+images are copied below the Product's vendor location, and from then on
+anyone who may pull from there can pull them, without the Product's
+credentials. Kokumi therefore refuses to copy an image it could only read with
+credentials to a vendor location it writes without credentials: the Order
+reports `CredentialsRequired`. The bundled registry has no authentication and
+is reachable on NodePort 30050 of every node, so a Product that vendors
+private images needs a vendor location on a registry with access control and a
+Registry for it.
 
 ## Events
 

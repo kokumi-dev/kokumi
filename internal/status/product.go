@@ -15,6 +15,8 @@ import (
 // ProductUpdater updates the status of a Product object.
 type ProductUpdater struct {
 	client client.Client
+	// access, when set, is recorded with every write.
+	access *[]deliveryv1alpha1.RegistryAccess
 }
 
 // NewProductUpdater returns a ProductUpdater backed by the given client.
@@ -111,6 +113,13 @@ func (u *ProductUpdater) Failed(ctx context.Context, product *deliveryv1alpha1.P
 	})
 }
 
+// WithRegistryAccess returns an updater that records access, the registry
+// locations the Product needs, with every write, so that a reconcile
+// writes its status once.
+func (u *ProductUpdater) WithRegistryAccess(access []deliveryv1alpha1.RegistryAccess) *ProductUpdater {
+	return &ProductUpdater{client: u.client, access: &access}
+}
+
 // NotReady marks the Product as waiting for a prerequisite, for reason. Like
 // Ready, it records the generation of product.
 func (u *ProductUpdater) NotReady(ctx context.Context, product *deliveryv1alpha1.Product, reason, msg string) error {
@@ -130,5 +139,10 @@ func (u *ProductUpdater) InUse(ctx context.Context, product *deliveryv1alpha1.Pr
 }
 
 func (u *ProductUpdater) set(ctx context.Context, product *deliveryv1alpha1.Product, mutate func(*deliveryv1alpha1.Product)) error {
-	return setCondition(ctx, u.client, product, mutate)
+	return setCondition(ctx, u.client, product, func(latest *deliveryv1alpha1.Product) {
+		mutate(latest)
+		if u.access != nil {
+			latest.Status.RegistryAccess = *u.access
+		}
+	})
 }

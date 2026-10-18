@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/spf13/afero"
@@ -72,37 +73,57 @@ func (c *pullCache) get(ctx context.Context, ref oci.Reference, layout Layout, w
 	return &entry
 }
 
-// restore copies all artifact files of a cache entry into workDir. It fails
-// when the entry contains no artifact files (e.g. a partially written entry),
-// which forces the caller to re-pull instead of serving an empty directory.
+// filesDir is the directory of a cache entry that holds the artifact's files,
+// apart from meta.json, so that an artifact file of that name cannot clash.
+const filesDir = "files"
+
+// restore copies all artifact files of a cache entry into workDir, keeping
+// their directories. It fails when the entry contains no artifact files (e.g.
+// a partially written entry), which forces the caller to re-pull instead of
+// serving an empty directory.
 func (c *pullCache) restore(entryDir, workDir string) error {
-	infos, err := afero.ReadDir(c.fs, entryDir)
+	restored, err := copyTree(c.fs, filepath.Join(entryDir, filesDir), workDir)
 	if err != nil {
 		return err
 	}
-
-	restored := 0
-	for _, info := range infos {
-		if info.IsDir() || info.Name() == "meta.json" {
-			continue
-		}
-
-		data, err := afero.ReadFile(c.fs, filepath.Join(entryDir, info.Name()))
-		if err != nil {
-			return err
-		}
-
-		if err := afero.WriteFile(c.fs, filepath.Join(workDir, info.Name()), data, 0600); err != nil {
-			return err
-		}
-		restored++
-	}
-
 	if restored == 0 {
 		return fmt.Errorf("cache entry %q contains no artifact files", entryDir)
 	}
 
 	return nil
+}
+
+// copyTree copies the regular files below from to the same paths below to and
+// returns how many it copied.
+func copyTree(fs afero.Fs, from, to string) (int, error) {
+	copied := 0
+	err := afero.Walk(fs, from, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+
+		rel, err := filepath.Rel(from, path)
+		if err != nil {
+			return err
+		}
+		data, err := afero.ReadFile(fs, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(to, rel)
+		if err := fs.MkdirAll(filepath.Dir(target), 0700); err != nil {
+			return err
+		}
+		if err := afero.WriteFile(fs, target, data, 0600); err != nil {
+			return err
+		}
+		copied++
+		return nil
+	})
+	return copied, err
 }
 
 // put writes the pulled artifact and its metadata to the cache. The entry is
@@ -131,27 +152,9 @@ func (c *pullCache) put(ctx context.Context, mediaType, digest string, annotatio
 		}
 	}()
 
-	infos, err := afero.ReadDir(c.fs, workDir)
-	if err != nil {
-		logger.Info("Could not read artifact directory for caching, skipping cache", "error", err)
+	if _, err := copyTree(c.fs, workDir, filepath.Join(tmpDir, filesDir)); err != nil {
+		logger.Info("Could not write artifact to cache, skipping cache", "error", err)
 		return
-	}
-
-	for _, info := range infos {
-		if info.IsDir() {
-			continue
-		}
-
-		data, err := afero.ReadFile(c.fs, filepath.Join(workDir, info.Name()))
-		if err != nil {
-			logger.Info("Could not read artifact for caching, skipping cache", "error", err)
-			return
-		}
-
-		if err := afero.WriteFile(c.fs, filepath.Join(tmpDir, info.Name()), data, 0600); err != nil {
-			logger.Info("Could not write artifact to cache, skipping cache", "error", err)
-			return
-		}
 	}
 
 	metaBytes, err := json.Marshal(cacheEntry{MediaType: mediaType, Digest: digest, Annotations: annotations})

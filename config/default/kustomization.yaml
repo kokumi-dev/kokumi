@@ -39,8 +39,9 @@ resources:
 # Only CR(s) which requires webhooks and are applied on namespaces labeled with 'webhooks: enabled' will
 # be able to communicate with the Webhook Server.
 #- ../network-policy
-# [REGISTRY] To deploy an unauthenticated OCI registry for the operator, uncomment the following line.
-# The registry will be available at registry.kokumi.svc.cluster.local:5000
+# [REGISTRY] The bundled OCI registry: unauthenticated, served over plain HTTP at
+# kokumi-registry.kokumi.svc.cluster.local:5000. It is the default destination
+# of Orders and the default vendor location of Products.
 - ../registry
 - ../admission
 

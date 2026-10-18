@@ -20,6 +20,8 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -40,10 +42,10 @@ import (
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/approval"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
-	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/images"
 	"github.com/kokumi-dev/kokumi/internal/index"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/registry"
 	"github.com/kokumi-dev/kokumi/internal/resolve"
 	"github.com/kokumi-dev/kokumi/internal/status"
 	"github.com/kokumi-dev/kokumi/internal/version"
@@ -70,10 +72,13 @@ type OrderReconciler struct {
 	// APIReader bypasses the cache. Before a render, it confirms that the
 	// cached Order is the latest and reads the Preparation whose images the
 	// render locks, which the cache may not hold yet.
-	APIReader      client.Reader
-	Scheme         *runtime.Scheme
-	Pipeline       *artifact.Pipeline
-	PantryResolver credential.PantryResolver
+	APIReader client.Reader
+	Scheme    *runtime.Scheme
+	Pipeline  *artifact.Pipeline
+	// Registries connects to the source, the images and the vendor location
+	// through the Product's registryRefs, and to the destination through
+	// the Order's.
+	Registries registryConnector
 	// Recorder records Events on Orders.
 	Recorder events.EventRecorder
 	// InstallNamespace holds the Kitchen, whose image mirrors renders use.
@@ -89,7 +94,7 @@ type OrderReconciler struct {
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=preparations,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=preparations/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=products,verbs=get;list;watch
-// +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=pantries,verbs=get;list;watch
+// +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=registries,verbs=get;list;watch
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=servings,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=kitchens,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
@@ -208,30 +213,33 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 	logger := log.FromContext(ctx)
 	statusUpdater := status.NewOrderUpdater(r.Client)
 
-	effectiveDest := artifact.DefaultDestination(order.Namespace, order.Name)
-	if order.Spec.Destination != nil && order.Spec.Destination.OCI != "" {
-		effectiveDest = order.Spec.Destination.OCI
+	destination := artifact.DefaultDestination(order.Namespace, order.Name)
+	if order.Spec.Destination != nil && order.Spec.Destination.URL != "" {
+		destination = order.Spec.Destination.URL
 	}
 
-	// Resolve Pantry references into plain OCI URLs before hashing so a live
-	// Pantry URL change is part of artifact identity.
-	sourceURL, sourceClient, err := r.PantryResolver.ResolveSource(ctx, effective.Source, order.Namespace)
+	// The Product's Registries connect to what the Product owns: the
+	// source, the images and their vendor location. The Order's connect to
+	// its destination.
+	productScope, err := registryScope(ctx, r.Client, r.Registries, order.Namespace, effective.RegistryRefs)
 	if err != nil {
-		if uerr := statusUpdater.Failed(ctx, order, fmt.Errorf("failed to resolve source Pantry: %w", err)); uerr != nil {
-			logger.Error(uerr, "Failed to update Order status")
-		}
-		return ctrl.Result{}, err
+		return r.registryFailed(ctx, order, err)
 	}
-
-	resolvedDest, destClient, err := r.PantryResolver.ResolveDestination(ctx, order.Spec.Destination, effectiveDest, order.Namespace)
+	orderScope, err := registryScope(ctx, r.Client, r.Registries, order.Namespace, order.Spec.RegistryRefs)
 	if err != nil {
-		if uerr := statusUpdater.Failed(ctx, order, fmt.Errorf("failed to resolve destination Pantry: %w", err)); uerr != nil {
-			logger.Error(uerr, "Failed to update Order status")
-		}
-		return ctrl.Result{}, err
+		return r.registryFailed(ctx, order, err)
 	}
 
-	intent, err := resolve.NewIntent(order, effective, sourceURL, resolvedDest).Canonical()
+	sourceConn, err := productScope.Connect(effective.Source.URL)
+	if err != nil {
+		return r.registryFailed(ctx, order, err)
+	}
+	destConn, err := orderScope.Connect(destination)
+	if err != nil {
+		return r.registryFailed(ctx, order, err)
+	}
+
+	intent, err := resolve.NewIntent(order, effective, destination).Canonical()
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to calculate spec hash: %w", err)
 	}
@@ -239,14 +247,7 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 	specHash := resolve.CalculateSpecHash(intent)
 
 	if order.Status.LatestConfigHash == specHash && order.Status.LatestPreparationName != "" {
-		logger.Info("Configuration is up-to-date, skipping reconciliation")
-		if waitedForProduct(order) {
-			if err := statusUpdater.Ready(ctx, order, specHash, order.Status.LatestPreparationName, order.Status.LatestArtifactDigest,
-				fmt.Sprintf("Preparation %s is up to date", order.Status.LatestPreparationName)); err != nil {
-				return ctrl.Result{}, err
-			}
-		}
-		return ctrl.Result{}, r.ensureServing(ctx, order)
+		return ctrl.Result{}, r.reconcileUpToDate(ctx, order, effective, specHash, productScope, sourceConn, destination, destConn)
 	}
 
 	// A cache that lags behind the status of the previous render would
@@ -259,6 +260,17 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 	if !latest {
 		logger.Info("Skipping render until the cache holds the latest Order")
 		return ctrl.Result{}, nil
+	}
+
+	exposes, err := exposesPrivateSource(ctx, effective, productScope, sourceConn, destConn)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if exposes {
+		logger.Info("Refusing to push a private source without credentials", "source", effective.Source.URL, "destination", destination)
+		return ctrl.Result{}, statusUpdater.Blocked(ctx, order, deliveryv1alpha1.ReasonCredentialsRequired,
+			fmt.Sprintf("The source is private, and pushing its render to %s, which Kokumi writes without credentials, would make it public: "+
+				"list a Registry with credentials for %s in spec.registryRefs", destination, destination))
 	}
 
 	if err := statusUpdater.Processing(ctx, order, specHash); err != nil {
@@ -280,7 +292,7 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 		return ctrl.Result{}, err
 	}
 
-	imageOpts, err := r.imageOptions(ctx, order, effective.Images, spec.Images)
+	imageOpts, err := r.imageOptions(ctx, order, effective, spec.Images)
 	if err != nil {
 		if uerr := statusUpdater.Failed(ctx, order, err); uerr != nil {
 			logger.Error(uerr, "Failed to update Order status")
@@ -295,10 +307,10 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 	defer cancel()
 
 	result, err := r.Pipeline.Render(renderCtx, artifact.RenderRequest{
-		Source:           artifact.Source{OCI: sourceURL, Version: spec.Source.Version, Digest: spec.Source.Digest},
-		SourceClient:     sourceClient,
-		Destination:      artifact.Destination{OCI: resolvedDest},
-		DestClient:       destClient,
+		Source:           artifact.Source{OCI: effective.Source.URL, Version: spec.Source.Version, Digest: spec.Source.Digest},
+		Destination:      artifact.Destination{OCI: destination},
+		Product:          productScope,
+		Order:            orderScope,
 		Render:           spec.Render,
 		Patches:          spec.Patches,
 		Edits:            spec.Edits,
@@ -312,6 +324,10 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 		Config:           config,
 	})
 	if err != nil {
+		if reason := registry.Reason(err, ""); reason != "" {
+			logger.Info("Order cannot render with its registries", "reason", reason, "error", err.Error())
+			return ctrl.Result{}, statusUpdater.Blocked(ctx, order, reason, err.Error())
+		}
 		logger.Error(err, "Failed to process Order")
 		if uerr := statusUpdater.Failed(ctx, order, err); uerr != nil {
 			logger.Error(uerr, "Failed to update Order status")
@@ -320,7 +336,7 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 		return ctrl.Result{}, err
 	}
 
-	preparation, err := r.createPreparation(ctx, order, result, renderer, commitMessage, parentDigest, specHash)
+	preparation, err := r.createPreparation(ctx, order, result, renderer, commitMessage, parentDigest, specHash, destConn.RegistryName())
 	if err != nil {
 		logger.Error(err, "Failed to create Preparation")
 		if uerr := statusUpdater.Failed(ctx, order, fmt.Errorf("failed to create revision: %w", err)); uerr != nil {
@@ -333,7 +349,11 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 	logger.Info("Created Preparation", "revision", preparation.Name)
 	r.recordUnresolvedImages(order, preparation, result.Images)
 
-	if err := statusUpdater.Ready(ctx, order, specHash, preparation.Name, result.DestRef.Digest, fmt.Sprintf("Successfully pushed to %s", result.DestRef)); err != nil {
+	// One status write: a failed second write would leave the render
+	// unrecorded, and the next reconcile would render it again.
+	access := registryAccess(ctx, effective, productScope, sourceConn, destination, destConn, preparation)
+	if err := statusUpdater.WithRegistryAccess(access).Ready(ctx, order, specHash, preparation.Name, result.DestRef.Digest,
+		fmt.Sprintf("Successfully pushed to %s", result.DestRef)); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -351,6 +371,75 @@ func (r *OrderReconciler) reconcileRender(ctx context.Context, order *deliveryv1
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// reconcileUpToDate handles an Order whose intent its latest Preparation
+// already renders.
+func (r *OrderReconciler) reconcileUpToDate(
+	ctx context.Context, order *deliveryv1alpha1.Order, effective *resolve.EffectiveSpec, specHash string,
+	productScope registry.Scope, sourceConn registry.Connection, destination string, destConn registry.Connection,
+) error {
+	log.FromContext(ctx).Info("Configuration is up-to-date, skipping reconciliation")
+	// registryRefs are not part of the intent: a change records how the
+	// Order connects now without rendering again.
+	latest, err := r.latestPreparation(ctx, order)
+	if err != nil {
+		return err
+	}
+	access := registryAccess(ctx, effective, productScope, sourceConn, destination, destConn, latest)
+	statusUpdater := status.NewOrderUpdater(r.Client).WithRegistryAccess(access)
+	if waitedForProduct(order) {
+		err = statusUpdater.Ready(ctx, order, specHash, order.Status.LatestPreparationName, order.Status.LatestArtifactDigest,
+			fmt.Sprintf("Preparation %s is up to date", order.Status.LatestPreparationName))
+	} else {
+		err = statusUpdater.Observed(ctx, order)
+	}
+	if err != nil {
+		return err
+	}
+	return r.ensureServing(ctx, order)
+}
+
+// latestPreparation returns the Order's latest Preparation, or nil when it
+// no longer exists.
+func (r *OrderReconciler) latestPreparation(ctx context.Context, order *deliveryv1alpha1.Order) (*deliveryv1alpha1.Preparation, error) {
+	latest := &deliveryv1alpha1.Preparation{}
+	if err := r.Get(ctx, client.ObjectKey{Namespace: order.Namespace, Name: order.Status.LatestPreparationName}, latest); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get latest Preparation: %w", err)
+	}
+	return latest, nil
+}
+
+// exposesPrivateSource reports whether rendering the source into the
+// destination would expose it: a private source rendered into a destination
+// Kokumi writes without credentials could be read there by anyone.
+func exposesPrivateSource(
+	ctx context.Context, effective *resolve.EffectiveSpec, productScope registry.Scope, sourceConn, destConn registry.Connection,
+) (bool, error) {
+	if destConn.Authenticated() {
+		return false, nil
+	}
+	pinned, err := oci.Parse(effective.Source.URL + "@" + effective.SourceDigest)
+	if err != nil {
+		return false, fmt.Errorf("failed to parse source reference: %w", err)
+	}
+	return productScope.Private(ctx, sourceConn, pinned), nil
+}
+
+// registryFailed records that the Order cannot connect to a registry, for
+// the reason err carries, such as RegistryNotFound or SecretInvalid. The
+// Registry watch reconciles the Order again once its Registries change.
+// Errors without a reason are returned to be retried.
+func (r *OrderReconciler) registryFailed(ctx context.Context, order *deliveryv1alpha1.Order, err error) (ctrl.Result, error) {
+	reason := registry.Reason(err, "")
+	if reason == "" {
+		return ctrl.Result{}, fmt.Errorf("failed to connect to the Order's registries: %w", err)
+	}
+	log.FromContext(ctx).Info("Order cannot connect to its registries", "reason", reason, "error", err.Error())
+	return ctrl.Result{}, status.NewOrderUpdater(r.Client).Blocked(ctx, order, reason, err.Error())
 }
 
 // waitedForProduct reports whether the Order's Ready condition says it is
@@ -404,18 +493,12 @@ func (r *OrderReconciler) isLatest(ctx context.Context, order *deliveryv1alpha1.
 	return live.ResourceVersion == order.ResourceVersion, nil
 }
 
-// imageOptions completes the image options of a render with the registry
-// client of the Product's pull secret, the Kitchen's mirrors, and, under Pin
-// and Vendor, the images of the Order's latest Preparation, whose digests the
-// render keeps.
-func (r *OrderReconciler) imageOptions(ctx context.Context, order *deliveryv1alpha1.Order, spec deliveryv1alpha1.ProductImages, opts artifact.ImageOptions) (artifact.ImageOptions, error) {
-	if ref := spec.PullSecretRef; ref != nil {
-		creds, err := r.PantryResolver.CredentialsForSecret(ctx, order.Namespace, ref.Name)
-		if err != nil {
-			return opts, fmt.Errorf("failed to read image pull Secret: %w", err)
-		}
-		opts.Client = oci.NewAuthenticatedORASClient(creds)
-	}
+// imageOptions completes the image options of a render with the location
+// the Product vendors images below, the Kitchen's mirrors, and, under Pin
+// and Vendor, the images of the Order's latest Preparation, whose digests
+// the render keeps.
+func (r *OrderReconciler) imageOptions(ctx context.Context, order *deliveryv1alpha1.Order, effective *resolve.EffectiveSpec, opts artifact.ImageOptions) (artifact.ImageOptions, error) {
+	opts.VendorURL = effective.ImagesVendorURL
 
 	kitchen := &deliveryv1alpha1.Kitchen{}
 	err := r.Get(ctx, client.ObjectKey{Namespace: r.InstallNamespace, Name: deliveryv1alpha1.DefaultKitchenName}, kitchen)
@@ -424,7 +507,7 @@ func (r *OrderReconciler) imageOptions(ctx context.Context, order *deliveryv1alp
 	}
 	opts.Mirrors = resolve.ImageMirrors(kitchen)
 
-	if spec.EffectivePolicy() == deliveryv1alpha1.ImagePolicyRecord || order.Status.LatestPreparationName == "" {
+	if effective.Images.EffectivePolicy() == deliveryv1alpha1.ImagePolicyRecord || order.Status.LatestPreparationName == "" {
 		return opts, nil
 	}
 
@@ -438,6 +521,88 @@ func (r *OrderReconciler) imageOptions(ctx context.Context, order *deliveryv1alp
 	}
 
 	return opts, nil
+}
+
+// maxRegistryAccess is the most registry locations an Order lists, the
+// MaxItems of status.registryAccess.
+const maxRegistryAccess = 32
+
+// registryAccess returns the registry locations of the Order for its
+// status: the source and the images Kokumi pulls, through the Product's
+// Registries; the destination it pushes to, through the Order's; the
+// location the images are vendored to; and what Argo CD and the kubelet
+// pull, for which they need credentials of their own. latest is the
+// Preparation whose images are listed, nil when there is none.
+func registryAccess(
+	ctx context.Context,
+	effective *resolve.EffectiveSpec,
+	productScope registry.Scope,
+	sourceConn registry.Connection,
+	destination string,
+	destConn registry.Connection,
+	latest *deliveryv1alpha1.Preparation,
+) []deliveryv1alpha1.RegistryAccess {
+	registries := productScope.Registries()
+	registryOf := func(url string) string {
+		reg, err := registry.Match(registries, url)
+		if err != nil || reg == nil {
+			return ""
+		}
+		return reg.Name
+	}
+
+	accessByKey := map[deliveryv1alpha1.RegistryAccess]bool{}
+	add := func(url string, op deliveryv1alpha1.RegistryOperation, who deliveryv1alpha1.RegistryClient, registryName string) {
+		accessByKey[deliveryv1alpha1.RegistryAccess{URL: url, Operation: op, Client: who, Registry: registryName}] = true
+	}
+
+	add(effective.Source.URL, deliveryv1alpha1.RegistryOperationPull, deliveryv1alpha1.RegistryClientKokumi, sourceConn.RegistryName())
+	add(destination, deliveryv1alpha1.RegistryOperationPush, deliveryv1alpha1.RegistryClientKokumi, destConn.RegistryName())
+	add(destination, deliveryv1alpha1.RegistryOperationPull, deliveryv1alpha1.RegistryClientArgoCD, "")
+
+	if latest != nil {
+		vendorImages := ""
+		if effective.ImagesVendorURL != "" {
+			vendorImages = effective.ImagesVendorURL + "/images"
+		}
+		for _, img := range latest.Spec.Images {
+			loc, err := registry.ParseLocation(img.Name)
+			if err != nil {
+				continue
+			}
+			upstream := "oci://" + loc.Host
+			if reg := registryOf(img.Name); reg != "" {
+				upstream = registriesURL(registries, reg)
+			}
+			add(upstream, deliveryv1alpha1.RegistryOperationPull, deliveryv1alpha1.RegistryClientKokumi, registryOf(img.Name))
+
+			if img.Vendored != "" && vendorImages != "" {
+				add(vendorImages, deliveryv1alpha1.RegistryOperationPush, deliveryv1alpha1.RegistryClientKokumi, registryOf(vendorImages))
+				add(vendorImages, deliveryv1alpha1.RegistryOperationPull, deliveryv1alpha1.RegistryClientKubelet, "")
+				continue
+			}
+			add("oci://"+loc.Host, deliveryv1alpha1.RegistryOperationPull, deliveryv1alpha1.RegistryClientKubelet, "")
+		}
+	}
+
+	access := slices.SortedFunc(maps.Keys(accessByKey), func(a, b deliveryv1alpha1.RegistryAccess) int {
+		return cmp.Or(cmp.Compare(a.URL, b.URL), cmp.Compare(a.Client, b.Client), cmp.Compare(a.Operation, b.Operation))
+	})
+	if len(access) > maxRegistryAccess {
+		log.FromContext(ctx).Info("Listing only some registry locations of the Order", "listed", maxRegistryAccess, "total", len(access))
+		access = access[:maxRegistryAccess]
+	}
+	return access
+}
+
+// registriesURL returns the url of the named Registry among registries.
+func registriesURL(registries []deliveryv1alpha1.Registry, name string) string {
+	for _, reg := range registries {
+		if reg.Name == name {
+			return reg.Spec.URL
+		}
+	}
+	return ""
 }
 
 // maxEventNote is the longest note events.k8s.io/v1 accepts.
@@ -489,6 +654,7 @@ func (r *OrderReconciler) createPreparation(
 	commitMessage string,
 	parentDigest string,
 	configHash string,
+	registryName string,
 ) (*deliveryv1alpha1.Preparation, error) {
 	logger := log.FromContext(ctx)
 	sourceRef, destRef := result.SourceRef, result.DestRef
@@ -517,7 +683,7 @@ func (r *OrderReconciler) createPreparation(
 		Spec: deliveryv1alpha1.PreparationSpec{
 			OrderName: order.Name,
 			Source: deliveryv1alpha1.OrderSource{
-				OCI:        sourceRef.OCIRepositoryReference(),
+				URL:        sourceRef.OCIRepositoryReference(),
 				BaseDigest: sourceRef.Digest,
 			},
 			Renderer:   renderer,
@@ -532,6 +698,10 @@ func (r *OrderReconciler) createPreparation(
 			ApprovalPolicy: order.ApprovalPolicy().DeepCopy(),
 			Images:         preparationImages(result.Images),
 		},
+	}
+
+	if registryName != "" {
+		preparation.Spec.Artifact.RegistryRef = &corev1.LocalObjectReference{Name: registryName}
 	}
 
 	if err := controllerutil.SetControllerReference(order, preparation, r.Scheme); err != nil {
@@ -593,9 +763,6 @@ func artifactConfig(order *deliveryv1alpha1.Order, effective *resolve.EffectiveS
 		Intent:     intent,
 	}
 
-	if effective.Source.PantryRef != nil {
-		config.Source.PantryRef = effective.Source.PantryRef.Name
-	}
 	if verified := effective.SourceVerified; verified != nil {
 		config.Source.Verified = &artifact.ConfigVerification{
 			Provider: string(verified.Provider),
@@ -603,9 +770,6 @@ func artifactConfig(order *deliveryv1alpha1.Order, effective *resolve.EffectiveS
 			Issuer:   verified.Issuer,
 			Subject:  verified.Subject,
 		}
-	}
-	if order.Spec.Destination != nil && order.Spec.Destination.PantryRef != nil {
-		config.Destination.PantryRef = order.Spec.Destination.PantryRef.Name
 	}
 
 	return config
@@ -632,21 +796,41 @@ func (r *OrderReconciler) enqueueOrdersForProduct() handler.EventHandler {
 	})
 }
 
-func (r *OrderReconciler) enqueueOrdersForPantry() handler.EventHandler {
+// enqueueOrdersForRegistry enqueues the Orders that connect through the
+// Registry: those that list it, and the Orders of the Products that list
+// it, so that they connect again when it changes.
+func (r *OrderReconciler) enqueueOrdersForRegistry() handler.EventHandler {
 	return handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
-		pantry, ok := obj.(*deliveryv1alpha1.Pantry)
-		if !ok {
-			return nil
-		}
+		logger := log.FromContext(ctx)
 
-		orders, err := index.OrdersForPantry(ctx, r.Client, pantry.Namespace, pantry.Name)
+		orders, err := index.OrdersForRegistry(ctx, r.Client, obj.GetNamespace(), obj.GetName())
 		if err != nil {
+			logger.Error(err, "Failed to list Orders of Registry", "registry", obj.GetName())
 			return nil
 		}
+		products, err := index.ProductsForRegistry(ctx, r.Client, obj.GetNamespace(), obj.GetName())
+		if err != nil {
+			logger.Error(err, "Failed to list Products of Registry", "registry", obj.GetName())
+			return nil
+		}
+		for _, product := range products {
+			ofProduct, err := index.OrdersForProduct(ctx, r.Client, product.Namespace, product.Name)
+			if err != nil {
+				logger.Error(err, "Failed to list Orders of Product", "product", product.Name)
+				return nil
+			}
+			orders = append(orders, ofProduct...)
+		}
 
+		seen := map[client.ObjectKey]bool{}
 		reqs := make([]reconcile.Request, 0, len(orders))
 		for _, order := range orders {
-			reqs = append(reqs, reconcile.Request{Namespace: order.Namespace, Name: order.Name})
+			key := client.ObjectKeyFromObject(&order)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			reqs = append(reqs, reconcile.Request{NamespacedName: key})
 		}
 		return reqs
 	})
@@ -658,7 +842,7 @@ func (r *OrderReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&deliveryv1alpha1.Order{}).
 		Owns(&deliveryv1alpha1.Preparation{}).
 		Watches(&deliveryv1alpha1.Product{}, r.enqueueOrdersForProduct()).
-		Watches(&deliveryv1alpha1.Pantry{}, r.enqueueOrdersForPantry()).
+		Watches(&deliveryv1alpha1.Registry{}, r.enqueueOrdersForRegistry()).
 		Named("order").
 		WithOptions(controller.Options{MaxConcurrentReconciles: orderConcurrency}).
 		Complete(r)

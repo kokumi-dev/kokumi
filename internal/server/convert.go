@@ -107,18 +107,13 @@ func orderToDTO(r deliveryv1alpha1.Order, activePreparation string) OrderDTO {
 			return OCIDestinationDTO{}
 		}(),
 		EffectiveDestination: func() string {
-			if r.Spec.Destination == nil {
-				return artifact.DefaultDestination(r.Namespace, r.Name)
-			}
-			if r.Spec.Destination.OCI != "" {
-				return r.Spec.Destination.OCI
-			}
-			if r.Spec.Destination.PantryRef != nil {
-				// URL is resolved at runtime from the Pantry; omit from DTO.
-				return ""
+			if r.Spec.Destination != nil && r.Spec.Destination.URL != "" {
+				return r.Spec.Destination.URL
 			}
 			return artifact.DefaultDestination(r.Namespace, r.Name)
 		}(),
+		RegistryRefs:      registryRefsToDTO(r.Spec.RegistryRefs),
+		RegistryAccess:    registryAccessToDTO(r.Status.RegistryAccess),
 		Patches:           patchesToDTO(r.Spec.Patches),
 		Edits:             patchesToDTO(r.Spec.Edits),
 		Mode:              string(r.EffectivePromotionMode()),
@@ -239,6 +234,9 @@ func preparationToDTO(p deliveryv1alpha1.Preparation, isActive bool) Preparation
 		},
 		Conditions: conditionsToDTO(p.Status.Conditions),
 		Approval:   preparationApprovalToDTO(p),
+	}
+	if ref := p.Spec.Artifact.RegistryRef; ref != nil {
+		dto.Artifact.RegistryRef = ref.Name
 	}
 	for _, img := range p.Spec.Images {
 		dto.Images = append(dto.Images, PreparationImageDTO{
@@ -393,30 +391,50 @@ func valuesFromDTO(raw json.RawMessage) *apiextensionsv1.JSON {
 	return &apiextensionsv1.JSON{Raw: raw}
 }
 
-// pantryRefToDTO converts a PantryRef; nil stays nil.
-func pantryRefToDTO(ref *deliveryv1alpha1.PantryRef) *PantryRefDTO {
-	if ref == nil {
+// registryRefsToDTO converts registryRefs; empty stays nil.
+func registryRefsToDTO(refs []corev1.LocalObjectReference) []RegistryRefDTO {
+	if len(refs) == 0 {
 		return nil
 	}
-	return &PantryRefDTO{Name: ref.Name}
+	out := make([]RegistryRefDTO, 0, len(refs))
+	for _, ref := range refs {
+		out = append(out, RegistryRefDTO{Name: ref.Name})
+	}
+	return out
 }
 
-// pantryRefFromDTO converts a PantryRefDTO; nil stays nil.
-func pantryRefFromDTO(dto *PantryRefDTO) *deliveryv1alpha1.PantryRef {
-	if dto == nil {
+// registryRefsFromDTO converts registryRefs, dropping empty names; empty
+// stays nil.
+func registryRefsFromDTO(dtos []RegistryRefDTO) []corev1.LocalObjectReference {
+	var refs []corev1.LocalObjectReference
+	for _, dto := range dtos {
+		if dto.Name != "" {
+			refs = append(refs, corev1.LocalObjectReference{Name: dto.Name})
+		}
+	}
+	return refs
+}
+
+// registryAccessToDTO converts the registry locations of a status.
+func registryAccessToDTO(access []deliveryv1alpha1.RegistryAccess) []RegistryAccessDTO {
+	if len(access) == 0 {
 		return nil
 	}
-	return &deliveryv1alpha1.PantryRef{Name: dto.Name}
+	out := make([]RegistryAccessDTO, 0, len(access))
+	for _, a := range access {
+		out = append(out, RegistryAccessDTO{URL: a.URL, Operation: string(a.Operation), Client: string(a.Client), Registry: a.Registry})
+	}
+	return out
 }
 
 // sourceToDTO converts an OCISource to its DTO representation.
 func sourceToDTO(src deliveryv1alpha1.OCISource) OCISourceDTO {
-	return OCISourceDTO{OCI: src.OCI, Version: src.Version, PantryRef: pantryRefToDTO(src.PantryRef), Verify: verifyToDTO(src.Verify)}
+	return OCISourceDTO{URL: src.URL, Version: src.Version, Verify: verifyToDTO(src.Verify)}
 }
 
 // sourceFromDTO converts an OCISourceDTO to an OCISource.
 func sourceFromDTO(dto OCISourceDTO) deliveryv1alpha1.OCISource {
-	return deliveryv1alpha1.OCISource{OCI: dto.OCI, Version: dto.Version, PantryRef: pantryRefFromDTO(dto.PantryRef), Verify: verifyFromDTO(dto.Verify)}
+	return deliveryv1alpha1.OCISource{URL: dto.URL, Version: dto.Version, Verify: verifyFromDTO(dto.Verify)}
 }
 
 // verifyToDTO converts an OCISourceVerification; nil stays nil.
@@ -474,16 +492,17 @@ func destinationToDTO(dest *deliveryv1alpha1.OCIDestination) *OCIDestinationDTO 
 	if dest == nil {
 		return nil
 	}
-	return &OCIDestinationDTO{OCI: dest.OCI, PantryRef: pantryRefToDTO(dest.PantryRef)}
+	return &OCIDestinationDTO{URL: dest.URL}
 }
 
-// destinationFromDTO converts an OCIDestinationDTO pointer to an OCIDestination spec.
-// Returns nil when dto is nil or both oci and pantryRef are absent.
+// destinationFromDTO converts an OCIDestinationDTO pointer to an Order
+// destination. Returns nil when dto is nil or names no url, which is the
+// in-cluster default.
 func destinationFromDTO(dto *OCIDestinationDTO) *deliveryv1alpha1.OCIDestination {
-	if dto == nil || (dto.OCI == "" && dto.PantryRef == nil) {
+	if dto == nil || dto.URL == "" {
 		return nil
 	}
-	return &deliveryv1alpha1.OCIDestination{OCI: dto.OCI, PantryRef: pantryRefFromDTO(dto.PantryRef)}
+	return &deliveryv1alpha1.OCIDestination{URL: dto.URL}
 }
 
 // compareKeys orders objects by namespace, then name. The informer cache lists
@@ -611,7 +630,9 @@ func productToDTO(p deliveryv1alpha1.Product) ProductDTO {
 		Images:     productImagesToDTO(p.Spec.Images),
 		State:      stateFromConditions(p.Status.Conditions),
 		Conditions: conditionsToDTO(p.Status.Conditions),
-	}
+
+		RegistryRefs:   registryRefsToDTO(p.Spec.RegistryRefs),
+		RegistryAccess: registryAccessToDTO(p.Status.RegistryAccess)}
 	if p.DeletionTimestamp != nil {
 		t := p.DeletionTimestamp.UTC()
 		dto.DeletionTimestamp = &t
@@ -619,11 +640,10 @@ func productToDTO(p deliveryv1alpha1.Product) ProductDTO {
 	}
 	if src := p.Status.Source; src != nil {
 		dto.ResolvedSource = &ProductSourceStatusDTO{
-			OCI:       src.OCI,
-			Version:   src.Version,
-			PantryRef: pantryRefToDTO(src.PantryRef),
-			Digest:    src.Digest,
-			Verified:  sourceVerificationToDTO(src.Verified),
+			URL:      src.URL,
+			Version:  src.Version,
+			Digest:   src.Digest,
+			Verified: sourceVerificationToDTO(src.Verified),
 		}
 	}
 	if !p.CreationTimestamp.IsZero() {
@@ -646,16 +666,17 @@ func productsToDTO(products []deliveryv1alpha1.Product) []ProductDTO {
 // productSpecFromDTO builds a ProductSpec from a create or update request.
 func productSpecFromDTO(dto ProductSpecDTO) deliveryv1alpha1.ProductSpec {
 	spec := deliveryv1alpha1.ProductSpec{
-		Source:    sourceFromDTO(dto.Source),
-		Render:    renderFromDTO(dto.Render),
-		Patches:   patchesFromDTO(dto.Patches),
-		Overrides: overridesFromDTO(dto.Overrides),
-		Images:    productImagesFromDTO(dto.Images),
+		Source:       sourceFromDTO(dto.Source),
+		Render:       renderFromDTO(dto.Render),
+		Patches:      patchesFromDTO(dto.Patches),
+		Overrides:    overridesFromDTO(dto.Overrides),
+		Images:       productImagesFromDTO(dto.Images),
+		RegistryRefs: registryRefsFromDTO(dto.RegistryRefs),
 	}
 	// An empty vendor destination is valid: the controller vendors to the
 	// in-cluster registry.
 	if vendor := dto.Vendor; vendor != nil {
-		spec.Vendor = &deliveryv1alpha1.OCIDestination{OCI: vendor.OCI, PantryRef: pantryRefFromDTO(vendor.PantryRef)}
+		spec.Vendor = &deliveryv1alpha1.OCIDestination{URL: vendor.URL}
 	}
 	return spec
 }
@@ -663,10 +684,7 @@ func productSpecFromDTO(dto ProductSpecDTO) deliveryv1alpha1.ProductSpec {
 // productImagesToDTO converts ProductImages to its DTO representation. An
 // unset policy is reported as Record, which is what it means.
 func productImagesToDTO(images deliveryv1alpha1.ProductImages) ProductImagesDTO {
-	dto := ProductImagesDTO{
-		Policy:        string(images.EffectivePolicy()),
-		PullSecretRef: secretRefToDTO(images.PullSecretRef),
-	}
+	dto := ProductImagesDTO{Policy: string(images.EffectivePolicy())}
 	for _, fs := range images.FieldSpecs {
 		dto.FieldSpecs = append(dto.FieldSpecs, ImageFieldSpecDTO{Group: fs.Group, Version: fs.Version, Kind: fs.Kind, Path: fs.Path})
 	}
@@ -676,10 +694,7 @@ func productImagesToDTO(images deliveryv1alpha1.ProductImages) ProductImagesDTO 
 // productImagesFromDTO converts a ProductImagesDTO into the CRD type. An
 // empty policy is left for the API server to default.
 func productImagesFromDTO(dto ProductImagesDTO) deliveryv1alpha1.ProductImages {
-	images := deliveryv1alpha1.ProductImages{
-		Policy:        deliveryv1alpha1.ImagePolicy(dto.Policy),
-		PullSecretRef: secretRefFromDTO(dto.PullSecretRef),
-	}
+	images := deliveryv1alpha1.ProductImages{Policy: deliveryv1alpha1.ImagePolicy(dto.Policy)}
 	for _, fs := range dto.FieldSpecs {
 		images.FieldSpecs = append(images.FieldSpecs, deliveryv1alpha1.ImageFieldSpec{Group: fs.Group, Version: fs.Version, Kind: fs.Kind, Path: fs.Path})
 	}
@@ -724,38 +739,76 @@ func overridesFromDTO(dto OverridesDTO) deliveryv1alpha1.Overrides {
 	return o
 }
 
-// pantryToDTO converts a Pantry CRD object into a PantryDTO.
-func pantryToDTO(p deliveryv1alpha1.Pantry) PantryDTO {
-	dto := PantryDTO{
-		Name:         p.Name,
-		Namespace:    p.Namespace,
-		URL:          p.Spec.URL,
-		Description:  p.Spec.Description,
-		State:        stateFromConditions(p.Status.Conditions),
-		ReferrersAPI: string(p.Status.ReferrersAPI),
-		Conditions:   conditionsToDTO(p.Status.Conditions),
+// registryToDTO converts a Registry CRD object into a RegistryDTO.
+func registryToDTO(reg deliveryv1alpha1.Registry) RegistryDTO {
+	dto := RegistryDTO{
+		Name:       reg.Name,
+		Namespace:  reg.Namespace,
+		URL:        reg.Spec.URL,
+		Scheme:     string(reg.Spec.EffectiveScheme()),
+		State:      stateFromConditions(reg.Status.Conditions),
+		Conditions: conditionsToDTO(reg.Status.Conditions),
 	}
-
-	if p.Spec.SecretRef != nil {
-		dto.SecretRef = p.Spec.SecretRef.Name
+	if ref := reg.Spec.SecretRef; ref != nil {
+		dto.SecretRef = ref.Name
 	}
-
-	if !p.CreationTimestamp.IsZero() {
-		t := p.CreationTimestamp.UTC()
+	if ref := reg.Spec.CertSecretRef; ref != nil {
+		dto.CertSecretRef = ref.Name
+	}
+	if !reg.CreationTimestamp.IsZero() {
+		t := reg.CreationTimestamp.UTC()
 		dto.CreatedAt = &t
 	}
-
 	return dto
 }
 
-// pantriesFromList converts a PantryList into a slice of PantryDTOs.
-func pantriesFromList(list deliveryv1alpha1.PantryList) []PantryDTO {
-	out := make([]PantryDTO, len(list.Items))
-	for i, p := range list.Items {
-		out[i] = pantryToDTO(p)
+// registriesToDTO converts Registries into RegistryDTOs, sorted.
+func registriesToDTO(registries []deliveryv1alpha1.Registry) []RegistryDTO {
+	out := make([]RegistryDTO, len(registries))
+	for i, reg := range registries {
+		out[i] = registryToDTO(reg)
 	}
-	slices.SortFunc(out, func(a, b PantryDTO) int { return compareKeys(a.Namespace, a.Name, b.Namespace, b.Name) })
+	slices.SortFunc(out, func(a, b RegistryDTO) int { return compareKeys(a.Namespace, a.Name, b.Namespace, b.Name) })
 	return out
+}
+
+// repositoryToDTO converts a Repository CRD object into a RepositoryDTO.
+func repositoryToDTO(repo deliveryv1alpha1.Repository) RepositoryDTO {
+	dto := RepositoryDTO{
+		Name:        repo.Name,
+		Namespace:   repo.Namespace,
+		URL:         repo.Spec.URL,
+		Description: repo.Spec.Description,
+		State:       stateFromConditions(repo.Status.Conditions),
+		Conditions:  conditionsToDTO(repo.Status.Conditions),
+	}
+	if ref := repo.Spec.RegistryRef; ref != nil {
+		dto.RegistryRef = ref.Name
+	}
+	if !repo.CreationTimestamp.IsZero() {
+		t := repo.CreationTimestamp.UTC()
+		dto.CreatedAt = &t
+	}
+	return dto
+}
+
+// repositoriesToDTO converts Repositories into RepositoryDTOs, sorted.
+func repositoriesToDTO(repositories []deliveryv1alpha1.Repository) []RepositoryDTO {
+	out := make([]RepositoryDTO, len(repositories))
+	for i, repo := range repositories {
+		out[i] = repositoryToDTO(repo)
+	}
+	slices.SortFunc(out, func(a, b RepositoryDTO) int { return compareKeys(a.Namespace, a.Name, b.Namespace, b.Name) })
+	return out
+}
+
+// repositoryRegistryRefs returns the registryRefs a Repository is read
+// through: its registryRef, or none.
+func repositoryRegistryRefs(repo *deliveryv1alpha1.Repository) []corev1.LocalObjectReference {
+	if repo.Spec.RegistryRef == nil {
+		return nil
+	}
+	return []corev1.LocalObjectReference{*repo.Spec.RegistryRef}
 }
 
 // artifactFilesToDTO converts an artifact's files to their DTO representation.

@@ -17,7 +17,7 @@ spec:
       type: NodePort
 
   destination:
-    oci: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/podinfo-staging
+    url: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/podinfo-staging
 
   promotion:
     mode: Manual

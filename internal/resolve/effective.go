@@ -5,8 +5,10 @@ package resolve
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -31,6 +33,13 @@ type EffectiveSpec struct {
 	// Images configures how the images of the rendered manifests are
 	// handled. It always comes from the Product.
 	Images deliveryv1alpha1.ProductImages
+	// ImagesVendorURL is the location the images are vendored below, at
+	// <ImagesVendorURL>/images, under the Vendor policy: the Product's
+	// vendored source.
+	ImagesVendorURL string
+	// RegistryRefs are the Product's: they connect to its source, its
+	// images and their mirrors, and its vendor location.
+	RegistryRefs []corev1.LocalObjectReference
 	// Product identifies the Product the spec was merged from.
 	Product ProductIdentity
 }
@@ -78,11 +87,10 @@ func ForProduct(product *deliveryv1alpha1.Product, order *deliveryv1alpha1.Order
 		return nil, err
 	}
 
-	return &EffectiveSpec{
+	effective := &EffectiveSpec{
 		Source: deliveryv1alpha1.OCISource{
-			OCI:       product.Status.Source.OCI,
-			Version:   product.Status.Source.Version,
-			PantryRef: product.Status.Source.PantryRef,
+			URL:     product.Status.Source.URL,
+			Version: product.Status.Source.Version,
 		},
 		SourceDigest:   product.Status.Source.Digest,
 		SourceVerified: product.Status.Source.Verified,
@@ -90,8 +98,13 @@ func ForProduct(product *deliveryv1alpha1.Product, order *deliveryv1alpha1.Order
 		Patches:        patches,
 		Edits:          order.Spec.Edits,
 		Images:         *product.Spec.Images.DeepCopy(),
+		RegistryRefs:   slices.Clone(product.Spec.RegistryRefs),
 		Product:        ProductIdentity{Name: product.Name, ConfigHash: product.Status.ConfigHash},
-	}, nil
+	}
+	if effective.Images.EffectivePolicy() == deliveryv1alpha1.ImagePolicyVendor {
+		effective.ImagesVendorURL = product.Status.Source.URL
+	}
+	return effective, nil
 }
 
 // LockedImages returns the images of preparation, whose digests Pin and

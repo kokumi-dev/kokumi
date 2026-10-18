@@ -39,11 +39,10 @@ import (
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/approval"
-	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/deployer"
 	"github.com/kokumi-dev/kokumi/internal/evidence"
 	"github.com/kokumi-dev/kokumi/internal/index"
-	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/registry"
 	"github.com/kokumi-dev/kokumi/internal/signing"
 	"github.com/kokumi-dev/kokumi/internal/status"
 )
@@ -67,9 +66,8 @@ type ServingReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
 	Deployer deployer.Deployer
-	// OCIClient is used when the Order's destination has no credentials.
-	OCIClient      oci.Client
-	PantryResolver credential.PantryResolver
+	// Registries connects to the destination holding the artifacts.
+	Registries registryConnector
 	// Signing holds the keys the evidence of a Preparation must verify
 	// against before it is deployed.
 	Signing *signing.Provider
@@ -85,7 +83,7 @@ type ServingReconciler struct {
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=preparations,verbs=get;list;watch
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=orders,verbs=get;list;watch
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=approvals,verbs=get;list;watch
-// +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=pantries,verbs=get;list;watch
+// +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=registries,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=argoproj.io,resources=applications,verbs=get;list;watch;create;update;patch;delete
 
@@ -257,8 +255,13 @@ func (r *ServingReconciler) verify(ctx context.Context, serving *deliveryv1alpha
 
 	r.verifiedOnce.Do(func() { r.verified = lru.New(verificationCacheSize) })
 	if _, ok := r.verified.Get(key); !ok {
-		destClient, err := destinationClient(ctx, r.Client, r.PantryResolver, r.OCIClient, preparation)
+		destClient, err := destinationClient(ctx, r.Client, r.Registries, preparation)
 		if err != nil {
+			if reason := registry.Reason(err, ""); reason != "" {
+				// The Registry watch of the Order reconciles again once
+				// the Registries change.
+				return true, statusUpdater.Verified(ctx, serving, metav1.ConditionFalse, reason, preparation.Name+": "+err.Error())
+			}
 			return true, err
 		}
 

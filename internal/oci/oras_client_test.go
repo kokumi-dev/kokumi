@@ -5,6 +5,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,36 +17,13 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/oras-project/oras-go/v3/registry/remote/auth"
+	"github.com/oras-project/oras-go/v3/registry/remote/credentials"
+	"github.com/oras-project/oras-go/v3/registry/remote/errcode"
 	"github.com/stretchr/testify/require"
 )
-
-func Test_IsPlainHTTP(t *testing.T) {
-	tests := []struct {
-		ref  string
-		want bool
-	}{
-		// In-cluster Kubernetes service DNS
-		{"kokumi-registry.kokumi.svc.cluster.local:5000/repo/image", true},
-		{"registry.default.svc.cluster.local/repo/image", true},
-		{"registry.svc/image", true},
-		// Loopback and bare IPs
-		{"localhost:5000/image", true},
-		{"127.0.0.1:5000/image", true},
-		{"10.96.0.1/image", true},
-		// Public / external registries
-		{"ghcr.io/myorg/myimage", false},
-		{"registry-1.docker.io/library/nginx", false},
-		{"public.ecr.aws/myimage", false},
-		{"gcr.io/google-containers/pause", false},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.ref, func(t *testing.T) {
-			require.Equal(t, tc.want, IsPlainHTTP(tc.ref))
-		})
-	}
-}
 
 // writeTar builds an uncompressed tar archive from the given file entries.
 func writeTar(t *testing.T, entries map[string]string) *bytes.Buffer {
@@ -165,12 +145,10 @@ func TestORASClient_authenticatedClientCachesTokens(t *testing.T) {
 	defer srv.Close()
 
 	host := strings.TrimPrefix(srv.URL, "http://")
-	creds, err := CredentialsFromDockerConfigJSON(fmt.Appendf(nil, `{"auths":{%q:{"username":"u","password":"p"}}}`, host))
-	require.NoError(t, err)
 	ref, err := Parse(host + "/app:1")
 	require.NoError(t, err)
 
-	client := NewAuthenticatedORASClient(creds)
+	client := NewClient(Options{Host: host, Credential: credentials.Credential{Username: "u", Password: "p"}, PlainHTTP: true})
 	for range 2 {
 		desc, err := client.Resolve(context.Background(), ref)
 		require.NoError(t, err)
@@ -179,4 +157,152 @@ func TestORASClient_authenticatedClientCachesTokens(t *testing.T) {
 
 	require.Equal(t, int32(1), tokens.Load(), "the token is fetched once")
 	require.Equal(t, int32(1), challenges.Load(), "the second request carries the cached token")
+}
+
+const (
+	testUsername = "user"
+	testPassword = "pass"
+)
+
+// basicAuthServer serves the registry API base endpoint only to requests
+// that carry user:pass.
+func basicAuthServer(t *testing.T, newServer func(http.Handler) *httptest.Server) *httptest.Server {
+	t.Helper()
+	srv := newServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if user, pass, ok := r.BasicAuth(); !ok || user != testUsername || pass != testPassword {
+			w.Header().Set("WWW-Authenticate", `Basic realm="test"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestNewClient_sendsCredentialOnlyToItsHost(t *testing.T) {
+	srv := basicAuthServer(t, httptest.NewServer)
+	host := strings.TrimPrefix(srv.URL, "http://")
+	cred := credentials.Credential{Username: testUsername, Password: testPassword}
+
+	require.NoError(t, NewClient(Options{Host: host, Credential: cred, PlainHTTP: true}).Ping(context.Background(), host))
+	require.Error(t, NewClient(Options{Host: "registry.example.com", Credential: cred, PlainHTTP: true}).Ping(context.Background(), host),
+		"a credential for another host is not sent")
+	require.Error(t, NewClient(Options{PlainHTTP: true}).Ping(context.Background(), host), "anonymous")
+}
+
+func TestPing_anonymous(t *testing.T) {
+	// A token registry such as ghcr.io asks for a bearer token at its base
+	// endpoint and denies an anonymous one there, but grants anonymous
+	// tokens for its public repositories.
+	bearer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/token" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.Header().Set("WWW-Authenticate", `Bearer realm="http://`+r.Host+`/token",service="test",scope="repository:user/image:pull"`)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	t.Cleanup(bearer.Close)
+	bearerHost := strings.TrimPrefix(bearer.URL, "http://")
+	require.NoError(t, NewClient(Options{PlainHTTP: true}).Ping(context.Background(), bearerHost))
+
+	basicHost := strings.TrimPrefix(basicAuthServer(t, httptest.NewServer).URL, "http://")
+	err := NewClient(Options{PlainHTTP: true}).Ping(context.Background(), basicHost)
+	require.ErrorIs(t, err, auth.ErrBasicCredentialNotFound, "a basic auth registry refuses anonymous access")
+
+	missing := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(missing.Close)
+	err = NewClient(Options{PlainHTTP: true}).Ping(context.Background(), strings.TrimPrefix(missing.URL, "http://"))
+	var resp *errcode.ErrorResponse
+	require.ErrorAs(t, err, &resp, "a server that does not serve the registry API")
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+func TestNewClient_trustsTheGivenCA(t *testing.T) {
+	srv := basicAuthServer(t, httptest.NewTLSServer)
+	host := strings.TrimPrefix(srv.URL, "https://")
+	cred := credentials.Credential{Username: testUsername, Password: testPassword}
+
+	roots := x509.NewCertPool()
+	roots.AddCert(srv.Certificate())
+	trusted := NewClient(Options{Host: host, Credential: cred, TLSConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}})
+	require.NoError(t, trusted.Ping(context.Background(), host))
+
+	err := NewClient(Options{Host: host, Credential: cred}).Ping(context.Background(), host)
+	require.ErrorContains(t, err, "certificate", "the system trust store does not know the test CA")
+}
+
+func TestCanonicalHost(t *testing.T) {
+	for host, want := range map[string]string{
+		dockerHubHost:          dockerHubHost,
+		"index.docker.io":      dockerHubHost,
+		"registry-1.docker.io": dockerHubHost,
+		"GHCR.io":              "ghcr.io",
+		"localhost:5000":       "localhost:5000",
+	} {
+		require.Equal(t, want, CanonicalHost(host), host)
+	}
+}
+
+// mountRegistry is a registry that serves one image manifest in the
+// repository "src" and accepts blob mounts and manifest pushes for any other
+// repository. It counts the mounts it was asked for.
+type mountRegistry struct {
+	manifest, config, layer []byte
+	mounts                  atomic.Int32
+}
+
+func newMountRegistry(t *testing.T) (*mountRegistry, string) {
+	t.Helper()
+	reg := &mountRegistry{config: []byte("{}"), layer: []byte("layer")}
+	manifest := ocispec.Manifest{
+		SchemaVersion: 2,
+		MediaType:     ocispec.MediaTypeImageManifest,
+		Config:        ocispec.Descriptor{MediaType: ocispec.MediaTypeImageConfig, Digest: digest.FromBytes(reg.config), Size: int64(len(reg.config))},
+		Layers:        []ocispec.Descriptor{{MediaType: ocispec.MediaTypeImageLayer, Digest: digest.FromBytes(reg.layer), Size: int64(len(reg.layer))}},
+	}
+	var err error
+	reg.manifest, err = json.Marshal(manifest)
+	require.NoError(t, err)
+
+	srv := httptest.NewServer(reg)
+	t.Cleanup(srv.Close)
+	return reg, strings.TrimPrefix(srv.URL, "http://")
+}
+
+func (reg *mountRegistry) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	switch {
+	case r.URL.Path == "/v2/src/manifests/1":
+		w.Header().Set("Content-Type", ocispec.MediaTypeImageManifest)
+		w.Header().Set("Docker-Content-Digest", digest.FromBytes(reg.manifest).String())
+		w.Header().Set("Content-Length", fmt.Sprint(len(reg.manifest)))
+		if r.Method == http.MethodGet {
+			_, _ = w.Write(reg.manifest)
+		}
+	case r.Method == http.MethodPost && r.URL.Query().Get("mount") != "":
+		reg.mounts.Add(1)
+		w.Header().Set("Location", r.URL.Path+r.URL.Query().Get("mount"))
+		w.WriteHeader(http.StatusCreated)
+	case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/manifests/"):
+		w.Header().Set("Docker-Content-Digest", digest.FromBytes(reg.manifest).String())
+		w.WriteHeader(http.StatusCreated)
+	default:
+		w.WriteHeader(http.StatusNotFound)
+	}
+}
+
+func TestORASClient_Copy_mountsBetweenClientsOfOneRegistry(t *testing.T) {
+	reg, host := newMountRegistry(t)
+	src, err := Parse(host + "/src:1")
+	require.NoError(t, err)
+	dst, err := Parse(host + "/dst:1")
+	require.NoError(t, err)
+
+	// Two clients, as for two Registry objects on the same host.
+	reader := NewClient(Options{PlainHTTP: true})
+	writer := NewClient(Options{PlainHTTP: true})
+	require.NoError(t, reader.Copy(context.Background(), writer, src, dst, CopyOptions{}))
+
+	require.Equal(t, int32(2), reg.mounts.Load(), "the config and the layer are mounted, not transferred")
 }

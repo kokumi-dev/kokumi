@@ -15,7 +15,7 @@ spec:
     replicaCount: 3
 
   destination:
-    oci: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/podinfo-prod
+    url: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/podinfo-prod
 
   # Each Preparation needs two release approvers before it can be served.
   promotion:

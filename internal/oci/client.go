@@ -118,4 +118,8 @@ type Client interface {
 
 	// FetchManifest returns the image manifest or image index at ref.
 	FetchManifest(ctx context.Context, ref Reference) (Manifest, error)
+
+	// Ping checks that the registry at host answers its API base endpoint
+	// with the client's credential, scheme and TLS settings.
+	Ping(ctx context.Context, host string) error
 }

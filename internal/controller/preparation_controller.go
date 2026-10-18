@@ -17,12 +17,12 @@ limitations under the License.
 package controller
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -38,7 +38,6 @@ import (
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/approval"
 	"github.com/kokumi-dev/kokumi/internal/attestation"
-	"github.com/kokumi-dev/kokumi/internal/credential"
 	"github.com/kokumi-dev/kokumi/internal/index"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/provenance"
@@ -59,9 +58,8 @@ type PreparationReconciler struct {
 	Scheme *runtime.Scheme
 	// APIReader bypasses the cache so sealing never misses in-flight votes.
 	APIReader client.Reader
-	// OCIClient is used when the Order's destination has no credentials.
-	OCIClient      oci.Client
-	PantryResolver credential.PantryResolver
+	// Registries connects to the destination holding the artifact.
+	Registries registryConnector
 	// Signing signs the artifact and its attestations with the Kitchen key.
 	Signing *signing.Provider
 }
@@ -72,6 +70,8 @@ type PreparationReconciler struct {
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=approvals,verbs=get;list;watch
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=servings,verbs=get;list;watch
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=orders,verbs=get;list;watch
+// +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=registries,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -225,24 +225,28 @@ func (r *PreparationReconciler) archive(ctx context.Context, prep *deliveryv1alp
 // destinationClient returns the client for the registry holding prep's
 // artifact.
 func (r *PreparationReconciler) destinationClient(ctx context.Context, prep *deliveryv1alpha1.Preparation) (oci.Client, error) {
-	return destinationClient(ctx, r.Client, r.PantryResolver, r.OCIClient, prep)
+	return destinationClient(ctx, r.Client, r.Registries, prep)
 }
 
 // destinationClient returns the client for the registry holding prep's
-// artifact. It uses the credentials of the Order's destination; a deleted
-// Order falls back to the anonymous client.
-func destinationClient(ctx context.Context, reader client.Reader, resolver credential.PantryResolver, anonymous oci.Client, prep *deliveryv1alpha1.Preparation) (oci.Client, error) {
-	order := &deliveryv1alpha1.Order{}
-	if err := reader.Get(ctx, client.ObjectKey{Namespace: prep.Namespace, Name: prep.Spec.OrderName}, order); err != nil && !apierrors.IsNotFound(err) {
-		return nil, fmt.Errorf("failed to get Order %q: %w", prep.Spec.OrderName, err)
-	}
-
-	_, destClient, err := resolver.ResolveDestination(ctx, order.Spec.Destination, "", prep.Namespace)
+// artifact: through the Registry that authenticated its push, while it
+// exists and still covers the artifact, and through the Order's
+// registryRefs otherwise. So a Preparation stays readable when its Order
+// moves its destination, and a deleted Order leaves the Registry the
+// Preparation recorded.
+func destinationClient(ctx context.Context, reader client.Reader, registries registryConnector, prep *deliveryv1alpha1.Preparation) (oci.Client, error) {
+	conn, err := connectRecorded(ctx, reader, registries, prep.Namespace, prep.Spec.Artifact.RegistryRef, prep.Spec.Artifact.OCIRef,
+		func(ctx context.Context) ([]corev1.LocalObjectReference, error) {
+			order := &deliveryv1alpha1.Order{}
+			if err := reader.Get(ctx, client.ObjectKey{Namespace: prep.Namespace, Name: prep.Spec.OrderName}, order); err != nil && !apierrors.IsNotFound(err) {
+				return nil, fmt.Errorf("failed to get Order %q: %w", prep.Spec.OrderName, err)
+			}
+			return order.Spec.RegistryRefs, nil
+		})
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve destination credentials: %w", err)
+		return nil, fmt.Errorf("failed to connect to the destination of Preparation %q: %w", prep.Name, err)
 	}
-
-	return cmp.Or(destClient, anonymous), nil
+	return conn.Client, nil
 }
 
 // attachEvidence signs prep's artifact and attaches its provenance as signed

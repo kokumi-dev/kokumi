@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 
+	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
@@ -19,9 +20,11 @@ func Setup(ctx context.Context, indexer client.FieldIndexer) error {
 		{&deliveryv1alpha1.Approval{}, FieldPreparationRefName, approvalPreparation},
 		{&deliveryv1alpha1.Preparation{}, FieldOrderName, preparationOrder},
 		{&deliveryv1alpha1.Order{}, FieldProductRefName, orderProduct},
-		{&deliveryv1alpha1.Order{}, FieldDestinationPantryRefName, orderDestinationPantry},
-		{&deliveryv1alpha1.Product{}, FieldPantryRefNames, productPantries},
+		{&deliveryv1alpha1.Order{}, FieldRegistryRefNames, orderRegistries},
+		{&deliveryv1alpha1.Product{}, FieldRegistryRefNames, productRegistries},
 		{&deliveryv1alpha1.Product{}, FieldVerifySecretNames, productVerifySecrets},
+		{&deliveryv1alpha1.Registry{}, FieldRegistrySecretNames, registrySecrets},
+		{&deliveryv1alpha1.Repository{}, FieldRegistryRefName, repositoryRegistry},
 	}
 	for _, idx := range indexes {
 		if err := indexer.IndexField(ctx, idx.obj, idx.field, idx.extract); err != nil {
@@ -68,28 +71,26 @@ func OrdersForProduct(ctx context.Context, r client.Reader, namespace, productNa
 	return orders.Items, nil
 }
 
-// OrdersForPantry returns the Orders whose destination references the named
-// Pantry. Orders follow their Product's source Pantry through the Product.
-// It requires the cache indexes registered by Setup.
-func OrdersForPantry(ctx context.Context, r client.Reader, namespace, pantryName string) ([]deliveryv1alpha1.Order, error) {
+// OrdersForRegistry returns the Orders that list the named Registry in
+// their registryRefs. It requires the cache indexes registered by Setup.
+func OrdersForRegistry(ctx context.Context, r client.Reader, namespace, registryName string) ([]deliveryv1alpha1.Order, error) {
 	orders := &deliveryv1alpha1.OrderList{}
 	if err := r.List(ctx, orders,
 		client.InNamespace(namespace),
-		client.MatchingFields{FieldDestinationPantryRefName: pantryName},
+		client.MatchingFields{FieldRegistryRefNames: registryName},
 	); err != nil {
 		return nil, err
 	}
 	return orders.Items, nil
 }
 
-// ProductsForPantry returns the Products whose source or vendor destination
-// references the named Pantry. It requires the cache indexes registered by
-// Setup.
-func ProductsForPantry(ctx context.Context, r client.Reader, namespace, pantryName string) ([]deliveryv1alpha1.Product, error) {
+// ProductsForRegistry returns the Products that list the named Registry in
+// their registryRefs. It requires the cache indexes registered by Setup.
+func ProductsForRegistry(ctx context.Context, r client.Reader, namespace, registryName string) ([]deliveryv1alpha1.Product, error) {
 	products := &deliveryv1alpha1.ProductList{}
 	if err := r.List(ctx, products,
 		client.InNamespace(namespace),
-		client.MatchingFields{FieldPantryRefNames: pantryName},
+		client.MatchingFields{FieldRegistryRefNames: registryName},
 	); err != nil {
 		return nil, err
 	}
@@ -133,19 +134,12 @@ func orderProduct(obj client.Object) []string {
 	return []string{order.Spec.ProductRef.Name}
 }
 
-func productPantries(obj client.Object) []string {
+func productRegistries(obj client.Object) []string {
 	product, ok := obj.(*deliveryv1alpha1.Product)
 	if !ok {
 		return nil
 	}
-	var names []string
-	if ref := product.Spec.Source.PantryRef; ref != nil {
-		names = append(names, ref.Name)
-	}
-	if vendor := product.Spec.Vendor; vendor != nil && vendor.PantryRef != nil && !slices.Contains(names, vendor.PantryRef.Name) {
-		names = append(names, vendor.PantryRef.Name)
-	}
-	return names
+	return refNames(product.Spec.RegistryRefs)
 }
 
 func productVerifySecrets(obj client.Object) []string {
@@ -164,10 +158,69 @@ func productVerifySecrets(obj client.Object) []string {
 	return names
 }
 
-func orderDestinationPantry(obj client.Object) []string {
+func orderRegistries(obj client.Object) []string {
 	order, ok := obj.(*deliveryv1alpha1.Order)
-	if !ok || order.Spec.Destination == nil || order.Spec.Destination.PantryRef == nil {
+	if !ok {
 		return nil
 	}
-	return []string{order.Spec.Destination.PantryRef.Name}
+	return refNames(order.Spec.RegistryRefs)
+}
+
+// refNames returns the names refs reference.
+func refNames(refs []corev1.LocalObjectReference) []string {
+	names := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		names = append(names, ref.Name)
+	}
+	return names
+}
+
+// RegistriesForSecret returns the Registries whose secretRef or
+// certSecretRef names the Secret. It requires the cache indexes registered
+// by Setup.
+func RegistriesForSecret(ctx context.Context, r client.Reader, namespace, secretName string) ([]deliveryv1alpha1.Registry, error) {
+	registries := &deliveryv1alpha1.RegistryList{}
+	if err := r.List(ctx, registries,
+		client.InNamespace(namespace),
+		client.MatchingFields{FieldRegistrySecretNames: secretName},
+	); err != nil {
+		return nil, err
+	}
+	return registries.Items, nil
+}
+
+// RepositoriesForRegistry returns the Repositories read through the named
+// Registry. It requires the cache indexes registered by Setup.
+func RepositoriesForRegistry(ctx context.Context, r client.Reader, namespace, registryName string) ([]deliveryv1alpha1.Repository, error) {
+	repositories := &deliveryv1alpha1.RepositoryList{}
+	if err := r.List(ctx, repositories,
+		client.InNamespace(namespace),
+		client.MatchingFields{FieldRegistryRefName: registryName},
+	); err != nil {
+		return nil, err
+	}
+	return repositories.Items, nil
+}
+
+func registrySecrets(obj client.Object) []string {
+	reg, ok := obj.(*deliveryv1alpha1.Registry)
+	if !ok {
+		return nil
+	}
+	var names []string
+	if ref := reg.Spec.SecretRef; ref != nil {
+		names = append(names, ref.Name)
+	}
+	if ref := reg.Spec.CertSecretRef; ref != nil && !slices.Contains(names, ref.Name) {
+		names = append(names, ref.Name)
+	}
+	return names
+}
+
+func repositoryRegistry(obj client.Object) []string {
+	repo, ok := obj.(*deliveryv1alpha1.Repository)
+	if !ok || repo.Spec.RegistryRef == nil {
+		return nil
+	}
+	return []string{repo.Spec.RegistryRef.Name}
 }
