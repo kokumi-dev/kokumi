@@ -91,6 +91,16 @@ type Serving struct {
 	Status ServingStatus `json:"status,omitzero"`
 }
 
+// GetConditions returns the status conditions of the Serving.
+func (s *Serving) GetConditions() []metav1.Condition {
+	return s.Status.Conditions
+}
+
+// SetConditions sets the status conditions of the Serving.
+func (s *Serving) SetConditions(conditions []metav1.Condition) {
+	s.Status.Conditions = conditions
+}
+
 // +kubebuilder:object:root=true
 
 // ServingList contains a list of Serving

@@ -28,7 +28,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
-	"github.com/kokumi-dev/kokumi/internal/index"
 )
 
 // createTestApproval submits a vote the way the kokumi server would.
@@ -61,7 +60,7 @@ func createTestApproval(ctx context.Context, prep *deliveryv1alpha1.Preparation,
 // without the admission policies that forbid this in a real cluster.
 func deleteApprovalsOfOrder(ctx context.Context, orderName string) {
 	Expect(k8sClient.DeleteAllOf(ctx, &deliveryv1alpha1.Approval{},
-		client.InNamespace(testNamespace), client.MatchingFields{index.FieldOrderName: orderName})).To(Succeed())
+		client.InNamespace(testNamespace), client.MatchingFields{deliveryv1alpha1.FieldOrderName: orderName})).To(Succeed())
 }
 
 var _ = Describe("Approval Controller", func() {

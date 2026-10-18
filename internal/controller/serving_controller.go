@@ -23,15 +23,18 @@ import (
 	"sync"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	apimeta "k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/utils/lru"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -39,12 +42,11 @@ import (
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/approval"
-	"github.com/kokumi-dev/kokumi/internal/deployer"
+	"github.com/kokumi-dev/kokumi/internal/argocd"
+	"github.com/kokumi-dev/kokumi/internal/conditions"
 	"github.com/kokumi-dev/kokumi/internal/evidence"
-	"github.com/kokumi-dev/kokumi/internal/index"
 	"github.com/kokumi-dev/kokumi/internal/registry"
 	"github.com/kokumi-dev/kokumi/internal/signing"
-	"github.com/kokumi-dev/kokumi/internal/status"
 )
 
 // verificationCacheSize bounds how many verified artifacts the Serving
@@ -61,16 +63,31 @@ type verificationKey struct {
 	approvalRequired bool
 }
 
-// ServingReconciler reconciles a Serving object
+// servingRegistries connects to the artifact of a Preparation.
+// *registry.Resolver implements it.
+type servingRegistries interface {
+	ConnectRecorded(ctx context.Context, namespace string, recorded *corev1.LocalObjectReference, url string,
+		fallback func(context.Context) ([]corev1.LocalObjectReference, error)) (registry.Connection, error)
+}
+
+// servingSigning provides the trust the evidence of a Preparation verifies
+// against and tells when it changes. *signing.Provider implements it.
+type servingSigning interface {
+	State(ctx context.Context) (signing.State, error)
+	OnChange(notify func())
+}
+
+// ServingReconciler reconciles a Serving object. It deploys the Preparation
+// the Serving converges to through an Argo CD Application, which lives in
+// the argocd namespace and is deleted with the Serving.
 type ServingReconciler struct {
 	client.Client
-	Scheme   *runtime.Scheme
-	Deployer deployer.Deployer
+	Scheme *runtime.Scheme
 	// Registries connects to the destination holding the artifacts.
-	Registries registryConnector
+	Registries servingRegistries
 	// Signing holds the keys the evidence of a Preparation must verify
 	// against before it is deployed.
-	Signing *signing.Provider
+	Signing servingSigning
 
 	// verified remembers verified artifacts by verificationKey.
 	verified     *lru.Cache
@@ -87,12 +104,9 @@ type ServingReconciler struct {
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=argoproj.io,resources=applications,verbs=get;list;watch;create;update;patch;delete
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.23.1/pkg/reconcile
-func (r *ServingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+// Reconcile deploys the Preparation the Serving converges to and reports on
+// its deployment.
+func (r *ServingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, err error) {
 	logger := log.FromContext(ctx)
 	logger.Info("Reconciling Serving", "namespace", req.Namespace, "name", req.Name)
 
@@ -102,9 +116,14 @@ func (r *ServingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			logger.Info("Serving resource not found, ignoring")
 			return ctrl.Result{}, nil
 		}
+
 		logger.Error(err, "Failed to get Serving")
+
 		return ctrl.Result{}, fmt.Errorf("failed to get Serving: %w", err)
 	}
+
+	before := serving.Status.DeepCopy()
+	defer func() { result, err = r.patchStatus(ctx, serving, before, result, err) }()
 
 	if !serving.DeletionTimestamp.IsZero() {
 		return r.reconcileDelete(ctx, serving)
@@ -112,6 +131,7 @@ func (r *ServingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	if !controllerutil.ContainsFinalizer(serving, deliveryv1alpha1.Finalizer) {
 		controllerutil.AddFinalizer(serving, deliveryv1alpha1.Finalizer)
+
 		if err := r.Update(ctx, serving); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -120,130 +140,147 @@ func (r *ServingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return r.reconcileServing(ctx, serving)
 }
 
-// reconcileServing handles the serving by driving the deployment through the
-// configured Deployer.
+// reconcileServing deploys the Preparation the Serving converges to once it
+// is ready, approved, and its evidence verifies, and reports how its
+// deployment is doing. A Preparation that does not pass leaves the deployed
+// one untouched.
 func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliveryv1alpha1.Serving) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	statusUpdater := status.NewServingUpdater(r.Client)
-
-	preparationName, result, err := r.resolveTarget(ctx, serving, statusUpdater)
-	if result != nil || err != nil {
-		return *result, err
-	}
-
-	preparation := &deliveryv1alpha1.Preparation{}
-	preparationKey := client.ObjectKey{Namespace: serving.Namespace, Name: preparationName}
-	if err := r.Get(ctx, preparationKey, preparation); err != nil {
-		logger.Error(err, "Failed to get Preparation", "preparation", preparationName)
-		if uerr := statusUpdater.Failed(ctx, serving, fmt.Errorf("preparation not found: %w", err)); uerr != nil {
-			logger.Error(uerr, "Failed to update Serving status")
-		}
+	preparation, err := r.targetPreparation(ctx, serving)
+	if preparation == nil || err != nil {
 		return ctrl.Result{}, err
 	}
 
 	// A Preparation is served only once it is Ready, under both promotion
-	// modes. The currently deployed Preparation is left untouched, and the
-	// Preparation watch triggers the next reconcile.
-	if !apimeta.IsStatusConditionTrue(preparation.Status.Conditions, deliveryv1alpha1.ConditionTypeReady) {
-		logger.Info("Preparation not ready, waiting", "preparation", preparationName)
-		if uerr := statusUpdater.Pending(ctx, serving, fmt.Sprintf("Waiting for Preparation %q to become ready", preparationName)); uerr != nil {
-			logger.Error(uerr, "Failed to update Serving status")
-		}
+	// modes. The Preparation watch triggers the next reconcile.
+	if !meta.IsStatusConditionTrue(preparation.Status.Conditions, deliveryv1alpha1.ConditionTypeReady) {
+		logger.Info("Preparation not ready, waiting", "preparation", preparation.Name)
+		markPending(serving, fmt.Sprintf("Waiting for Preparation %q to become ready", preparation.Name))
 		return ctrl.Result{}, nil
 	}
 
-	blocked, err := r.gate(ctx, serving, preparation, statusUpdater)
-	if blocked || err != nil {
+	if blocked, err := r.gate(ctx, serving, preparation); blocked || err != nil {
 		return ctrl.Result{}, err
 	}
 
 	// The registry is the record: the signature and attestations are
 	// verified there, not trusted from the Preparation's status.
-	blocked, err = r.verify(ctx, serving, preparation, statusUpdater)
-	if blocked || err != nil {
+	if blocked, err := r.verify(ctx, serving, preparation); blocked || err != nil {
 		return ctrl.Result{}, err
 	}
 
-	logger.Info("Found Preparation", "preparation", preparation.Name, "digest", preparation.Spec.Artifact.Digest)
-
-	desiredDigest := preparation.Spec.Artifact.Digest
-
-	// Deploy is idempotent: it leaves a deployment that already points at the
-	// Preparation untouched and reverts drift otherwise.
-	if err := r.Deployer.Deploy(ctx, serving, preparation); err != nil {
-		if errors.Is(err, deployer.ErrOptInRequired) {
+	app, err := r.applyApplication(ctx, serving, preparation)
+	if err != nil {
+		if errors.Is(err, argocd.ErrOptInRequired) {
+			// Holds for this generation: the Application watch reports a
+			// change to the opt-in, and a spec change reports itself.
 			logger.Info("Could not update deployment, opt-in required", "error", err.Error())
-			if uerr := statusUpdater.Failed(ctx, serving, err); uerr != nil {
-				logger.Error(uerr, "Failed to update Serving status")
-			}
-			// Terminal for this generation: do not requeue. The deployer watch
-			// reports a change to the opt-in, and a spec change reports itself.
+			markDeploymentFailed(serving, err.Error())
 			return ctrl.Result{}, nil
 		}
-		logger.Error(err, "Failed to deploy")
-		if uerr := statusUpdater.Failed(ctx, serving, fmt.Errorf("failed to deploy: %w", err)); uerr != nil {
-			logger.Error(uerr, "Failed to update Serving status")
-		}
-		return ctrl.Result{}, err
+		markDeploymentFailed(serving, "failed to deploy: "+err.Error())
+		return ctrl.Result{}, fmt.Errorf("failed to deploy: %w", err)
 	}
 
-	deploymentStatus, err := r.Deployer.Status(ctx, serving)
-	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to get deployment status: %w", err)
-	}
-
-	// The status is derived from the observed deployment and written once per
-	// reconcile. An unchanged status is not written, so a Serving that stays
-	// degraded or progressing settles until the deployment changes. The health
-	// of another revision says nothing about this Preparation, so until the
-	// deployment reaches the desired revision the Serving is Deploying.
-	atDesired := deploymentStatus.Revision == desiredDigest
-	switch {
-	case atDesired && deploymentStatus.Phase == deployer.PhaseDegraded:
-		return ctrl.Result{}, statusUpdater.Degraded(ctx, serving, preparationName, deploymentStatus.Message)
-	case atDesired && deploymentStatus.Phase == deployer.PhaseHealthy:
-		return ctrl.Result{}, statusUpdater.Deployed(ctx, serving, preparationName, desiredDigest, "Successfully deployed component")
-	default:
-		logger.Info("Deployment not yet healthy at desired revision",
-			"preparation", preparationName, "phase", deploymentStatus.Phase, "revision", deploymentStatus.Revision)
-		return ctrl.Result{}, statusUpdater.Deploying(ctx, serving, preparationName)
-	}
+	markDeployment(serving, preparation, argocd.StateOf(app))
+	return ctrl.Result{}, nil
 }
 
-// gate enforces the approval gate of the target Preparation for both
-// promotion modes. It returns true when deployment must not proceed; the
-// currently deployed Preparation is left untouched.
-func (r *ServingReconciler) gate(ctx context.Context, serving *deliveryv1alpha1.Serving, preparation *deliveryv1alpha1.Preparation, statusUpdater *status.ServingUpdater) (bool, error) {
-	approvals, err := index.ApprovalsForPreparation(ctx, r.Client, preparation)
-	if err != nil {
+// targetPreparation returns the Preparation the Serving converges to, nil
+// while there is none. The promotion mode is read from the Order: Manual
+// serves spec.preparationName, Automatic the newest Ready Preparation of the
+// Order. The Serving spec is never modified.
+func (r *ServingReconciler) targetPreparation(ctx context.Context, serving *deliveryv1alpha1.Serving) (*deliveryv1alpha1.Preparation, error) {
+	order := &deliveryv1alpha1.Order{}
+	if err := r.Get(ctx, client.ObjectKey{Namespace: serving.Namespace, Name: serving.Spec.OrderName}, order); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("failed to get Order: %w", err)
+		}
+		markPending(serving, fmt.Sprintf("Waiting for Order %q", serving.Spec.OrderName))
+		return nil, nil
+	}
+
+	if order.EffectivePromotionMode() != deliveryv1alpha1.PromotionModeAutomatic {
+		if serving.Spec.PreparationName == "" {
+			markPending(serving, "Waiting for a Preparation to be promoted")
+			return nil, nil
+		}
+		preparation := &deliveryv1alpha1.Preparation{}
+		if err := r.Get(ctx, client.ObjectKey{Namespace: serving.Namespace, Name: serving.Spec.PreparationName}, preparation); err != nil {
+			markDeploymentFailed(serving, fmt.Sprintf("preparation not found: %v", err))
+			return nil, fmt.Errorf("failed to get Preparation %q: %w", serving.Spec.PreparationName, err)
+		}
+		return preparation, nil
+	}
+
+	preparations := &deliveryv1alpha1.PreparationList{}
+	if err := r.List(ctx, preparations,
+		client.InNamespace(serving.Namespace),
+		client.MatchingFields{deliveryv1alpha1.FieldOrderName: serving.Spec.OrderName},
+	); err != nil {
+		markDeploymentFailed(serving, fmt.Sprintf("failed to list preparations: %v", err))
+		return nil, fmt.Errorf("failed to list Preparations: %w", err)
+	}
+
+	var latest *deliveryv1alpha1.Preparation
+	for i := range preparations.Items {
+		prep := &preparations.Items[i]
+		if !meta.IsStatusConditionTrue(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeReady) {
+			continue
+		}
+		if latest == nil || prep.CreationTimestamp.After(latest.CreationTimestamp.Time) {
+			latest = prep
+		}
+	}
+
+	if latest == nil {
+		// The Preparation watch reconciles again once one is ready.
+		msg := "Waiting for ready preparation"
+		if len(preparations.Items) == 0 {
+			msg = "Waiting for preparations"
+		}
+		markPending(serving, msg)
+		return nil, nil
+	}
+	return latest, nil
+}
+
+// gate records the target Preparation and whether it passes its approval
+// gate, under both promotion modes. It reports whether deployment must not
+// proceed.
+func (r *ServingReconciler) gate(ctx context.Context, serving *deliveryv1alpha1.Serving, preparation *deliveryv1alpha1.Preparation) (bool, error) {
+	approvals := &deliveryv1alpha1.ApprovalList{}
+	if err := r.List(ctx, approvals,
+		client.InNamespace(preparation.Namespace),
+		client.MatchingFields{deliveryv1alpha1.FieldPreparationRefName: preparation.Name},
+	); err != nil {
 		return true, fmt.Errorf("failed to list Approvals: %w", err)
 	}
 
-	gate := approval.Gate(preparation, approvals)
+	gate := approval.Gate(preparation, approvals.Items)
 	if gate.Blocked {
 		log.FromContext(ctx).V(4).Info("Approval gate blocks deployment", "preparation", preparation.Name, "reason", gate.Reason)
 	}
-	if err := statusUpdater.Gate(ctx, serving, preparation.Name, gate.Status, gate.Reason, gate.Message); err != nil {
-		return true, fmt.Errorf("failed to update Serving approval status: %w", err)
-	}
+	serving.Status.TargetPreparationName = preparation.Name
+	conditions.Set(serving, deliveryv1alpha1.ConditionTypeApproved, gate.Status, gate.Reason, gate.Message)
 	return gate.Blocked, nil
 }
 
 // verify checks the evidence of preparation's artifact in the registry
 // before it is deployed: its signature, its provenance for the Serving's
 // Order, and, when an approval policy applies, its sealed approvals. It
-// returns true when deployment must not proceed; the currently deployed
-// Preparation is left untouched.
-func (r *ServingReconciler) verify(ctx context.Context, serving *deliveryv1alpha1.Serving, preparation *deliveryv1alpha1.Preparation, statusUpdater *status.ServingUpdater) (bool, error) {
+// reports whether deployment must not proceed.
+func (r *ServingReconciler) verify(ctx context.Context, serving *deliveryv1alpha1.Serving, preparation *deliveryv1alpha1.Preparation) (bool, error) {
 	logger := log.FromContext(ctx)
 
 	state, err := r.Signing.State(ctx)
 	if err != nil {
 		// The provider notifies the watch once the key is loaded.
 		logger.Info("Waiting for the signing key to verify Preparation", "preparation", preparation.Name, "reason", err.Error())
-		return true, statusUpdater.Verified(ctx, serving, metav1.ConditionUnknown, deliveryv1alpha1.ReasonSigningKeyNotReady,
+		conditions.MarkUnknown(serving, deliveryv1alpha1.ConditionTypeVerified, deliveryv1alpha1.ReasonSigningKeyNotReady,
 			preparation.Name+": waiting for the signing key: "+err.Error())
+		return true, nil
 	}
 
 	key := verificationKey{
@@ -255,126 +292,215 @@ func (r *ServingReconciler) verify(ctx context.Context, serving *deliveryv1alpha
 
 	r.verifiedOnce.Do(func() { r.verified = lru.New(verificationCacheSize) })
 	if _, ok := r.verified.Get(key); !ok {
-		destClient, err := destinationClient(ctx, r.Client, r.Registries, preparation)
+		conn, err := r.artifactConnection(ctx, preparation)
 		if err != nil {
 			if reason := registry.Reason(err, ""); reason != "" {
 				// The Registry watch of the Order reconciles again once
 				// the Registries change.
-				return true, statusUpdater.Verified(ctx, serving, metav1.ConditionFalse, reason, preparation.Name+": "+err.Error())
+				conditions.MarkFalse(serving, deliveryv1alpha1.ConditionTypeVerified, reason, preparation.Name+": "+err.Error())
+				return true, nil
 			}
 			return true, err
 		}
 
-		if err := evidence.Verify(ctx, destClient, state.Trust, preparation, key.order); err != nil {
+		if err := evidence.Verify(ctx, conn.Client, state.Trust, preparation, key.order); err != nil {
 			var rejected *evidence.Rejected
 			if !errors.As(err, &rejected) {
 				return true, fmt.Errorf("failed to verify Preparation %q: %w", preparation.Name, err)
 			}
 			logger.Info("Evidence of Preparation did not verify, keeping the current deployment",
 				"preparation", preparation.Name, "reason", rejected.Reason, "error", err.Error())
-			return true, statusUpdater.Verified(ctx, serving, metav1.ConditionFalse, rejected.Reason, preparation.Name+": "+err.Error())
+			conditions.MarkFalse(serving, deliveryv1alpha1.ConditionTypeVerified, rejected.Reason, preparation.Name+": "+err.Error())
+			return true, nil
 		}
 
 		r.verified.Add(key, struct{}{})
 	}
 
-	return false, statusUpdater.Verified(ctx, serving, metav1.ConditionTrue, deliveryv1alpha1.ReasonSignaturesVerified,
+	conditions.MarkTrue(serving, deliveryv1alpha1.ConditionTypeVerified, deliveryv1alpha1.ReasonSignaturesVerified,
 		preparation.Name+": signature and attestations verified")
+	return false, nil
 }
 
-// resolveTarget determines the Preparation the Serving converges to. The
-// promotion mode is read from the Order: Manual uses spec.preparationName,
-// Automatic uses the newest Ready Preparation of the Order. The Serving spec
-// is never modified.
-func (r *ServingReconciler) resolveTarget(ctx context.Context, serving *deliveryv1alpha1.Serving, statusUpdater *status.ServingUpdater) (string, *ctrl.Result, error) {
+// applyApplication points the Serving's Argo CD Application at the artifact
+// of preparation, creating it when it is missing, and returns it as it is
+// now. An Application that already points there is left untouched, and
+// drift is reverted. A pre-existing Application that is not opted in for
+// the Serving's Order is never changed: the error wraps
+// argocd.ErrOptInRequired.
+func (r *ServingReconciler) applyApplication(
+	ctx context.Context, serving *deliveryv1alpha1.Serving, preparation *deliveryv1alpha1.Preparation,
+) (*unstructured.Unstructured, error) {
 	logger := log.FromContext(ctx)
 
-	order := &deliveryv1alpha1.Order{}
-	if err := r.Get(ctx, client.ObjectKey{Namespace: serving.Namespace, Name: serving.Spec.OrderName}, order); err != nil {
-		if !apierrors.IsNotFound(err) {
-			return "", &ctrl.Result{}, fmt.Errorf("failed to get Order: %w", err)
-		}
-		if uerr := statusUpdater.Pending(ctx, serving, fmt.Sprintf("Waiting for Order %q", serving.Spec.OrderName)); uerr != nil {
-			logger.Error(uerr, "Failed to update Serving status")
-		}
-		return "", &ctrl.Result{}, nil
-	}
-
-	if order.EffectivePromotionMode() != deliveryv1alpha1.PromotionModeAutomatic {
-		if serving.Spec.PreparationName == "" {
-			if uerr := statusUpdater.Pending(ctx, serving, "Waiting for a Preparation to be promoted"); uerr != nil {
-				logger.Error(uerr, "Failed to update Serving status")
-			}
-			return "", &ctrl.Result{}, nil
-		}
-		return serving.Spec.PreparationName, nil, nil
-	}
-
-	preparations, err := index.PreparationsForOrder(ctx, r.Client, serving.Namespace, serving.Spec.OrderName)
+	desired, err := argocd.Application(serving, preparation)
 	if err != nil {
-		logger.Error(err, "Failed to list Preparations")
-		if uerr := statusUpdater.Failed(ctx, serving, fmt.Errorf("failed to list preparations: %w", err)); uerr != nil {
-			logger.Error(uerr, "Failed to update Serving status")
-		}
-		return "", &ctrl.Result{}, err
+		return nil, err
 	}
 
-	if len(preparations) == 0 {
-		logger.Info("No preparations found for order", "order", serving.Spec.OrderName)
-		if uerr := statusUpdater.Pending(ctx, serving, "Waiting for preparations"); uerr != nil {
-			logger.Error(uerr, "Failed to update Serving status")
+	existing := argocd.New()
+	if err := r.Get(ctx, argocd.Key(serving), existing); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("failed to get Application: %w", err)
 		}
-		result := ctrl.Result{RequeueAfter: 30 * time.Second}
-		return "", &result, nil
+		if err := r.Create(ctx, desired); err != nil {
+			return nil, fmt.Errorf("failed to create Application: %w", err)
+		}
+		logger.Info("Created Argo CD Application", "name", desired.GetName(), "namespace", desired.GetNamespace(), "preparation", preparation.Name)
+		return desired, nil
 	}
 
-	var latestPreparation *deliveryv1alpha1.Preparation
-	for i := range preparations {
-		prep := &preparations[i]
-		if !apimeta.IsStatusConditionTrue(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeReady) {
-			continue
-		}
-		if latestPreparation == nil || prep.CreationTimestamp.After(latestPreparation.CreationTimestamp.Time) {
-			latestPreparation = prep
-		}
+	if err := argocd.OptedIn(existing, serving.Spec.OrderName); err != nil {
+		return nil, err
+	}
+	if argocd.Matches(existing, desired) {
+		return existing, nil
 	}
 
-	if latestPreparation == nil {
-		logger.Info("No ready preparations found for order", "order", serving.Spec.OrderName)
-		if uerr := statusUpdater.Pending(ctx, serving, "Waiting for ready preparation"); uerr != nil {
-			logger.Error(uerr, "Failed to update Serving status")
-		}
-		result := ctrl.Result{RequeueAfter: 30 * time.Second}
-		return "", &result, nil
+	desired.SetResourceVersion(existing.GetResourceVersion())
+	if err := r.Update(ctx, desired); err != nil {
+		return nil, fmt.Errorf("failed to update Application: %w", err)
 	}
-
-	preparationName := latestPreparation.Name
-	logger.Info("Selected latest preparation", "preparation", preparationName)
-
-	return preparationName, nil, nil
+	logger.Info("Updated Argo CD Application", "name", desired.GetName(), "namespace", desired.GetNamespace(), "preparation", preparation.Name)
+	return desired, nil
 }
 
-// reconcileDelete handles the deletion of a Serving
+// reconcileDelete deletes the Serving's Argo CD Application, which garbage
+// collection cannot reach in the argocd namespace, then removes the
+// finalizer.
 func (r *ServingReconciler) reconcileDelete(ctx context.Context, serving *deliveryv1alpha1.Serving) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("Handling deletion of Serving")
 
 	if controllerutil.ContainsFinalizer(serving, deliveryv1alpha1.Finalizer) {
-		logger.Info("Cleaning up deployment")
-		if err := r.Deployer.Remove(ctx, serving); err != nil {
+		logger.Info("Cleaning up Serving resources")
+
+		if err := r.removeApplication(ctx, serving); err != nil {
 			return ctrl.Result{}, err
 		}
+
+		controllerutil.RemoveFinalizer(serving, deliveryv1alpha1.Finalizer)
 
 		// Deleting an Order deletes its Serving, Preparations and Application
 		// at once, and their events can reconcile a Serving whose finalizer is
 		// gone again from a cache that still holds it.
-		controllerutil.RemoveFinalizer(serving, deliveryv1alpha1.Finalizer)
 		if err := r.Update(ctx, serving); err != nil {
 			return ctrl.Result{}, client.IgnoreNotFound(err)
 		}
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// removeApplication deletes the Serving's Argo CD Application. One that is
+// gone already counts as removed, and one that is not opted in for the
+// Serving's Order is kept. The delete is conditional on the UID and
+// resource version that passed the opt-in check, so an Application replaced
+// or changed in between is never deleted.
+func (r *ServingReconciler) removeApplication(ctx context.Context, serving *deliveryv1alpha1.Serving) error {
+	logger := log.FromContext(ctx)
+
+	app := argocd.New()
+	if err := r.Get(ctx, argocd.Key(serving), app); err != nil {
+		if apierrors.IsNotFound(err) {
+			logger.Info("Argo CD Application already deleted", "name", serving.Name)
+			return nil
+		}
+		return fmt.Errorf("failed to get Application: %w", err)
+	}
+
+	if err := argocd.OptedIn(app, serving.Spec.OrderName); err != nil {
+		logger.Info("Keeping Argo CD Application that is not opted in for the Order", "name", app.GetName(), "error", err.Error())
+		return nil
+	}
+
+	uid, resourceVersion := app.GetUID(), app.GetResourceVersion()
+	if err := r.Delete(ctx, app, client.Preconditions{UID: &uid, ResourceVersion: &resourceVersion}); client.IgnoreNotFound(err) != nil {
+		return fmt.Errorf("failed to delete Application: %w", err)
+	}
+
+	logger.Info("Deleted Argo CD Application", "name", app.GetName())
+	return nil
+}
+
+// artifactConnection connects to the registry holding prep's artifact:
+// through the Registry that authenticated its push, while it exists and
+// still covers the artifact, and through the Order's registryRefs
+// otherwise.
+func (r *ServingReconciler) artifactConnection(ctx context.Context, prep *deliveryv1alpha1.Preparation) (registry.Connection, error) {
+	conn, err := r.Registries.ConnectRecorded(ctx, prep.Namespace, prep.Spec.Artifact.RegistryRef, prep.Spec.Artifact.OCIRef,
+		func(ctx context.Context) ([]corev1.LocalObjectReference, error) {
+			order := &deliveryv1alpha1.Order{}
+			if err := r.Get(ctx, client.ObjectKey{Namespace: prep.Namespace, Name: prep.Spec.OrderName}, order); err != nil && !apierrors.IsNotFound(err) {
+				return nil, fmt.Errorf("failed to get Order %q: %w", prep.Spec.OrderName, err)
+			}
+			return order.Spec.RegistryRefs, nil
+		})
+	if err != nil {
+		return registry.Connection{}, fmt.Errorf("failed to connect to the destination of Preparation %q: %w", prep.Name, err)
+	}
+	return conn, nil
+}
+
+// patchStatus writes the status serving took on in this reconcile, unless it
+// is unchanged, and returns how to requeue: as the reconcile decided, or soon
+// when the patch conflicts. The patch is locked to the version this reconcile
+// read or last wrote, so that a reconcile from a stale cache never overwrites
+// the recorded gate verdict.
+func (r *ServingReconciler) patchStatus(
+	ctx context.Context, serving *deliveryv1alpha1.Serving, before *deliveryv1alpha1.ServingStatus, result ctrl.Result, err error,
+) (ctrl.Result, error) {
+	serving.Status.ObservedGeneration = serving.Generation
+	if equality.Semantic.DeepEqual(*before, serving.Status) {
+		return result, err
+	}
+
+	base := serving.DeepCopy()
+	base.Status = *before
+	perr := r.Status().Patch(ctx, serving, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}))
+	switch {
+	case perr == nil, apierrors.IsNotFound(perr):
+		return result, err
+	case apierrors.IsConflict(perr) && err == nil:
+		log.FromContext(ctx).V(1).Info("Serving changed during the reconcile, reconciling it again")
+		return ctrl.Result{RequeueAfter: time.Second}, nil
+	default:
+		return result, errors.Join(err, fmt.Errorf("failed to patch Serving status: %w", perr))
+	}
+}
+
+// markDeployment derives the Ready condition of the Serving from the state
+// of its Application. The health of another revision says nothing about
+// preparation, so until the Application reaches it the Serving is
+// Deploying. An unchanged state changes nothing, so a Serving that stays
+// degraded or progressing settles until the Application changes.
+func markDeployment(serving *deliveryv1alpha1.Serving, preparation *deliveryv1alpha1.Preparation, state argocd.State) {
+	serving.Status.ObservedPreparationName = preparation.Name
+
+	atTarget := state.Revision == preparation.Spec.Artifact.Digest
+	switch {
+	case atTarget && state.Phase == argocd.PhaseDegraded:
+		msg := "deployment degraded"
+		if state.Message != "" {
+			msg += ": " + state.Message
+		}
+		markDeploymentFailed(serving, msg)
+	case atTarget && state.Phase == argocd.PhaseHealthy:
+		serving.Status.DeployedDigest = preparation.Spec.Artifact.Digest
+		conditions.MarkTrue(serving, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonDeployed, "Successfully deployed component")
+	default:
+		conditions.MarkUnknown(serving, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonDeploying, "Deploying preparation "+preparation.Name)
+	}
+}
+
+// markPending marks the Serving as waiting for a prerequisite.
+func markPending(serving *deliveryv1alpha1.Serving, msg string) {
+	conditions.MarkUnknown(serving, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonPending, msg)
+}
+
+// markDeploymentFailed marks the Serving as not deployed, for msg.
+func markDeploymentFailed(serving *deliveryv1alpha1.Serving, msg string) {
+	conditions.MarkFalse(serving, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonDeploymentFailed, msg)
 }
 
 // enqueueServingForOrderName maps an Order or Preparation to the Order's
@@ -390,6 +516,27 @@ func enqueueServingForOrderName(_ context.Context, obj client.Object) []ctrl.Req
 		return nil
 	}
 	return []ctrl.Request{{Namespace: obj.GetNamespace(), Name: orderName}}
+}
+
+// servingOfApplication maps an Argo CD Application to the Serving its labels
+// name.
+func servingOfApplication(_ context.Context, obj client.Object) []ctrl.Request {
+	key, ok := argocd.ServingOf(obj.GetLabels())
+	if !ok {
+		return nil
+	}
+	return []ctrl.Request{{NamespacedName: key}}
+}
+
+// applicationChanged passes the Application updates that change what the
+// Serving status and the opt-in check depend on. Creates and deletes always
+// pass.
+var applicationChanged = predicate.Funcs{
+	UpdateFunc: func(e event.UpdateEvent) bool {
+		oldApp, okOld := e.ObjectOld.(*unstructured.Unstructured)
+		newApp, okNew := e.ObjectNew.(*unstructured.Unstructured)
+		return okOld && okNew && argocd.Changed(oldApp, newApp)
+	},
 }
 
 // enqueueAllServings enqueues every Serving, so that their targets are
@@ -408,6 +555,20 @@ func (r *ServingReconciler) enqueueAllServings(ctx context.Context, _ client.Obj
 	return reqs
 }
 
+// signingChanges returns a channel that receives an event whenever the
+// trust of the signing state changes.
+func (r *ServingReconciler) signingChanges() <-chan event.GenericEvent {
+	ch := make(chan event.GenericEvent, 1)
+	r.Signing.OnChange(func() {
+		select {
+		case ch <- event.GenericEvent{Object: &deliveryv1alpha1.Kitchen{}}:
+		default:
+			// A notification is already pending.
+		}
+	})
+	return ch
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *ServingReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
@@ -417,10 +578,10 @@ func (r *ServingReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&deliveryv1alpha1.Order{},
 			handler.EnqueueRequestsFromMapFunc(enqueueServingForOrderName),
 			builder.WithPredicates(predicate.GenerationChangedPredicate{})).
-		Watches(r.Deployer.WatchObject(),
-			handler.EnqueueRequestsFromMapFunc(r.Deployer.EnqueueRequests),
-			builder.WithPredicates(r.Deployer.WatchPredicate())).
-		WatchesRawSource(source.Channel(signingChanges(r.Signing), handler.EnqueueRequestsFromMapFunc(r.enqueueAllServings))).
+		Watches(argocd.New(),
+			handler.EnqueueRequestsFromMapFunc(servingOfApplication),
+			builder.WithPredicates(applicationChanged)).
+		WatchesRawSource(source.Channel(r.signingChanges(), handler.EnqueueRequestsFromMapFunc(r.enqueueAllServings))).
 		Named("serving").
 		Complete(r)
 }

@@ -41,7 +41,6 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/signing"
 	"github.com/kokumi-dev/kokumi/internal/signing/signingtest"
 	signingsource "github.com/kokumi-dev/kokumi/internal/signing/source"
-	"github.com/kokumi-dev/kokumi/internal/status"
 )
 
 // unlistableClient is a FakeClient whose registry cannot list referrers.
@@ -479,12 +478,15 @@ var _ = Describe("Product Controller", func() {
 		changed.Spec.Source.Version = "2.0.0"
 		Expect(k8sClient.Update(ctx, changed)).To(Succeed())
 
-		source := &deliveryv1alpha1.ProductSourceStatus{URL: testOCIRef, Version: testVersion, Digest: oci.FakeDigest}
-		Expect(status.NewProductUpdater(k8sClient).Ready(ctx, resolving, "sha256:old", source)).To(Succeed())
+		By("recording the resolved old version")
+		before := resolving.Status.DeepCopy()
+		markPublished(resolving, "sha256:old", &deliveryv1alpha1.ProductSourceStatus{URL: testOCIRef, Version: testVersion, Digest: oci.FakeDigest})
+		result, err := r.patchStatus(ctx, resolving, before, reconcile.Result{}, nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.RequeueAfter).To(BeNumerically(">", 0), "the status write is locked to the version that was resolved")
 
 		product := getProduct(name)
-		Expect(product.Status.Source.Version).To(Equal(testVersion))
-		Expect(product.Status.ObservedGeneration).To(Equal(resolving.Generation))
+		Expect(product.Status.Source).To(BeNil())
 		Expect(resolve.ProductReady(product)).To(BeFalse(), "Orders must not render the new spec over the old source")
 	})
 
@@ -620,4 +622,31 @@ var _ = Describe("Product Controller", func() {
 		err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &deliveryv1alpha1.Product{})
 		Expect(errors.IsNotFound(err)).To(BeTrue())
 	})
+})
+
+var _ = Describe("Product field indexes", func() {
+	secret := func(name string) *corev1.LocalObjectReference { return &corev1.LocalObjectReference{Name: name} }
+
+	It("indexes a Product by every Registry it lists", func() {
+		const upstream, mirror = "product-upstream", "product-mirror"
+		product := &deliveryv1alpha1.Product{Spec: deliveryv1alpha1.ProductSpec{
+			RegistryRefs: []corev1.LocalObjectReference{{Name: upstream}, {Name: mirror}},
+		}}
+		Expect(productRegistryNames(product)).To(Equal([]string{upstream, mirror}))
+		Expect(productRegistryNames(&deliveryv1alpha1.Product{})).To(BeEmpty())
+	})
+
+	DescribeTable("indexes a Product by the Secrets its source verification reads",
+		func(verify *deliveryv1alpha1.OCISourceVerification, want []string) {
+			product := &deliveryv1alpha1.Product{Spec: deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{Verify: verify}}}
+			Expect(productVerifySecrets(product)).To(Equal(want))
+		},
+		Entry("no verification", nil, nil),
+		Entry("keys and trusted root",
+			&deliveryv1alpha1.OCISourceVerification{SecretRef: secret("keys"), TrustedRootSecretRef: secret("sigstore-root")},
+			[]string{"keys", "sigstore-root"}),
+		Entry("the same Secret once",
+			&deliveryv1alpha1.OCISourceVerification{SecretRef: secret("trust"), TrustedRootSecretRef: secret("trust")},
+			[]string{"trust"}),
+	)
 })

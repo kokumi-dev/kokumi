@@ -20,7 +20,6 @@ import (
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/approval"
-	"github.com/kokumi-dev/kokumi/internal/index"
 )
 
 const (
@@ -33,13 +32,13 @@ const (
 // handleListPreparationApprovals handles GET /api/v1/preparations/{namespace}/{name}/approvals.
 // It returns the full, chronologically ordered vote history of a Preparation.
 func handleListPreparationApprovals(deps *apiDeps) http.HandlerFunc {
-	return listApprovals(deps, index.FieldPreparationRefName)
+	return listApprovals(deps, deliveryv1alpha1.FieldPreparationRefName)
 }
 
 // handleListOrderApprovals handles GET /api/v1/orders/{namespace}/{name}/approvals.
 // It includes votes whose Preparation no longer exists.
 func handleListOrderApprovals(deps *apiDeps) http.HandlerFunc {
-	return listApprovals(deps, index.FieldOrderName)
+	return listApprovals(deps, deliveryv1alpha1.FieldOrderName)
 }
 
 func listApprovals(deps *apiDeps, field string) http.HandlerFunc {
@@ -162,7 +161,7 @@ func handleSubmitApproval(deps *apiDeps) http.HandlerFunc {
 		existing := &deliveryv1alpha1.ApprovalList{}
 		if err := deps.approvalWriter.List(r.Context(), existing,
 			client.InNamespace(namespace),
-			client.MatchingFields{index.FieldPreparationRefName: name},
+			client.MatchingFields{deliveryv1alpha1.FieldPreparationRefName: name},
 		); err != nil {
 			respondError(w, http.StatusInternalServerError, "failed to list existing approvals")
 			return

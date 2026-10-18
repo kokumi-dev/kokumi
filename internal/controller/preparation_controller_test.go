@@ -174,9 +174,8 @@ var _ = Describe("Preparation Controller", func() {
 			prep := createTestPreparation(ctx, prepName, orderName, digest,
 				&deliveryv1alpha1.ApprovalPolicy{RequiredApprovals: required, AllowedGroups: release})
 			seedArtifact(fakeOCI, prep.Spec.Artifact.OCIRef, digest)
-			Expect(reconcilePrep()).To(Succeed()) // adds the finalizer
 			Expect(reconcilePrep()).To(Succeed()) // signs, attaches provenance, marks Ready
-			Expect(reconcilePrep()).To(Succeed())
+			Expect(reconcilePrep()).To(Succeed()) // aggregates the votes
 			return getPrep()
 		}
 
@@ -200,7 +199,6 @@ var _ = Describe("Preparation Controller", func() {
 
 			By("staying not ready while the registry rejects the attestations")
 			seedArtifact(fakeOCI, prep.Spec.Artifact.OCIRef, digest)
-			Expect(reconcilePrep()).To(Succeed()) // adds the finalizer
 			fakeOCI.PushReferrerErr = errors.New("registry unavailable")
 			Expect(reconcilePrep()).To(MatchError(ContainSubstring("registry unavailable")))
 			prep = getPrep()
@@ -243,7 +241,6 @@ var _ = Describe("Preparation Controller", func() {
 		It("reuses the referrers it pushed when the status write was lost", func() {
 			prep := createTestPreparation(ctx, prepName, orderName, digest, nil)
 			seedArtifact(fakeOCI, prep.Spec.Artifact.OCIRef, digest)
-			Expect(reconcilePrep()).To(Succeed()) // adds the finalizer
 			Expect(reconcilePrep()).To(Succeed())
 			first := getPrep().Status.Attestations
 
@@ -261,7 +258,6 @@ var _ = Describe("Preparation Controller", func() {
 		It("signs a Preparation that was ready before signing existed", func() {
 			prep := createTestPreparation(ctx, prepName, orderName, digest, nil)
 			seedArtifact(fakeOCI, prep.Spec.Artifact.OCIRef, digest)
-			Expect(reconcilePrep()).To(Succeed()) // adds the finalizer
 
 			prep = getPrep()
 			apimeta.SetStatusCondition(&prep.Status.Conditions, metav1.Condition{
@@ -283,7 +279,6 @@ var _ = Describe("Preparation Controller", func() {
 			seedArtifact(fakeOCI, prep.Spec.Artifact.OCIRef, digest)
 			signer = signing.NewProvider(SigningInputs(k8sClient, testNamespace, "no-signing-key"))
 
-			Expect(reconcilePrep()).To(Succeed()) // adds the finalizer
 			result, err := reconcilePrepResult()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
@@ -299,7 +294,6 @@ var _ = Describe("Preparation Controller", func() {
 		It("stays not ready and retries while the artifact cannot be read", func() {
 			createTestPreparation(ctx, prepName, orderName, digest, nil)
 
-			Expect(reconcilePrep()).To(Succeed()) // adds the finalizer
 			Expect(reconcilePrep()).To(HaveOccurred())
 			prep := getPrep()
 			Expect(apimeta.IsStatusConditionTrue(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)).To(BeFalse())
@@ -316,8 +310,8 @@ var _ = Describe("Preparation Controller", func() {
 				Options: oci.PushOptions{Config: []byte("{}"), ConfigMediaType: "application/vnd.oci.empty.v1+json"},
 			})
 
-			Expect(reconcilePrep()).To(Succeed()) // adds the finalizer
-			Expect(reconcilePrep()).To(Succeed(), "the artifact is immutable, so the failure is terminal")
+			err = reconcilePrep()
+			Expect(errors.Is(err, reconcile.TerminalError(nil))).To(BeTrue(), "the artifact is immutable, so the failure is terminal: %v", err)
 			prep = getPrep()
 			Expect(apimeta.IsStatusConditionTrue(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)).To(BeFalse())
 			cond := apimeta.FindStatusCondition(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeSigned)
@@ -354,10 +348,17 @@ var _ = Describe("Preparation Controller", func() {
 			prep := setup(1)
 			createTestApproval(ctx, prep, "alice", release, deliveryv1alpha1.ApprovalDecisionApprove)
 			targetPreparation()
-			Expect(reconcilePrep()).To(Succeed())
 
+			By("sealing the votes")
+			Expect(reconcilePrep()).To(Succeed())
 			prep = getPrep()
 			Expect(prep.Status.Approval.SealedTime).NotTo(BeNil())
+			Expect(prep.Status.Approval.Attestation).To(BeNil(), "the votes are sealed before they are archived")
+			Expect(referrersOfPredicate(fakeOCI, approval.AttestationPredicateType)).To(BeEmpty())
+
+			By("archiving them in the pass the seal triggers")
+			Expect(reconcilePrep()).To(Succeed())
+			prep = getPrep()
 			Expect(prep.Status.Approval.Attestation).NotTo(BeNil())
 			Expect(apimeta.IsStatusConditionTrue(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeApprovalsSealed)).To(BeTrue())
 			approvals := referrersOfPredicate(fakeOCI, approval.AttestationPredicateType)
@@ -384,6 +385,7 @@ var _ = Describe("Preparation Controller", func() {
 			targetPreparation()
 
 			fakeOCI.PushReferrerErr = errors.New("registry unavailable")
+			Expect(reconcilePrep()).To(Succeed()) // seals the votes
 			Expect(reconcilePrep()).To(MatchError(ContainSubstring("registry unavailable")))
 			prep = getPrep()
 			sealedTime := prep.Status.Approval.SealedTime

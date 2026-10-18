@@ -130,6 +130,23 @@ func PingReason(err error) string {
 	return deliveryv1alpha1.ReasonUnreachable
 }
 
+// Retriable reports whether a failed oci.Client.Ping may succeed soon: the
+// registry did not answer. Rejected credentials and a certificate the client
+// does not trust are a matter of configuration and stay until it changes.
+func Retriable(err error) bool {
+	return PingReason(err) == deliveryv1alpha1.ReasonUnreachable && !untrustedCertificate(err)
+}
+
+// untrustedCertificate reports whether err is a TLS certificate the client
+// does not trust.
+func untrustedCertificate(err error) bool {
+	var verification *tls.CertificateVerificationError
+	var unknownAuthority x509.UnknownAuthorityError
+	var hostname x509.HostnameError
+	var invalid x509.CertificateInvalidError
+	return errors.As(err, &verification) || errors.As(err, &unknownAuthority) || errors.As(err, &hostname) || errors.As(err, &invalid)
+}
+
 // RegistryNotFound returns the error of a registryRefs entry that names no
 // Registry.
 func RegistryNotFound(name string) error {

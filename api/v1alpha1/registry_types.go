@@ -206,6 +206,16 @@ type Registry struct {
 	Status RegistryStatus `json:"status,omitzero"`
 }
 
+// GetConditions returns the status conditions of the Registry.
+func (r *Registry) GetConditions() []metav1.Condition {
+	return r.Status.Conditions
+}
+
+// SetConditions sets the status conditions of the Registry.
+func (r *Registry) SetConditions(conditions []metav1.Condition) {
+	r.Status.Conditions = conditions
+}
+
 // +kubebuilder:object:root=true
 
 // RegistryList contains a list of Registry

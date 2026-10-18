@@ -36,7 +36,6 @@ import (
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/oci"
-	"github.com/kokumi-dev/kokumi/internal/registry"
 )
 
 const testRegistryURL = "oci://ghcr.io/kokumi-test"
@@ -59,8 +58,7 @@ var _ = Describe("Registry Controller", func() {
 	var registryClient *oci.FakeClient
 
 	reconcileRegistry := func(name string) (reconcile.Result, error) {
-		registries := registry.NewClients(artifact.DefaultRegistryHost).
-			WithClientFactory(func(oci.Options) oci.Client { return registryClient })
+		registries := fakeRegistries(registryClient)
 		return (&RegistryReconciler{Client: k8sClient, Scheme: k8sClient.Scheme(), Registries: registries}).
 			Reconcile(ctx, reconcile.Request{Namespace: testNamespace, Name: name})
 	}
@@ -154,7 +152,7 @@ var _ = Describe("Registry Controller", func() {
 
 	It("creates the Registry of the bundled registry once, and keeps changes to it", func() {
 		r := &RegistryReconciler{Client: k8sClient, Namespace: testNamespace, BundledHost: artifact.DefaultRegistryHost}
-		Expect(r.ensureDefaultRunner(k8sClient)(ctx)).To(Succeed())
+		Expect(r.ensureBundledRegistry(k8sClient)(ctx)).To(Succeed())
 
 		reg := &deliveryv1alpha1.Registry{}
 		key := client.ObjectKey{Namespace: testNamespace, Name: deliveryv1alpha1.DefaultRegistryName}
@@ -164,7 +162,7 @@ var _ = Describe("Registry Controller", func() {
 
 		reg.Spec.URL = "oci://" + artifact.DefaultRegistryHost + "/team"
 		Expect(k8sClient.Update(ctx, reg)).To(Succeed())
-		Expect(r.ensureDefaultRunner(k8sClient)(ctx)).To(Succeed())
+		Expect(r.ensureBundledRegistry(k8sClient)(ctx)).To(Succeed())
 		Expect(k8sClient.Get(ctx, key, reg)).To(Succeed())
 		Expect(reg.Spec.URL).To(HaveSuffix("/team"), "an existing Registry is left as it is")
 		Expect(k8sClient.Delete(ctx, reg)).To(Succeed())
@@ -178,5 +176,17 @@ var _ = Describe("Registry Controller", func() {
 		Expect(err).NotTo(HaveOccurred(), "a configuration error is not retried with backoff")
 		Expect(result.RequeueAfter).To(Equal(registryRecheckInterval))
 		Expect(readyOf("registry-untrusted").Reason).To(Equal(deliveryv1alpha1.ReasonUnreachable))
+	})
+})
+
+var _ = Describe("Registry field indexes", func() {
+	It("indexes a Registry by the Secrets it names, each once", func() {
+		const secretName = "registry-creds"
+		reg := &deliveryv1alpha1.Registry{Spec: deliveryv1alpha1.RegistrySpec{
+			SecretRef:     &corev1.LocalObjectReference{Name: secretName},
+			CertSecretRef: &corev1.LocalObjectReference{Name: secretName},
+		}}
+		Expect(registrySecrets(reg)).To(Equal([]string{secretName}))
+		Expect(registrySecrets(&deliveryv1alpha1.Registry{})).To(BeEmpty())
 	})
 })

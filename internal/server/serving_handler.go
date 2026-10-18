@@ -7,7 +7,6 @@ import (
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/approval"
-	"github.com/kokumi-dev/kokumi/internal/index"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -85,7 +84,7 @@ func handlePromote(deps *apiDeps) http.HandlerFunc {
 		approvals := &deliveryv1alpha1.ApprovalList{}
 		if err := uc.list(r.Context(), approvals,
 			client.InNamespace(namespace),
-			client.MatchingFields{index.FieldPreparationRefName: prep.Name},
+			client.MatchingFields{deliveryv1alpha1.FieldPreparationRefName: prep.Name},
 		); err != nil {
 			respondForbiddenOrError(w, err, "failed to list approvals")
 			return

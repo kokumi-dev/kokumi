@@ -8,6 +8,12 @@
 // kubelet does.
 package images
 
+import (
+	"fmt"
+	"strings"
+	"unicode/utf8"
+)
+
 // Policy controls what Stage.Run does with the images it finds.
 type Policy string
 
@@ -58,4 +64,37 @@ type Image struct {
 	Vendored string `json:"vendored,omitempty"`
 	// Error tells why Ref could not be resolved.
 	Error string `json:"error,omitempty"`
+}
+
+// UnresolvedNote summarizes the images among imgs that could not be
+// resolved, which only PolicyRecord lets pass, in at most maxBytes bytes. It
+// lists as many of them as fit and returns "" when every image resolved.
+func UnresolvedNote(imgs []Image, maxBytes int) string {
+	var unresolved []string
+	for _, img := range imgs {
+		if img.Error != "" {
+			unresolved = append(unresolved, img.Ref+": "+img.Error)
+		}
+	}
+	if len(unresolved) == 0 {
+		return ""
+	}
+
+	note := fmt.Sprintf("Could not resolve %d of %d images: %s", len(unresolved), len(imgs), strings.Join(unresolved, "; "))
+	return truncate(note, maxBytes)
+}
+
+// truncate cuts s to maxBytes bytes at a rune boundary, marking the cut
+// with an ellipsis.
+func truncate(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+
+	const ellipsis = "…"
+	cut := maxBytes - len(ellipsis)
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + ellipsis
 }

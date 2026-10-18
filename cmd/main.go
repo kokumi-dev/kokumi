@@ -42,8 +42,6 @@ import (
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/controller"
-	"github.com/kokumi-dev/kokumi/internal/deployer"
-	"github.com/kokumi-dev/kokumi/internal/index"
 	"github.com/kokumi-dev/kokumi/internal/namespace"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/registry"
@@ -191,11 +189,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := index.Setup(context.Background(), mgr.GetFieldIndexer()); err != nil {
-		setupLog.Error(err, "Failed to set up field indexes")
-		os.Exit(1)
-	}
-
 	if err := (&controller.RecipeReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
@@ -206,8 +199,10 @@ func main() {
 	installNamespace := namespace.Current(os.Getenv)
 
 	// One Clients keeps the clients of all Registries, so that their
-	// tokens are shared between controllers.
-	registries := registry.NewClients(artifact.DefaultRegistryHost)
+	// tokens are shared between controllers. The controllers read the
+	// Registries and their Secrets from the cache.
+	registries := registry.NewResolver(
+		registry.NewClients(artifact.DefaultRegistryHost), controller.RegistryReader(mgr.GetClient()))
 
 	// The Kitchen controller reloads the signing state; every controller that
 	// signs or verifies reads it from here.
@@ -227,7 +222,6 @@ func main() {
 	if err := (&controller.ServingReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
-		Deployer:   deployer.NewArgoCD(mgr.GetClient()),
 		Registries: registries,
 		Signing:    signingProvider,
 	}).SetupWithManager(mgr); err != nil {

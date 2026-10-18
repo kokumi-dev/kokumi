@@ -12,7 +12,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
-	"github.com/kokumi-dev/kokumi/internal/index"
 	"github.com/kokumi-dev/kokumi/internal/registry"
 )
 
@@ -34,27 +33,39 @@ type userRegistryReader struct {
 	uc *userClient
 }
 
-// Get implements client.Reader.
-func (u userRegistryReader) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-	resource := registriesResource
-	if _, ok := obj.(*corev1.Secret); ok {
-		resource = secretsResource
-	}
-
-	reader, err := u.uc.readerForObject(ctx, "get", resource, key.Namespace, key.Name)
+// Registry implements registry.Reader.
+func (u userRegistryReader) Registry(ctx context.Context, namespace, name string) (*deliveryv1alpha1.Registry, error) {
+	reader, err := u.uc.readerForObject(ctx, "get", registriesResource, namespace, name)
 	if err != nil {
-		if resource == secretsResource && errors.Is(err, errNotAuthorized) {
-			return fmt.Errorf("you are %w to read it in namespace %q: a platform admin grants it by binding the ClusterRole %s there",
-				errNotAuthorized, key.Namespace, registryCredentialsRole)
-		}
-		return err
+		return nil, err
 	}
-	return reader.Get(ctx, key, obj, opts...)
+	reg := &deliveryv1alpha1.Registry{}
+	if err := reader.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, reg); err != nil {
+		return nil, err
+	}
+	return reg, nil
 }
 
-// List implements client.Reader.
-func (u userRegistryReader) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
-	return u.uc.list(ctx, list, opts...)
+// Secret implements registry.Reader.
+func (u userRegistryReader) Secret(ctx context.Context, namespace, name string) (*corev1.Secret, error) {
+	reader, err := u.uc.readerForObject(ctx, "get", secretsResource, namespace, name)
+	if err != nil {
+		if errors.Is(err, errNotAuthorized) {
+			return nil, fmt.Errorf("you are %w to read it in namespace %q: a platform admin grants it by binding the ClusterRole %s there",
+				errNotAuthorized, namespace, registryCredentialsRole)
+		}
+		return nil, err
+	}
+	secret := &corev1.Secret{}
+	if err := reader.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, secret); err != nil {
+		return nil, err
+	}
+	return secret, nil
+}
+
+// resolverFor returns the Resolver that connects as uc.
+func (deps *apiDeps) resolverFor(uc *userClient) *registry.Resolver {
+	return registry.NewResolver(deps.registries, userRegistryReader{uc: uc})
 }
 
 // scopeFor returns the Scope of an object in namespace that lists refs, for
@@ -73,11 +84,7 @@ func (deps *apiDeps) scopeFor(r *http.Request, namespace string, refs []corev1.L
 // userScope reads the Registries refs name in namespace, with their
 // Secrets, as uc and returns the Scope they form.
 func (deps *apiDeps) userScope(ctx context.Context, uc *userClient, namespace string, refs []corev1.LocalObjectReference) (registry.Scope, error) {
-	entries, err := index.RegistryEntries(ctx, userRegistryReader{uc: uc}, namespace, refs)
-	if err != nil {
-		return registry.Scope{}, err
-	}
-	return deps.registries.Scope(entries), nil
+	return deps.resolverFor(uc).Scope(ctx, namespace, refs)
 }
 
 // connectFor returns the connection to url of an object in namespace that
@@ -94,28 +101,14 @@ func (deps *apiDeps) connectFor(r *http.Request, namespace string, refs []corev1
 // uc: through the Registry recorded with it while it exists and still
 // covers the artifact, and through the registryRefs of its Order otherwise.
 func (deps *apiDeps) preparationConnection(ctx context.Context, uc *userClient, prep *deliveryv1alpha1.Preparation) (registry.Connection, error) {
-	url := prep.Spec.Artifact.OCIRef
-	if recorded := prep.Spec.Artifact.RegistryRef; recorded != nil {
-		scope, err := deps.userScope(ctx, uc, prep.Namespace, []corev1.LocalObjectReference{*recorded})
-		if err == nil {
-			conn, err := scope.Connect(url)
-			if err != nil || conn.Registry != nil {
-				return conn, err
+	return deps.resolverFor(uc).ConnectRecorded(ctx, prep.Namespace, prep.Spec.Artifact.RegistryRef, prep.Spec.Artifact.OCIRef,
+		func(ctx context.Context) ([]corev1.LocalObjectReference, error) {
+			order := &deliveryv1alpha1.Order{}
+			if err := uc.get(ctx, client.ObjectKey{Namespace: prep.Namespace, Name: prep.Spec.OrderName}, order); err != nil && !apierrors.IsNotFound(err) {
+				return nil, err
 			}
-		} else if registry.Reason(err, "") != deliveryv1alpha1.ReasonRegistryNotFound {
-			return registry.Connection{}, err
-		}
-	}
-
-	order := &deliveryv1alpha1.Order{}
-	if err := uc.get(ctx, client.ObjectKey{Namespace: prep.Namespace, Name: prep.Spec.OrderName}, order); err != nil && !apierrors.IsNotFound(err) {
-		return registry.Connection{}, err
-	}
-	scope, err := deps.userScope(ctx, uc, prep.Namespace, order.Spec.RegistryRefs)
-	if err != nil {
-		return registry.Connection{}, err
-	}
-	return scope.Connect(url)
+			return order.Spec.RegistryRefs, nil
+		})
 }
 
 // respondConnectError writes the response for a failed connection: 403 when

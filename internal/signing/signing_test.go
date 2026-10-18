@@ -63,6 +63,20 @@ func TestLoadKey(t *testing.T) {
 		require.NotEmpty(t, key.ID())
 	})
 
+	t.Run("loads a key GenerateKey generated", func(t *testing.T) {
+		generated, err := GenerateKey()
+		require.NoError(t, err)
+
+		key, err := LoadKey(map[string][]byte{
+			SecretPrivateKey: generated.PrivateKey,
+			SecretPassword:   generated.Password,
+			SecretPublicKey:  generated.PublicKey,
+		})
+		require.NoError(t, err)
+		require.Equal(t, string(generated.PublicKey), string(key.PublicKeyPEM()))
+		require.NotEmpty(t, generated.Password, "cosign reads the key with its password")
+	})
+
 	t.Run("loads a key with an empty password", func(t *testing.T) {
 		_, err := LoadKey(generateSecretData(t, ""))
 		require.NoError(t, err)
