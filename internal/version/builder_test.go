@@ -7,7 +7,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 func TestBuilderID(t *testing.T) {
@@ -44,12 +44,14 @@ func TestBuilderID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			builder := fake.NewClientBuilder()
-			if tt.pod != nil {
-				builder = builder.WithObjects(tt.pod)
+			getPod := func(_ context.Context, podNamespace, name string) (*corev1.Pod, error) {
+				if tt.pod == nil || tt.pod.Namespace != podNamespace || tt.pod.Name != name {
+					return nil, apierrors.NewNotFound(corev1.Resource("pods"), name)
+				}
+				return tt.pod, nil
 			}
 
-			got := BuilderID(context.Background(), func(key string) string { return tt.env[key] }, builder.Build())
+			got := BuilderID(context.Background(), func(key string) string { return tt.env[key] }, getPod)
 			require.Equal(t, tt.want, got)
 		})
 	}

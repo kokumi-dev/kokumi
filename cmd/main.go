@@ -27,10 +27,12 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	"github.com/spf13/afero"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
@@ -236,7 +238,14 @@ func main() {
 	artifactStore := artifact.NewStore(oci.NewClient(oci.Options{}), afero.NewOsFs(), "/tmp/kokumi-pull-cache")
 	artifactPipeline := artifact.NewPipeline(artifactStore)
 
-	builderID := version.BuilderID(context.Background(), os.Getenv, mgr.GetAPIReader())
+	getPod := func(ctx context.Context, podNamespace, podName string) (*corev1.Pod, error) {
+		pod := &corev1.Pod{}
+		if err := mgr.GetAPIReader().Get(ctx, client.ObjectKey{Namespace: podNamespace, Name: podName}, pod); err != nil {
+			return nil, err
+		}
+		return pod, nil
+	}
+	builderID := version.BuilderID(context.Background(), os.Getenv, getPod)
 	setupLog.Info("Resolved builder identity", "builder", builderID)
 
 	if err := (&controller.OrderReconciler{
