@@ -406,7 +406,7 @@ var _ = Describe("Serving Controller", func() {
 
 		It("waits for the signing key before deploying", func() {
 			r := newReconciler()
-			r.Signing = signing.NewProvider(k8sClient, testNamespace, "no-signing-key")
+			r.Signing = signing.NewProvider(SigningInputs(k8sClient, testNamespace, "no-signing-key"))
 
 			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
 			Expect(err).NotTo(HaveOccurred())

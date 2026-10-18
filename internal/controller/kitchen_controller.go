@@ -30,6 +30,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -222,6 +223,47 @@ func (r *KitchenReconciler) ensureDefaultRunner(mgr manager.Manager) manager.Run
 		}
 		return nil
 	}
+}
+
+// SigningInputs returns a signing.ReadFunc that reads the signing key Secret
+// from keyNamespace and the Kitchen from namespace with reader. Pass an
+// uncached reader, so that a Secret the Kitchen controller has just created
+// is seen.
+func SigningInputs(reader client.Reader, namespace, keyNamespace string) signing.ReadFunc {
+	return func(ctx context.Context) (signing.Inputs, error) {
+		secret := &corev1.Secret{}
+		if err := reader.Get(ctx, client.ObjectKey{Namespace: keyNamespace, Name: deliveryv1alpha1.SigningKeySecretName}, secret); err != nil {
+			if apierrors.IsNotFound(err) {
+				return signing.Inputs{}, fmt.Errorf("%w: Secret %s/%s not found", signing.ErrKeyNotReady, keyNamespace, deliveryv1alpha1.SigningKeySecretName)
+			}
+			return signing.Inputs{}, fmt.Errorf("reading signing key Secret: %w", err)
+		}
+
+		kitchen := &deliveryv1alpha1.Kitchen{}
+		if err := reader.Get(ctx, client.ObjectKey{Namespace: namespace, Name: deliveryv1alpha1.DefaultKitchenName}, kitchen); err != nil {
+			if !apierrors.IsNotFound(err) {
+				return signing.Inputs{}, fmt.Errorf("reading Kitchen: %w", err)
+			}
+			kitchen = nil
+		}
+
+		return signing.Inputs{KeyData: secret.Data, Kitchen: kitchen}, nil
+	}
+}
+
+// signingChanges returns a channel that receives an event whenever provider
+// makes a state with different trust current. Controllers watch it with
+// source.Channel to verify again.
+func signingChanges(provider *signing.Provider) <-chan event.GenericEvent {
+	ch := make(chan event.GenericEvent, 1)
+	provider.OnChange(func() {
+		select {
+		case ch <- event.GenericEvent{Object: &deliveryv1alpha1.Kitchen{}}:
+		default:
+			// A notification is already pending.
+		}
+	})
+	return ch
 }
 
 // ensureSigningKeySecret generates the signing key Secret in cosign's layout

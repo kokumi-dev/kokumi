@@ -417,7 +417,7 @@ func (r *ServingReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(r.Deployer.WatchObject(),
 			handler.EnqueueRequestsFromMapFunc(r.Deployer.EnqueueRequests),
 			builder.WithPredicates(r.Deployer.WatchPredicate())).
-		WatchesRawSource(source.Channel(r.Signing.Changes(), handler.EnqueueRequestsFromMapFunc(r.enqueueAllServings))).
+		WatchesRawSource(source.Channel(signingChanges(r.Signing), handler.EnqueueRequestsFromMapFunc(r.enqueueAllServings))).
 		Named("serving").
 		Complete(r)
 }
