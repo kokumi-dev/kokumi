@@ -17,9 +17,9 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	toolscache "k8s.io/client-go/tools/cache"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -71,7 +71,7 @@ func startK8sWatcher(
 	getenv func(string) string,
 ) (*apiDeps, error) {
 	logger := log.FromContext(ctx)
-	cfg, err := ctrl.GetConfig()
+	cfg, err := config.GetConfig()
 	if err != nil {
 		logger.Info("No Kubernetes config found, API endpoints will return 503", "error", err)
 		return nil, nil //nolint:nilnil
