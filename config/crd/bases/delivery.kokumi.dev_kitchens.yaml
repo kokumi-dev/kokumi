@@ -58,7 +58,7 @@ spec:
             properties:
               argoCDURL:
                 description: |-
-                  ArgoCDURL is the base URL of the Argo CD instance used to build deep
+                  argoCDURL is the base URL of the Argo CD instance used to build deep
                   links on the Servings page. Empty means no links.
                 type: string
                 x-kubernetes-validations:
@@ -67,19 +67,19 @@ spec:
                     'https'])
               auth:
                 description: |-
-                  Auth configures UI/API authentication. The built-in admin account
+                  auth configures UI/API authentication. The built-in admin account
                   (auth.adminUser) and an external OIDC provider (auth.oidc) can be enabled
                   independently; both may be active at once. When Auth is unset, no identity
                   provider is configured and the server runs without authentication.
                 properties:
                   adminUser:
-                    description: AdminUser configures the built-in admin account used
+                    description: adminUser configures the built-in admin account used
                       for UI login.
                     properties:
                       enabled:
                         default: true
                         description: |-
-                          Enabled toggles the admin account. When false, admin login is disabled and
+                          enabled toggles the admin account. When false, admin login is disabled and
                           the server falls back to no authentication unless another identity
                           provider (e.g. OIDC) is configured. Defaults to true.
                         type: boolean
@@ -87,7 +87,7 @@ spec:
                         default:
                           name: kokumi-server-auth
                         description: |-
-                          SecretRef points to the Secret holding the admin credentials. The Secret
+                          secretRef points to the Secret holding the admin credentials. The Secret
                           must reside in the same namespace as the Kitchen. The recognized key is
                           "password-hash" (bcrypt hash); "username" may optionally override the
                           configured username. Defaults to "kokumi-server-auth".
@@ -105,7 +105,7 @@ spec:
                         x-kubernetes-map-type: atomic
                       username:
                         default: admin
-                        description: Username is the login name for the admin account.
+                        description: username is the login name for the admin account.
                           Defaults to "admin".
                         maxLength: 253
                         pattern: ^[^/\s]+$
@@ -113,20 +113,20 @@ spec:
                     type: object
                   oidc:
                     description: |-
-                      OIDC configures an external OpenID Connect identity provider for UI
+                      oidc configures an external OpenID Connect identity provider for UI
                       login. When set, the login page offers an SSO button alongside (or
                       instead of) the admin account, depending on whether AdminUser is also
                       enabled.
                     properties:
                       clientID:
-                        description: ClientID is the OAuth2/OIDC client identifier
+                        description: clientID is the OAuth2/OIDC client identifier
                           registered with the issuer.
                         type: string
                       clientSecretRef:
                         default:
                           name: kokumi-server-oidc
                         description: |-
-                          ClientSecretRef points to the Secret holding the OAuth2 client secret in
+                          clientSecretRef points to the Secret holding the OAuth2 client secret in
                           the "client-secret" key. The Secret must reside in the same namespace as
                           the Kitchen.
                           Defaults to "kokumi-server-oidc".
@@ -145,7 +145,7 @@ spec:
                       emailClaim:
                         default: email
                         description: |-
-                          EmailClaim is the ID-token claim used as the user's email for
+                          emailClaim is the ID-token claim used as the user's email for
                           ServiceAccount identity mapping (kokumi.dev/identity-email). Supports
                           dotted paths for nested claims (e.g. "user.email"). Defaults to "email".
                         maxLength: 253
@@ -153,7 +153,7 @@ spec:
                       groupsClaim:
                         default: groups
                         description: |-
-                          GroupsClaim is the ID-token claim holding the user's group memberships
+                          groupsClaim is the ID-token claim holding the user's group memberships
                           (a list of strings) for ServiceAccount identity mapping
                           (kokumi.dev/identity-groups). Supports dotted paths for nested claims
                           (e.g. "realm_access.roles" for Keycloak). Defaults to "groups".
@@ -161,7 +161,7 @@ spec:
                         type: string
                       issuerURL:
                         description: |-
-                          IssuerURL is the base URL of the OIDC issuer (e.g.
+                          issuerURL is the base URL of the OIDC issuer (e.g.
                           "https://accounts.google.com"). The server discovers the authorization
                           and token endpoints from the issuer's well-known configuration.
                         type: string
@@ -174,16 +174,18 @@ spec:
                         - profile
                         - email
                         description: |-
-                          Scopes is the list of OAuth2 scopes requested at login.
+                          scopes is the list of OAuth2 scopes requested at login.
                           Defaults to ["openid", "profile", "email"].
                         items:
+                          maxLength: 256
                           type: string
                         maxItems: 16
                         type: array
+                        x-kubernetes-list-type: atomic
                       usernameClaim:
                         default: email
                         description: |-
-                          UsernameClaim is the ID-token claim used as the kokumi username.
+                          usernameClaim is the ID-token claim used as the kokumi username.
                           Defaults to "email".
                         maxLength: 253
                         type: string
@@ -195,7 +197,7 @@ spec:
                     default:
                       name: kokumi-server-tokens
                     description: |-
-                      TokenSigningKeySecretRef points to the Secret holding the HMAC signing
+                      tokenSigningKeySecretRef points to the Secret holding the HMAC signing
                       key (key "signing-key") used to sign all session tokens, for both admin
                       and OIDC sessions. The Secret must reside in the same namespace as the
                       Kitchen. When the referenced Secret does not exist, the controller

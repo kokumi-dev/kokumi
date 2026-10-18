@@ -9,3 +9,5 @@ plugins:
   - module: "sigs.k8s.io/logtools"
     import: "sigs.k8s.io/logtools/logcheck/gclplugin"
     version: latest
+  - module: "sigs.k8s.io/kube-api-linter"
+    version: "v0.0.0-20261012124120-79b557aa8c8d"

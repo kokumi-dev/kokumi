@@ -161,9 +161,13 @@ spec:
                                 paths lists the allowed JSONPath expressions within the target
                                 (e.g. ".spec.replicas").
                               items:
+                                maxLength: 1024
+                                minLength: 1
                                 type: string
+                              maxItems: 64
                               minItems: 1
                               type: array
+                              x-kubernetes-list-type: set
                             target:
                               description: |-
                                 target identifies the resource that Orders may patch. A target without
@@ -268,7 +272,9 @@ spec:
                   - set
                   - target
                   type: object
+                maxItems: 128
                 type: array
+                x-kubernetes-list-type: atomic
               registryRefs:
                 description: |-
                   registryRefs lists Registries in the Product's namespace. Kokumi

@@ -48,13 +48,13 @@ const (
 
 // KitchenSpec defines the desired state of Kitchen
 type KitchenSpec struct {
-	// ArgoCDURL is the base URL of the Argo CD instance used to build deep
+	// argoCDURL is the base URL of the Argo CD instance used to build deep
 	// links on the Servings page. Empty means no links.
 	// +kubebuilder:validation:XValidation:rule="self == '' || (isURL(self) && url(self).getScheme() in ['http', 'https'])",message="must be a valid http or https URL"
 	// +optional
 	ArgoCDURL string `json:"argoCDURL,omitempty"`
 
-	// Auth configures UI/API authentication. The built-in admin account
+	// auth configures UI/API authentication. The built-in admin account
 	// (auth.adminUser) and an external OIDC provider (auth.oidc) can be enabled
 	// independently; both may be active at once. When Auth is unset, no identity
 	// provider is configured and the server runs without authentication.
@@ -148,18 +148,18 @@ type TrustedKey struct {
 
 // KitchenAuth groups the authentication configuration for the Kitchen server.
 type KitchenAuth struct {
-	// AdminUser configures the built-in admin account used for UI login.
+	// adminUser configures the built-in admin account used for UI login.
 	// +optional
 	AdminUser *AdminUserConfig `json:"adminUser,omitempty"`
 
-	// OIDC configures an external OpenID Connect identity provider for UI
+	// oidc configures an external OpenID Connect identity provider for UI
 	// login. When set, the login page offers an SSO button alongside (or
 	// instead of) the admin account, depending on whether AdminUser is also
 	// enabled.
 	// +optional
 	OIDC *OIDCConfig `json:"oidc,omitempty"`
 
-	// TokenSigningKeySecretRef points to the Secret holding the HMAC signing
+	// tokenSigningKeySecretRef points to the Secret holding the HMAC signing
 	// key (key "signing-key") used to sign all session tokens, for both admin
 	// and OIDC sessions. The Secret must reside in the same namespace as the
 	// Kitchen. When the referenced Secret does not exist, the controller
@@ -175,21 +175,21 @@ type KitchenAuth struct {
 // Secret (see SecretRef). This keeps the admin login usable while allowing it
 // to be disabled (e.g. when an external OIDC provider takes over) or renamed.
 type AdminUserConfig struct {
-	// Enabled toggles the admin account. When false, admin login is disabled and
+	// enabled toggles the admin account. When false, admin login is disabled and
 	// the server falls back to no authentication unless another identity
 	// provider (e.g. OIDC) is configured. Defaults to true.
 	// +kubebuilder:default=true
 	// +optional
 	Enabled *bool `json:"enabled,omitempty"`
 
-	// Username is the login name for the admin account. Defaults to "admin".
+	// username is the login name for the admin account. Defaults to "admin".
 	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:validation:Pattern=`^[^/\s]+$`
 	// +kubebuilder:default="admin"
 	// +optional
 	Username string `json:"username,omitempty"`
 
-	// SecretRef points to the Secret holding the admin credentials. The Secret
+	// secretRef points to the Secret holding the admin credentials. The Secret
 	// must reside in the same namespace as the Kitchen. The recognized key is
 	// "password-hash" (bcrypt hash); "username" may optionally override the
 	// configured username. Defaults to "kokumi-server-auth".
@@ -208,18 +208,18 @@ func (c *AdminUserConfig) IsEnabled() bool {
 // OIDCConfig configures an external OpenID Connect identity provider for UI
 // login. The client secret lives in a referenced Secret.
 type OIDCConfig struct {
-	// IssuerURL is the base URL of the OIDC issuer (e.g.
+	// issuerURL is the base URL of the OIDC issuer (e.g.
 	// "https://accounts.google.com"). The server discovers the authorization
 	// and token endpoints from the issuer's well-known configuration.
-	// +kubebuilder:validation:Required
+	// +required
 	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() in ['http', 'https']",message="must be a valid http or https URL"
 	IssuerURL string `json:"issuerURL"`
 
-	// ClientID is the OAuth2/OIDC client identifier registered with the issuer.
-	// +kubebuilder:validation:Required
+	// clientID is the OAuth2/OIDC client identifier registered with the issuer.
+	// +required
 	ClientID string `json:"clientID"`
 
-	// ClientSecretRef points to the Secret holding the OAuth2 client secret in
+	// clientSecretRef points to the Secret holding the OAuth2 client secret in
 	// the "client-secret" key. The Secret must reside in the same namespace as
 	// the Kitchen.
 	// Defaults to "kokumi-server-oidc".
@@ -227,14 +227,14 @@ type OIDCConfig struct {
 	// +optional
 	ClientSecretRef *corev1.LocalObjectReference `json:"clientSecretRef,omitempty"`
 
-	// UsernameClaim is the ID-token claim used as the kokumi username.
+	// usernameClaim is the ID-token claim used as the kokumi username.
 	// Defaults to "email".
 	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:default=email
 	// +optional
 	UsernameClaim string `json:"usernameClaim,omitempty"`
 
-	// EmailClaim is the ID-token claim used as the user's email for
+	// emailClaim is the ID-token claim used as the user's email for
 	// ServiceAccount identity mapping (kokumi.dev/identity-email). Supports
 	// dotted paths for nested claims (e.g. "user.email"). Defaults to "email".
 	// +kubebuilder:validation:MaxLength=253
@@ -242,7 +242,7 @@ type OIDCConfig struct {
 	// +optional
 	EmailClaim string `json:"emailClaim,omitempty"`
 
-	// GroupsClaim is the ID-token claim holding the user's group memberships
+	// groupsClaim is the ID-token claim holding the user's group memberships
 	// (a list of strings) for ServiceAccount identity mapping
 	// (kokumi.dev/identity-groups). Supports dotted paths for nested claims
 	// (e.g. "realm_access.roles" for Keycloak). Defaults to "groups".
@@ -251,11 +251,13 @@ type OIDCConfig struct {
 	// +optional
 	GroupsClaim string `json:"groupsClaim,omitempty"`
 
-	// Scopes is the list of OAuth2 scopes requested at login.
+	// scopes is the list of OAuth2 scopes requested at login.
 	// Defaults to ["openid", "profile", "email"].
 	// +kubebuilder:validation:MaxItems=16
 	// +kubebuilder:default={openid,profile,email}
 	// +optional
+	// +kubebuilder:validation:items:MaxLength=256
+	// +listType=atomic
 	Scopes []string `json:"scopes,omitempty"`
 }
 

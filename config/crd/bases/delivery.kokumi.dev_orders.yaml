@@ -116,7 +116,9 @@ spec:
                   - set
                   - target
                   type: object
+                maxItems: 128
                 type: array
+                x-kubernetes-list-type: atomic
               patches:
                 description: |-
                   patches are merged over the Product's patches, per target, before
@@ -155,7 +157,9 @@ spec:
                   - set
                   - target
                   type: object
+                maxItems: 128
                 type: array
+                x-kubernetes-list-type: atomic
               productRef:
                 description: |-
                   productRef references the Product in the Order's namespace that this

@@ -13,6 +13,7 @@ linters:
     - gocyclo
     - govet
     - ineffassign
+    - kubeapilinter
     - lll
     - modernize
     - misspell
@@ -29,6 +30,35 @@ linters:
       logcheck:
         type: "module"
         description: Checks Go logging calls for Kubernetes logging conventions.
+      kubeapilinter:
+        type: module
+        description: Kube API Linter lints Kube like APIs based on API conventions and best practices.
+        settings:
+          linters:
+            # enable:
+            #   # TODO: add MinLength/MinItems by hand.
+            #   - minlength
+            #   # TODO: add MaxLength/MaxItems by hand.
+            #   - maxlength
+            #   - statussubresource
+            #   - statusoptional
+            disable:
+              # TODO: add Minimum=1 to observedGeneration so it stays a value; the approval counts and some structs need omitzero.
+              - optionalfields
+              # TODO: mostly adds omitempty to required fields, and a pointer only where a zero value is still valid.
+              - requiredfields
+              - nonpointerstructs
+          lintersConfig:
+            conditions:
+              # TODO: set to Warn and move Conditions to the top of each status struct.
+              isFirstField: Ignore
+              useProtobuf: Forbid
+              usePatchStrategy: Forbid
+            defaults:
+              preferredDefaultMarker: kubebuilder:default
+            optionalfields:
+              pointers:
+                preference: WhenRequired
     depguard:
       rules:
         forbid-sort-pkg:
@@ -52,6 +82,9 @@ linters:
           - dupl
           - lll
         path: internal/*
+      - linters:
+          - kubeapilinter
+        path-except: api/*
     paths:
       - third_party$
       - builtin$

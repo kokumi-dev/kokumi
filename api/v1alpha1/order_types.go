@@ -47,7 +47,7 @@ type OCISource struct {
 
 	// version is the semantic version or tag of the artifact
 	// The controller will resolve this to a digest
-	// +kubebuilder:validation:Required
+	// +required
 	Version string `json:"version"`
 
 	// verify requires the artifact the version resolves to to carry a
@@ -191,11 +191,11 @@ type OCIDestination struct {
 // PatchTarget identifies which resource to patch
 type PatchTarget struct {
 	// kind specifies the Kubernetes resource kind to patch
-	// +kubebuilder:validation:Required
+	// +required
 	Kind string `json:"kind"`
 
 	// name specifies the name of the resource to patch
-	// +kubebuilder:validation:Required
+	// +required
 	Name string `json:"name"`
 
 	// namespace specifies the namespace of the resource (optional, defaults to same namespace as Order)
@@ -206,13 +206,13 @@ type PatchTarget struct {
 // Patch defines a modification to apply to a resource
 type Patch struct {
 	// target identifies which resource to patch
-	// +kubebuilder:validation:Required
+	// +required
 	Target PatchTarget `json:"target"`
 
 	// set contains JSONPath expressions and their values to set
 	// Keys are JSONPath expressions (e.g., ".spec.replicas")
 	// Values are the desired values for those paths
-	// +kubebuilder:validation:Required
+	// +required
 	Set map[string]string `json:"set"`
 }
 
@@ -220,7 +220,7 @@ type Patch struct {
 type ProductRef struct {
 	// name is the name of the Product. The Product must exist in the same
 	// namespace as the Order.
-	// +kubebuilder:validation:Required
+	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
 	Name string `json:"name"`
@@ -232,7 +232,7 @@ type ProductRef struct {
 type OrderSpec struct {
 	// productRef references the Product in the Order's namespace that this
 	// Order is a variant of. It cannot be changed after creation.
-	// +kubebuilder:validation:Required
+	// +required
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="productRef is immutable"
 	ProductRef ProductRef `json:"productRef"`
 
@@ -262,12 +262,16 @@ type OrderSpec struct {
 	// patches are merged over the Product's patches, per target, before
 	// producing a Preparation. Subject to the Product's overrides.
 	// +optional
+	// +kubebuilder:validation:MaxItems=128
+	// +listType=atomic
 	Patches []Patch `json:"patches,omitempty"`
 
 	// edits defines UI-driven field modifications applied after patches.
 	// They are intended for interactive changes made through the web UI and
 	// are subject to the Product's patch overrides.
 	// +optional
+	// +kubebuilder:validation:MaxItems=128
+	// +listType=atomic
 	Edits []Patch `json:"edits,omitempty"`
 
 	// promotion configures how new Preparations become active Servings.
