@@ -209,7 +209,8 @@ func main() {
 
 	// The Kitchen controller reloads the signing state; every controller that
 	// signs or verifies reads it from here.
-	signingProvider := signing.NewProvider(mgr.GetAPIReader(), installNamespace, deliveryv1alpha1.SigningKeyNamespace)
+	signingProvider := signing.NewProvider(
+		controller.SigningInputs(mgr.GetAPIReader(), installNamespace, deliveryv1alpha1.SigningKeyNamespace))
 
 	if err := (&controller.PreparationReconciler{
 		Client:     mgr.GetClient(),

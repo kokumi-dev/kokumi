@@ -8,11 +8,6 @@ import (
 	"fmt"
 	"sync"
 
-	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/event"
-
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 )
 
@@ -41,15 +36,24 @@ func (s State) ID() string {
 	return fmt.Sprintf("%s/%t", s.Trust.ID(), s.RequireSourceVerification)
 }
 
+// Inputs are what the signing state is built from.
+type Inputs struct {
+	// KeyData is the data of the signing key Secret.
+	KeyData map[string][]byte
+	// Kitchen is the singleton Kitchen, or nil when it does not exist.
+	Kitchen *deliveryv1alpha1.Kitchen
+}
+
+// ReadFunc reads the current Inputs. It fails with an error wrapping
+// ErrKeyNotReady when the signing key Secret does not exist.
+type ReadFunc func(ctx context.Context) (Inputs, error)
+
 // Provider holds the Kitchen's signing state for the controllers that sign
 // or verify. The Kitchen controller reloads it whenever the Kitchen or its
 // key Secret changes; the first use loads it as well, so that controllers
 // need not wait for the Kitchen controller after a restart.
 type Provider struct {
-	reader client.Reader
-	// namespace holds the Kitchen; keyNamespace holds the signing key.
-	namespace    string
-	keyNamespace string
+	read ReadFunc
 
 	// loadMu serializes loads. Decrypting the key runs scrypt, which costs
 	// 32 MiB, so concurrent first uses must not each decrypt it.
@@ -59,18 +63,17 @@ type Provider struct {
 	key       *Key
 	keyDigest []byte
 
-	mu          sync.RWMutex
-	loaded      bool
-	state       State
-	err         error
-	subscribers []chan event.GenericEvent
+	mu        sync.RWMutex
+	loaded    bool
+	state     State
+	err       error
+	listeners []func()
 }
 
-// NewProvider returns a Provider that reads the Kitchen from namespace and its
-// key Secret from keyNamespace with reader. Pass an uncached reader, so that a
-// Secret the Kitchen controller has just created is seen.
-func NewProvider(reader client.Reader, namespace, keyNamespace string) *Provider {
-	return &Provider{reader: reader, namespace: namespace, keyNamespace: keyNamespace}
+// NewProvider returns a Provider that builds its state from what read
+// returns. read must see a Secret the Kitchen controller has just created.
+func NewProvider(read ReadFunc) *Provider {
+	return &Provider{read: read}
 }
 
 // NewStaticProvider returns a Provider with a fixed state, for tests.
@@ -104,7 +107,7 @@ func (p *Provider) State(ctx context.Context) (State, error) {
 }
 
 // Load reads the Kitchen and its key Secret, makes them the current state,
-// and notifies the subscribers when the trust changed. A missing Kitchen
+// and notifies the listeners when the trust changed. A missing Kitchen
 // trusts no keys besides the signing key.
 func (p *Provider) Load(ctx context.Context) (State, error) {
 	p.loadMu.Lock()
@@ -114,7 +117,7 @@ func (p *Provider) Load(ctx context.Context) (State, error) {
 
 // load is Load; callers hold loadMu.
 func (p *Provider) load(ctx context.Context) (State, error) {
-	state, err := p.read(ctx)
+	state, err := p.build(ctx)
 
 	p.mu.Lock()
 	prevOK, prevID := p.loaded && p.err == nil, p.state.ID()
@@ -127,43 +130,32 @@ func (p *Provider) load(ctx context.Context) (State, error) {
 		// A transient read error keeps the last known good state.
 	}
 	state, err = p.state, p.err
-	subscribers := p.subscribers
+	listeners := p.listeners
 	p.mu.Unlock()
 
 	if err == nil && (!prevOK || prevID != state.ID()) {
-		for _, ch := range subscribers {
-			select {
-			case ch <- event.GenericEvent{Object: &deliveryv1alpha1.Kitchen{}}:
-			default:
-				// A notification is already pending.
-			}
+		for _, notify := range listeners {
+			notify()
 		}
 	}
 
 	return state, err
 }
 
-func (p *Provider) read(ctx context.Context) (State, error) {
-	secret := &corev1.Secret{}
-	if err := p.reader.Get(ctx, client.ObjectKey{Namespace: p.keyNamespace, Name: deliveryv1alpha1.SigningKeySecretName}, secret); err != nil {
-		if apierrors.IsNotFound(err) {
-			return State{}, fmt.Errorf("%w: Secret %s/%s not found", ErrKeyNotReady, p.keyNamespace, deliveryv1alpha1.SigningKeySecretName)
-		}
-		return State{}, fmt.Errorf("reading signing key Secret: %w", err)
+// build reads the inputs and builds the state from them. Callers hold
+// loadMu.
+func (p *Provider) build(ctx context.Context) (State, error) {
+	in, err := p.read(ctx)
+	if err != nil {
+		return State{}, err
 	}
 
-	key, err := p.loadKey(secret.Data)
+	key, err := p.loadKey(in.KeyData)
 	if err != nil {
 		return State{}, fmt.Errorf("%w: %w", ErrKeyNotReady, err)
 	}
 
-	kitchen := &deliveryv1alpha1.Kitchen{}
-	if err := p.reader.Get(ctx, client.ObjectKey{Namespace: p.namespace, Name: deliveryv1alpha1.DefaultKitchenName}, kitchen); err != nil {
-		if !apierrors.IsNotFound(err) {
-			return State{}, fmt.Errorf("reading Kitchen: %w", err)
-		}
-		kitchen = nil
-	}
+	kitchen := in.Kitchen
 
 	signer, err := NewSigner(key)
 	if err != nil {
@@ -205,15 +197,11 @@ func (p *Provider) loadKey(data map[string][]byte) (*Key, error) {
 	return key, nil
 }
 
-// Changes returns a channel that receives an event whenever Load makes a
-// state with different trust current. Controllers watch it with
-// source.Channel to verify again.
-func (p *Provider) Changes() <-chan event.GenericEvent {
-	ch := make(chan event.GenericEvent, 1)
-
+// OnChange registers notify to be called whenever Load makes a state with
+// different trust current, so that controllers verify again. notify runs
+// during Load and must neither block nor call Load.
+func (p *Provider) OnChange(notify func()) {
 	p.mu.Lock()
-	p.subscribers = append(p.subscribers, ch)
+	p.listeners = append(p.listeners, notify)
 	p.mu.Unlock()
-
-	return ch
 }

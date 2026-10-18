@@ -101,7 +101,7 @@ func newKitchenReconciler() *KitchenReconciler {
 		Scheme:           k8sClient.Scheme(),
 		Namespace:        testNamespace,
 		SigningNamespace: testSigningNamespace,
-		Signing:          signing.NewProvider(k8sClient, testNamespace, testSigningNamespace),
+		Signing:          signing.NewProvider(SigningInputs(k8sClient, testNamespace, testSigningNamespace)),
 	}
 }
 
@@ -454,7 +454,7 @@ var _ = Describe("Kitchen signing key", func() {
 		Expect(k8sClient.Create(ctx, &corev1.Namespace{Name: keyNamespace})).To(Succeed())
 		reconciler := newKitchenReconciler()
 		reconciler.SigningNamespace = keyNamespace
-		reconciler.Signing = signing.NewProvider(k8sClient, testNamespace, keyNamespace)
+		reconciler.Signing = signing.NewProvider(SigningInputs(k8sClient, testNamespace, keyNamespace))
 		request := reconcile.Request{Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace}
 
 		_, err := reconciler.Reconcile(ctx, request)

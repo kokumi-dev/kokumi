@@ -597,7 +597,7 @@ func (r *ProductReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&deliveryv1alpha1.Registry{}, r.enqueueProductsForRegistry()).
 		Watches(&corev1.Secret{}, r.enqueueProductsForSecret()).
 		Watches(&deliveryv1alpha1.Order{}, enqueueProductOfOrder(), builder.WithPredicates(orderCreatedOrDeleted)).
-		WatchesRawSource(source.Channel(r.Signing.Changes(), handler.EnqueueRequestsFromMapFunc(r.enqueueAllProducts))).
+		WatchesRawSource(source.Channel(signingChanges(r.Signing), handler.EnqueueRequestsFromMapFunc(r.enqueueAllProducts))).
 		Named("product").
 		WithOptions(controller.Options{MaxConcurrentReconciles: productConcurrency}).
 		Complete(r)

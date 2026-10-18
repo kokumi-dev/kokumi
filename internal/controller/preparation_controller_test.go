@@ -281,7 +281,7 @@ var _ = Describe("Preparation Controller", func() {
 		It("waits for the signing key", func() {
 			prep := createTestPreparation(ctx, prepName, orderName, digest, nil)
 			seedArtifact(fakeOCI, prep.Spec.Artifact.OCIRef, digest)
-			signer = signing.NewProvider(k8sClient, testNamespace, "no-signing-key")
+			signer = signing.NewProvider(SigningInputs(k8sClient, testNamespace, "no-signing-key"))
 
 			Expect(reconcilePrep()).To(Succeed()) // adds the finalizer
 			result, err := reconcilePrepResult()

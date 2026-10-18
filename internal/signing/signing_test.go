@@ -4,16 +4,14 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/sigstore/cosign/v3/pkg/cosign"
 	"github.com/stretchr/testify/require"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 )
@@ -223,22 +221,23 @@ func TestTrustSet(t *testing.T) {
 	})
 }
 
+// fakeInputs returns its Inputs and err to a Provider and counts the reads.
+type fakeInputs struct {
+	Inputs
+	err   error
+	reads atomic.Int32
+}
+
+func (f *fakeInputs) read(context.Context) (Inputs, error) {
+	f.reads.Add(1)
+	return f.Inputs, f.err
+}
+
 func TestProvider(t *testing.T) {
-	const (
-		namespace    = "kokumi"
-		keyNamespace = deliveryv1alpha1.SigningKeyNamespace
-	)
-
-	scheme := runtime.NewScheme()
-	require.NoError(t, corev1.AddToScheme(scheme))
-	require.NoError(t, deliveryv1alpha1.AddToScheme(scheme))
-
 	data := generateSecretData(t, "secret")
 	rotated := testSigner(t)
 
-	secret := &corev1.Secret{Namespace: keyNamespace, Name: deliveryv1alpha1.SigningKeySecretName, Data: data}
 	kitchen := &deliveryv1alpha1.Kitchen{
-		Namespace: namespace, Name: deliveryv1alpha1.DefaultKitchenName,
 		Spec: deliveryv1alpha1.KitchenSpec{Signing: &deliveryv1alpha1.KitchenSigning{
 			TrustedKeys:               []deliveryv1alpha1.TrustedKey{{Name: "before-rotation", PublicKey: string(rotated.PublicKeyPEM())}},
 			RequireSourceVerification: true,
@@ -246,34 +245,45 @@ func TestProvider(t *testing.T) {
 	}
 
 	t.Run("is not ready without a key", func(t *testing.T) {
-		provider := NewProvider(fake.NewClientBuilder().WithScheme(scheme).Build(), namespace, keyNamespace)
+		in := &fakeInputs{err: fmt.Errorf("%w: Secret not found", ErrKeyNotReady)}
+		provider := NewProvider(in.read)
 
 		_, err := provider.State(context.Background())
 		require.ErrorIs(t, err, ErrKeyNotReady)
 	})
 
+	t.Run("is not ready with an invalid key", func(t *testing.T) {
+		in := &fakeInputs{KeyData: map[string][]byte{SecretPrivateKey: []byte("invalid")}}
+		provider := NewProvider(in.read)
+
+		_, err := provider.State(context.Background())
+		require.ErrorIs(t, err, ErrKeyNotReady)
+		require.ErrorIs(t, err, ErrInvalidKey)
+	})
+
 	t.Run("loads the key and the trusted keys", func(t *testing.T) {
-		reader := fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret, kitchen).Build()
-		provider := NewProvider(reader, namespace, keyNamespace)
-		changes := provider.Changes()
+		in := &fakeInputs{KeyData: data, Kitchen: kitchen}
+		provider := NewProvider(in.read)
+		changes := 0
+		provider.OnChange(func() { changes++ })
 
 		state, err := provider.State(context.Background())
 		require.NoError(t, err)
 		require.True(t, state.RequireSourceVerification)
 		require.Len(t, state.Trust.KeyIDs(), 2)
 		require.Equal(t, "current", state.Trust.KeyName(state.Signer.KeyID()))
-		require.Len(t, changes, 1)
-		<-changes
+		require.Equal(t, 1, changes)
 
 		key := provider.key
 		_, err = provider.Load(context.Background())
 		require.NoError(t, err)
-		require.Empty(t, changes, "an unchanged state notifies nobody")
+		require.Equal(t, 1, changes, "an unchanged state notifies nobody")
 		require.Same(t, key, provider.key, "an unchanged Secret is not decrypted again")
 	})
 
 	t.Run("loads once for concurrent first uses", func(t *testing.T) {
-		provider := NewProvider(fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret, kitchen).Build(), namespace, keyNamespace)
+		in := &fakeInputs{KeyData: data, Kitchen: kitchen}
+		provider := NewProvider(in.read)
 
 		var wg sync.WaitGroup
 		ids := make(chan string, 4)
@@ -294,25 +304,37 @@ func TestProvider(t *testing.T) {
 		}
 		require.Len(t, got, 4)
 		require.Equal(t, []string{got[0], got[0], got[0], got[0]}, got)
+		require.Equal(t, int32(1), in.reads.Load())
 	})
 
 	t.Run("picks up a rotated key", func(t *testing.T) {
-		reader := fake.NewClientBuilder().WithScheme(scheme).WithObjects(secret.DeepCopy()).Build()
-		provider := NewProvider(reader, namespace, keyNamespace)
-		changes := provider.Changes()
+		in := &fakeInputs{KeyData: data}
+		provider := NewProvider(in.read)
+		changes := 0
+		provider.OnChange(func() { changes++ })
 
 		before, err := provider.State(context.Background())
 		require.NoError(t, err)
-		<-changes
+		require.Equal(t, 1, changes)
 
-		rotated := &corev1.Secret{}
-		require.NoError(t, reader.Get(context.Background(), client.ObjectKeyFromObject(secret), rotated))
-		rotated.Data = generateSecretData(t, "other")
-		require.NoError(t, reader.Update(context.Background(), rotated))
+		in.KeyData = generateSecretData(t, "other")
 
 		after, err := provider.Load(context.Background())
 		require.NoError(t, err)
 		require.NotEqual(t, before.Signer.KeyID(), after.Signer.KeyID())
-		require.Len(t, changes, 1, "a rotated key notifies the subscribers")
+		require.Equal(t, 2, changes, "a rotated key notifies the listeners")
+	})
+
+	t.Run("keeps the last good state on a transient read error", func(t *testing.T) {
+		in := &fakeInputs{KeyData: data}
+		provider := NewProvider(in.read)
+
+		before, err := provider.State(context.Background())
+		require.NoError(t, err)
+
+		in.err = errors.New("connection refused")
+		after, err := provider.Load(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, before.ID(), after.ID())
 	})
 }
