@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v3"
-	ctrl "sigs.k8s.io/controller-runtime"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // PatchTarget identifies which resource to patch.
@@ -101,7 +101,7 @@ func applyPatchesToNode(ctx context.Context, docNode *yaml.Node, patches []Patch
 		return
 	}
 
-	log := ctrl.LoggerFrom(ctx)
+	log := logf.FromContext(ctx)
 
 	for _, patch := range patches {
 		if patch.Target.Kind != kind || patch.Target.Name != name {

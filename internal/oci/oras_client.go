@@ -24,7 +24,7 @@ import (
 	"github.com/oras-project/oras-go/v3/registry/remote/credentials"
 	"github.com/oras-project/oras-go/v3/registry/remote/errcode"
 	"github.com/oras-project/oras-go/v3/registry/remote/retry"
-	ctrl "sigs.k8s.io/controller-runtime"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // ORASClient implements Client using the ORAS library. It talks to the
@@ -209,7 +209,7 @@ func (c *ORASClient) pingAnonymous(ctx context.Context, host string) error {
 // The first return value is the layer media type (empty string for non-Helm artifacts).
 // The third return value is the manifest annotations map (may be nil/empty).
 func (c *ORASClient) Pull(ctx context.Context, ref Reference, targetDir string) (string, string, map[string]string, error) {
-	log := ctrl.LoggerFrom(ctx)
+	log := logf.FromContext(ctx)
 
 	repository := ref.RepositoryReference()
 	reference := ref.GetReference()
@@ -504,7 +504,7 @@ func (c *ORASClient) Push(ctx context.Context, ref Reference, sourceDir string, 
 		return "", errors.New("config media type is required when a config is set")
 	}
 
-	log := ctrl.LoggerFrom(ctx)
+	log := logf.FromContext(ctx)
 
 	repository := ref.RepositoryReference()
 	reference := ref.GetReference()
