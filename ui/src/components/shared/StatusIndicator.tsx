@@ -7,6 +7,9 @@ function toneFor(state: string): Tone {
     case 'ready':
     case 'deployed':
     case 'resolved':
+    case 'vendored':
+    case 'connected':
+    case 'listed':
     case 'approved':
       return 'success'
     case 'pending':

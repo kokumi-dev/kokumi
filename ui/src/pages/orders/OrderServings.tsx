@@ -30,7 +30,7 @@ export default function OrderServings() {
               width: '30%',
               cell: (s) => <NameCell to={paths.serving(s.namespace, s.name)} name={s.name} secondary={s.namespace} />,
             },
-            { header: 'Status', width: '110px', cell: (s) => <StatusIndicator state={s.state} /> },
+            { header: 'Status', width: '130px', cell: (s) => <StatusIndicator state={s.state} /> },
             {
               header: 'Deployed',
               truncate: true,

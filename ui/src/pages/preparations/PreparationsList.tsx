@@ -57,7 +57,7 @@ export default function PreparationsList() {
                   />
                 ),
               },
-              { header: 'Status', width: '110px', cell: (p) => <StatusIndicator state={p.state} /> },
+              { header: 'Status', width: '130px', cell: (p) => <StatusIndicator state={p.state} /> },
               {
                 header: 'Order',
                 truncate: true,

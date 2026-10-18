@@ -72,13 +72,12 @@ function IconSettings() {
   )
 }
 
-/** Stacked layers: an OCI registry stores artifacts as layers of content. */
 function IconRegistry() {
   return (
     <svg className={styles.navIcon} viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M9 2 16 5.5 9 9 2 5.5Z" />
-      <path d="M2 9l7 3.5L16 9" />
-      <path d="M2 12.5 9 16l7-3.5" />
+      <rect x="1.5" y="2.5" width="15" height="4" rx="1" />
+      <path d="M3 6.5v8A1.5 1.5 0 0 0 4.5 16h9a1.5 1.5 0 0 0 1.5-1.5v-8" />
+      <path d="M7.5 9.5h3" />
     </svg>
   )
 }
@@ -86,9 +85,8 @@ function IconRegistry() {
 function IconRepository() {
   return (
     <svg className={styles.navIcon} viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="5" width="14" height="10" rx="2" />
-      <path d="M5 5V3.5A1.5 1.5 0 0 1 6.5 2h5A1.5 1.5 0 0 1 13 3.5V5" />
-      <path d="M6 9h6M6 12h4" />
+      <path d="M9 1.5 16 5v8l-7 3.5L2 13V5l7-3.5Z" />
+      <path d="M2 5l7 3.5L16 5M9 8.5v8" />
     </svg>
   )
 }
@@ -96,8 +94,8 @@ function IconRepository() {
 function IconProduct() {
   return (
     <svg className={styles.navIcon} viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M9 1.5 16 5v8l-7 3.5L2 13V5l7-3.5Z" />
-      <path d="M2 5l7 3.5L16 5M9 8.5v8" />
+      <rect x="2" y="2" width="14" height="14" rx="2" />
+      <path d="M6 6h6M6 9h6M6 12h4" />
     </svg>
   )
 }
@@ -114,15 +112,20 @@ const sections: NavSection[] = [
     items: [
       { to: '/products',     label: 'Products',     icon: <IconProduct /> },
       { to: '/orders',       label: 'Orders',       icon: <IconOrder /> },
-      { to: '/repositories', label: 'Repositories', icon: <IconRepository /> },
       { to: '/preparations', label: 'Preparations', icon: <IconPreparation /> },
       { to: '/servings',     label: 'Servings',     icon: <IconServing /> },
     ],
   },
   {
+    label: 'Registry',
+    items: [
+      { to: '/registries',   label: 'Registries',   icon: <IconRegistry /> },
+      { to: '/repositories', label: 'Repositories', icon: <IconRepository /> },
+    ],
+  },
+  {
     label: 'System',
     items: [
-      { to: '/registries', label: 'Registries', icon: <IconRegistry /> },
       {
         to: '/settings',
         label: 'Settings',

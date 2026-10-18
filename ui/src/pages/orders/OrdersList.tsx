@@ -55,7 +55,7 @@ export default function OrdersList() {
                 width: '20%',
                 cell: (o) => <NameCell to={paths.order(o.namespace, o.name)} name={o.name} secondary={o.namespace} />,
               },
-              { header: 'Status', width: '110px', cell: (o) => <StatusIndicator state={o.state} /> },
+              { header: 'Status', width: '130px', cell: (o) => <StatusIndicator state={o.state} /> },
               {
                 header: 'Product',
                 truncate: true,
