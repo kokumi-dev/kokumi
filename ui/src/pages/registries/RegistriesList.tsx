@@ -53,7 +53,7 @@ export default function RegistriesList() {
                 width: '24%',
                 cell: (r) => <NameCell to={paths.registry(r.namespace, r.name)} name={r.name} secondary={r.namespace} />,
               },
-              { header: 'Status', width: '110px', cell: (r) => <StatusIndicator state={r.state} /> },
+              { header: 'Status', width: '130px', cell: (r) => <StatusIndicator state={r.state} /> },
               { header: 'URL', truncate: true, title: (r) => r.url, cell: (r) => stripOCIScheme(r.url) },
               {
                 header: 'Credentials',
@@ -62,7 +62,7 @@ export default function RegistriesList() {
                 title: (r) => r.secretRef,
                 cell: (r) => r.secretRef ?? <span className={layout.muted}>Anonymous</span>,
               },
-              { header: 'Scheme', width: '80px', cell: (r) => r.scheme },
+              { header: 'Scheme', width: '100px', cell: (r) => r.scheme },
               { header: 'Created', width: '110px', cell: (r) => <RelativeTime iso={r.createdAt} /> },
             ]}
           />

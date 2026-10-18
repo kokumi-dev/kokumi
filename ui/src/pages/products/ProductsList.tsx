@@ -91,7 +91,7 @@ export default function ProductsList() {
                 width: '22%',
                 cell: (p) => <NameCell to={paths.product(p.namespace, p.name)} name={p.name} secondary={p.namespace} />,
               },
-              { header: 'Status', width: '110px', cell: (p) => <StatusIndicator state={p.state} /> },
+              { header: 'Status', width: '130px', cell: (p) => <StatusIndicator state={p.state} /> },
               { header: 'Source', truncate: true, title: (p) => p.source.url || productSourceRef(p), cell: productSourceRef },
               {
                 header: 'Version',

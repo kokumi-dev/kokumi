@@ -54,7 +54,7 @@ export default function RepositoriesList() {
                 width: '24%',
                 cell: (r) => <NameCell to={paths.repository(r.namespace, r.name)} name={r.name} secondary={r.namespace} />,
               },
-              { header: 'Status', width: '110px', cell: (r) => <StatusIndicator state={r.state} /> },
+              { header: 'Status', width: '130px', cell: (r) => <StatusIndicator state={r.state} /> },
               { header: 'URL', truncate: true, title: (r) => r.url, cell: (r) => stripOCIScheme(r.url) },
               {
                 header: 'Registry',
