@@ -239,6 +239,10 @@ answer.
 | `preparations:promote` | `create` and `update` `servings` | Promote and Rollback |
 | `preparations:approve` | `approve` `preparations`, and the user signed in with OIDC | Approve and Request changes |
 
+`orders:delete` stops delivery without `delete` on `servings`: the garbage
+collector deletes the Order's Serving, and with it the Argo CD Application.
+The deployed workloads keep running until you remove them.
+
 One capability holds per namespace and is reported by
 `GET /api/v1/namespaces/{namespace}/capabilities`:
 

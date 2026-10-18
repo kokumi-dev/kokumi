@@ -29,14 +29,20 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/events"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
@@ -71,7 +77,8 @@ type OrderReconciler struct {
 	client.Client
 	// APIReader bypasses the cache. Before a render, it confirms that the
 	// cached Order is the latest and reads the Preparation whose images the
-	// render locks, which the cache may not hold yet.
+	// render locks, which the cache may not hold yet. It reads the Serving
+	// the Order adopts, which the Serving controller writes meanwhile.
 	APIReader client.Reader
 	Scheme    *runtime.Scheme
 	Pipeline  *artifact.Pipeline
@@ -95,7 +102,7 @@ type OrderReconciler struct {
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=preparations/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=products,verbs=get;list;watch
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=registries,verbs=get;list;watch
-// +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=servings,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=servings,verbs=get;list;watch;create;patch
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=kitchens,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
@@ -181,30 +188,98 @@ func (r *OrderReconciler) reconcileOrder(ctx context.Context, order *deliveryv1a
 	return r.reconcileRender(ctx, order, effective)
 }
 
-// ensureServing creates the Order's Serving under Automatic promotion so the
-// Serving controller can pick up new Preparations. It never changes an
-// existing Serving; the promotion mode is read from the Order directly.
+// ensureServing makes the Order the controller of its Serving, which carries
+// the Order's name, so that the Serving goes with the Order. Under Automatic
+// promotion it creates the Serving, so the Serving controller can pick up new
+// Preparations. Under Manual promotion the first promote creates it, and the
+// Order adopts it. The Serving spec is never changed; the promotion mode is
+// read from the Order directly.
 func (r *OrderReconciler) ensureServing(ctx context.Context, order *deliveryv1alpha1.Order) error {
-	if order.EffectivePromotionMode() != deliveryv1alpha1.PromotionModeAutomatic {
+	key := client.ObjectKey{Namespace: order.Namespace, Name: order.Name}
+	serving := &deliveryv1alpha1.Serving{}
+	err := r.Get(ctx, key, serving)
+	if apierrors.IsNotFound(err) {
+		if order.EffectivePromotionMode() != deliveryv1alpha1.PromotionModeAutomatic {
+			return nil
+		}
+		return r.createServing(ctx, order)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to get Serving: %w", err)
+	}
+	if metav1.IsControlledBy(serving, order) {
 		return nil
 	}
 
-	serving := &deliveryv1alpha1.Serving{}
-	err := r.Get(ctx, client.ObjectKey{Namespace: order.Namespace, Name: order.Name}, serving)
-	if err == nil || !apierrors.IsNotFound(err) {
-		return client.IgnoreNotFound(err)
+	// The Serving controller adds its finalizer to the Serving the first
+	// promote creates while the Order adopts it, so adoption reads the
+	// Serving from the API server rather than the cache, and again after a
+	// conflict.
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		serving := &deliveryv1alpha1.Serving{}
+		if err := r.APIReader.Get(ctx, key, serving); err != nil {
+			if apierrors.IsNotFound(err) {
+				return nil
+			}
+			return fmt.Errorf("failed to get Serving: %w", err)
+		}
+		return r.adoptServing(ctx, order, serving)
+	})
+}
+
+// adoptServing makes the Order the controller of serving, unless serving
+// belongs to another Order or still to a deleted one.
+func (r *OrderReconciler) adoptServing(ctx context.Context, order *deliveryv1alpha1.Order, serving *deliveryv1alpha1.Serving) error {
+	logger := log.FromContext(ctx)
+
+	if metav1.IsControlledBy(serving, order) {
+		return nil
+	}
+	if serving.Spec.OrderName != order.Name {
+		logger.Info("Serving serves another Order, not adopting it", "order", serving.Spec.OrderName)
+		return nil
+	}
+	if owner := metav1.GetControllerOfNoCopy(serving); owner != nil {
+		// The Serving of a deleted Order of the same name, which the
+		// garbage collector deletes or orphans; the Serving watch
+		// reconciles the Order again once it has.
+		logger.Info("Waiting for garbage collection of Serving", "owner", owner.UID)
+		return nil
 	}
 
-	serving = &deliveryv1alpha1.Serving{
+	// The optimistic lock keeps the merge patch, which replaces the owner
+	// references as a whole, from dropping one added meanwhile.
+	patch := client.MergeFromWithOptions(serving.DeepCopy(), client.MergeFromWithOptimisticLock{})
+	if err := controllerutil.SetControllerReference(order, serving, r.Scheme); err != nil {
+		return fmt.Errorf("failed to set owner reference: %w", err)
+	}
+	if err := r.Patch(ctx, serving, patch); err != nil {
+		return fmt.Errorf("failed to adopt Serving: %w", err)
+	}
+	logger.Info("Adopted Serving")
+	return nil
+}
+
+// createServing creates the Serving of an Automatic Order, controlled by the
+// Order.
+func (r *OrderReconciler) createServing(ctx context.Context, order *deliveryv1alpha1.Order) error {
+	serving := &deliveryv1alpha1.Serving{
 		Name:      order.Name,
 		Namespace: order.Namespace,
 		Labels:    map[string]string{deliveryv1alpha1.LabelOrder: order.Name},
 		Spec:      deliveryv1alpha1.ServingSpec{OrderName: order.Name},
 	}
-	if err := r.Create(ctx, serving); err != nil && !apierrors.IsAlreadyExists(err) {
+	if err := controllerutil.SetControllerReference(order, serving, r.Scheme); err != nil {
+		return fmt.Errorf("failed to set owner reference: %w", err)
+	}
+	if err := r.Create(ctx, serving); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			// The Serving watch reconciles the Order again to adopt it.
+			return nil
+		}
 		return fmt.Errorf("failed to create Serving: %w", err)
 	}
-	log.FromContext(ctx).Info("Created Serving", "name", serving.Name)
+	log.FromContext(ctx).Info("Created Serving")
 	return nil
 }
 
@@ -836,6 +911,31 @@ func (r *OrderReconciler) enqueueOrdersForRegistry() handler.EventHandler {
 	})
 }
 
+// enqueueOrderOfServing maps a Serving to its Order, whose name it carries.
+func enqueueOrderOfServing(_ context.Context, obj client.Object) []reconcile.Request {
+	return []reconcile.Request{{NamespacedName: client.ObjectKeyFromObject(obj)}}
+}
+
+// servingControllerChanged passes the Serving events after which its Order
+// may have to create or adopt it: creates, deletes, and updates that change
+// the controller reference. The frequent status writes of a Serving do not
+// pass.
+var servingControllerChanged = predicate.Funcs{
+	UpdateFunc: func(e event.UpdateEvent) bool {
+		return controllerUID(e.ObjectOld) != controllerUID(e.ObjectNew)
+	},
+	GenericFunc: func(event.GenericEvent) bool { return false },
+}
+
+// controllerUID returns the UID of the controller of obj, or "" when it has
+// none.
+func controllerUID(obj client.Object) types.UID {
+	if owner := metav1.GetControllerOfNoCopy(obj); owner != nil {
+		return owner.UID
+	}
+	return ""
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *OrderReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
@@ -843,6 +943,9 @@ func (r *OrderReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&deliveryv1alpha1.Preparation{}).
 		Watches(&deliveryv1alpha1.Product{}, r.enqueueOrdersForProduct()).
 		Watches(&deliveryv1alpha1.Registry{}, r.enqueueOrdersForRegistry()).
+		Watches(&deliveryv1alpha1.Serving{},
+			handler.EnqueueRequestsFromMapFunc(enqueueOrderOfServing),
+			builder.WithPredicates(servingControllerChanged)).
 		Named("order").
 		WithOptions(controller.Options{MaxConcurrentReconciles: orderConcurrency}).
 		Complete(r)

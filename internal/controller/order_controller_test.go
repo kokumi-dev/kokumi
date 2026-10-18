@@ -40,6 +40,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
@@ -494,6 +495,89 @@ var _ = Describe("Order Controller", func() {
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: orderName}, serving)).To(Succeed())
 			Expect(serving.Spec.OrderName).To(Equal(orderName))
 			Expect(serving.Spec.PreparationName).To(BeEmpty())
+
+			order := &deliveryv1alpha1.Order{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: orderName}, order)).To(Succeed())
+			Expect(metav1.IsControlledBy(serving, order)).To(BeTrue())
+		})
+	})
+
+	Context("When promoting creates the Serving of a Manual Order", func() {
+		const orderName = "order-promoted-manual"
+
+		ctx := context.Background()
+		key := types.NamespacedName{Namespace: testNamespace, Name: orderName}
+
+		var r *OrderReconciler
+
+		BeforeEach(func() {
+			createTestOrder(ctx, orderName, deliveryv1alpha1.PromotionModeManual)
+			DeferCleanup(func() {
+				_ = k8sClient.DeleteAllOf(ctx, &deliveryv1alpha1.Preparation{},
+					client.InNamespace(testNamespace), client.MatchingFields{index.FieldOrderName: orderName})
+				order := &deliveryv1alpha1.Order{}
+				if err := k8sClient.Get(ctx, key, order); err == nil {
+					order.SetFinalizers(nil)
+					_ = k8sClient.Update(ctx, order)
+					_ = k8sClient.Delete(ctx, order)
+				}
+				_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Serving{Name: orderName, Namespace: testNamespace})
+			})
+
+			r = newTestOrderReconciler(oci.NewFakeClient(afero.NewMemMapFs()))
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Get(ctx, key, &deliveryv1alpha1.Serving{})).To(Satisfy(apierrors.IsNotFound),
+				"a Manual Order has no Serving before its first promote")
+		})
+
+		// promote creates the Serving as the API server does on the first
+		// promote, with the given owner references.
+		promote := func(owners ...metav1.OwnerReference) {
+			order := &deliveryv1alpha1.Order{}
+			Expect(k8sClient.Get(ctx, key, order)).To(Succeed())
+			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Serving{
+				Name:            orderName,
+				Namespace:       testNamespace,
+				Labels:          map[string]string{deliveryv1alpha1.LabelOrder: orderName},
+				OwnerReferences: owners,
+				Spec: deliveryv1alpha1.ServingSpec{
+					OrderName:       orderName,
+					PreparationName: order.Status.LatestPreparationName,
+				},
+			})).To(Succeed())
+		}
+
+		It("adopts the Serving, so that it goes with the Order", func() {
+			promote()
+
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+
+			order := &deliveryv1alpha1.Order{}
+			Expect(k8sClient.Get(ctx, key, order)).To(Succeed())
+			serving := &deliveryv1alpha1.Serving{}
+			Expect(k8sClient.Get(ctx, key, serving)).To(Succeed())
+			Expect(metav1.IsControlledBy(serving, order)).To(BeTrue())
+			Expect(serving.Spec.PreparationName).To(Equal(order.Status.LatestPreparationName))
+		})
+
+		It("leaves the Serving of a deleted Order of the same name to the garbage collector", func() {
+			deleted := metav1.OwnerReference{
+				APIVersion: deliveryv1alpha1.SchemeGroupVersion.String(),
+				Kind:       "Order",
+				Name:       orderName,
+				UID:        "00000000-0000-0000-0000-000000000000",
+				Controller: new(true),
+			}
+			promote(deleted)
+
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+			Expect(err).NotTo(HaveOccurred())
+
+			serving := &deliveryv1alpha1.Serving{}
+			Expect(k8sClient.Get(ctx, key, serving)).To(Succeed())
+			Expect(serving.OwnerReferences).To(ConsistOf(deleted))
 		})
 	})
 
@@ -1393,4 +1477,42 @@ var _ = Describe("truncateNote", func() {
 		Expect(utf8.ValidString(note)).To(BeTrue())
 		Expect(note).To(HaveSuffix("…"))
 	})
+})
+
+var _ = Describe("servingControllerChanged", func() {
+	// servingOwnedBy returns a Serving whose controller has the given UID,
+	// or that has none for "".
+	servingOwnedBy := func(uid types.UID) *deliveryv1alpha1.Serving {
+		const orderName = "order-watched"
+		serving := &deliveryv1alpha1.Serving{Name: orderName, Namespace: testNamespace}
+		if uid != "" {
+			serving.OwnerReferences = []metav1.OwnerReference{{
+				APIVersion: deliveryv1alpha1.SchemeGroupVersion.String(),
+				Kind:       "Order",
+				Name:       orderName,
+				UID:        uid,
+				Controller: new(true),
+			}}
+		}
+		return serving
+	}
+
+	It("passes creates and deletes, and no generic events", func() {
+		Expect(servingControllerChanged.Create(event.CreateEvent{Object: servingOwnedBy("")})).To(BeTrue())
+		Expect(servingControllerChanged.Delete(event.DeleteEvent{Object: servingOwnedBy("a")})).To(BeTrue())
+		Expect(servingControllerChanged.Generic(event.GenericEvent{Object: servingOwnedBy("a")})).To(BeFalse())
+	})
+
+	DescribeTable("passes updates that change the controller",
+		func(oldUID, newUID types.UID, passes bool) {
+			old, updated := servingOwnedBy(oldUID), servingOwnedBy(newUID)
+			updated.Status.TargetPreparationName = "order-watched-0123456789ab"
+			Expect(servingControllerChanged.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: updated})).To(Equal(passes))
+		},
+		Entry("adopted", types.UID(""), types.UID("a"), true),
+		Entry("orphaned", types.UID("a"), types.UID(""), true),
+		Entry("controlled by another Order", types.UID("a"), types.UID("b"), true),
+		Entry("unchanged controller", types.UID("a"), types.UID("a"), false),
+		Entry("no controller", types.UID(""), types.UID(""), false),
+	)
 })
