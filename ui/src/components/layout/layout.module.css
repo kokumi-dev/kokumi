@@ -341,6 +341,16 @@
   background: var(--color-fill-subtle);
 }
 
+/* The row a table shows details of elsewhere, marked by a bar at its start. */
+.rowSelected td,
+.rowSelected:hover td {
+  background: var(--color-fill-strong);
+}
+
+.rowSelected td:first-child {
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+
 .primaryLink {
   font-weight: 600;
   color: var(--color-text-on-light);
@@ -408,6 +418,13 @@
 .emptyText {
   font-size: 0.875rem;
   font-weight: 500;
+}
+
+/* An explanation below the text of an empty state. */
+.emptyHint {
+  max-width: 560px;
+  font-size: 0.82rem;
+  line-height: 1.5;
 }
 
 /* ── Conditions ── */
@@ -483,6 +500,13 @@
   font-size: 0.82rem;
   color: var(--color-danger);
   font-weight: 500;
+}
+
+/* A short muted remark between sections, e.g. that a check is not set. */
+.pageNote {
+  margin: 0 0 16px;
+  font-size: 0.85rem;
+  color: var(--color-text-muted-light);
 }
 
 /* A page-wide notice below the header, e.g. a pending deletion. */

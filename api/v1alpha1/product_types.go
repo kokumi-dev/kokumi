@@ -390,11 +390,157 @@ type ProductStatus struct {
 	// +kubebuilder:validation:MaxItems=32
 	RegistryAccess []RegistryAccess `json:"registryAccess,omitempty"`
 
+	// vulnerabilities summarizes the latest scans of the images the
+	// Product vendors and its Orders' Preparations in use run. The signed
+	// reports are referrers of the vendored images; this summary is for
+	// display. Set while the Kitchen enables scanning and the Product's
+	// image policy is Vendor.
+	// +optional
+	Vulnerabilities *ProductVulnerabilities `json:"vulnerabilities,omitempty"`
+
 	// conditions represent the current state of the Product resource.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+// ProductVulnerabilities is the record of the vulnerability scans of a
+// Product's vendored images.
+type ProductVulnerabilities struct {
+	// scanner identifies the scanner and the database of the latest scan.
+	// +required
+	Scanner VulnerabilityScanner `json:"scanner"`
+
+	// images lists the latest scan of each vendored image digest in use.
+	// When more digests are in use, the most recently scanned are listed
+	// and the Scanned condition says how many were left out.
+	// +optional
+	// +listType=map
+	// +listMapKey=digest
+	// +kubebuilder:validation:MaxItems=512
+	Images []ImageScan `json:"images,omitempty"`
+}
+
+// VulnerabilityScanner identifies the scanner and the vulnerability database
+// a scan ran with.
+type VulnerabilityScanner struct {
+	// name is the scanner, "trivy".
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	Name string `json:"name"`
+
+	// version is the version of the scanner.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=64
+	Version string `json:"version"`
+
+	// database is the OCI reference of the vulnerability database, with
+	// its digest.
+	// +optional
+	// +kubebuilder:validation:MaxLength=2048
+	Database string `json:"database,omitempty"`
+
+	// databaseUpdatedTime is when the vulnerability database was built.
+	// +optional
+	DatabaseUpdatedTime *metav1.Time `json:"databaseUpdatedTime,omitempty"`
+}
+
+// SBOMOrigin says where the SBOM a scan was computed from came from.
+// +kubebuilder:validation:Enum=Generated;Image;Signed
+type SBOMOrigin string
+
+const (
+	// SBOMOriginGenerated is an SBOM Kokumi generated from the image and
+	// attached to it, signed.
+	SBOMOriginGenerated SBOMOrigin = "Generated"
+	// SBOMOriginImage is an SBOM attestation inside the image index, as
+	// BuildKit writes it. The image digest covers it.
+	SBOMOriginImage SBOMOrigin = "Image"
+	// SBOMOriginSigned is an SBOM attached to the image and signed by a key
+	// the Kitchen trusts.
+	SBOMOriginSigned SBOMOrigin = "Signed"
+)
+
+// ImageScan is the latest scan of one vendored image digest.
+type ImageScan struct {
+	// digest is the digest of the vendored image, an image index or
+	// manifest.
+	// +required
+	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
+	Digest string `json:"digest"`
+
+	// repository is the oci:// URL of the vendored image's repository.
+	// +required
+	// +kubebuilder:validation:MaxLength=2048
+	Repository string `json:"repository"`
+
+	// platform is the platform of the image index that was scanned, such
+	// as "linux/amd64". Empty for a single-platform image.
+	// +optional
+	// +kubebuilder:validation:MaxLength=64
+	Platform string `json:"platform,omitempty"`
+
+	// scannedTime is when the image was scanned.
+	// +required
+	ScannedTime metav1.Time `json:"scannedTime"`
+
+	// sbom is the SBOM the scan was computed from.
+	// +required
+	SBOM ImageSBOM `json:"sbom"`
+
+	// report is the digest of the signed vulnerability report, a referrer
+	// of the vendored image.
+	// +required
+	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
+	Report string `json:"report"`
+
+	// summary counts the findings of the report.
+	// +required
+	Summary VulnerabilitySummary `json:"summary"`
+}
+
+// ImageSBOM identifies the SBOM a scan was computed from.
+type ImageSBOM struct {
+	// digest is the digest of the referrer or attestation manifest holding
+	// the SBOM.
+	// +required
+	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
+	Digest string `json:"digest"`
+
+	// origin says where the SBOM came from.
+	// +required
+	Origin SBOMOrigin `json:"origin"`
+}
+
+// VulnerabilitySummary counts vulnerability findings by severity.
+type VulnerabilitySummary struct {
+	// critical counts the findings of severity Critical.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	Critical int32 `json:"critical"`
+	// high counts the findings of severity High.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	High int32 `json:"high"`
+	// medium counts the findings of severity Medium.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	Medium int32 `json:"medium"`
+	// low counts the findings of severity Low.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	Low int32 `json:"low"`
+	// unknown counts the findings without a severity.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	Unknown int32 `json:"unknown"`
+	// fixable counts the findings a newer version of the package fixes.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	Fixable int32 `json:"fixable"`
 }
 
 // +kubebuilder:object:root=true

@@ -1,5 +1,5 @@
 /** The tabs of the Settings page. */
-export const settingsTabs = ['general', 'authentication', 'signing'] as const
+export const settingsTabs = ['general', 'authentication', 'signing', 'scanning'] as const
 export type SettingsTab = typeof settingsTabs[number]
 
 // Central URL builders so links stay consistent across pages.
@@ -14,7 +14,7 @@ export const paths = {
     repository
       ? `/products/new?repository=${seg(`${repository.namespace}/${repository.name}`)}${version ? `&version=${seg(version)}` : ''}`
       : '/products/new',
-  product: (ns: string, name: string, tab?: 'orders' | 'preview' | 'artifact' | 'edit') =>
+  product: (ns: string, name: string, tab?: 'orders' | 'preview' | 'artifact' | 'security' | 'edit') =>
     `/products/${seg(ns)}/${seg(name)}${tab ? `/${tab}` : ''}`,
   orders: () => '/orders',
   /** Optionally preselects the Product the new Order is a variant of. */
@@ -23,7 +23,7 @@ export const paths = {
   order: (ns: string, name: string, tab?: 'preparations' | 'servings' | 'files' | 'edit') =>
     `/orders/${seg(ns)}/${seg(name)}${tab ? `/${tab}` : ''}`,
   preparations: () => '/preparations',
-  preparation: (ns: string, name: string, tab?: 'files' | 'changes' | 'images' | 'intent' | 'artifact' | 'approvals') =>
+  preparation: (ns: string, name: string, tab?: 'files' | 'changes' | 'images' | 'security' | 'intent' | 'artifact' | 'approvals') =>
     `/preparations/${seg(ns)}/${seg(name)}${tab ? `/${tab}` : ''}`,
   servings: () => '/servings',
   serving: (ns: string, name: string) => `/servings/${seg(ns)}/${seg(name)}`,

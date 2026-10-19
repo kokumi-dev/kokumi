@@ -52,6 +52,8 @@ func addRoutes(
 	mux.HandleFunc("POST /api/v1/products/preview", handlePreviewProduct(deps))
 	mux.HandleFunc("GET /api/v1/products/{namespace}/{name}", handleGetProduct(deps))
 	mux.HandleFunc("GET /api/v1/products/{namespace}/{name}/source/artifact", handleGetProductSourceArtifact(deps))
+	mux.HandleFunc("GET /api/v1/products/{namespace}/{name}/vulnerabilities", handleGetProductVulnerabilities(deps))
+	mux.HandleFunc("GET /api/v1/products/{namespace}/{name}/sbom", handleGetProductSBOM(deps))
 	mux.HandleFunc("PUT /api/v1/products/{namespace}/{name}", handleUpdateProduct(deps))
 	mux.HandleFunc("DELETE /api/v1/products/{namespace}/{name}", handleDeleteProduct(deps))
 
@@ -85,6 +87,7 @@ func addRoutes(
 	mux.HandleFunc("GET /api/v1/preparations/{namespace}/{name}/artifact", handleGetPreparationArtifact(deps))
 	mux.HandleFunc("GET /api/v1/preparations/{namespace}/{name}/intent", handleGetPreparationIntent(deps))
 	mux.HandleFunc("GET /api/v1/preparations/{namespace}/{name}/manifest", handleGetPreparationManifest(deps))
+	mux.HandleFunc("GET /api/v1/preparations/{namespace}/{name}/vulnerabilities", handleGetPreparationVulnerabilities(deps))
 
 	distFS, err := fs.Sub(staticFiles, "web/dist")
 	if err != nil {

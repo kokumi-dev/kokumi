@@ -55,6 +55,12 @@ type ServingStatus struct {
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	DeployedDigest string `json:"deployedDigest,omitempty"`
 
+	// deployedVulnerabilities sums the latest scans of the images of the
+	// deployed Preparation. It keeps changing after the deployment, as new
+	// vulnerabilities are published.
+	// +optional
+	DeployedVulnerabilities *VulnerabilitySummary `json:"deployedVulnerabilities,omitempty"`
+
 	// conditions represent the current state of the Serving resource.
 	// +listType=map
 	// +listMapKey=type

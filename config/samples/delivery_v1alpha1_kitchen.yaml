@@ -30,3 +30,10 @@ spec:
   #   mirrors:
   #   - prefix: docker.io
   #     location: oci://harbor.example.com/dockerhub
+  # Scan the images Products vendor for vulnerabilities, with the Trivy
+  # database "make push-artifacts" mirrors into the bundled registry, as an
+  # air-gapped installation would. "scanning: {}" reads the public copy on
+  # mirror.gcr.io instead.
+  scanning:
+    dbRepository: oci://kokumi-registry.kokumi.svc.cluster.local:5000/aquasec/trivy-db
+    javaDBRepository: oci://kokumi-registry.kokumi.svc.cluster.local:5000/aquasec/trivy-java-db

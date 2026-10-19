@@ -50,7 +50,7 @@ export default function PreparationLayout() {
   const blockedByApproval = !!prep.approval && !prep.approval.approved
   const canPromote = !prep.isActive && order?.mode === 'Manual'
 
-  const ctx: PreparationContext = { prep, order, parent, active, editsAllowed }
+  const ctx: PreparationContext = { prep, order, product, parent, active, editsAllowed }
 
   return (
     <div className={layout.page}>
@@ -88,6 +88,7 @@ export default function PreparationLayout() {
           { to: paths.preparation(prep.namespace, prep.name, 'files'), label: 'Files' },
           { to: paths.preparation(prep.namespace, prep.name, 'changes'), label: 'Changes' },
           { to: paths.preparation(prep.namespace, prep.name, 'images'), label: 'Images', count: prep.images?.length ?? 0 },
+          { to: paths.preparation(prep.namespace, prep.name, 'security'), label: 'Security' },
           { to: paths.preparation(prep.namespace, prep.name, 'intent'), label: 'Intent' },
           { to: paths.preparation(prep.namespace, prep.name, 'artifact'), label: 'Artifact' },
           ...(prep.approval

@@ -17,9 +17,10 @@ import (
 type Capability string
 
 const (
-	CapSettingsGeneralUpdate Capability = "settings.general:update"
-	CapSettingsAuthUpdate    Capability = "settings.auth:update"
-	CapSettingsSigningUpdate Capability = "settings.signing:update"
+	CapSettingsGeneralUpdate  Capability = "settings.general:update"
+	CapSettingsAuthUpdate     Capability = "settings.auth:update"
+	CapSettingsSigningUpdate  Capability = "settings.signing:update"
+	CapSettingsScanningUpdate Capability = "settings.scanning:update"
 
 	CapOrdersCreate Capability = "orders:create"
 	CapOrdersUpdate Capability = "orders:update"
@@ -86,12 +87,13 @@ func capabilityCatalog(installNamespace string) []capabilityRule {
 		name:      deliveryv1alpha1.DefaultKitchenName,
 	}}
 	return []capabilityRule{
-		// General, auth and signing settings share the Kitchen singleton, so
-		// RBAC cannot tell them apart yet. They are separate capabilities so
-		// the UI is unaffected once they can be split.
+		// General, auth, signing and scanning settings share the Kitchen
+		// singleton, so RBAC cannot tell them apart yet. They are separate
+		// capabilities so the UI is unaffected once they can be split.
 		{capability: CapSettingsGeneralUpdate, checks: kitchen},
 		{capability: CapSettingsAuthUpdate, checks: kitchen},
 		{capability: CapSettingsSigningUpdate, checks: kitchen},
+		{capability: CapSettingsScanningUpdate, checks: kitchen},
 
 		{capability: CapOrdersCreate, checks: allNamespaces("orders", "create")},
 		{capability: CapOrdersUpdate, checks: allNamespaces("orders", "update")},

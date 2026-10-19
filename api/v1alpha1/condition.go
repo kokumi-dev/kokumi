@@ -35,6 +35,14 @@ const (
 
 	// ConditionTypeCounted reports on Approvals whether the vote counts.
 	ConditionTypeCounted = "Counted"
+
+	// ConditionTypeScanned reports on Products whether the images they
+	// vendor were scanned for vulnerabilities recently enough.
+	ConditionTypeScanned = "Scanned"
+
+	// ConditionTypeChecksPassed reports on Servings whether the target
+	// Preparation passes the promotion checks it was rendered under.
+	ConditionTypeChecksPassed = "ChecksPassed"
 )
 
 // Ready condition reasons of the objects Kokumi reconciles.
@@ -164,4 +172,42 @@ const (
 	// ReasonVerificationRequired reports on a Product that the Kitchen
 	// requires its source to verify, and it does not.
 	ReasonVerificationRequired = "VerificationRequired"
+)
+
+// Condition reasons used by vulnerability scanning.
+const (
+	// ReasonScanned reports on a Product that every vendored image in use
+	// was scanned within the Kitchen's interval.
+	ReasonScanned = "Scanned"
+	// ReasonScanFailed reports on a Product that images could not be
+	// scanned, or the results not be recorded.
+	ReasonScanFailed = "ScanFailed"
+	// ReasonStale reports on a Product that the scan of an image in use is
+	// older than twice the Kitchen's interval.
+	ReasonStale = "Stale"
+	// ReasonDatabaseStale reports on a Product that its images were scanned
+	// with a vulnerability database older than the Kitchen allows.
+	ReasonDatabaseStale = "DatabaseStale"
+	// ReasonScannerUnavailable reports on a Product that the scanner could
+	// not be reached.
+	ReasonScannerUnavailable = "ScannerUnavailable"
+
+	// ReasonPassed reports on a Serving that the target Preparation passes
+	// its promotion checks.
+	ReasonPassed = "Passed"
+	// ReasonVulnerabilitiesFound reports on a Serving that an image of the
+	// target Preparation has findings at or above the allowed severity.
+	ReasonVulnerabilitiesFound = "VulnerabilitiesFound"
+	// ReasonScanMissing reports on a Serving that an image of the target
+	// Preparation has no verified scan: it is not vendored, or not scanned
+	// yet.
+	ReasonScanMissing = "ScanMissing"
+	// ReasonScanStale reports on a Serving that the scan of an image of the
+	// target Preparation is older than the check allows.
+	ReasonScanStale = "ScanStale"
+
+	// ReasonVulnerabilitiesIncreased reports in a Warning Event on a Serving
+	// that the deployed Preparation has more findings at or above the
+	// severity its check allows than before.
+	ReasonVulnerabilitiesIncreased = "VulnerabilitiesIncreased"
 )

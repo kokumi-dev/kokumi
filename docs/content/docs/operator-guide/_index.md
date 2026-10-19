@@ -11,4 +11,5 @@ Guides for operators who run and secure Kokumi in a cluster.
   {{< card link="authorization" title="Authorization" icon="key" subtitle="Kubernetes-native RBAC via identity-to-ServiceAccount mapping." >}}
   {{< card link="signing" title="Signing" icon="badge-check" subtitle="The signing key, verifying artifacts with cosign, and requiring signed sources." >}}
   {{< card link="images" title="Container Images" icon="cube-transparent" subtitle="Image mirrors, letting nodes pull vendored images, and registry sizing." >}}
+  {{< card link="scanning" title="Vulnerability Scanning" icon="shield-check" subtitle="The scanner component, the vulnerability database in air-gapped clusters, and network isolation." >}}
 {{< /cards >}}

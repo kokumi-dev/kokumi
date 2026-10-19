@@ -1,0 +1,55 @@
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--control-h-sm);
+  padding: 0 var(--control-pad-x-sm);
+  font-family: inherit;
+  font-size: var(--control-font-sm);
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 2em;
+  background: var(--color-bg-main);
+  color: var(--color-text-on-light);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.chip:hover {
+  border-color: var(--color-border-emphasis);
+}
+
+.chip:focus-visible {
+  outline: none;
+  box-shadow: var(--control-focus-ring);
+}
+
+.pressed,
+.pressed:hover {
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-tint);
+  color: var(--color-accent);
+}
+
+.count {
+  font-weight: 500;
+  color: var(--color-text-muted-light);
+}
+
+.pressed .count {
+  color: inherit;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.success { background: var(--color-success); }
+.warning { background: var(--color-warning); }
+.danger  { background: var(--color-danger); }
+.neutral { background: var(--color-status-neutral); }

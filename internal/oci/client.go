@@ -50,6 +50,9 @@ type Descriptor struct {
 	Digest       string
 	Size         int64
 	Annotations  map[string]string
+	// Platform is the platform of a manifest an image index lists, as
+	// "os/arch" or "os/arch/variant". It is empty elsewhere.
+	Platform string
 }
 
 // Manifest is the content of an image manifest or an image index.
@@ -118,6 +121,11 @@ type Client interface {
 
 	// FetchManifest returns the image manifest or image index at ref.
 	FetchManifest(ctx context.Context, ref Reference) (Manifest, error)
+
+	// FetchBlob returns the blob desc describes from ref's repository. It
+	// fails with ErrPayloadTooLarge when the blob exceeds maxSize, and when
+	// the content does not match desc's digest.
+	FetchBlob(ctx context.Context, ref Reference, desc Descriptor, maxSize int64) ([]byte, error)
 
 	// Ping checks that the registry at host answers its API base endpoint
 	// with the client's credential, scheme and TLS settings.

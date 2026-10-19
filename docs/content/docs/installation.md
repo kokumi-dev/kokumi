@@ -34,6 +34,8 @@ This installs:
 - The controller manager in the `kokumi` namespace, which creates the
   `Kitchen` settings and the `Registry` of the bundled registry on start
 - The API server and web UI in the `kokumi` namespace
+- The `kokumi-scanner` component in the `kokumi` namespace, which idles until
+  the Kitchen enables [vulnerability scanning](../operator-guide/scanning/)
 - RBAC roles and bindings
 
 > **Model:** a `Product` defines an application completely, and each `Order`

@@ -36,10 +36,36 @@ const (
 func serveAsAdmin(t *testing.T, req *http.Request, objs ...client.Object) *httptest.ResponseRecorder {
 	t.Helper()
 	fs := afero.NewMemMapFs()
-	registryClient := oci.NewFakeClient(fs)
+	return serveAsAdminWith(t, req, testBackend{fs: fs, registry: oci.NewFakeClient(fs)}, objs...)
+}
+
+// testBackend is what the handlers under test read besides the cluster.
+type testBackend struct {
+	fs afero.Fs
+	// registry serves every Registry.
+	registry oci.Client
+	// kitchen is the Kitchen, nil for none.
+	kitchen *deliveryv1alpha1.Kitchen
+	// cluster is what the admin reads and writes, built from the objects
+	// passed along when nil.
+	cluster client.Client
+}
+
+// serveAsAdminWith serves req as the admin, with objs in the cluster and
+// backend behind it.
+func serveAsAdminWith(t *testing.T, req *http.Request, backend testBackend, objs ...client.Object) *httptest.ResponseRecorder {
+	t.Helper()
+	fs, registryClient := backend.fs, backend.registry
+	if fs == nil {
+		fs = afero.NewMemMapFs()
+	}
 	store := artifact.NewStore(registryClient, fs, "")
 	imp := newImpersonator(nil, nil, capsInstallNamespace)
-	imp.clients[adminServiceAccountName] = fake.NewClientBuilder().WithScheme(unionScheme(t)).WithObjects(objs...).Build()
+	cluster := backend.cluster
+	if cluster == nil {
+		cluster = fake.NewClientBuilder().WithScheme(unionScheme(t)).WithObjects(objs...).Build()
+	}
+	imp.clients[adminServiceAccountName] = cluster
 	deps := &apiDeps{
 		registries:   registry.NewClients(artifact.DefaultRegistryHost).WithClientFactory(func(oci.Options) oci.Client { return registryClient }),
 		store:        store,
@@ -49,7 +75,12 @@ func serveAsAdmin(t *testing.T, req *http.Request, objs ...client.Object) *httpt
 		saList: func() []*corev1.ServiceAccount {
 			return []*corev1.ServiceAccount{{Name: adminServiceAccountName}}
 		},
-		kitchen: func() (*deliveryv1alpha1.Kitchen, error) { return nil, errors.New("no Kitchen") },
+		kitchen: func() (*deliveryv1alpha1.Kitchen, error) {
+			if backend.kitchen == nil {
+				return nil, errors.New("no Kitchen")
+			}
+			return backend.kitchen, nil
+		},
 	}
 
 	mux := http.NewServeMux()

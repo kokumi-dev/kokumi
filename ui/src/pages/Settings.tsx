@@ -3,6 +3,7 @@ import { Navigate, useParams } from 'react-router'
 import styles from './pages.module.css'
 import layout from '../components/layout/layout.module.css'
 import Toggle from '../components/shared/Toggle'
+import RegistryRefsEditor from '../components/shared/RegistryRefsEditor'
 import { Button, TabNav } from '../components/ui'
 import PageHeader from '../components/layout/PageHeader'
 import { paths } from '../routes/paths'
@@ -14,10 +15,24 @@ import {
   saveSettings,
   saveAuthSettings,
   saveImagesSettings,
+  saveScanningSettings,
   saveSigningSettings,
 } from '../api/client'
-import type { AuthSettings, ImageMirror, ImagesSettings, Settings, SigningInfo, SigningSettings, TrustedKey } from '../api/client'
+import type {
+  AuthSettings,
+  ImageMirror,
+  ImagesSettings,
+  ScanningDefaults,
+  ScanningSettings,
+  Settings,
+  SigningInfo,
+  SigningSettings,
+  TrustedKey,
+} from '../api/client'
+import type { RegistryRef } from '../api/types'
 import { settingsTabs, type SettingsTab } from '../routes/paths'
+import { saveBlob } from '../utils/download'
+import { stripOCIScheme } from '../utils/format'
 
 const tabs = settingsTabs
 type Tab = SettingsTab
@@ -27,12 +42,14 @@ const tabCapability: Record<Tab, Capability> = {
   general: 'settings.general:update',
   authentication: 'settings.auth:update',
   signing: 'settings.signing:update',
+  scanning: 'settings.scanning:update',
 }
 
 const tabLabel: Record<Tab, string> = {
   general: 'General',
   authentication: 'Authentication',
   signing: 'Signing',
+  scanning: 'Scanning',
 }
 
 const maxClaimLength = 253
@@ -41,10 +58,11 @@ const maxClaimLength = 253
 const maxImageMirrors = 32
 
 /**
- * Settings shows the operator configuration of the Kitchen singleton in three
- * tabs: General (Argo CD URL, image mirrors), Authentication (admin user, OIDC) and Signing
- * (public key, trusted keys, source verification). Each tab is only shown
- * with its capability; the server still enforces RBAC on every write.
+ * Settings shows the operator configuration of the Kitchen singleton in four
+ * tabs: General (Argo CD URL, image mirrors), Authentication (admin user, OIDC), Signing
+ * (public key, trusted keys, source verification) and Scanning (vulnerability
+ * scanning of vendored images). Each tab is only shown with its capability;
+ * the server still enforces RBAC on every write.
  */
 export default function Settings() {
   const params = useParams()
@@ -111,6 +129,14 @@ export default function Settings() {
         </div>
       ) : tab === 'signing' ? (
         <SigningTab key={`s-${settingsRev}`} signing={settings?.signing} onSaved={handleSaved} />
+      ) : tab === 'scanning' ? (
+        <ScanningTab
+          key={`sc-${settingsRev}`}
+          namespace={settings?.namespace ?? ''}
+          scanning={settings?.scanning}
+          defaults={settings?.scanningDefaults}
+          onSaved={handleSaved}
+        />
       ) : (
         <AuthenticationTab key={`a-${settingsRev}`} auth={settings?.auth} onSaved={handleSaved} />
       )}
@@ -662,6 +688,249 @@ function AuthenticationTab({ auth, onSaved }: { auth?: AuthSettings; onSaved: (s
   )
 }
 
+// ── Scanning tab ─────────────────────────────────────────────────────────────
+
+const hourSeconds = 3600
+const daySeconds = 24 * hourSeconds
+/** Mirror the bounds of the Kitchen's spec.scanning. */
+const minScanIntervalSeconds = hourSeconds
+const maxScanIntervalSeconds = 720 * hourSeconds
+const minDatabaseAgeSeconds = hourSeconds
+const maxScanningRegistries = 16
+
+/** Seconds in units of unit, as an input shows them; empty when unset. */
+function secondsText(seconds: number | undefined, unit: number): string {
+  return seconds ? String(Math.round((seconds / unit) * 100) / 100) : ''
+}
+
+/** The seconds an input in units of unit holds: undefined when empty, NaN when it is not a positive number. */
+function textSeconds(text: string, unit: number): number | undefined {
+  if (!text.trim()) return undefined
+  const n = Number(text)
+  return Number.isFinite(n) && n > 0 ? Math.round(n * unit) : NaN
+}
+
+interface ScanningTabProps {
+  /** The install namespace, whose Registries scanning may use. */
+  namespace: string
+  scanning?: ScanningSettings
+  /** What empty fields default to; shown as placeholders. */
+  defaults?: ScanningDefaults
+  onSaved: (s: Settings) => void
+}
+
+/**
+ * ScanningTab turns vulnerability scanning of vendored images on and off,
+ * and sets how often images are scanned again and where the vulnerability
+ * databases come from. Turning it off keeps what was typed until it is saved.
+ */
+function ScanningTab({ namespace, scanning, defaults, onSaved }: ScanningTabProps) {
+  const [enabled, setEnabled] = useState(scanning?.enabled ?? false)
+  const [intervalText, setIntervalText] = useState(secondsText(scanning?.intervalSeconds, hourSeconds))
+  const [databaseAgeText, setDatabaseAgeText] = useState(secondsText(scanning?.maxDatabaseAgeSeconds, daySeconds))
+  const [dbRepository, setDBRepository] = useState(scanning?.dbRepository ?? '')
+  const [javaDBRepository, setJavaDBRepository] = useState(scanning?.javaDBRepository ?? '')
+  const [registryRefs, setRegistryRefs] = useState<RegistryRef[]>(scanning?.registryRefs ?? [])
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const inputsDisabled = !enabled || submitting
+
+  useEffect(() => () => {
+    if (savedTimer.current) clearTimeout(savedTimer.current)
+  }, [])
+
+  /** Wraps a setter so that a change clears the saved feedback. */
+  function changed<T>(set: (value: T) => void) {
+    return (value: T) => {
+      set(value)
+      setSaved(false)
+    }
+  }
+
+  function validate(): string | null {
+    const interval = textSeconds(intervalText, hourSeconds)
+    if (interval !== undefined && !(interval >= minScanIntervalSeconds && interval <= maxScanIntervalSeconds)) {
+      return 'Scan again every 1 to 720 hours'
+    }
+    const age = textSeconds(databaseAgeText, daySeconds)
+    if (age !== undefined && !(age >= minDatabaseAgeSeconds)) return 'The maximum database age must be at least 1 hour'
+    for (const [label, url] of [['The vulnerability database', dbRepository], ['The Java database', javaDBRepository]]) {
+      if (url.trim() && !/^oci:\/\/.+/.test(url.trim())) return `${label} must be an oci:// URL`
+    }
+    if (registryRefs.length > maxScanningRegistries) return `At most ${maxScanningRegistries} Registries`
+    return null
+  }
+
+  function handleSave() {
+    // Turned off, the server removes spec.scanning and ignores the fields.
+    const problem = enabled ? validate() : null
+    if (problem) {
+      setError(problem)
+      return
+    }
+    setError(null)
+    setSubmitting(true)
+    const next: ScanningSettings = enabled
+      ? {
+          enabled: true,
+          intervalSeconds: textSeconds(intervalText, hourSeconds),
+          maxDatabaseAgeSeconds: textSeconds(databaseAgeText, daySeconds),
+          dbRepository: dbRepository.trim() || undefined,
+          javaDBRepository: javaDBRepository.trim() || undefined,
+          registryRefs,
+        }
+      : { enabled: false }
+    saveScanningSettings(next)
+      .then((s) => {
+        setSaved(true)
+        savedTimer.current = setTimeout(() => setSaved(false), 2000)
+        onSaved(s)
+      })
+      .catch((e) => setError((e as Error).message))
+      .finally(() => setSubmitting(false))
+  }
+
+  const mirrorCommands = defaults
+    ? [
+        `oras cp ${stripOCIScheme(defaults.dbRepository)}:2 <registry>/aquasec/trivy-db:2`,
+        `oras cp ${stripOCIScheme(defaults.javaDBRepository)}:1 <registry>/aquasec/trivy-java-db:1`,
+      ].join('\n')
+    : ''
+
+  return (
+    <div className={styles.groupStack}>
+      <div className={styles.section}>
+        <div className={styles.sectionHeader}>
+          <span className={styles.sectionTitle}>Vulnerability Scanning</span>
+        </div>
+        <div className={styles.sectionBody}>
+          <div className={styles.settingsSection}>
+            <div className={styles.fieldRow}>
+              <label className={styles.fieldLabel} htmlFor="scanning-enabled">Enabled</label>
+              <Toggle
+                id="scanning-enabled"
+                checked={enabled}
+                disabled={submitting}
+                label="Scan vendored images for vulnerabilities"
+                onChange={changed(setEnabled)}
+              />
+            </div>
+            <p className={styles.fieldHint}>
+              Kokumi scans only the images of Products with the Vendor image policy, once per digest, and attaches
+              the signed SBOM and vulnerability report to the vendored image. See Vulnerability Scanning in the
+              operator guide.
+            </p>
+
+            <div className={styles.fieldRow}>
+              <label className={styles.fieldLabel} htmlFor="scanning-interval">Scan again every (hours)</label>
+              <input
+                id="scanning-interval"
+                className={styles.fieldInput}
+                type="number"
+                min={1}
+                max={720}
+                step="any"
+                placeholder={secondsText(defaults?.intervalSeconds, hourSeconds)}
+                value={intervalText}
+                disabled={inputsDisabled}
+                onChange={(e) => changed(setIntervalText)(e.target.value)}
+              />
+            </div>
+            <p className={styles.fieldHint}>
+              Images that Preparations in use run are scanned again at this interval, so vulnerabilities published
+              later show up on what is deployed.
+            </p>
+
+            <div className={styles.fieldRow}>
+              <label className={styles.fieldLabel} htmlFor="scanning-database-age">Maximum database age (days)</label>
+              <input
+                id="scanning-database-age"
+                className={styles.fieldInput}
+                type="number"
+                min={0}
+                step="any"
+                placeholder={secondsText(defaults?.maxDatabaseAgeSeconds, daySeconds)}
+                value={databaseAgeText}
+                disabled={inputsDisabled}
+                onChange={(e) => changed(setDatabaseAgeText)(e.target.value)}
+              />
+            </div>
+            <p className={styles.fieldHint}>
+              Scans with an older database still produce reports, but their Products report DatabaseStale, so a
+              forgotten update is noticed.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className={styles.section}>
+        <div className={styles.sectionHeader}>
+          <span className={styles.sectionTitle}>Vulnerability Databases</span>
+        </div>
+        <div className={styles.sectionBody}>
+          <div className={styles.settingsSection}>
+            <div className={styles.fieldRow}>
+              <label className={styles.fieldLabel} htmlFor="scanning-db">Vulnerability database</label>
+              <input
+                id="scanning-db"
+                className={styles.fieldInput}
+                type="text"
+                placeholder={defaults?.dbRepository}
+                value={dbRepository}
+                disabled={inputsDisabled}
+                onChange={(e) => changed(setDBRepository)(e.target.value)}
+              />
+            </div>
+            <div className={styles.fieldRow}>
+              <label className={styles.fieldLabel} htmlFor="scanning-java-db">Java database</label>
+              <input
+                id="scanning-java-db"
+                className={styles.fieldInput}
+                type="text"
+                placeholder={defaults?.javaDBRepository}
+                value={javaDBRepository}
+                disabled={inputsDisabled}
+                onChange={(e) => changed(setJavaDBRepository)(e.target.value)}
+              />
+            </div>
+            <p className={styles.fieldHint}>
+              The Java database is downloaded only when an image holds Java archives, and such images cannot be
+              scanned without it. A URL with a digest pins a database, so each update is a reviewed change.
+            </p>
+            <p className={styles.fieldHint}>
+              In air-gapped clusters, mirror both databases and point the fields at the mirror, for example:
+            </p>
+            {mirrorCommands && <pre className={styles.codeBlock}>{mirrorCommands}</pre>}
+
+            <div className={styles.fieldRow} style={{ alignItems: 'flex-start' }}>
+              <span className={styles.fieldLabel}>Registries</span>
+              <RegistryRefsEditor
+                namespace={namespace}
+                value={registryRefs}
+                onChange={changed(setRegistryRefs)}
+                owns="the vulnerability databases"
+                unlabeled
+                disabled={inputsDisabled}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {error && <p className={styles.fieldError}>{error}</p>}
+
+      <div className={styles.fieldRow}>
+        <Button variant="primary" onClick={handleSave} disabled={submitting}>
+          Save
+        </Button>
+        {saved && <span className={styles.savedMsg}>Saved ✓</span>}
+      </div>
+    </div>
+  )
+}
+
 // ── Signing tab ──────────────────────────────────────────────────────────────
 
 /** Matches the name pattern of a trusted key. */
@@ -747,12 +1016,7 @@ function SigningTab({ signing, onSaved }: { signing?: SigningSettings; onSaved: 
   }
 
   function downloadPublicKey(publicKey: string) {
-    const url = URL.createObjectURL(new Blob([publicKey], { type: 'application/x-pem-file' }))
-    const link = document.createElement('a')
-    link.href = url
-    link.download = 'kokumi.pub'
-    link.click()
-    URL.revokeObjectURL(url)
+    saveBlob(new Blob([publicKey], { type: 'application/x-pem-file' }), 'kokumi.pub')
   }
 
   const current = info?.current

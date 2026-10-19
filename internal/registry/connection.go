@@ -38,6 +38,15 @@ type Connection struct {
 	// TLSConfig holds the Registry's CA and client certificate, nil for the
 	// system defaults.
 	TLSConfig *tls.Config
+	// CertificateAuthority is the PEM the Registry's certSecretRef holds in
+	// ca.crt, trusted in addition to the system's certificate authorities.
+	// TLSConfig is built from it; it is kept to hand the connection on, as
+	// to the scanner.
+	CertificateAuthority []byte
+	// ClientCertificate and ClientKey are the PEM client certificate and key
+	// the Registry's certSecretRef holds in tls.crt and tls.key.
+	ClientCertificate []byte
+	ClientKey         []byte
 	// Client accesses the location.
 	Client oci.Client
 

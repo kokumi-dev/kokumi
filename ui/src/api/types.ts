@@ -116,6 +116,7 @@ export interface Order {
   edits?: Patch[]
   mode: PromotionMode
   approvals?: ApprovalPolicy
+  checks?: PromotionChecks
   state: string
   latestRevision?: string
   activePreparation?: string
@@ -128,6 +129,32 @@ export type PromotionMode = 'Automatic' | 'Manual'
 export interface ApprovalPolicy {
   requiredApprovals: number
   allowedGroups: string[]
+}
+
+/** The checks a Preparation must pass before it is served; copied into each Preparation. */
+export interface PromotionChecks {
+  vulnerabilities?: VulnerabilityCheck
+}
+
+/** The severity of a vulnerability a check can block on. */
+export type Severity = 'Critical' | 'High' | 'Medium' | 'Low'
+
+export const severities: readonly Severity[] = ['Critical', 'High', 'Medium', 'Low']
+
+/** A finding's severity; Unknown never blocks. */
+export type FindingSeverity = Severity | 'Unknown'
+
+/**
+ * Holds new deployments of a Preparation whose images have findings at or
+ * above maxSeverity. Only vendored images are scanned.
+ */
+export interface VulnerabilityCheck {
+  /** The lowest severity that blocks: High blocks High and Critical. */
+  maxSeverity: Severity
+  /** Findings no version fixes yet do not block. */
+  ignoreUnfixed?: boolean
+  /** How old the scan of every image may be; defaults to twice the Kitchen's scanning interval. */
+  maxAgeSeconds?: number
 }
 
 export type ApprovalDecision = 'Approve' | 'Reject'
@@ -212,6 +239,10 @@ export interface Preparation {
   approval?: PreparationApproval
   /** The container images the manifests reference, as resolved when rendered. */
   images?: PreparationImage[]
+  /** The promotion checks the Preparation was rendered under; immutable. */
+  checks?: PromotionChecks
+  /** The source version it was rendered from, e.g. the chart version. */
+  version?: string
 }
 
 /** A container image a Preparation's manifests reference. */
@@ -342,9 +373,147 @@ export interface Serving {
   targetPreparation?: string
   observedPreparation?: string
   deployedDigest?: string
+  /** The latest scans of the deployed Preparation's images, summed; changes as vulnerabilities are published. */
+  deployedVulnerabilities?: VulnerabilitySummary
   state: string
   conditions?: Condition[]
   createdAt?: string
+}
+
+// ── Vulnerability types ───────────────────────────────────────────────────────
+
+/** Counts findings by severity. */
+export interface VulnerabilitySummary {
+  critical: number
+  high: number
+  medium: number
+  low: number
+  unknown: number
+  /** Findings a newer version of the package fixes. */
+  fixable: number
+}
+
+/** The scanner and the vulnerability database a scan ran with. */
+export interface VulnerabilityScanner {
+  name: string
+  version: string
+  /** OCI reference of the database, by digest. */
+  database?: string
+  /** When the database was built. */
+  databaseUpdatedTime?: string
+}
+
+/**
+ * Where the SBOM a scan was computed from came from: generated and signed
+ * by Kokumi, written into the image index by BuildKit, or attached to the
+ * image and signed by a key the Kitchen trusts.
+ */
+export type SBOMOrigin = 'Generated' | 'Image' | 'Signed'
+
+/** The latest scan of one vendored image digest. */
+export interface ImageScan {
+  digest: string
+  /** The oci:// URL of the vendored image's repository. */
+  repository: string
+  /** The platform scanned of an image index, e.g. linux/amd64. */
+  platform?: string
+  scannedTime: string
+  sbomDigest: string
+  sbomOrigin: SBOMOrigin
+  /** Digest of the signed vulnerability report, a referrer of the image. */
+  report: string
+  summary: VulnerabilitySummary
+}
+
+/** A Product's record of the scans of its vendored images, without findings. */
+export interface ProductVulnerabilities {
+  scanner: VulnerabilityScanner
+  images?: ImageScan[]
+}
+
+/** One vulnerability of one package. */
+export interface Finding {
+  id: string
+  severity: FindingSeverity
+  package: string
+  installed: string
+  /** The versions that fix it; absent when none does yet. */
+  fixed?: string
+  title?: string
+  /** What the package was found in, such as the OS or a lock file. */
+  target?: string
+}
+
+/** An Order whose Preparations run an image. */
+export interface ImageUse {
+  order: string
+  /** The Order's Preparations that run the image, newest first. */
+  preparations: string[]
+  /** Set when the Order's Serving deploys one of them. */
+  deployed?: boolean
+}
+
+/** A scan with the findings of its signed report, read from the registry and verified. */
+export interface ImageReport extends ImageScan {
+  /** The references the manifests name the image by; only from the Product endpoint. */
+  refs?: string[]
+  /** The Orders whose Preparations run the image; only from the Product endpoint. */
+  usedBy?: ImageUse[]
+  findings?: Finding[]
+  /** Why the report could not be read or did not verify; findings are empty then. */
+  error?: string
+}
+
+/** The latest scans of a Product's vendored images with their findings. */
+export interface ProductVulnerabilityReport {
+  /** Absent until the Product's images were scanned. */
+  scanner?: VulnerabilityScanner
+  images?: ImageReport[]
+}
+
+/** An image of a Preparation with the scan of its vendored digest. */
+export interface PreparationImageReport extends PreparationImage {
+  scan?: ImageReport
+  /** Why there is no scan: the image is not vendored, or not scanned yet. */
+  missing?: string
+  /** Findings the check blocks on; 0 without a check, and when the report could not be read. */
+  blocking: number
+}
+
+/** A finding of a comparison, with the image of the Preparation that has it. */
+export interface ComparedFinding extends Finding {
+  /** The image's name, or its reference without one. */
+  image: string
+}
+
+/**
+ * The findings of a Preparation compared with the one its Order's Serving
+ * deploys. Findings match by vulnerability ID and package, so an upgrade
+ * that still carries a vulnerability is neither added nor removed.
+ */
+export interface VulnerabilityComparison {
+  /** The deployed Preparation. */
+  preparation: string
+  /** The source version the deployed Preparation was rendered from. */
+  version?: string
+  /** Findings this Preparation has and the deployed one lacks, the most severe first. */
+  added?: ComparedFinding[]
+  /** Findings the deployed one has and this Preparation lacks: what promoting it fixes. */
+  removed?: ComparedFinding[]
+  /** "<preparation>: <image>" for the images of either side without a verified scan. */
+  incomplete?: string[]
+}
+
+/** The images of a Preparation joined with the latest scans of its Product. */
+export interface PreparationVulnerabilityReport {
+  /** The Product whose scans the images are joined with. */
+  product?: string
+  /** The check the Preparation was rendered under. */
+  check?: VulnerabilityCheck
+  scanner?: VulnerabilityScanner
+  images?: PreparationImageReport[]
+  /** Absent when nothing is deployed, or this Preparation is. */
+  comparison?: VulnerabilityComparison
 }
 
 // ── Product types ─────────────────────────────────────────────────────────────
@@ -438,6 +607,8 @@ export interface Product {
   registryRefs?: RegistryRef[]
   resolvedSource?: ResolvedSource
   registryAccess?: RegistryAccess[]
+  /** The latest scans of the vendored images in use; set while the Kitchen enables scanning. */
+  vulnerabilities?: ProductVulnerabilities
   state?: string
   conditions?: Condition[]
   createdAt?: string
@@ -527,6 +698,8 @@ export interface OrderFormData {
   edits: Patch[]
   mode: PromotionMode
   approvals?: ApprovalPolicy
+  /** Always sent on update: an update without checks removes them. */
+  checks?: PromotionChecks
 }
 
 export const emptyOrderForm = (product?: { namespace: string; name: string }): OrderFormData => ({
@@ -559,6 +732,7 @@ export const orderToFormData = (r: Order): OrderFormData => ({
   approvals: r.approvals
     ? { requiredApprovals: r.approvals.requiredApprovals, allowedGroups: [...r.approvals.allowedGroups] }
     : undefined,
+  checks: r.checks?.vulnerabilities ? { vulnerabilities: { ...r.checks.vulnerabilities } } : undefined,
 })
 
 export interface ProductFormData {

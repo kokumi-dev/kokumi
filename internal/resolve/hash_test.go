@@ -173,6 +173,20 @@ func TestCalculateSpecHash(t *testing.T) {
 		o.Spec.Promotion.Approvals.RequiredApprovals = 2
 		require.NotEqual(t, one, hashOf(t, product(), o, hashDest))
 	})
+
+	t.Run("promotion checks produce different hashes", func(t *testing.T) {
+		o := order()
+		o.Spec.Promotion = &deliveryv1alpha1.PromotionSpec{Checks: &deliveryv1alpha1.PromotionChecks{}}
+		empty := hashOf(t, product(), o, hashDest)
+		require.NotEqual(t, base, empty)
+
+		o.Spec.Promotion.Checks.Vulnerabilities = &deliveryv1alpha1.VulnerabilityCheck{MaxSeverity: deliveryv1alpha1.SeverityHigh}
+		high := hashOf(t, product(), o, hashDest)
+		require.NotEqual(t, empty, high)
+
+		o.Spec.Promotion.Checks.Vulnerabilities.IgnoreUnfixed = true
+		require.NotEqual(t, high, hashOf(t, product(), o, hashDest))
+	})
 }
 
 func TestCalculateSpecHash_product(t *testing.T) {
@@ -307,6 +321,9 @@ func TestIntent_golden(t *testing.T) {
 		Promotion: &deliveryv1alpha1.PromotionSpec{
 			Mode:      deliveryv1alpha1.PromotionModeManual,
 			Approvals: &deliveryv1alpha1.ApprovalPolicy{RequiredApprovals: 2, AllowedGroups: []string{"release", "security"}},
+			Checks: &deliveryv1alpha1.PromotionChecks{Vulnerabilities: &deliveryv1alpha1.VulnerabilityCheck{
+				MaxSeverity: deliveryv1alpha1.SeverityHigh, IgnoreUnfixed: true, MaxAgeSeconds: 172800,
+			}},
 		},
 	})
 

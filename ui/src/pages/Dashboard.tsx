@@ -1,4 +1,5 @@
 import OpenPromotions from '../components/dashboard/OpenPromotions'
+import CriticalDeployments from '../components/dashboard/CriticalDeployments'
 import PageHeader from '../components/layout/PageHeader'
 import Section from '../components/layout/Section'
 import { useResourceCounts } from '../hooks/useResourceCounts'
@@ -41,6 +42,8 @@ export default function Dashboard() {
           <span className={styles.statValue}>{counts?.servings ?? '—'}</span>
         </div>
       </div>
+
+      <CriticalDeployments />
 
       <Section title="Open Promotions" description="Orders whose latest Preparation is not live yet" flush>
         <OpenPromotions />

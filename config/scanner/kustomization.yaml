@@ -1,0 +1,17 @@
+resources:
+- serviceaccount.yaml
+- deployment.yaml
+- service.yaml
+- networkpolicy.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# scanner is the kokumi image, whose scanner binary the init container
+# installs; make deploy and make build-installer set it to IMG. trivy is the
+# official Trivy image, pinned by digest: a Trivy update is a digest bump.
+images:
+- name: scanner
+  newName: example.com/kokumi
+  newTag: v0.0.1
+- digest: sha256:016eae51fdcf989332a5404af7e8f625cd5d95d7c0907a221d080a996f556500
+  name: trivy
+  newName: ghcr.io/aquasecurity/trivy

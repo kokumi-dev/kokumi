@@ -1,0 +1,30 @@
+---
+# Only the controller manager may call the scanner: it sends registry
+# credentials with each request and signs what the scanner returns. The CNI
+# must enforce NetworkPolicy for this to hold. Egress is not restricted, so
+# that the scanner reaches the public vulnerability database by default;
+# docs/content/docs/operator-guide/scanning.md shows how to restrict it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: scanner
+  namespace: system
+  labels:
+    app.kubernetes.io/component: scanner
+    app.kubernetes.io/name: kokumi
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: scanner
+      app.kubernetes.io/name: kokumi
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              control-plane: controller-manager
+              app.kubernetes.io/name: kokumi
+      ports:
+        - port: http
+          protocol: TCP

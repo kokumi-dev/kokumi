@@ -234,6 +234,7 @@ build-installer: manifests generate kustomize ## Generate a consolidated YAML wi
 	mkdir -p dist
 	cd config/manager && "$(KUSTOMIZE)" edit set image controller=${IMG}
 	cd config/server && "$(KUSTOMIZE)" edit set image server=${IMG}
+	cd config/scanner && "$(KUSTOMIZE)" edit set image scanner=${IMG}
 	"$(KUSTOMIZE)" build config/default > dist/install.yaml
 	echo "---" >> dist/install.yaml
 	"$(KUSTOMIZE)" build config/signing >> dist/install.yaml
@@ -258,6 +259,7 @@ uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified 
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
 	cd config/manager && "$(KUSTOMIZE)" edit set image controller=${IMG}
 	cd config/server && "$(KUSTOMIZE)" edit set image server=${IMG}
+	cd config/scanner && "$(KUSTOMIZE)" edit set image scanner=${IMG}
 	"$(KUSTOMIZE)" build config/signing | "$(KUBECTL)" apply -f -
 	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" apply -f -
 

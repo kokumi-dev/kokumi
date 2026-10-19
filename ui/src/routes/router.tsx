@@ -10,6 +10,7 @@ import ProductOverview from '../pages/products/ProductOverview'
 import ProductOrders from '../pages/products/ProductOrders'
 import ProductPreview from '../pages/products/ProductPreview'
 import ProductArtifact from '../pages/products/ProductArtifact'
+import ProductSecurity from '../pages/products/ProductSecurity'
 import ProductEditor from '../pages/products/ProductEditor'
 import OrdersList from '../pages/orders/OrdersList'
 import OrderLayout from '../pages/orders/OrderLayout'
@@ -26,6 +27,7 @@ import PreparationChanges from '../pages/preparations/PreparationChanges'
 import PreparationApprovals from '../pages/preparations/PreparationApprovals'
 import PreparationIntent from '../pages/preparations/PreparationIntent'
 import PreparationImages from '../pages/preparations/PreparationImages'
+import PreparationSecurity from '../pages/preparations/PreparationSecurity'
 import PreparationArtifact from '../pages/preparations/PreparationArtifact'
 import ServingsList from '../pages/servings/ServingsList'
 import ServingDetail from '../pages/servings/ServingDetail'
@@ -56,6 +58,7 @@ export const router = createBrowserRouter([
           { path: 'orders', element: <ProductOrders /> },
           { path: 'preview', element: <ProductPreview /> },
           { path: 'artifact', element: <ProductArtifact /> },
+          { path: 'security', element: <ProductSecurity /> },
         ],
       },
 
@@ -82,6 +85,7 @@ export const router = createBrowserRouter([
           { path: 'files', element: <PreparationFiles /> },
           { path: 'changes', element: <PreparationChanges /> },
           { path: 'images', element: <PreparationImages /> },
+          { path: 'security', element: <PreparationSecurity /> },
           { path: 'intent', element: <PreparationIntent /> },
           { path: 'artifact', element: <PreparationArtifact /> },
           { path: 'approvals', element: <PreparationApprovals /> },
@@ -111,7 +115,7 @@ export const router = createBrowserRouter([
       { path: 'settings', element: <Navigate to="/settings/general" replace /> },
       {
         path: 'settings/:tab',
-        element: <RequireCapability anyOf={['settings.general:update', 'settings.auth:update', 'settings.signing:update']}><Settings /></RequireCapability>,
+        element: <RequireCapability anyOf={['settings.general:update', 'settings.auth:update', 'settings.signing:update', 'settings.scanning:update']}><Settings /></RequireCapability>,
       },
 
       { path: '*', element: <NotFound /> },

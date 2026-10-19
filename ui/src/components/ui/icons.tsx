@@ -49,6 +49,20 @@ export function RollbackIcon(p: IconProps) {
   return <Svg {...p}><path d="M3 6h7a3 3 0 010 6H7M6 3L3 6l3 3" /></Svg>
 }
 
+export function DownloadIcon(p: IconProps) {
+  return <Svg {...p}><path d="M8 2.5v8M4.5 7L8 10.5 11.5 7M3 13.5h10" /></Svg>
+}
+
+/** Security: vulnerability scans and checks. */
+export function ShieldIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M8 1.75L13 3.5v4c0 3.1-2.1 5.6-5 6.75C5.1 13.1 3 10.6 3 7.5v-4z" />
+      <path d="M5.75 8l1.5 1.5 3-3" />
+    </Svg>
+  )
+}
+
 export function CopyIcon(p: IconProps) {
   return (
     <Svg {...p}>

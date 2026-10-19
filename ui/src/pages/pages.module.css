@@ -12,6 +12,8 @@
   padding: 18px 20px;
   display: flex;
   flex-direction: column;
+  /* The value sits at the bottom, so values align when a label wraps. */
+  justify-content: space-between;
   gap: 6px;
   border: 1px solid var(--color-border-subtle);
 }

@@ -42,6 +42,13 @@
         "security"
       ],
       "requiredApprovals": 2
+    },
+    "checks": {
+      "vulnerabilities": {
+        "ignoreUnfixed": true,
+        "maxAgeSeconds": 172800,
+        "maxSeverity": "High"
+      }
     }
   },
   "render": {

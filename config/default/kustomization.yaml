@@ -44,6 +44,9 @@ resources:
 # of Orders and the default vendor location of Products.
 - ../registry
 - ../admission
+# [SCANNER] The kokumi-scanner component, which scans the images Products
+# vendor once the Kitchen enables scanning. It stays idle until then.
+- ../scanner
 
 # Uncomment the patches line if you enable Metrics
 patches:

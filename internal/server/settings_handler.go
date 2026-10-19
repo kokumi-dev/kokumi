@@ -1,7 +1,9 @@
 package server
 
 import (
+	"cmp"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -87,33 +89,139 @@ type imagesSettingsDTO struct {
 	Mirrors []imageMirrorDTO `json:"mirrors"`
 }
 
+// scanningSettingsDTO mirrors spec.scanning of the Kitchen singleton.
+type scanningSettingsDTO struct {
+	// Enabled is whether spec.scanning is set: scanning runs while it is.
+	Enabled               bool             `json:"enabled"`
+	IntervalSeconds       int32            `json:"intervalSeconds,omitempty"`
+	MaxDatabaseAgeSeconds int32            `json:"maxDatabaseAgeSeconds,omitempty"`
+	DBRepository          string           `json:"dbRepository,omitempty"`
+	JavaDBRepository      string           `json:"javaDBRepository,omitempty"`
+	RegistryRefs          []RegistryRefDTO `json:"registryRefs,omitempty"`
+}
+
+// scanningDefaultsDTO holds what the fields of spec.scanning default to.
+type scanningDefaultsDTO struct {
+	IntervalSeconds       int32  `json:"intervalSeconds"`
+	MaxDatabaseAgeSeconds int32  `json:"maxDatabaseAgeSeconds"`
+	DBRepository          string `json:"dbRepository"`
+	JavaDBRepository      string `json:"javaDBRepository"`
+}
+
 // settingsResponse is the JSON body for GET /api/v1/settings.
 type settingsResponse struct {
-	ArgoCDURL string             `json:"argoCDURL"`
-	Auth      *authDTO           `json:"auth,omitempty"`
-	Signing   signingSettingsDTO `json:"signing"`
-	Images    imagesSettingsDTO  `json:"images"`
+	// Namespace is the install namespace, which holds the Kitchen and the
+	// Registries its scanning names.
+	Namespace        string              `json:"namespace"`
+	ArgoCDURL        string              `json:"argoCDURL"`
+	Auth             *authDTO            `json:"auth,omitempty"`
+	Signing          signingSettingsDTO  `json:"signing"`
+	Images           imagesSettingsDTO   `json:"images"`
+	Scanning         scanningSettingsDTO `json:"scanning"`
+	ScanningDefaults scanningDefaultsDTO `json:"scanningDefaults"`
 }
 
 // settingsRequest is the JSON body for PUT /api/v1/settings. Top-level fields
 // are optional: an absent field leaves the corresponding Kitchen spec part
 // unchanged, so the Settings tabs can save independently. A present auth,
-// signing or images object replaces the whole subtree.
+// signing, images or scanning object replaces the whole subtree.
 type settingsRequest struct {
-	ArgoCDURL *string             `json:"argoCDURL,omitempty"`
-	Auth      *authDTO            `json:"auth,omitempty"`
-	Signing   *signingSettingsDTO `json:"signing,omitempty"`
-	Images    *imagesSettingsDTO  `json:"images,omitempty"`
+	ArgoCDURL *string              `json:"argoCDURL,omitempty"`
+	Auth      *authDTO             `json:"auth,omitempty"`
+	Signing   *signingSettingsDTO  `json:"signing,omitempty"`
+	Images    *imagesSettingsDTO   `json:"images,omitempty"`
+	Scanning  *scanningSettingsDTO `json:"scanning,omitempty"`
 }
 
-// settingsToResponse converts the Kitchen spec to the settings response.
-func settingsToResponse(spec deliveryv1alpha1.KitchenSpec) settingsResponse {
+// settingsToResponse converts the Kitchen spec in namespace to the settings
+// response.
+func settingsToResponse(namespace string, spec deliveryv1alpha1.KitchenSpec) settingsResponse {
+	var defaults *deliveryv1alpha1.KitchenScanning
 	return settingsResponse{
+		Namespace: namespace,
 		ArgoCDURL: spec.ArgoCDURL,
 		Auth:      authToDTO(spec.Auth),
 		Signing:   signingToDTO(spec.Signing),
 		Images:    imagesSettingsToDTO(spec.Images),
+		Scanning:  scanningSettingsToDTO(spec.Scanning),
+		ScanningDefaults: scanningDefaultsDTO{
+			IntervalSeconds:       defaults.EffectiveIntervalSeconds(),
+			MaxDatabaseAgeSeconds: defaults.EffectiveMaxDatabaseAgeSeconds(),
+			DBRepository:          defaults.EffectiveDBRepository(),
+			JavaDBRepository:      defaults.EffectiveJavaDBRepository(),
+		},
 	}
+}
+
+// scanningSettingsToDTO converts a Kitchen spec.scanning to its DTO shape.
+func scanningSettingsToDTO(scanning *deliveryv1alpha1.KitchenScanning) scanningSettingsDTO {
+	if scanning == nil {
+		return scanningSettingsDTO{}
+	}
+	return scanningSettingsDTO{
+		Enabled:               true,
+		IntervalSeconds:       scanning.IntervalSeconds,
+		MaxDatabaseAgeSeconds: scanning.MaxDatabaseAgeSeconds,
+		DBRepository:          scanning.DBRepository,
+		JavaDBRepository:      scanning.JavaDBRepository,
+		RegistryRefs:          registryRefsToDTO(scanning.RegistryRefs),
+	}
+}
+
+// scanningSettingsFromDTO converts the request DTO to a Kitchen
+// spec.scanning. Disabled settings clear it; fields left out take their
+// defaults.
+func scanningSettingsFromDTO(dto *scanningSettingsDTO) *deliveryv1alpha1.KitchenScanning {
+	if !dto.Enabled {
+		return nil
+	}
+	return &deliveryv1alpha1.KitchenScanning{
+		IntervalSeconds:       dto.IntervalSeconds,
+		MaxDatabaseAgeSeconds: dto.MaxDatabaseAgeSeconds,
+		DBRepository:          strings.TrimSpace(dto.DBRepository),
+		JavaDBRepository:      strings.TrimSpace(dto.JavaDBRepository),
+		RegistryRefs:          registryRefsFromDTO(dto.RegistryRefs),
+	}
+}
+
+// Bounds of the Kitchen's spec.scanning, as its markers set them.
+const (
+	minScanIntervalSeconds   = 3600
+	maxScanIntervalSeconds   = 2592000
+	minDatabaseAgeSeconds    = 3600
+	maxScanningRegistryRefs  = 16
+	scanningRepositoryPrefix = "oci://"
+)
+
+// validateScanningDTO checks a scanning payload for what the UI can get
+// wrong; the API server validates the rest.
+func validateScanningDTO(dto *scanningSettingsDTO) error {
+	if dto == nil || !dto.Enabled {
+		return nil
+	}
+	if dto.IntervalSeconds != 0 && (dto.IntervalSeconds < minScanIntervalSeconds || dto.IntervalSeconds > maxScanIntervalSeconds) {
+		return fmt.Errorf("scanning.intervalSeconds must be between %d and %d", minScanIntervalSeconds, maxScanIntervalSeconds)
+	}
+	if dto.MaxDatabaseAgeSeconds != 0 && dto.MaxDatabaseAgeSeconds < minDatabaseAgeSeconds {
+		return fmt.Errorf("scanning.maxDatabaseAgeSeconds must be at least %d", minDatabaseAgeSeconds)
+	}
+	for field, repo := range map[string]string{"dbRepository": dto.DBRepository, "javaDBRepository": dto.JavaDBRepository} {
+		repo = strings.TrimSpace(repo)
+		if repo != "" && (!strings.HasPrefix(repo, scanningRepositoryPrefix) || len(repo) == len(scanningRepositoryPrefix)) {
+			return fmt.Errorf("scanning.%s must be an oci:// URL", field)
+		}
+	}
+	if len(dto.RegistryRefs) > maxScanningRegistryRefs {
+		return fmt.Errorf("scanning.registryRefs must contain at most %d entries", maxScanningRegistryRefs)
+	}
+	names := map[string]bool{}
+	for _, ref := range dto.RegistryRefs {
+		if names[ref.Name] {
+			return fmt.Errorf("scanning.registryRefs names %q twice", ref.Name)
+		}
+		names[ref.Name] = true
+	}
+	return nil
 }
 
 // imagesSettingsToDTO converts a Kitchen spec.images to its DTO shape.
@@ -367,19 +475,19 @@ func handleGetSettings(deps *apiDeps, namespace string) http.HandlerFunc {
 		}, kitchen)
 		if err != nil {
 			if client.IgnoreNotFound(err) == nil {
-				respondJSON(w, http.StatusOK, settingsToResponse(deliveryv1alpha1.KitchenSpec{}))
+				respondJSON(w, http.StatusOK, settingsToResponse(namespace, deliveryv1alpha1.KitchenSpec{}))
 				return
 			}
 			respondForbiddenOrError(w, err, "failed to get settings")
 			return
 		}
 
-		respondJSON(w, http.StatusOK, settingsToResponse(kitchen.Spec))
+		respondJSON(w, http.StatusOK, settingsToResponse(namespace, kitchen.Spec))
 	}
 }
 
 // handlePutSettings handles PUT /api/v1/settings.
-// Updates argoCDURL and the auth, signing and images subtrees of the
+// Updates argoCDURL and the auth, signing, images and scanning subtrees of the
 // singleton Kitchen/default, creating it if absent. Absent request fields
 // leave the Kitchen unchanged.
 func handlePutSettings(deps *apiDeps, namespace string) http.HandlerFunc {
@@ -394,34 +502,10 @@ func handlePutSettings(deps *apiDeps, namespace string) http.HandlerFunc {
 			respondError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
-		if req.ArgoCDURL == nil && req.Auth == nil && req.Signing == nil && req.Images == nil {
-			respondError(w, http.StatusBadRequest, "request must set argoCDURL, auth, signing or images")
-			return
-		}
-		if err := validateAuthDTO(req.Auth); err != nil {
+		argoCDURL, err := validateSettingsRequest(&req)
+		if err != nil {
 			respondError(w, http.StatusBadRequest, err.Error())
 			return
-		}
-		if err := validateSigningDTO(req.Signing); err != nil {
-			respondError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if err := validateImagesDTO(req.Images); err != nil {
-			respondError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-
-		var argoCDURL string
-		if req.ArgoCDURL != nil {
-			raw := strings.TrimSpace(*req.ArgoCDURL)
-			if raw != "" {
-				u, err := url.Parse(raw)
-				if err != nil || (u.Scheme != schemeHTTP && u.Scheme != schemeHTTPS) {
-					respondError(w, http.StatusBadRequest, "argoCDURL must be a valid http:// or https:// URL")
-					return
-				}
-			}
-			argoCDURL = raw
 		}
 
 		kitchen := &deliveryv1alpha1.Kitchen{}
@@ -442,48 +526,22 @@ func handlePutSettings(deps *apiDeps, namespace string) http.HandlerFunc {
 			kitchen = &deliveryv1alpha1.Kitchen{}
 			kitchen.Name = deliveryv1alpha1.DefaultKitchenName
 			kitchen.Namespace = namespace
-			if req.ArgoCDURL != nil {
-				kitchen.Spec.ArgoCDURL = argoCDURL
-			}
-			if req.Auth != nil {
-				kitchen.Spec.Auth = &deliveryv1alpha1.KitchenAuth{}
-				applyAuth(kitchen.Spec.Auth, req.Auth)
-			}
-			if req.Signing != nil {
-				kitchen.Spec.Signing = signingFromDTO(req.Signing)
-			}
-			if req.Images != nil {
-				kitchen.Spec.Images = imagesSettingsFromDTO(req.Images)
-			}
+			applySettings(&kitchen.Spec, &req, argoCDURL)
 			if err := uc.create(r.Context(), kitchen, "kitchens"); err != nil {
 				deps.logger.Error(err, "Failed to create Kitchen")
 				respondForbiddenOrError(w, err, "failed to save settings")
 				return
 			}
-			respondJSON(w, http.StatusOK, settingsToResponse(kitchen.Spec))
+			respondJSON(w, http.StatusOK, settingsToResponse(namespace, kitchen.Spec))
 			return
 		}
 
 		// DeepCopy so later mutations (applyAuth writes through the shared
 		// *KitchenAuth pointer) cannot alias the snapshot used for the no-op check.
 		before := *kitchen.Spec.DeepCopy()
-		if req.ArgoCDURL != nil {
-			kitchen.Spec.ArgoCDURL = argoCDURL
-		}
-		if req.Auth != nil {
-			if kitchen.Spec.Auth == nil {
-				kitchen.Spec.Auth = &deliveryv1alpha1.KitchenAuth{}
-			}
-			applyAuth(kitchen.Spec.Auth, req.Auth)
-		}
-		if req.Signing != nil {
-			kitchen.Spec.Signing = signingFromDTO(req.Signing)
-		}
-		if req.Images != nil {
-			kitchen.Spec.Images = imagesSettingsFromDTO(req.Images)
-		}
+		applySettings(&kitchen.Spec, &req, argoCDURL)
 		if apiequality.Semantic.DeepEqual(&before, &kitchen.Spec) {
-			respondJSON(w, http.StatusOK, settingsToResponse(kitchen.Spec))
+			respondJSON(w, http.StatusOK, settingsToResponse(namespace, kitchen.Spec))
 			return
 		}
 		if err := uc.update(r.Context(), kitchen, "kitchens"); err != nil {
@@ -492,6 +550,49 @@ func handlePutSettings(deps *apiDeps, namespace string) http.HandlerFunc {
 			return
 		}
 
-		respondJSON(w, http.StatusOK, settingsToResponse(kitchen.Spec))
+		respondJSON(w, http.StatusOK, settingsToResponse(namespace, kitchen.Spec))
+	}
+}
+
+// validateSettingsRequest checks req and returns its argoCDURL, trimmed.
+func validateSettingsRequest(req *settingsRequest) (string, error) {
+	if req.ArgoCDURL == nil && req.Auth == nil && req.Signing == nil && req.Images == nil && req.Scanning == nil {
+		return "", errors.New("request must set argoCDURL, auth, signing, images or scanning")
+	}
+	if err := cmp.Or(validateAuthDTO(req.Auth), validateSigningDTO(req.Signing), validateImagesDTO(req.Images), validateScanningDTO(req.Scanning)); err != nil {
+		return "", err
+	}
+	if req.ArgoCDURL == nil {
+		return "", nil
+	}
+	raw := strings.TrimSpace(*req.ArgoCDURL)
+	if raw != "" {
+		u, err := url.Parse(raw)
+		if err != nil || (u.Scheme != schemeHTTP && u.Scheme != schemeHTTPS) {
+			return "", errors.New("argoCDURL must be a valid http:// or https:// URL")
+		}
+	}
+	return raw, nil
+}
+
+// applySettings writes the parts of the Kitchen spec that req sets.
+func applySettings(spec *deliveryv1alpha1.KitchenSpec, req *settingsRequest, argoCDURL string) {
+	if req.ArgoCDURL != nil {
+		spec.ArgoCDURL = argoCDURL
+	}
+	if req.Auth != nil {
+		if spec.Auth == nil {
+			spec.Auth = &deliveryv1alpha1.KitchenAuth{}
+		}
+		applyAuth(spec.Auth, req.Auth)
+	}
+	if req.Signing != nil {
+		spec.Signing = signingFromDTO(req.Signing)
+	}
+	if req.Images != nil {
+		spec.Images = imagesSettingsFromDTO(req.Images)
+	}
+	if req.Scanning != nil {
+		spec.Scanning = scanningSettingsFromDTO(req.Scanning)
 	}
 }

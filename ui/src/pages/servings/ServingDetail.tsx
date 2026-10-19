@@ -7,6 +7,7 @@ import PropertyList from '../../components/layout/PropertyList'
 import ConditionList from '../../components/layout/ConditionList'
 import ResourceNotFound from '../../components/layout/ResourceNotFound'
 import Badge from '../../components/shared/Badge'
+import VulnerabilityCounts from '../../components/vulnerability/VulnerabilityCounts'
 import { paths } from '../../routes/paths'
 import { formatDate } from '../../utils/format'
 import layout from '../../components/layout/layout.module.css'
@@ -35,6 +36,7 @@ export default function ServingDetail() {
   const argoURL = argoAppURL(argoBase, serving.name)
   const gate = serving.conditions?.find((c) => c.type === 'Approved')
   const verified = serving.conditions?.find((c) => c.type === 'Verified')
+  const checks = serving.conditions?.find((c) => c.type === 'ChecksPassed')
 
   const prepLink = (prepName?: string) =>
     prepName ? (
@@ -77,6 +79,16 @@ export default function ServingDetail() {
               label: 'Signatures',
               value: verified?.status === 'True' ? 'Verified in the registry' : `${verified?.reason}: ${verified?.message}`,
               show: !!verified,
+            },
+            {
+              label: 'Vulnerability check',
+              value: checks?.status === 'True' ? 'Passed' : `${checks?.reason}: ${checks?.message}`,
+              show: !!checks,
+            },
+            {
+              label: 'Deployed findings',
+              value: serving.deployedVulnerabilities && <VulnerabilityCounts summary={serving.deployedVulnerabilities} />,
+              show: !!serving.deployedVulnerabilities,
             },
             { label: 'Created', value: formatDate(serving.createdAt) },
           ]}

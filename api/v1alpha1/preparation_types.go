@@ -172,6 +172,12 @@ type PreparationSpec struct {
 	// +optional
 	ApprovalPolicy *ApprovalPolicy `json:"approvalPolicy,omitempty"`
 
+	// checks are the promotion checks copied from the Order when this
+	// Preparation was created. The Preparation is only served while it
+	// passes them.
+	// +optional
+	Checks *PromotionChecks `json:"checks,omitempty"`
+
 	// images lists the container images the rendered manifests reference,
 	// resolved to digests when the Preparation was rendered. The artifact's
 	// config blob records the same list, with the reason for each image that

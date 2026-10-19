@@ -118,6 +118,7 @@ func orderToDTO(r deliveryv1alpha1.Order, activePreparation string) OrderDTO {
 		Edits:             patchesToDTO(r.Spec.Edits),
 		Mode:              string(r.EffectivePromotionMode()),
 		Approvals:         approvalPolicyToDTO(r.ApprovalPolicy()),
+		Checks:            checksToDTO(r.PromotionChecks()),
 		State:             stateFromConditions(r.Status.Conditions),
 		LatestRevision:    r.Status.LatestPreparationName,
 		ActivePreparation: activePreparation,
@@ -234,22 +235,94 @@ func preparationToDTO(p deliveryv1alpha1.Preparation, isActive bool) Preparation
 		},
 		Conditions: conditionsToDTO(p.Status.Conditions),
 		Approval:   preparationApprovalToDTO(p),
+		Checks:     checksToDTO(p.Spec.Checks),
+		Version:    p.Labels[deliveryv1alpha1.LabelVersion],
 	}
 	if ref := p.Spec.Artifact.RegistryRef; ref != nil {
 		dto.Artifact.RegistryRef = ref.Name
 	}
 	for _, img := range p.Spec.Images {
-		dto.Images = append(dto.Images, PreparationImageDTO{
-			Ref:       img.Ref,
-			Name:      img.Name,
-			Digest:    img.Digest,
-			MediaType: img.MediaType,
-			Vendored:  img.Vendored,
-		})
+		dto.Images = append(dto.Images, preparationImageToDTO(img))
 	}
 	if !p.CreationTimestamp.IsZero() {
 		t := p.CreationTimestamp.UTC()
 		dto.CreatedAt = &t
+	}
+	return dto
+}
+
+// preparationImageToDTO converts a PreparationImage.
+func preparationImageToDTO(img deliveryv1alpha1.PreparationImage) PreparationImageDTO {
+	return PreparationImageDTO{Ref: img.Ref, Name: img.Name, Digest: img.Digest, MediaType: img.MediaType, Vendored: img.Vendored}
+}
+
+// checksToDTO converts PromotionChecks; nil stays nil.
+func checksToDTO(c *deliveryv1alpha1.PromotionChecks) *PromotionChecksDTO {
+	if c == nil {
+		return nil
+	}
+	return &PromotionChecksDTO{Vulnerabilities: vulnerabilityCheckToDTO(c.Vulnerabilities)}
+}
+
+// vulnerabilityCheckToDTO converts a VulnerabilityCheck; nil stays nil.
+func vulnerabilityCheckToDTO(c *deliveryv1alpha1.VulnerabilityCheck) *VulnerabilityCheckDTO {
+	if c == nil {
+		return nil
+	}
+	return &VulnerabilityCheckDTO{MaxSeverity: string(c.MaxSeverity), IgnoreUnfixed: c.IgnoreUnfixed, MaxAgeSeconds: c.MaxAgeSeconds}
+}
+
+// checksFromDTO converts requested checks; nil and empty checks mean none.
+func checksFromDTO(dto *PromotionChecksDTO) *deliveryv1alpha1.PromotionChecks {
+	if dto == nil || dto.Vulnerabilities == nil {
+		return nil
+	}
+	v := dto.Vulnerabilities
+	return &deliveryv1alpha1.PromotionChecks{Vulnerabilities: &deliveryv1alpha1.VulnerabilityCheck{
+		MaxSeverity:   deliveryv1alpha1.Severity(v.MaxSeverity),
+		IgnoreUnfixed: v.IgnoreUnfixed,
+		MaxAgeSeconds: v.MaxAgeSeconds,
+	}}
+}
+
+// summaryToDTO converts a VulnerabilitySummary.
+func summaryToDTO(s deliveryv1alpha1.VulnerabilitySummary) VulnerabilitySummaryDTO {
+	return VulnerabilitySummaryDTO{Critical: s.Critical, High: s.High, Medium: s.Medium, Low: s.Low, Unknown: s.Unknown, Fixable: s.Fixable}
+}
+
+// scannerToDTO converts a VulnerabilityScanner.
+func scannerToDTO(s deliveryv1alpha1.VulnerabilityScanner) VulnerabilityScannerDTO {
+	dto := VulnerabilityScannerDTO{Name: s.Name, Version: s.Version, Database: s.Database}
+	if s.DatabaseUpdatedTime != nil {
+		t := s.DatabaseUpdatedTime.UTC()
+		dto.DatabaseUpdatedTime = &t
+	}
+	return dto
+}
+
+// imageScanToDTO converts an ImageScan.
+func imageScanToDTO(s deliveryv1alpha1.ImageScan) ImageScanDTO {
+	return ImageScanDTO{
+		Digest:      s.Digest,
+		Repository:  s.Repository,
+		Platform:    s.Platform,
+		ScannedTime: s.ScannedTime.UTC(),
+		SBOMDigest:  s.SBOM.Digest,
+		SBOMOrigin:  string(s.SBOM.Origin),
+		Report:      s.Report,
+		Summary:     summaryToDTO(s.Summary),
+	}
+}
+
+// productVulnerabilitiesToDTO converts a Product's status.vulnerabilities;
+// nil stays nil.
+func productVulnerabilitiesToDTO(v *deliveryv1alpha1.ProductVulnerabilities) *ProductVulnerabilitiesDTO {
+	if v == nil {
+		return nil
+	}
+	dto := &ProductVulnerabilitiesDTO{Scanner: scannerToDTO(v.Scanner)}
+	for _, img := range v.Images {
+		dto.Images = append(dto.Images, imageScanToDTO(img))
 	}
 	return dto
 }
@@ -598,6 +671,9 @@ func servingToDTO(s deliveryv1alpha1.Serving) ServingDTO {
 		State:               stateFromConditions(s.Status.Conditions),
 		Conditions:          conditionsToDTO(s.Status.Conditions),
 	}
+	if summary := s.Status.DeployedVulnerabilities; summary != nil {
+		dto.DeployedVulnerabilities = new(summaryToDTO(*summary))
+	}
 	if !s.CreationTimestamp.IsZero() {
 		t := s.CreationTimestamp.UTC()
 		dto.CreatedAt = &t
@@ -631,8 +707,9 @@ func productToDTO(p deliveryv1alpha1.Product) ProductDTO {
 		State:      stateFromConditions(p.Status.Conditions),
 		Conditions: conditionsToDTO(p.Status.Conditions),
 
-		RegistryRefs:   registryRefsToDTO(p.Spec.RegistryRefs),
-		RegistryAccess: registryAccessToDTO(p.Status.RegistryAccess)}
+		RegistryRefs:    registryRefsToDTO(p.Spec.RegistryRefs),
+		RegistryAccess:  registryAccessToDTO(p.Status.RegistryAccess),
+		Vulnerabilities: productVulnerabilitiesToDTO(p.Status.Vulnerabilities)}
 	if p.DeletionTimestamp != nil {
 		t := p.DeletionTimestamp.UTC()
 		dto.DeletionTimestamp = &t

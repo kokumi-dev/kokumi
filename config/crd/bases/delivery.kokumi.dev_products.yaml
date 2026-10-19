@@ -764,6 +764,152 @@ spec:
                 - url
                 - version
                 type: object
+              vulnerabilities:
+                description: |-
+                  vulnerabilities summarizes the latest scans of the images the
+                  Product vendors and its Orders' Preparations in use run. The signed
+                  reports are referrers of the vendored images; this summary is for
+                  display. Set while the Kitchen enables scanning and the Product's
+                  image policy is Vendor.
+                properties:
+                  images:
+                    description: |-
+                      images lists the latest scan of each vendored image digest in use.
+                      When more digests are in use, the most recently scanned are listed
+                      and the Scanned condition says how many were left out.
+                    items:
+                      description: ImageScan is the latest scan of one vendored image
+                        digest.
+                      properties:
+                        digest:
+                          description: |-
+                            digest is the digest of the vendored image, an image index or
+                            manifest.
+                          pattern: ^sha256:[a-f0-9]{64}$
+                          type: string
+                        platform:
+                          description: |-
+                            platform is the platform of the image index that was scanned, such
+                            as "linux/amd64". Empty for a single-platform image.
+                          maxLength: 64
+                          type: string
+                        report:
+                          description: |-
+                            report is the digest of the signed vulnerability report, a referrer
+                            of the vendored image.
+                          pattern: ^sha256:[a-f0-9]{64}$
+                          type: string
+                        repository:
+                          description: repository is the oci:// URL of the vendored
+                            image's repository.
+                          maxLength: 2048
+                          type: string
+                        sbom:
+                          description: sbom is the SBOM the scan was computed from.
+                          properties:
+                            digest:
+                              description: |-
+                                digest is the digest of the referrer or attestation manifest holding
+                                the SBOM.
+                              pattern: ^sha256:[a-f0-9]{64}$
+                              type: string
+                            origin:
+                              description: origin says where the SBOM came from.
+                              enum:
+                              - Generated
+                              - Image
+                              - Signed
+                              type: string
+                          required:
+                          - digest
+                          - origin
+                          type: object
+                        scannedTime:
+                          description: scannedTime is when the image was scanned.
+                          format: date-time
+                          type: string
+                        summary:
+                          description: summary counts the findings of the report.
+                          properties:
+                            critical:
+                              description: critical counts the findings of severity
+                                Critical.
+                              format: int32
+                              minimum: 0
+                              type: integer
+                            fixable:
+                              description: fixable counts the findings a newer version
+                                of the package fixes.
+                              format: int32
+                              minimum: 0
+                              type: integer
+                            high:
+                              description: high counts the findings of severity High.
+                              format: int32
+                              minimum: 0
+                              type: integer
+                            low:
+                              description: low counts the findings of severity Low.
+                              format: int32
+                              minimum: 0
+                              type: integer
+                            medium:
+                              description: medium counts the findings of severity
+                                Medium.
+                              format: int32
+                              minimum: 0
+                              type: integer
+                            unknown:
+                              description: unknown counts the findings without a severity.
+                              format: int32
+                              minimum: 0
+                              type: integer
+                          type: object
+                      required:
+                      - digest
+                      - report
+                      - repository
+                      - sbom
+                      - scannedTime
+                      - summary
+                      type: object
+                    maxItems: 512
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - digest
+                    x-kubernetes-list-type: map
+                  scanner:
+                    description: scanner identifies the scanner and the database of
+                      the latest scan.
+                    properties:
+                      database:
+                        description: |-
+                          database is the OCI reference of the vulnerability database, with
+                          its digest.
+                        maxLength: 2048
+                        type: string
+                      databaseUpdatedTime:
+                        description: databaseUpdatedTime is when the vulnerability
+                          database was built.
+                        format: date-time
+                        type: string
+                      name:
+                        description: name is the scanner, "trivy".
+                        maxLength: 63
+                        minLength: 1
+                        type: string
+                      version:
+                        description: version is the version of the scanner.
+                        maxLength: 64
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    - version
+                    type: object
+                required:
+                - scanner
+                type: object
             type: object
         required:
         - spec

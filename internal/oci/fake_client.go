@@ -44,6 +44,12 @@ type FakeClient struct {
 	Resolves []Reference
 	// CopyErr, when set, is returned by Copy.
 	CopyErr error
+	// Manifests maps digests to the manifests FetchManifest returns for
+	// them, ahead of what was pushed. Tests use it to serve image indexes.
+	Manifests map[string]Manifest
+	// Blobs maps digests to the blobs FetchBlob returns for them, besides
+	// the payloads of recorded referrers.
+	Blobs map[string][]byte
 	// Pings records the hosts Ping was called with.
 	Pings []string
 	// PingErr, when set, is returned by Ping.
@@ -261,6 +267,10 @@ func (c *FakeClient) PushIndex(_ context.Context, ref Reference, artifactType st
 // PushIndex, of the recorded referrer with ref's digest, or of FakeDigest,
 // the artifact every Pull and Resolve reports.
 func (c *FakeClient) FetchManifest(_ context.Context, ref Reference) (Manifest, error) {
+	if m, ok := c.Manifests[ref.Digest]; ok && ref.Digest != "" {
+		return m, nil
+	}
+
 	for _, p := range slices.Backward(c.Pushes) {
 		if matches(ref, p.Ref, p.Digest) {
 			return pushedManifest(p), nil
@@ -300,6 +310,27 @@ func (c *FakeClient) FetchManifest(_ context.Context, ref Reference) (Manifest, 
 	}
 
 	return Manifest{}, fmt.Errorf("fetch manifest %s: not found", ref)
+}
+
+// FetchBlob returns the blob in Blobs with desc's digest, or the payload of
+// the recorded referrer it describes.
+func (c *FakeClient) FetchBlob(_ context.Context, ref Reference, desc Descriptor, maxSize int64) ([]byte, error) {
+	data, ok := c.Blobs[desc.Digest]
+	if !ok {
+		for _, r := range c.Referrers {
+			if blobDescriptor(r.Artifact.MediaType, r.Artifact.Payload).Digest == desc.Digest {
+				data, ok = r.Artifact.Payload, true
+				break
+			}
+		}
+	}
+	if !ok {
+		return nil, fmt.Errorf("fetch blob %s of %s: not found", desc.Digest, ref)
+	}
+	if int64(len(data)) > maxSize {
+		return nil, fmt.Errorf("fetch blob %s of %s: %w", desc.Digest, ref, ErrPayloadTooLarge)
+	}
+	return data, nil
 }
 
 // pushedManifest returns the manifest a Push records.

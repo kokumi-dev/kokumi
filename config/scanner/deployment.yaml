@@ -1,0 +1,123 @@
+---
+# The kokumi-scanner component scans the images Products vendor for
+# vulnerabilities, when the Kitchen enables scanning. It runs the official
+# Trivy image; an init container installs the scanner binary from the kokumi
+# image into it. It has no Kubernetes identity and only the manager can reach
+# it (networkpolicy.yaml). It serves plain HTTP inside the cluster.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scanner
+  namespace: system
+  labels:
+    app.kubernetes.io/component: scanner
+    app.kubernetes.io/name: kokumi
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: scanner
+      app.kubernetes.io/name: kokumi
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: scanner
+        app.kubernetes.io/name: kokumi
+    spec:
+      serviceAccountName: kokumi-scanner
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: install
+          image: scanner:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - /scanner
+            - install
+            - /kokumi/scanner
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: kokumi
+              mountPath: /kokumi
+      containers:
+        - name: scanner
+          image: trivy:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - /kokumi/scanner
+            - serve
+          args:
+            - --listen=:8080
+            - --cache-dir=/cache
+            - --trivy=/usr/local/bin/trivy
+            - --max-concurrent=2
+          env:
+            - name: HOME
+              value: /tmp
+            - name: TMPDIR
+              value: /tmp
+          ports:
+            - containerPort: 8080
+              name: http
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          # A scan needs a few hundred MiB; the vulnerability database is
+          # read through a memory map, which counts as page cache. The
+          # request is what an idle scanner holds, as it runs whether or not
+          # the Kitchen enables scanning. Raise the limit for large images
+          # with many Java archives.
+          resources:
+            limits:
+              memory: 1Gi
+            requests:
+              cpu: 100m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: kokumi
+              mountPath: /kokumi
+              readOnly: true
+            - name: cache
+              mountPath: /cache
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: kokumi
+          emptyDir:
+            sizeLimit: 256Mi
+        # Two versions of the vulnerability database (1.6 GB each), the Java
+        # database once an image needs it, and the images being scanned.
+        - name: cache
+          emptyDir:
+            sizeLimit: 16Gi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 2Gi

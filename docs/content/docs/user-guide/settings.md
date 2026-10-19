@@ -22,7 +22,7 @@ who may update the Kitchen (see
 > called `default`, and the server only reads and writes that one. If you
 > create a Kitchen with any other name, Kokumi ignores it.
 
-The Settings page has three tabs, each shown only to users with its
+The Settings page has four tabs, each shown only to users with its
 capability:
 
 - **General**: the Argo CD base URL, stored as `spec.argoCDURL` and used to
@@ -35,6 +35,11 @@ capability:
   verify its artifacts, the further keys it trusts, and whether every Product
   source must verify, stored in `spec.signing`. See
   [Signing](../../operator-guide/signing/).
+- **Scanning**: whether the images Products vendor are scanned for
+  vulnerabilities, how often, how old the vulnerability database may be,
+  where the databases are read from, and the Registries of the install
+  namespace that connect to them, stored in `spec.scanning`. See
+  [Vulnerability Scanning](../../operator-guide/scanning/).
 
 ## Setting the Argo CD URL
 

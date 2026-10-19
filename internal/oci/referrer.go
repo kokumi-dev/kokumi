@@ -10,8 +10,11 @@ import (
 )
 
 // MaxReferrerPayloadSize is the largest referrer payload FetchReferrer reads.
-// Anyone who can push to a repository can attach a referrer of any size.
-const MaxReferrerPayloadSize = 1 << 20
+// Anyone who can push to a repository can attach a referrer of any size, so
+// the bound keeps a hostile referrer from exhausting memory. It allows for
+// signed SBOMs and vulnerability reports, which run to megabytes for large
+// images.
+const MaxReferrerPayloadSize = 16 << 20
 
 // ErrPayloadTooLarge is returned by FetchReferrer for a payload larger than
 // MaxReferrerPayloadSize.
@@ -105,7 +108,7 @@ func (c *ORASClient) FetchReferrer(ctx context.Context, ref Reference) (Referrer
 		return ReferrerArtifact{}, fmt.Errorf("fetch referrer %s: %d bytes: %w", ref, size, ErrPayloadTooLarge)
 	}
 
-	payload, err := fetchBlobBytes(ctx, repo, manifest.Layers[0])
+	payload, err := fetchBlobBytes(ctx, repo, manifest.Layers[0], MaxReferrerPayloadSize)
 	if err != nil {
 		return ReferrerArtifact{}, fmt.Errorf("fetch referrer %s: %w", ref, err)
 	}
