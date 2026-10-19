@@ -70,6 +70,7 @@ func TestPreparation(t *testing.T) {
 
 	require.Equal(t, policy, prep.Spec.ApprovalPolicy)
 	assert.NotSame(t, policy, prep.Spec.ApprovalPolicy, "the policy is a snapshot")
+	assert.Nil(t, prep.Spec.Checks)
 
 	anonymous := Preparation(testOrderObject(nil), Rendered{
 		Source:   mustParse(t, "oci://ghcr.io/org/chart:1.0.0@"+testDigest),
@@ -78,6 +79,23 @@ func TestPreparation(t *testing.T) {
 	assert.Nil(t, anonymous.Spec.Artifact.RegistryRef, "no Registry authenticated the push")
 	assert.Nil(t, anonymous.Spec.ApprovalPolicy)
 	assert.Nil(t, anonymous.Spec.Images)
+}
+
+func TestPreparation_checks(t *testing.T) {
+	checks := &deliveryv1alpha1.PromotionChecks{
+		Vulnerabilities: &deliveryv1alpha1.VulnerabilityCheck{MaxSeverity: deliveryv1alpha1.SeverityHigh},
+	}
+	order := testOrderObject(nil)
+	order.Spec.Promotion.Checks = checks
+
+	prep := Preparation(order, Rendered{
+		Source:   mustParse(t, "oci://ghcr.io/org/chart:1.0.0@"+testDigest),
+		Artifact: mustParse(t, "oci://registry.example/order/app:1.0.0@"+testDigest),
+	})
+
+	require.Equal(t, checks, prep.Spec.Checks)
+	assert.NotSame(t, checks, prep.Spec.Checks, "the checks are a snapshot")
+	assert.NotSame(t, checks.Vulnerabilities, prep.Spec.Checks.Vulnerabilities)
 }
 
 func TestServing(t *testing.T) {

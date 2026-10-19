@@ -1,6 +1,8 @@
 import { Link } from 'react-router'
 import type { Preparation } from '../../api/types'
 import { usePreparations } from '../../hooks/usePreparations'
+import { useOrders } from '../../hooks/useOrders'
+import { useProducts } from '../../hooks/useProducts'
 import { matchesFilter, useFilterParam } from '../../hooks/useFilterParam'
 import PageHeader from '../../components/layout/PageHeader'
 import Section from '../../components/layout/Section'
@@ -10,14 +12,23 @@ import FilterInput from '../../components/layout/FilterInput'
 import NameCell from '../../components/layout/NameCell'
 import StatusIndicator from '../../components/shared/StatusIndicator'
 import RelativeTime from '../../components/shared/RelativeTime'
+import PreparationFindings from '../../components/vulnerability/PreparationFindings'
 import { paths } from '../../routes/paths'
-import { shortDigest } from '../../utils/format'
 import { approvalLabel } from '../../utils/preparations'
+import { productOf } from '../../utils/products'
 import layout from '../../components/layout/layout.module.css'
 
 export default function PreparationsList() {
   const preparations = usePreparations()
+  const orders = useOrders()
+  const products = useProducts()
   const [query, setQuery] = useFilterParam()
+
+  /** The Product of a Preparation's Order, whose scans give its findings. */
+  function productFor(p: Preparation) {
+    const order = orders?.find((o) => o.namespace === p.namespace && o.name === p.order)
+    return order && productOf(products, order)
+  }
 
   const filtered = (preparations ?? [])
     .filter((p) => matchesFilter(query, p.name, p.namespace, p.order, p.commitMessage))
@@ -47,7 +58,7 @@ export default function PreparationsList() {
             columns={[
               {
                 header: 'Preparation',
-                width: '30%',
+                width: '22%',
                 cell: (p) => (
                   <NameCell
                     to={paths.preparation(p.namespace, p.name)}
@@ -57,7 +68,7 @@ export default function PreparationsList() {
                   />
                 ),
               },
-              { header: 'Status', width: '130px', cell: (p) => <StatusIndicator state={p.state} /> },
+              { header: 'Status', width: '110px', cell: (p) => <StatusIndicator state={p.state} /> },
               {
                 header: 'Order',
                 truncate: true,
@@ -65,19 +76,24 @@ export default function PreparationsList() {
                 cell: (p) => <Link className={layout.refLink} to={paths.order(p.namespace, p.order)}>{p.order}</Link>,
               },
               {
+                header: 'Version',
+                width: '110px',
+                truncate: true,
+                title: (p) => p.version,
+                cell: (p) => p.version ?? <span className={layout.muted}>—</span>,
+              },
+              {
+                header: 'Findings',
+                width: '145px',
+                cell: (p) => <PreparationFindings preparation={p} product={productFor(p)} />,
+              },
+              {
                 header: 'Approval',
-                width: '150px',
+                width: '125px',
                 cell: (p) =>
                   p.approval
                     ? approvalLabel(p.approval.state, p.approval.approvedCount, p.approval.requiredApprovals)
                     : <span className={layout.muted}>—</span>,
-              },
-              {
-                header: 'Digest',
-                width: '110px',
-                title: (p) => p.artifact.digest,
-                truncate: true,
-                cell: (p) => <span className={layout.mono}>{shortDigest(p.artifact.digest)}</span>,
               },
               { header: 'Created', width: '110px', cell: (p) => <RelativeTime iso={p.createdAt} /> },
             ]}

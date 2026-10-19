@@ -308,7 +308,7 @@ spec:
             properties:
               argoCDURL:
                 description: |-
-                  ArgoCDURL is the base URL of the Argo CD instance used to build deep
+                  argoCDURL is the base URL of the Argo CD instance used to build deep
                   links on the Servings page. Empty means no links.
                 type: string
                 x-kubernetes-validations:
@@ -317,19 +317,19 @@ spec:
                     'https'])
               auth:
                 description: |-
-                  Auth configures UI/API authentication. The built-in admin account
+                  auth configures UI/API authentication. The built-in admin account
                   (auth.adminUser) and an external OIDC provider (auth.oidc) can be enabled
                   independently; both may be active at once. When Auth is unset, no identity
                   provider is configured and the server runs without authentication.
                 properties:
                   adminUser:
-                    description: AdminUser configures the built-in admin account used
+                    description: adminUser configures the built-in admin account used
                       for UI login.
                     properties:
                       enabled:
                         default: true
                         description: |-
-                          Enabled toggles the admin account. When false, admin login is disabled and
+                          enabled toggles the admin account. When false, admin login is disabled and
                           the server falls back to no authentication unless another identity
                           provider (e.g. OIDC) is configured. Defaults to true.
                         type: boolean
@@ -337,7 +337,7 @@ spec:
                         default:
                           name: kokumi-server-auth
                         description: |-
-                          SecretRef points to the Secret holding the admin credentials. The Secret
+                          secretRef points to the Secret holding the admin credentials. The Secret
                           must reside in the same namespace as the Kitchen. The recognized key is
                           "password-hash" (bcrypt hash); "username" may optionally override the
                           configured username. Defaults to "kokumi-server-auth".
@@ -355,7 +355,7 @@ spec:
                         x-kubernetes-map-type: atomic
                       username:
                         default: admin
-                        description: Username is the login name for the admin account.
+                        description: username is the login name for the admin account.
                           Defaults to "admin".
                         maxLength: 253
                         pattern: ^[^/\s]+$
@@ -363,20 +363,20 @@ spec:
                     type: object
                   oidc:
                     description: |-
-                      OIDC configures an external OpenID Connect identity provider for UI
+                      oidc configures an external OpenID Connect identity provider for UI
                       login. When set, the login page offers an SSO button alongside (or
                       instead of) the admin account, depending on whether AdminUser is also
                       enabled.
                     properties:
                       clientID:
-                        description: ClientID is the OAuth2/OIDC client identifier
+                        description: clientID is the OAuth2/OIDC client identifier
                           registered with the issuer.
                         type: string
                       clientSecretRef:
                         default:
                           name: kokumi-server-oidc
                         description: |-
-                          ClientSecretRef points to the Secret holding the OAuth2 client secret in
+                          clientSecretRef points to the Secret holding the OAuth2 client secret in
                           the "client-secret" key. The Secret must reside in the same namespace as
                           the Kitchen.
                           Defaults to "kokumi-server-oidc".
@@ -395,7 +395,7 @@ spec:
                       emailClaim:
                         default: email
                         description: |-
-                          EmailClaim is the ID-token claim used as the user's email for
+                          emailClaim is the ID-token claim used as the user's email for
                           ServiceAccount identity mapping (kokumi.dev/identity-email). Supports
                           dotted paths for nested claims (e.g. "user.email"). Defaults to "email".
                         maxLength: 253
@@ -403,7 +403,7 @@ spec:
                       groupsClaim:
                         default: groups
                         description: |-
-                          GroupsClaim is the ID-token claim holding the user's group memberships
+                          groupsClaim is the ID-token claim holding the user's group memberships
                           (a list of strings) for ServiceAccount identity mapping
                           (kokumi.dev/identity-groups). Supports dotted paths for nested claims
                           (e.g. "realm_access.roles" for Keycloak). Defaults to "groups".
@@ -411,7 +411,7 @@ spec:
                         type: string
                       issuerURL:
                         description: |-
-                          IssuerURL is the base URL of the OIDC issuer (e.g.
+                          issuerURL is the base URL of the OIDC issuer (e.g.
                           "https://accounts.google.com"). The server discovers the authorization
                           and token endpoints from the issuer's well-known configuration.
                         type: string
@@ -424,16 +424,18 @@ spec:
                         - profile
                         - email
                         description: |-
-                          Scopes is the list of OAuth2 scopes requested at login.
+                          scopes is the list of OAuth2 scopes requested at login.
                           Defaults to ["openid", "profile", "email"].
                         items:
+                          maxLength: 256
                           type: string
                         maxItems: 16
                         type: array
+                        x-kubernetes-list-type: atomic
                       usernameClaim:
                         default: email
                         description: |-
-                          UsernameClaim is the ID-token claim used as the kokumi username.
+                          usernameClaim is the ID-token claim used as the kokumi username.
                           Defaults to "email".
                         maxLength: 253
                         type: string
@@ -445,7 +447,7 @@ spec:
                     default:
                       name: kokumi-server-tokens
                     description: |-
-                      TokenSigningKeySecretRef points to the Secret holding the HMAC signing
+                      tokenSigningKeySecretRef points to the Secret holding the HMAC signing
                       key (key "signing-key") used to sign all session tokens, for both admin
                       and OIDC sessions. The Secret must reside in the same namespace as the
                       Kitchen. When the referenced Secret does not exist, the controller
@@ -512,6 +514,84 @@ spec:
                     type: array
                     x-kubernetes-list-map-keys:
                     - prefix
+                    x-kubernetes-list-type: map
+                type: object
+              scanning:
+                description: |-
+                  scanning enables scanning the images Products vendor for
+                  vulnerabilities. When unset, nothing is scanned. An empty object
+                  scans with the defaults.
+                properties:
+                  dbRepository:
+                    description: |-
+                      dbRepository is the oci:// URL of the Trivy vulnerability database.
+                      A repository is read at tag 2; a URL with a tag or digest pins the
+                      database, so that an update is a reviewed change. Defaults to
+                      oci://mirror.gcr.io/aquasec/trivy-db. Set it to a mirror in
+                      air-gapped clusters.
+                    maxLength: 2048
+                    type: string
+                    x-kubernetes-validations:
+                    - message: must be a valid OCI URL
+                      rule: isURL(self) && url(self).getScheme() == 'oci'
+                  intervalSeconds:
+                    default: 86400
+                    description: |-
+                      intervalSeconds is how often an image that a Preparation in use runs
+                      is scanned again, so that new vulnerabilities show up on what is
+                      already deployed.
+                    format: int32
+                    maximum: 2592000
+                    minimum: 3600
+                    type: integer
+                  javaDBRepository:
+                    description: |-
+                      javaDBRepository is the oci:// URL of the Trivy Java database, which
+                      identifies Java archives. A repository is read at tag 1. It is only
+                      downloaded when an image holds Java archives, and such images cannot
+                      be scanned without it. Defaults to
+                      oci://mirror.gcr.io/aquasec/trivy-java-db.
+                    maxLength: 2048
+                    type: string
+                    x-kubernetes-validations:
+                    - message: must be a valid OCI URL
+                      rule: isURL(self) && url(self).getScheme() == 'oci'
+                  maxDatabaseAgeSeconds:
+                    default: 604800
+                    description: |-
+                      maxDatabaseAgeSeconds is how old the vulnerability database may be.
+                      Scans with an older one still produce reports, but the Product
+                      reports them as DatabaseStale, so that an air-gapped installation
+                      notices a database it forgot to update.
+                    format: int32
+                    minimum: 3600
+                    type: integer
+                  registryRefs:
+                    description: |-
+                      registryRefs lists Registries in the install namespace that connect
+                      to the database repositories, for mirrors that need credentials, a
+                      CA or plain HTTP. The public default and the bundled registry need
+                      none.
+                    items:
+                      description: |-
+                        LocalObjectReference contains enough information to let you locate the
+                        referenced object inside the same namespace.
+                      properties:
+                        name:
+                          default: ""
+                          description: |-
+                            Name of the referent.
+                            This field is effectively required, but due to backwards compatibility is
+                            allowed to be empty. Instances of this type with an empty value here are
+                            almost certainly wrong.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                          type: string
+                      type: object
+                      x-kubernetes-map-type: atomic
+                    maxItems: 16
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
                     x-kubernetes-list-type: map
                 type: object
               signing:
@@ -788,7 +868,9 @@ spec:
                   - set
                   - target
                   type: object
+                maxItems: 128
                 type: array
+                x-kubernetes-list-type: atomic
               patches:
                 description: |-
                   patches are merged over the Product's patches, per target, before
@@ -827,7 +909,9 @@ spec:
                   - set
                   - target
                   type: object
+                maxItems: 128
                 type: array
+                x-kubernetes-list-type: atomic
               productRef:
                 description: |-
                   productRef references the Product in the Order's namespace that this
@@ -879,6 +963,46 @@ spec:
                     required:
                     - allowedGroups
                     - requiredApprovals
+                    type: object
+                  checks:
+                    description: |-
+                      checks configures checks a Preparation must pass before it is served,
+                      in both Automatic and Manual mode. Like approvals, they are copied
+                      into each Preparation when it is created, so a change produces a new
+                      Preparation. They hold new deployments only: a deployed Preparation
+                      that stops passing stays deployed.
+                    properties:
+                      vulnerabilities:
+                        description: |-
+                          vulnerabilities blocks serving a Preparation whose images have
+                          vulnerabilities at or above maxSeverity. It needs scanning enabled in
+                          the Kitchen and the Product's Vendor image policy: Kokumi scans only
+                          the images it vendors.
+                        properties:
+                          ignoreUnfixed:
+                            description: ignoreUnfixed ignores vulnerabilities that
+                              no version fixes yet.
+                            type: boolean
+                          maxAgeSeconds:
+                            description: |-
+                              maxAgeSeconds is how old the scan of every image may be. Defaults to
+                              twice the Kitchen's scanning intervalSeconds.
+                            format: int32
+                            minimum: 3600
+                            type: integer
+                          maxSeverity:
+                            description: |-
+                              maxSeverity is the lowest severity that blocks: High blocks findings
+                              of severity High and Critical.
+                            enum:
+                            - Critical
+                            - High
+                            - Medium
+                            - Low
+                            type: string
+                        required:
+                        - maxSeverity
+                        type: object
                     type: object
                   mode:
                     default: Manual
@@ -1202,6 +1326,44 @@ spec:
                 required:
                 - digest
                 - ociRef
+                type: object
+              checks:
+                description: |-
+                  checks are the promotion checks copied from the Order when this
+                  Preparation was created. The Preparation is only served while it
+                  passes them.
+                properties:
+                  vulnerabilities:
+                    description: |-
+                      vulnerabilities blocks serving a Preparation whose images have
+                      vulnerabilities at or above maxSeverity. It needs scanning enabled in
+                      the Kitchen and the Product's Vendor image policy: Kokumi scans only
+                      the images it vendors.
+                    properties:
+                      ignoreUnfixed:
+                        description: ignoreUnfixed ignores vulnerabilities that no
+                          version fixes yet.
+                        type: boolean
+                      maxAgeSeconds:
+                        description: |-
+                          maxAgeSeconds is how old the scan of every image may be. Defaults to
+                          twice the Kitchen's scanning intervalSeconds.
+                        format: int32
+                        minimum: 3600
+                        type: integer
+                      maxSeverity:
+                        description: |-
+                          maxSeverity is the lowest severity that blocks: High blocks findings
+                          of severity High and Critical.
+                        enum:
+                        - Critical
+                        - High
+                        - Medium
+                        - Low
+                        type: string
+                    required:
+                    - maxSeverity
+                    type: object
                 type: object
               commitMessage:
                 description: |-
@@ -1757,9 +1919,13 @@ spec:
                                 paths lists the allowed JSONPath expressions within the target
                                 (e.g. ".spec.replicas").
                               items:
+                                maxLength: 1024
+                                minLength: 1
                                 type: string
+                              maxItems: 64
                               minItems: 1
                               type: array
+                              x-kubernetes-list-type: set
                             target:
                               description: |-
                                 target identifies the resource that Orders may patch. A target without
@@ -1864,7 +2030,9 @@ spec:
                   - set
                   - target
                   type: object
+                maxItems: 128
                 type: array
+                x-kubernetes-list-type: atomic
               registryRefs:
                 description: |-
                   registryRefs lists Registries in the Product's namespace. Kokumi
@@ -2353,6 +2521,152 @@ spec:
                 - digest
                 - url
                 - version
+                type: object
+              vulnerabilities:
+                description: |-
+                  vulnerabilities summarizes the latest scans of the images the
+                  Product vendors and its Orders' Preparations in use run. The signed
+                  reports are referrers of the vendored images; this summary is for
+                  display. Set while the Kitchen enables scanning and the Product's
+                  image policy is Vendor.
+                properties:
+                  images:
+                    description: |-
+                      images lists the latest scan of each vendored image digest in use.
+                      When more digests are in use, the most recently scanned are listed
+                      and the Scanned condition says how many were left out.
+                    items:
+                      description: ImageScan is the latest scan of one vendored image
+                        digest.
+                      properties:
+                        digest:
+                          description: |-
+                            digest is the digest of the vendored image, an image index or
+                            manifest.
+                          pattern: ^sha256:[a-f0-9]{64}$
+                          type: string
+                        platform:
+                          description: |-
+                            platform is the platform of the image index that was scanned, such
+                            as "linux/amd64". Empty for a single-platform image.
+                          maxLength: 64
+                          type: string
+                        report:
+                          description: |-
+                            report is the digest of the signed vulnerability report, a referrer
+                            of the vendored image.
+                          pattern: ^sha256:[a-f0-9]{64}$
+                          type: string
+                        repository:
+                          description: repository is the oci:// URL of the vendored
+                            image's repository.
+                          maxLength: 2048
+                          type: string
+                        sbom:
+                          description: sbom is the SBOM the scan was computed from.
+                          properties:
+                            digest:
+                              description: |-
+                                digest is the digest of the referrer or attestation manifest holding
+                                the SBOM.
+                              pattern: ^sha256:[a-f0-9]{64}$
+                              type: string
+                            origin:
+                              description: origin says where the SBOM came from.
+                              enum:
+                              - Generated
+                              - Image
+                              - Signed
+                              type: string
+                          required:
+                          - digest
+                          - origin
+                          type: object
+                        scannedTime:
+                          description: scannedTime is when the image was scanned.
+                          format: date-time
+                          type: string
+                        summary:
+                          description: summary counts the findings of the report.
+                          properties:
+                            critical:
+                              description: critical counts the findings of severity
+                                Critical.
+                              format: int32
+                              minimum: 0
+                              type: integer
+                            fixable:
+                              description: fixable counts the findings a newer version
+                                of the package fixes.
+                              format: int32
+                              minimum: 0
+                              type: integer
+                            high:
+                              description: high counts the findings of severity High.
+                              format: int32
+                              minimum: 0
+                              type: integer
+                            low:
+                              description: low counts the findings of severity Low.
+                              format: int32
+                              minimum: 0
+                              type: integer
+                            medium:
+                              description: medium counts the findings of severity
+                                Medium.
+                              format: int32
+                              minimum: 0
+                              type: integer
+                            unknown:
+                              description: unknown counts the findings without a severity.
+                              format: int32
+                              minimum: 0
+                              type: integer
+                          type: object
+                      required:
+                      - digest
+                      - report
+                      - repository
+                      - sbom
+                      - scannedTime
+                      - summary
+                      type: object
+                    maxItems: 512
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - digest
+                    x-kubernetes-list-type: map
+                  scanner:
+                    description: scanner identifies the scanner and the database of
+                      the latest scan.
+                    properties:
+                      database:
+                        description: |-
+                          database is the OCI reference of the vulnerability database, with
+                          its digest.
+                        maxLength: 2048
+                        type: string
+                      databaseUpdatedTime:
+                        description: databaseUpdatedTime is when the vulnerability
+                          database was built.
+                        format: date-time
+                        type: string
+                      name:
+                        description: name is the scanner, "trivy".
+                        maxLength: 63
+                        minLength: 1
+                        type: string
+                      version:
+                        description: version is the version of the scanner.
+                        maxLength: 64
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    - version
+                    type: object
+                required:
+                - scanner
                 type: object
             type: object
         required:
@@ -3010,6 +3324,44 @@ spec:
                   deployed artifact
                 pattern: ^sha256:[a-f0-9]{64}$
                 type: string
+              deployedVulnerabilities:
+                description: |-
+                  deployedVulnerabilities sums the latest scans of the images of the
+                  deployed Preparation. It keeps changing after the deployment, as new
+                  vulnerabilities are published.
+                properties:
+                  critical:
+                    description: critical counts the findings of severity Critical.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  fixable:
+                    description: fixable counts the findings a newer version of the
+                      package fixes.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  high:
+                    description: high counts the findings of severity High.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  low:
+                    description: low counts the findings of severity Low.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  medium:
+                    description: medium counts the findings of severity Medium.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  unknown:
+                    description: unknown counts the findings without a severity.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                type: object
               observedGeneration:
                 description: observedGeneration is the most recent generation observed
                   by the controller
@@ -3075,6 +3427,16 @@ metadata:
     app.kubernetes.io/component: registry
     app.kubernetes.io/name: kokumi
   name: kokumi-registry
+  namespace: kokumi
+---
+apiVersion: v1
+automountServiceAccountToken: false
+kind: ServiceAccount
+metadata:
+  labels:
+    app.kubernetes.io/component: scanner
+    app.kubernetes.io/name: kokumi
+  name: kokumi-scanner
   namespace: kokumi
 ---
 apiVersion: v1
@@ -4371,6 +4733,24 @@ apiVersion: v1
 kind: Service
 metadata:
   labels:
+    app.kubernetes.io/component: scanner
+    app.kubernetes.io/name: kokumi
+  name: kokumi-scanner
+  namespace: kokumi
+spec:
+  ports:
+  - name: http
+    port: 8080
+    protocol: TCP
+    targetPort: http
+  selector:
+    app.kubernetes.io/component: scanner
+    app.kubernetes.io/name: kokumi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
     app.kubernetes.io/component: server
     app.kubernetes.io/name: kokumi
   name: kokumi-server
@@ -4563,6 +4943,117 @@ spec:
       - name: storage
         persistentVolumeClaim:
           claimName: kokumi-registry-pvc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/component: scanner
+    app.kubernetes.io/name: kokumi
+  name: kokumi-scanner
+  namespace: kokumi
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: scanner
+      app.kubernetes.io/name: kokumi
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: scanner
+        app.kubernetes.io/name: kokumi
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - args:
+        - --listen=:8080
+        - --cache-dir=/cache
+        - --trivy=/usr/local/bin/trivy
+        - --max-concurrent=2
+        command:
+        - /kokumi/scanner
+        - serve
+        env:
+        - name: HOME
+          value: /tmp
+        - name: TMPDIR
+          value: /tmp
+        image: ghcr.io/aquasecurity/trivy@sha256:016eae51fdcf989332a5404af7e8f625cd5d95d7c0907a221d080a996f556500
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 20
+        name: scanner
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: http
+          initialDelaySeconds: 2
+          periodSeconds: 10
+        resources:
+          limits:
+            memory: 1Gi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - mountPath: /kokumi
+          name: kokumi
+          readOnly: true
+        - mountPath: /cache
+          name: cache
+        - mountPath: /tmp
+          name: tmp
+      enableServiceLinks: false
+      initContainers:
+      - command:
+        - /scanner
+        - install
+        - /kokumi/scanner
+        image: ghcr.io/kokumi-dev/kokumi:latest
+        imagePullPolicy: IfNotPresent
+        name: install
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - mountPath: /kokumi
+          name: kokumi
+      securityContext:
+        fsGroup: 65534
+        runAsGroup: 65534
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccountName: kokumi-scanner
+      volumes:
+      - emptyDir:
+          sizeLimit: 256Mi
+        name: kokumi
+      - emptyDir:
+          sizeLimit: 16Gi
+        name: cache
+      - emptyDir:
+          sizeLimit: 2Gi
+        name: tmp
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -4824,6 +5315,31 @@ spec:
   policyName: kokumi-status-integrity
   validationActions:
   - Deny
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    app.kubernetes.io/component: scanner
+    app.kubernetes.io/name: kokumi
+  name: kokumi-scanner
+  namespace: kokumi
+spec:
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: kokumi
+          control-plane: controller-manager
+    ports:
+    - port: http
+      protocol: TCP
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: scanner
+      app.kubernetes.io/name: kokumi
+  policyTypes:
+  - Ingress
 ---
 apiVersion: v1
 kind: Namespace

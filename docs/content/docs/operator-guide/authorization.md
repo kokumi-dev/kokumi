@@ -232,6 +232,7 @@ answer.
 | `settings.general:update` | `update` the `kitchens/default` object in the install namespace | Settings, General tab |
 | `settings.auth:update` | `update` the `kitchens/default` object in the install namespace | Settings, Authentication tab |
 | `settings.signing:update` | `update` the `kitchens/default` object in the install namespace | Settings, Signing tab |
+| `settings.scanning:update` | `update` the `kitchens/default` object in the install namespace | Settings, Scanning tab |
 | `orders:create` / `orders:update` / `orders:delete` | `create` / `update` / `delete` `orders` | New, Edit, Delete Order; edits on rendered files |
 | `products:create` / `products:update` / `products:delete` | `create` / `update` / `delete` `products` | New, Edit, Delete Product |
 | `registries:create` / `registries:update` / `registries:delete` | `create` / `patch` / `delete` `registries` | New, Edit, Delete Registry |
@@ -282,6 +283,13 @@ resources**. It can only:
   (each connected user only receives events for resources their mapped
   ServiceAccounts may list). The server never writes kokumi resources with
   its own identity.
+
+## The kokumi-scanner ServiceAccount
+
+The scanner has no Kubernetes identity: its ServiceAccount mounts no token
+and is bound to no role. The controller manager sends it the registry
+credentials of each scan with the request, and signs what it returns. See
+[Vulnerability Scanning](../scanning/#network-isolation).
 
 ## UI and kubectl parity
 

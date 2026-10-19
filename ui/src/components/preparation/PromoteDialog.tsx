@@ -1,6 +1,7 @@
 import { promote } from '../../api/client'
 import type { Preparation } from '../../api/types'
 import ConfirmDialog from '../shared/ConfirmDialog'
+import VulnerabilityGate from '../vulnerability/VulnerabilityGate'
 import { shortDigest } from '../../utils/format'
 
 interface Props {
@@ -23,6 +24,7 @@ export default function PromoteDialog({ preparation: prep, action, onClose }: Pr
     >
       The Serving of Order <strong>{prep.order}</strong> will switch to Preparation{' '}
       <strong>{prep.name}</strong> (digest <code>{shortDigest(prep.artifact.digest)}</code>).
+      {(prep.checks?.vulnerabilities || prep.images?.some((i) => i.vendored)) && <VulnerabilityGate preparation={prep} />}
     </ConfirmDialog>
   )
 }

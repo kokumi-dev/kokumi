@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -97,6 +98,16 @@ func Sign(ctx context.Context, client oci.Client, signer *signing.Signer, subjec
 // statement is reused instead of pushing another one. This keeps retries
 // cheap and survives a crash between the push and recording it.
 func Push(ctx context.Context, client oci.Client, signer *signing.Signer, subject oci.Reference, predicateType string, statement []byte, created time.Time) (string, error) {
+	return PushAnnotated(ctx, client, signer, subject, predicateType, statement, created, nil)
+}
+
+// PushAnnotated is Push with annotations added to the referrer manifest.
+// Annotations are not signed: they only help listings find referrers
+// without fetching them, and the signed statement decides.
+func PushAnnotated(
+	ctx context.Context, client oci.Client, signer *signing.Signer, subject oci.Reference,
+	predicateType string, statement []byte, created time.Time, annotations map[string]string,
+) (string, error) {
 	existing, err := find(ctx, client, signer.TrustSet(), subject, predicateType, func(v *signing.Verification) bool {
 		return bytes.Equal(v.Statement, statement)
 	})
@@ -112,16 +123,20 @@ func Push(ctx context.Context, client oci.Client, signer *signing.Signer, subjec
 		return "", err
 	}
 
+	referrerAnnotations := map[string]string{}
+	maps.Copy(referrerAnnotations, annotations)
+	maps.Copy(referrerAnnotations, map[string]string{
+		ocispec.AnnotationCreated:         created.UTC().Format(time.RFC3339),
+		oci.AnnotationBundleContent:       oci.BundleContentDSSEEnvelope,
+		oci.AnnotationBundlePredicateType: predicateType,
+		oci.AnnotationInTotoPredicateType: predicateType,
+	})
+
 	digest, err := client.PushReferrer(ctx, subject, oci.ReferrerArtifact{
 		ArtifactType: oci.SigstoreBundleMediaType,
 		MediaType:    oci.SigstoreBundleMediaType,
 		Payload:      bundle,
-		Annotations: map[string]string{
-			ocispec.AnnotationCreated:         created.UTC().Format(time.RFC3339),
-			oci.AnnotationBundleContent:       oci.BundleContentDSSEEnvelope,
-			oci.AnnotationBundlePredicateType: predicateType,
-			oci.AnnotationInTotoPredicateType: predicateType,
-		},
+		Annotations:  referrerAnnotations,
 	})
 	if err != nil {
 		return "", fmt.Errorf("pushing attestation for %s: %w", subject, err)
@@ -202,6 +217,19 @@ func find(ctx context.Context, client oci.Client, trust *signing.TrustSet, subje
 	}
 
 	return nil, fmt.Errorf("no %s attestation of %s verified: %w", predicateType, subject, errors.Join(errs...))
+}
+
+// VerifyReferrer fetches the referrer with digest of the manifest at subject
+// and verifies that it is a Sigstore bundle signed by a key in trust over an
+// in-toto statement of predicateType about subject. Callers use it for a
+// referrer they already know, such as the report a status records, or to
+// try referrers whose predicate types vary by version, as SBOMs do.
+func VerifyReferrer(ctx context.Context, client oci.Client, trust *signing.TrustSet, subject oci.Reference, digest, predicateType string) (*Evidence, error) {
+	evidence, err := verifyReferrer(ctx, client, trust, subject, digest, predicateType)
+	if err != nil {
+		return nil, err
+	}
+	return &evidence.Evidence, nil
 }
 
 type verifiedEvidence struct {

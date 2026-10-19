@@ -3,6 +3,8 @@ package server
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/kokumi-dev/kokumi/internal/vulnerability"
 )
 
 // OCISourceDTO is the data-transfer representation of an OCISource.
@@ -137,6 +139,7 @@ type OrderDTO struct {
 	Edits                []PatchDTO          `json:"edits,omitempty"`
 	Mode                 string              `json:"mode"`
 	Approvals            *ApprovalPolicyDTO  `json:"approvals,omitempty"`
+	Checks               *PromotionChecksDTO `json:"checks,omitempty"`
 	State                string              `json:"state"`
 	LatestRevision       string              `json:"latestRevision,omitempty"`
 	ActivePreparation    string              `json:"activePreparation,omitempty"`
@@ -237,6 +240,11 @@ type PreparationDTO struct {
 	Approval *PreparationApprovalDTO `json:"approval,omitempty"`
 	// Images lists the container images the manifests reference.
 	Images []PreparationImageDTO `json:"images,omitempty"`
+	// Version is the version of the source the Preparation was rendered
+	// from, such as a chart version.
+	Version string `json:"version,omitempty"`
+	// Checks are the promotion checks the Preparation was rendered under.
+	Checks *PromotionChecksDTO `json:"checks,omitempty"`
 }
 
 // PreparationImageDTO is a container image a Preparation's manifests
@@ -346,30 +354,32 @@ type ProductSourceArtifactDTO struct {
 
 // CreateOrderRequest is the body for POST /api/v1/orders.
 type CreateOrderRequest struct {
-	Namespace     string             `json:"namespace"`
-	Name          string             `json:"name"`
-	ProductRef    ProductRefDTO      `json:"productRef"`
-	Values        json.RawMessage    `json:"values,omitempty"`
-	Destination   *OCIDestinationDTO `json:"destination,omitempty"`
-	RegistryRefs  []RegistryRefDTO   `json:"registryRefs,omitempty"`
-	Patches       []PatchDTO         `json:"patches,omitempty"`
-	Edits         []PatchDTO         `json:"edits,omitempty"`
-	Mode          string             `json:"mode"`
-	Approvals     *ApprovalPolicyDTO `json:"approvals,omitempty"`
-	CommitMessage *string            `json:"commitMessage,omitempty"`
+	Namespace     string              `json:"namespace"`
+	Name          string              `json:"name"`
+	ProductRef    ProductRefDTO       `json:"productRef"`
+	Values        json.RawMessage     `json:"values,omitempty"`
+	Destination   *OCIDestinationDTO  `json:"destination,omitempty"`
+	RegistryRefs  []RegistryRefDTO    `json:"registryRefs,omitempty"`
+	Patches       []PatchDTO          `json:"patches,omitempty"`
+	Edits         []PatchDTO          `json:"edits,omitempty"`
+	Mode          string              `json:"mode"`
+	Approvals     *ApprovalPolicyDTO  `json:"approvals,omitempty"`
+	Checks        *PromotionChecksDTO `json:"checks,omitempty"`
+	CommitMessage *string             `json:"commitMessage,omitempty"`
 }
 
 // UpdateOrderRequest is the body for PUT /api/v1/orders/{namespace}/{name}.
 // The Product of an Order cannot be changed.
 type UpdateOrderRequest struct {
-	Values        json.RawMessage    `json:"values,omitempty"`
-	Destination   *OCIDestinationDTO `json:"destination,omitempty"`
-	RegistryRefs  []RegistryRefDTO   `json:"registryRefs,omitempty"`
-	Patches       []PatchDTO         `json:"patches,omitempty"`
-	Edits         []PatchDTO         `json:"edits,omitempty"`
-	Mode          string             `json:"mode"`
-	Approvals     *ApprovalPolicyDTO `json:"approvals,omitempty"`
-	CommitMessage *string            `json:"commitMessage,omitempty"`
+	Values        json.RawMessage     `json:"values,omitempty"`
+	Destination   *OCIDestinationDTO  `json:"destination,omitempty"`
+	RegistryRefs  []RegistryRefDTO    `json:"registryRefs,omitempty"`
+	Patches       []PatchDTO          `json:"patches,omitempty"`
+	Edits         []PatchDTO          `json:"edits,omitempty"`
+	Mode          string              `json:"mode"`
+	Approvals     *ApprovalPolicyDTO  `json:"approvals,omitempty"`
+	Checks        *PromotionChecksDTO `json:"checks,omitempty"`
+	CommitMessage *string             `json:"commitMessage,omitempty"`
 }
 
 // PromoteRequest is the body for POST /api/v1/orders/{namespace}/{name}/promote.
@@ -379,16 +389,19 @@ type PromoteRequest struct {
 
 // ServingDTO is the enriched view of a Serving served to the UI.
 type ServingDTO struct {
-	Name                string         `json:"name"`
-	Namespace           string         `json:"namespace"`
-	Order               string         `json:"order"`
-	DesiredPreparation  string         `json:"desiredPreparation,omitempty"`
-	TargetPreparation   string         `json:"targetPreparation,omitempty"`
-	ObservedPreparation string         `json:"observedPreparation,omitempty"`
-	DeployedDigest      string         `json:"deployedDigest,omitempty"`
-	State               string         `json:"state"`
-	Conditions          []ConditionDTO `json:"conditions,omitempty"`
-	CreatedAt           *time.Time     `json:"createdAt,omitempty"`
+	Name                string `json:"name"`
+	Namespace           string `json:"namespace"`
+	Order               string `json:"order"`
+	DesiredPreparation  string `json:"desiredPreparation,omitempty"`
+	TargetPreparation   string `json:"targetPreparation,omitempty"`
+	ObservedPreparation string `json:"observedPreparation,omitempty"`
+	DeployedDigest      string `json:"deployedDigest,omitempty"`
+	// DeployedVulnerabilities sums the latest scans of the deployed
+	// Preparation's images.
+	DeployedVulnerabilities *VulnerabilitySummaryDTO `json:"deployedVulnerabilities,omitempty"`
+	State                   string                   `json:"state"`
+	Conditions              []ConditionDTO           `json:"conditions,omitempty"`
+	CreatedAt               *time.Time               `json:"createdAt,omitempty"`
 }
 
 // --- Product DTOs ---
@@ -462,9 +475,12 @@ type ProductDTO struct {
 	// ResolvedSource is status.source; absent until the Product is resolved.
 	ResolvedSource *ProductSourceStatusDTO `json:"resolvedSource,omitempty"`
 	RegistryAccess []RegistryAccessDTO     `json:"registryAccess,omitempty"`
-	State          string                  `json:"state,omitempty"`
-	Conditions     []ConditionDTO          `json:"conditions,omitempty"`
-	CreatedAt      *time.Time              `json:"createdAt,omitempty"`
+	// Vulnerabilities is status.vulnerabilities: the latest scan of each
+	// vendored image in use, without the findings.
+	Vulnerabilities *ProductVulnerabilitiesDTO `json:"vulnerabilities,omitempty"`
+	State           string                     `json:"state,omitempty"`
+	Conditions      []ConditionDTO             `json:"conditions,omitempty"`
+	CreatedAt       *time.Time                 `json:"createdAt,omitempty"`
 	// DeletionTimestamp is set while a deleted Product waits for its Orders
 	// to be deleted.
 	DeletionTimestamp *time.Time `json:"deletionTimestamp,omitempty"`
@@ -578,4 +594,143 @@ type ChartInfoDTO struct {
 	Readme string `json:"readme,omitempty"`
 	// HasSchema reports whether the chart ships a values JSON schema.
 	HasSchema bool `json:"hasSchema,omitempty"`
+}
+
+// --- Vulnerability DTOs ---
+
+// PromotionChecksDTO is the data-transfer representation of PromotionChecks.
+type PromotionChecksDTO struct {
+	Vulnerabilities *VulnerabilityCheckDTO `json:"vulnerabilities,omitempty"`
+}
+
+// VulnerabilityCheckDTO is the data-transfer representation of a
+// VulnerabilityCheck.
+type VulnerabilityCheckDTO struct {
+	MaxSeverity   string `json:"maxSeverity"`
+	IgnoreUnfixed bool   `json:"ignoreUnfixed,omitempty"`
+	MaxAgeSeconds int32  `json:"maxAgeSeconds,omitempty"`
+}
+
+// VulnerabilitySummaryDTO counts vulnerability findings by severity.
+type VulnerabilitySummaryDTO struct {
+	Critical int32 `json:"critical"`
+	High     int32 `json:"high"`
+	Medium   int32 `json:"medium"`
+	Low      int32 `json:"low"`
+	Unknown  int32 `json:"unknown"`
+	Fixable  int32 `json:"fixable"`
+}
+
+// VulnerabilityScannerDTO identifies the scanner and the database of a scan.
+type VulnerabilityScannerDTO struct {
+	Name                string     `json:"name"`
+	Version             string     `json:"version"`
+	Database            string     `json:"database,omitempty"`
+	DatabaseUpdatedTime *time.Time `json:"databaseUpdatedTime,omitempty"`
+}
+
+// ImageScanDTO is the latest scan of one vendored image digest.
+type ImageScanDTO struct {
+	Digest      string                  `json:"digest"`
+	Repository  string                  `json:"repository"`
+	Platform    string                  `json:"platform,omitempty"`
+	ScannedTime time.Time               `json:"scannedTime"`
+	SBOMDigest  string                  `json:"sbomDigest"`
+	SBOMOrigin  string                  `json:"sbomOrigin"`
+	Report      string                  `json:"report"`
+	Summary     VulnerabilitySummaryDTO `json:"summary"`
+}
+
+// ProductVulnerabilitiesDTO is a Product's status.vulnerabilities.
+type ProductVulnerabilitiesDTO struct {
+	Scanner VulnerabilityScannerDTO `json:"scanner"`
+	Images  []ImageScanDTO          `json:"images,omitempty"`
+}
+
+// ImageUseDTO is an Order whose Preparations run an image.
+type ImageUseDTO struct {
+	Order string `json:"order"`
+	// Preparations are the Order's Preparations that run the image, newest
+	// first.
+	Preparations []string `json:"preparations"`
+	// Deployed is set when the Order's Serving deploys one of them.
+	Deployed bool `json:"deployed,omitempty"`
+}
+
+// ImageReportDTO is the scan of one image with the findings of its signed
+// report, read from the registry and verified.
+type ImageReportDTO struct {
+	ImageScanDTO
+	// Refs are the references the manifests name the image by, such as
+	// ghcr.io/stefanprodan/podinfo:6.14.1. Set by the Product endpoint.
+	Refs []string `json:"refs,omitempty"`
+	// UsedBy lists the Orders whose Preparations run the image. Set by the
+	// Product endpoint.
+	UsedBy []ImageUseDTO `json:"usedBy,omitempty"`
+	// Findings are the findings of the verified report.
+	Findings []vulnerability.Finding `json:"findings,omitempty"`
+	// Error says why the report could not be read or did not verify. The
+	// findings are empty then.
+	Error string `json:"error,omitempty"`
+}
+
+// ProductVulnerabilityReportDTO is the body of
+// GET /api/v1/products/{namespace}/{name}/vulnerabilities.
+type ProductVulnerabilityReportDTO struct {
+	// Scanner is absent until the Product's images were scanned.
+	Scanner *VulnerabilityScannerDTO `json:"scanner,omitempty"`
+	Images  []ImageReportDTO         `json:"images,omitempty"`
+}
+
+// PreparationImageReportDTO is one image of a Preparation with the scan of
+// its vendored digest.
+type PreparationImageReportDTO struct {
+	PreparationImageDTO
+	// Scan is the scan of the image, absent when there is none.
+	Scan *ImageReportDTO `json:"scan,omitempty"`
+	// Missing says why there is no scan: the image is not vendored, or not
+	// scanned yet.
+	Missing string `json:"missing,omitempty"`
+	// Blocking counts the findings the Preparation's check blocks on.
+	Blocking int `json:"blocking"`
+}
+
+// PreparationVulnerabilityReportDTO is the body of
+// GET /api/v1/preparations/{namespace}/{name}/vulnerabilities.
+type PreparationVulnerabilityReportDTO struct {
+	// Product is the Product whose scans the images are joined with.
+	Product string `json:"product,omitempty"`
+	// Check is the vulnerability check the Preparation was rendered under.
+	Check   *VulnerabilityCheckDTO      `json:"check,omitempty"`
+	Scanner *VulnerabilityScannerDTO    `json:"scanner,omitempty"`
+	Images  []PreparationImageReportDTO `json:"images,omitempty"`
+	// Comparison compares the findings with those of the Preparation the
+	// Order's Serving deploys, absent when it deploys none or this one.
+	Comparison *VulnerabilityComparisonDTO `json:"comparison,omitempty"`
+}
+
+// VulnerabilityComparisonDTO compares the findings of a Preparation with
+// those of the Preparation its Order's Serving deploys.
+type VulnerabilityComparisonDTO struct {
+	// Preparation is the deployed Preparation.
+	Preparation string `json:"preparation"`
+	// Version is the version of the source it was rendered from.
+	Version string `json:"version,omitempty"`
+	// Added lists the findings the Preparation has and the deployed one
+	// lacks: what promoting it adds.
+	Added []ComparedFindingDTO `json:"added,omitempty"`
+	// Removed lists the findings the deployed Preparation has and this one
+	// lacks: what promoting it fixes.
+	Removed []ComparedFindingDTO `json:"removed,omitempty"`
+	// Incomplete lists, as "<preparation>: <image>", the images of either
+	// Preparation without a verified scan, whose findings the comparison
+	// misses.
+	Incomplete []string `json:"incomplete,omitempty"`
+}
+
+// ComparedFindingDTO is a finding one Preparation has and the other lacks.
+type ComparedFindingDTO struct {
+	vulnerability.Finding
+	// Image is the image of the Preparation that has it.
+	Image string `json:"image"`
 }

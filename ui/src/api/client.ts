@@ -1,5 +1,5 @@
 import { authHeaders, refresh } from './auth'
-import type { Order, Preparation, OrderFormData, OrderPreviewRequest, Product, ProductFormData, ProductPreviewRequest, Patch, Render, ChartInfo, Registry, RegistryFormData, Repository, RepositoryFormData, ArtifactInfo, ArtifactFile, Approval, ApprovalDecision, ArtifactConfig, ArtifactGraph, ProductSourceArtifact } from './types'
+import type { Order, Preparation, OrderFormData, OrderPreviewRequest, Product, ProductFormData, ProductPreviewRequest, Patch, Render, ChartInfo, Registry, RegistryFormData, Repository, RepositoryFormData, ArtifactInfo, ArtifactFile, Approval, ApprovalDecision, ArtifactConfig, ArtifactGraph, ProductSourceArtifact, ProductVulnerabilityReport, PreparationVulnerabilityReport, RegistryRef } from './types'
 
 // All API calls are relative so they work both in dev (proxied by Vite) and
 // in production (served from the same Go binary).
@@ -16,38 +16,58 @@ async function handleUnauthorized(status: number): Promise<boolean> {
   return refresh()
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+/** Sends a request with the access token and returns the successful response, or throws the server's error. */
+async function send(path: string, init?: RequestInit): Promise<Response> {
   const res = await fetch(`${BASE}${path}`, {
     headers: { 'Content-Type': 'application/json', ...authHeaders(), ...init?.headers },
     ...init,
   })
+  if (res.ok) return res
 
-  if (!res.ok) {
-    const recovered = await handleUnauthorized(res.status)
-    if (recovered) {
-      // Retry once with the freshly issued access token.
-      const retry = await fetch(`${BASE}${path}`, {
-        headers: { 'Content-Type': 'application/json', ...authHeaders(), ...init?.headers },
-        ...init,
-      })
-      if (retry.ok) {
-        if (retry.status === 204) return undefined as T
-        return retry.json() as Promise<T>
-      }
-    }
-    let message = `HTTP ${res.status}`
-    try {
-      const body = (await res.json()) as { error?: string }
-      if (body.error) message = body.error
-    } catch {
-      // ignore parse errors
-    }
-    throw new Error(message)
+  const recovered = await handleUnauthorized(res.status)
+  if (recovered) {
+    // Retry once with the freshly issued access token.
+    const retry = await fetch(`${BASE}${path}`, {
+      headers: { 'Content-Type': 'application/json', ...authHeaders(), ...init?.headers },
+      ...init,
+    })
+    if (retry.ok) return retry
   }
+  let message = `HTTP ${res.status}`
+  try {
+    const body = (await res.json()) as { error?: string }
+    if (body.error) message = body.error
+  } catch {
+    // ignore parse errors
+  }
+  throw new Error(message)
+}
 
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await send(path, init)
   // 204 No Content has no body.
   if (res.status === 204) return undefined as T
   return res.json() as Promise<T>
+}
+
+/** A file the server sends as an attachment. */
+export interface Download {
+  blob: Blob
+  filename: string
+}
+
+/** The filename a Content-Disposition header names, if any. */
+function attachmentFilename(disposition: string | null): string | undefined {
+  return disposition?.match(/filename="?([^";]+)"?/)?.[1]
+}
+
+/**
+ * Fetches an attachment as a blob. It goes through the request helper like
+ * any other call, because a plain link cannot send the access token.
+ */
+async function download(path: string, fallbackName: string): Promise<Download> {
+  const res = await send(path)
+  return { blob: await res.blob(), filename: attachmentFilename(res.headers.get('Content-Disposition')) ?? fallbackName }
 }
 
 // ── Orders ────────────────────────────────────────────────────────────────────
@@ -79,12 +99,16 @@ export function createOrder(data: OrderFormData, commitMessage?: string): Promis
       patches: data.patches,
       mode: data.mode,
       approvals: data.approvals,
+      checks: data.checks,
       commitMessage: commitMessage ?? '',
     }),
   })
 }
 
-/** Replaces the spec of an Order. Its Product cannot be changed. */
+/**
+ * Replaces the spec of an Order. Its Product cannot be changed. The
+ * promotion is replaced as a whole, so checks left out are removed.
+ */
 export function updateOrder(
   namespace: string,
   name: string,
@@ -101,6 +125,7 @@ export function updateOrder(
       edits: data.edits,
       mode: data.mode,
       approvals: data.approvals,
+      checks: data.checks,
       commitMessage: commitMessage ?? '',
     }),
   })
@@ -213,6 +238,30 @@ export function getRepositoryArtifact(namespace: string, name: string, tag: stri
 /** Returns the config blob of a Preparation's artifact. */
 export function getIntent(namespace: string, prepName: string): Promise<ArtifactConfig> {
   return request<ArtifactConfig>(`/preparations/${namespace}/${prepName}/intent`)
+}
+
+// ── Vulnerabilities ───────────────────────────────────────────────────────────
+
+/** Returns the latest scans of a Product's vendored images with the findings of their verified reports. */
+export function getProductVulnerabilities(namespace: string, name: string): Promise<ProductVulnerabilityReport> {
+  return request<ProductVulnerabilityReport>(`/products/${namespace}/${name}/vulnerabilities`)
+}
+
+/**
+ * Returns the images of a Preparation with the scans of their vendored
+ * digests and what its check blocks on, compared with the Preparation its
+ * Order's Serving deploys.
+ */
+export function getPreparationVulnerabilities(namespace: string, prepName: string): Promise<PreparationVulnerabilityReport> {
+  return request<PreparationVulnerabilityReport>(`/preparations/${namespace}/${prepName}/vulnerabilities`)
+}
+
+/** Downloads the SBOM the latest scan of a vendored image digest of a Product was computed from. */
+export function downloadSBOM(namespace: string, name: string, digest: string): Promise<Download> {
+  return download(
+    `/products/${namespace}/${name}/sbom?image=${encodeURIComponent(digest)}`,
+    `${name}-${digest.replace('sha256:', '').slice(0, 12)}.sbom.json`,
+  )
 }
 
 // ── Approvals ─────────────────────────────────────────────────────────────────
@@ -415,11 +464,41 @@ export interface ImagesSettings {
   mirrors: ImageMirror[]
 }
 
+/**
+ * Vulnerability scanning of the images Products vendor. Disabled while the
+ * Kitchen has no spec.scanning; fields left out take the defaults.
+ */
+export interface ScanningSettings {
+  enabled: boolean
+  /** How often an image in use is scanned again. */
+  intervalSeconds?: number
+  /** How old the vulnerability database may be before scans report DatabaseStale. */
+  maxDatabaseAgeSeconds?: number
+  /** oci:// URL of the Trivy vulnerability database; a digest pins it. */
+  dbRepository?: string
+  /** oci:// URL of the Trivy Java database. */
+  javaDBRepository?: string
+  /** Registries of the install namespace that connect to the database repositories. */
+  registryRefs?: RegistryRef[]
+}
+
+/** What the fields of ScanningSettings default to. */
+export interface ScanningDefaults {
+  intervalSeconds: number
+  maxDatabaseAgeSeconds: number
+  dbRepository: string
+  javaDBRepository: string
+}
+
 export interface Settings {
+  /** The install namespace, which holds the Kitchen and the Registries scanning may use. */
+  namespace: string
   argoCDURL: string
   auth?: AuthSettings
   signing: SigningSettings
   images: ImagesSettings
+  scanning: ScanningSettings
+  scanningDefaults: ScanningDefaults
 }
 
 export function getSettings(): Promise<Settings> {
@@ -447,6 +526,14 @@ export function saveImagesSettings(images: ImagesSettings): Promise<Settings> {
   return request<Settings>('/settings', {
     method: 'PUT',
     body: JSON.stringify({ images }),
+  })
+}
+
+// saveScanningSettings replaces the whole scanning subtree; disabled removes it.
+export function saveScanningSettings(scanning: ScanningSettings): Promise<Settings> {
+  return request<Settings>('/settings', {
+    method: 'PUT',
+    body: JSON.stringify({ scanning }),
   })
 }
 

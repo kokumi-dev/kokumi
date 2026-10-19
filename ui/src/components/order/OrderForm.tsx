@@ -10,8 +10,8 @@ import RegistryRefsEditor from '../shared/RegistryRefsEditor'
 import HelmValuesEditor from '../shared/HelmValuesEditor'
 import PatchesEditor from '../shared/PatchesEditor'
 import DiffTab from './DiffTab'
-import type { Order, OrderFormData, OrderPreviewRequest, OverridePolicy, Product } from '../../api/types'
-import { emptyOrderForm, orderToFormData } from '../../api/types'
+import type { Order, OrderFormData, OrderPreviewRequest, OverridePolicy, Product, Severity, VulnerabilityCheck } from '../../api/types'
+import { emptyOrderForm, imagePolicy, orderToFormData, severities } from '../../api/types'
 import { previewOrder } from '../../api/client'
 import { useChartInfo } from '../../hooks/useChartInfo'
 import { assertKnownKeys, patchesFromYaml, patchesToYaml, registryRefsFromYaml } from '../../utils/yaml'
@@ -54,6 +54,49 @@ function hasValues(values: Record<string, unknown>): boolean {
   return Object.keys(values).length > 0
 }
 
+/** The lowest maxAgeSeconds of a vulnerability check: an hour. */
+const minScanAgeSeconds = 3600
+
+/** A vulnerability check without its unset fields, as written in YAML and compared for changes. */
+function normalizedCheck(c: VulnerabilityCheck): VulnerabilityCheck {
+  return {
+    maxSeverity: c.maxSeverity,
+    ...(c.ignoreUnfixed ? { ignoreUnfixed: true } : {}),
+    ...(c.maxAgeSeconds !== undefined ? { maxAgeSeconds: c.maxAgeSeconds } : {}),
+  }
+}
+
+function vulnerabilityCheckFromYaml(raw: Record<string, unknown>): VulnerabilityCheck {
+  const path = 'promotion.checks.vulnerabilities'
+  if (!severities.includes(raw.maxSeverity as Severity)) {
+    throw new Error(`${path}.maxSeverity must be one of ${severities.join(', ')}`)
+  }
+  if (raw.ignoreUnfixed !== undefined && typeof raw.ignoreUnfixed !== 'boolean') {
+    throw new Error(`${path}.ignoreUnfixed must be true or false`)
+  }
+  const age = raw.maxAgeSeconds
+  if (age !== undefined && (typeof age !== 'number' || !Number.isInteger(age) || age < minScanAgeSeconds)) {
+    throw new Error(`${path}.maxAgeSeconds must be an integer of at least ${minScanAgeSeconds}`)
+  }
+  return normalizedCheck({
+    maxSeverity: raw.maxSeverity as Severity,
+    ignoreUnfixed: raw.ignoreUnfixed as boolean | undefined,
+    maxAgeSeconds: age as number | undefined,
+  })
+}
+
+/** A max scan age in hours as the form shows it; empty for the default. */
+function scanAgeText(seconds?: number): string {
+  return seconds === undefined ? '' : String(Math.round((seconds / 3600) * 100) / 100)
+}
+
+/** The max scan age typed in hours, in seconds: undefined when empty, 0 when it is not a positive number. */
+function scanAgeSeconds(text: string): number | undefined {
+  if (!text.trim()) return undefined
+  const hours = Number(text)
+  return Number.isFinite(hours) && hours > 0 ? Math.round(hours * 3600) : 0
+}
+
 /**
  * The YAML view of the Order spec. Values are left out only when the Product
  * is known not to render with Helm (helm is false, not undefined).
@@ -66,7 +109,10 @@ function formToYaml(data: OrderFormData, helm: boolean | undefined): string {
   if (data.patches.length > 0) doc.patches = patchesToYaml(data.patches)
   if (data.destination?.url) doc.destination = { url: data.destination.url }
   if (data.registryRefs.length > 0) doc.registryRefs = data.registryRefs.map((r) => ({ name: r.name }))
-  doc.promotion = data.approvals ? { mode: data.mode, approvals: data.approvals } : { mode: data.mode }
+  const promotion: Record<string, unknown> = { mode: data.mode }
+  if (data.approvals) promotion.approvals = data.approvals
+  if (data.checks?.vulnerabilities) promotion.checks = { vulnerabilities: normalizedCheck(data.checks.vulnerabilities) }
+  doc.promotion = promotion
   return dump(doc, { lineWidth: 100 })
 }
 
@@ -103,8 +149,12 @@ function yamlToPartialForm(text: string, ctx: ParseContext): Omit<OrderFormData,
 
   const promotion = doc.promotion as Record<string, unknown> | undefined
   const rawApprovals = promotion?.approvals as Record<string, unknown> | undefined
-  assertKnownKeys(promotion, ['mode', 'approvals'], 'promotion')
+  const rawChecks = promotion?.checks as Record<string, unknown> | undefined
+  const rawVulnerabilities = rawChecks?.vulnerabilities as Record<string, unknown> | undefined
+  assertKnownKeys(promotion, ['mode', 'approvals', 'checks'], 'promotion')
   assertKnownKeys(rawApprovals, ['requiredApprovals', 'allowedGroups'], 'promotion.approvals')
+  assertKnownKeys(rawChecks, ['vulnerabilities'], 'promotion.checks')
+  assertKnownKeys(rawVulnerabilities, ['maxSeverity', 'ignoreUnfixed', 'maxAgeSeconds'], 'promotion.checks.vulnerabilities')
   if (promotion?.mode !== undefined && promotion.mode !== 'Manual' && promotion.mode !== 'Automatic') {
     throw new Error('promotion.mode must be Manual or Automatic')
   }
@@ -129,6 +179,7 @@ function yamlToPartialForm(text: string, ctx: ParseContext): Omit<OrderFormData,
             : [],
         }
       : undefined,
+    checks: rawVulnerabilities ? { vulnerabilities: vulnerabilityCheckFromYaml(rawVulnerabilities) } : undefined,
     patches: patchesFromYaml(doc.patches),
   }
 }
@@ -229,6 +280,8 @@ export default function OrderForm({ order, initialProduct, products, onCancel, o
       }
     }
     if (!data.productRef.name) throw new Error('Pick the Product this Order is a variant of')
+    const scanAge = data.checks?.vulnerabilities?.maxAgeSeconds
+    if (scanAge !== undefined && scanAge < minScanAgeSeconds) throw new Error('The max scan age must be at least 1 hour')
     const deleting = deletingReason(data)
     if (deleting) throw new Error(deleting)
     await onSubmit(sendable(data), commitMessage)
@@ -327,6 +380,14 @@ function FormView({ formData, isEdit, product, products, deletingReason, onField
   const [isDestOpen, setIsDestOpen] = useState(!!formData.destination?.url || formData.registryRefs.length > 0)
   const [isPatchesOpen, setIsPatchesOpen] = useState(formData.patches.length > 0)
   const [groupsText, setGroupsText] = useState(formData.approvals?.allowedGroups.join(', ') ?? '')
+  const [maxAgeText, setMaxAgeText] = useState(scanAgeText(formData.checks?.vulnerabilities?.maxAgeSeconds))
+  const check = formData.checks?.vulnerabilities
+  const maxAgeInvalid = check?.maxAgeSeconds !== undefined && check.maxAgeSeconds < minScanAgeSeconds
+  const productPolicy = product && imagePolicy(product.images?.policy)
+
+  function setCheck(next?: VulnerabilityCheck) {
+    onFieldChange('checks', next ? { vulnerabilities: normalizedCheck(next) } : undefined)
+  }
 
   const helm = !!product?.render?.helm
   const chart = useChartInfo(helm ? product?.resolvedSource : undefined, formData.namespace, product?.registryRefs)
@@ -524,6 +585,73 @@ function FormView({ formData, isEdit, product, products, deletingReason, onField
             />
           </div>
         </div>
+      )}
+
+      {/* Vulnerability check */}
+      <label className={styles.checkRow}>
+        <input
+          type="checkbox"
+          checked={!!check}
+          onChange={(e) => {
+            setCheck(e.target.checked ? { maxSeverity: 'High' } : undefined)
+            setMaxAgeText('')
+          }}
+        />
+        Vulnerability check — block promotion while the images have findings at or above a severity
+      </label>
+      {check && (
+        <>
+          <div className={styles.row2}>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="check-max-severity">Max severity</label>
+              <select
+                id="check-max-severity"
+                className={styles.input}
+                value={check.maxSeverity}
+                onChange={(e) => setCheck({ ...check, maxSeverity: e.target.value as Severity })}
+              >
+                {severities.map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+              <span className={styles.hint}>Findings of this severity or higher block; Unknown never does.</span>
+            </div>
+            <div className={styles.fieldGroup}>
+              <label className={styles.label} htmlFor="check-max-age">Max scan age (hours)</label>
+              <input
+                id="check-max-age"
+                className={styles.input}
+                type="number"
+                min={1}
+                step="any"
+                value={maxAgeText}
+                onChange={(e) => {
+                  setMaxAgeText(e.target.value)
+                  setCheck({ ...check, maxAgeSeconds: scanAgeSeconds(e.target.value) })
+                }}
+                placeholder="Twice the scanning interval"
+              />
+              {maxAgeInvalid ? (
+                <span className={styles.fieldError}>At least 1 hour.</span>
+              ) : (
+                <span className={styles.hint}>Optional; older scans hold promotion like a missing one.</span>
+              )}
+            </div>
+          </div>
+          <label className={styles.checkRow}>
+            <input
+              type="checkbox"
+              checked={!!check.ignoreUnfixed}
+              onChange={(e) => setCheck({ ...check, ignoreUnfixed: e.target.checked })}
+            />
+            Ignore unfixed — findings that no version fixes yet do not block
+          </label>
+          <span className={styles.hint}>
+            Kokumi scans only the images it vendors, so the check needs the Product's Vendor image policy and scanning
+            enabled in the Kitchen. An image that is not vendored counts as scan missing and holds promotion too.
+            {productPolicy && productPolicy !== 'Vendor' && ` This Product's image policy is ${productPolicy}, so none of its images are scanned.`}
+          </span>
+        </>
       )}
 
       {/* Patches (collapsible) */}

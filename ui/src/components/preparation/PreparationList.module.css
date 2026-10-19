@@ -6,7 +6,8 @@
 
 .row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 110px 110px;
+  /* Info, version, findings, status, actions. */
+  grid-template-columns: minmax(0, 1fr) 100px 145px 110px 110px;
   gap: 16px;
   align-items: center;
   padding: 12px 0;
@@ -31,6 +32,18 @@
   row-gap: 2px;
   font-size: 0.78rem;
   color: var(--color-text-muted-light);
+}
+
+.version {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.findings {
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: 0.8rem;
 }
 
 .actions {

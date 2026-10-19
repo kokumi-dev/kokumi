@@ -61,6 +61,8 @@ type IntentImages struct {
 type IntentPromotion struct {
 	// Approvals is the approval policy the artifact is rendered under.
 	Approvals *deliveryv1alpha1.ApprovalPolicy `json:"approvals,omitempty"`
+	// Checks are the promotion checks the artifact is rendered under.
+	Checks *deliveryv1alpha1.PromotionChecks `json:"checks,omitempty"`
 }
 
 // NewIntent builds the Intent of order from its effective spec and its
@@ -78,8 +80,8 @@ func NewIntent(order *deliveryv1alpha1.Order, effective *EffectiveSpec, destinat
 		intent.Images = &IntentImages{Policy: policy, FieldSpecs: effective.Images.FieldSpecs, Vendor: effective.ImagesVendorURL}
 	}
 
-	if policy := order.ApprovalPolicy(); policy != nil {
-		intent.Promotion = &IntentPromotion{Approvals: policy}
+	if approvals, checks := order.ApprovalPolicy(), order.PromotionChecks(); approvals != nil || checks != nil {
+		intent.Promotion = &IntentPromotion{Approvals: approvals, Checks: checks}
 	}
 
 	return intent

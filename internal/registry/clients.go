@@ -102,6 +102,8 @@ func (c *Clients) Connect(entry Entry) (Connection, error) {
 		if err != nil {
 			return Connection{}, &Error{Reason: deliveryv1alpha1.ReasonCertificateInvalid, Err: fmt.Errorf("secret %q: %w", ref.Name, err)}
 		}
+		conn.CertificateAuthority = secret.Data[keyCACert]
+		conn.ClientCertificate, conn.ClientKey = secret.Data[keyClientCert], secret.Data[keyClientKey]
 		version += "/" + secret.ResourceVersion
 	}
 

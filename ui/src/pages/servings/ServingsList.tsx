@@ -10,6 +10,7 @@ import FilterInput from '../../components/layout/FilterInput'
 import NameCell from '../../components/layout/NameCell'
 import StatusIndicator from '../../components/shared/StatusIndicator'
 import RelativeTime from '../../components/shared/RelativeTime'
+import SeverityBadge from '../../components/vulnerability/SeverityBadge'
 import { paths } from '../../routes/paths'
 import layout from '../../components/layout/layout.module.css'
 
@@ -46,7 +47,7 @@ export default function ServingsList() {
             columns={[
               {
                 header: 'Name',
-                width: '24%',
+                width: '20%',
                 cell: (s) => <NameCell to={paths.serving(s.namespace, s.name)} name={s.name} secondary={s.namespace} />,
               },
               { header: 'Status', width: '130px', cell: (s) => <StatusIndicator state={s.state} /> },
@@ -58,7 +59,7 @@ export default function ServingsList() {
               },
               {
                 header: 'Deployed',
-                width: '26%',
+                width: '18%',
                 truncate: true,
                 title: (s) => s.observedPreparation,
                 cell: (s) =>
@@ -76,6 +77,11 @@ export default function ServingsList() {
                 title: (s) => s.targetPreparation || s.desiredPreparation,
                 truncate: true,
                 cell: syncLabel,
+              },
+              {
+                header: 'Findings',
+                width: '120px',
+                cell: (s) => s.deployedVulnerabilities && <SeverityBadge summary={s.deployedVulnerabilities} />,
               },
               { header: 'Created', width: '110px', cell: (s) => <RelativeTime iso={s.createdAt} /> },
             ]}

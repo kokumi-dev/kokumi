@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
-import type { Preparation, PromotionMode } from '../../api/types'
+import type { Preparation, Product, PromotionMode } from '../../api/types'
 import StatusIndicator from '../shared/StatusIndicator'
 import RelativeTime from '../shared/RelativeTime'
+import PreparationFindings from '../vulnerability/PreparationFindings'
 import { Button, PromoteIcon, RollbackIcon } from '../ui'
 import PromoteDialog from './PromoteDialog'
 import { paths } from '../../routes/paths'
@@ -17,13 +18,15 @@ interface Props {
   preparations: Preparation[]
   /** Promotion mode of the Order; Automatic Orders cannot be promoted manually. */
   mode: PromotionMode
+  /** The Order's Product, whose scans give each Preparation's findings. */
+  product?: Product
 }
 
 /**
  * PreparationList renders the history of an Order like a commit log. Each row
  * links to the Preparation and offers promote/rollback for Manual Orders.
  */
-export default function PreparationList({ preparations, mode }: Props) {
+export default function PreparationList({ preparations, mode, product }: Props) {
   const [promoting, setPromoting] = useState<{ prep: Preparation; action: 'Promote' | 'Rollback' } | null>(null)
   const promoteDenied = useDeniedReason('preparations:promote')
   const active = preparations.find((p) => p.isActive)
@@ -71,6 +74,14 @@ export default function PreparationList({ preparations, mode }: Props) {
                     </a>
                   )}
                 </div>
+              </div>
+
+              <span className={`${styles.version} ${layout.mono}`} title={prep.version && `Rendered from version ${prep.version}`}>
+                {prep.version}
+              </span>
+
+              <div className={styles.findings}>
+                <PreparationFindings preparation={prep} product={product} />
               </div>
 
               <StatusIndicator state={prep.state} />

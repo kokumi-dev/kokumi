@@ -212,6 +212,46 @@ spec:
                     - allowedGroups
                     - requiredApprovals
                     type: object
+                  checks:
+                    description: |-
+                      checks configures checks a Preparation must pass before it is served,
+                      in both Automatic and Manual mode. Like approvals, they are copied
+                      into each Preparation when it is created, so a change produces a new
+                      Preparation. They hold new deployments only: a deployed Preparation
+                      that stops passing stays deployed.
+                    properties:
+                      vulnerabilities:
+                        description: |-
+                          vulnerabilities blocks serving a Preparation whose images have
+                          vulnerabilities at or above maxSeverity. It needs scanning enabled in
+                          the Kitchen and the Product's Vendor image policy: Kokumi scans only
+                          the images it vendors.
+                        properties:
+                          ignoreUnfixed:
+                            description: ignoreUnfixed ignores vulnerabilities that
+                              no version fixes yet.
+                            type: boolean
+                          maxAgeSeconds:
+                            description: |-
+                              maxAgeSeconds is how old the scan of every image may be. Defaults to
+                              twice the Kitchen's scanning intervalSeconds.
+                            format: int32
+                            minimum: 3600
+                            type: integer
+                          maxSeverity:
+                            description: |-
+                              maxSeverity is the lowest severity that blocks: High blocks findings
+                              of severity High and Critical.
+                            enum:
+                            - Critical
+                            - High
+                            - Medium
+                            - Low
+                            type: string
+                        required:
+                        - maxSeverity
+                        type: object
+                    type: object
                   mode:
                     default: Manual
                     description: |-

@@ -18,17 +18,23 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/events"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -41,6 +47,7 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/provenance"
 	"github.com/kokumi-dev/kokumi/internal/signing"
 	"github.com/kokumi-dev/kokumi/internal/signing/signingtest"
+	"github.com/kokumi-dev/kokumi/internal/vulnerability"
 )
 
 var argoAppGVK = schema.GroupVersionKind{
@@ -778,6 +785,229 @@ var _ = Describe("Serving Controller", func() {
 			reconcileServing()
 			Expect(appExists()).To(BeTrue())
 		})
+	})
+})
+
+var _ = Describe("Serving vulnerability checks", func() {
+	const (
+		orderName       = "checked"
+		productName     = "checked-product"
+		preparationName = "checked-0123456789ab"
+		artifactDigest  = "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+		imageDigest     = "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+		vendoredRepo    = "kokumi-registry.kokumi.svc.cluster.local:5000/default/vendor/checked-product/images/docker.io/library/nginx"
+		cleanReport     = `{"invocation":{"parameters":null},"scanner":{"uri":"pkg:github/aquasecurity/trivy@0.71.0","version":"0.71.0","db":{"uri":"","version":""},"result":{"Results":[]}},"metadata":{}}`
+	)
+	key := types.NamespacedName{Namespace: testNamespace, Name: orderName}
+
+	var (
+		registry   *oci.FakeClient
+		recorder   *events.FakeRecorder
+		now        time.Time
+		vulnerable string
+		clean      string
+	)
+
+	subject := func() oci.Reference {
+		ref, err := oci.Parse("oci://" + vendoredRepo + "@" + imageDigest)
+		Expect(err).NotTo(HaveOccurred())
+		return ref
+	}
+	// attachReport attaches report to the vendored image, signed by signer,
+	// and returns the referrer's digest.
+	attachReport := func(signer *signing.Signer, report string) string {
+		statement, err := attestation.NewStatement(vendoredRepo, imageDigest, vulnerability.PredicateType, json.RawMessage(report))
+		Expect(err).NotTo(HaveOccurred())
+		digest, err := attestation.Push(ctx, registry, signer, subject(), vulnerability.PredicateType, statement, now)
+		Expect(err).NotTo(HaveOccurred())
+		return digest
+	}
+	// recordScan records on the Product a scan of the image with report,
+	// scanned at scanned.
+	recordScan := func(report string, scanned time.Time, summary deliveryv1alpha1.VulnerabilitySummary) {
+		product := &deliveryv1alpha1.Product{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: productName}, product)).To(Succeed())
+		product.Status.Vulnerabilities = &deliveryv1alpha1.ProductVulnerabilities{
+			Scanner: deliveryv1alpha1.VulnerabilityScanner{Name: "trivy", Version: "0.71.0"},
+			Images: []deliveryv1alpha1.ImageScan{{
+				Digest: imageDigest, Repository: "oci://" + vendoredRepo, ScannedTime: metav1.Time{Time: scanned},
+				SBOM:   deliveryv1alpha1.ImageSBOM{Digest: imageDigest, Origin: deliveryv1alpha1.SBOMOriginImage},
+				Report: report, Summary: summary,
+			}},
+		}
+		Expect(k8sClient.Status().Update(ctx, product)).To(Succeed())
+	}
+	reconcileServing := func() ctrl.Result {
+		r := newServingReconciler(registry)
+		r.Recorder = recorder
+		r.InstallNamespace = "kokumi-none"
+		r.now = func() time.Time { return now }
+		result, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		return result
+	}
+	getServing := func() *deliveryv1alpha1.Serving {
+		s := &deliveryv1alpha1.Serving{}
+		Expect(k8sClient.Get(ctx, key, s)).To(Succeed())
+		return s
+	}
+	checksPassed := func() *metav1.Condition {
+		return apimeta.FindStatusCondition(getServing().Status.Conditions, deliveryv1alpha1.ConditionTypeChecksPassed)
+	}
+	appExists := func() bool {
+		app := &unstructured.Unstructured{}
+		app.SetGroupVersionKind(argoAppGVK)
+		return k8sClient.Get(ctx, client.ObjectKey{Namespace: argoNamespace, Name: orderName}, app) == nil
+	}
+	setAppHealthy := func() {
+		app := &unstructured.Unstructured{}
+		app.SetGroupVersionKind(argoAppGVK)
+		Expect(k8sClient.Get(ctx, client.ObjectKey{Namespace: argoNamespace, Name: orderName}, app)).To(Succeed())
+		Expect(unstructured.SetNestedField(app.Object, "Synced", "status", "sync", "status")).To(Succeed())
+		Expect(unstructured.SetNestedField(app.Object, artifactDigest, "status", "sync", "revision")).To(Succeed())
+		Expect(unstructured.SetNestedField(app.Object, "Healthy", "status", "health", "status")).To(Succeed())
+		Expect(k8sClient.Status().Update(ctx, app)).To(Succeed())
+	}
+
+	BeforeEach(func() {
+		registry = oci.NewFakeClient(nil)
+		recorder = events.NewFakeRecorder(10)
+		now = time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+
+		_ = k8sClient.Create(ctx, &corev1.Namespace{Name: argoNamespace})
+
+		report, err := os.ReadFile(filepath.Join("..", "vulnerability", "testdata", "report.json"))
+		Expect(err).NotTo(HaveOccurred())
+		vulnerable = attachReport(testSigner, string(report))
+		clean = attachReport(testSigner, cleanReport)
+
+		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Product{
+			Name:      productName,
+			Namespace: testNamespace,
+			Spec: deliveryv1alpha1.ProductSpec{
+				Source: deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion},
+				Vendor: &deliveryv1alpha1.OCIDestination{},
+				Images: deliveryv1alpha1.ProductImages{Policy: deliveryv1alpha1.ImagePolicyVendor},
+			},
+		})).To(Succeed())
+		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Order{
+			Name:      orderName,
+			Namespace: testNamespace,
+			Spec: deliveryv1alpha1.OrderSpec{
+				ProductRef: deliveryv1alpha1.ProductRef{Name: productName},
+				Promotion:  &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
+			},
+		})).To(Succeed())
+		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Preparation{
+			Name:      preparationName,
+			Namespace: testNamespace,
+			Spec: deliveryv1alpha1.PreparationSpec{
+				OrderName:  orderName,
+				Source:     deliveryv1alpha1.OrderSource{URL: testOCIRef, BaseDigest: oci.FakeDigest},
+				Renderer:   deliveryv1alpha1.Renderer{Type: deliveryv1alpha1.RenderTypeManifest, Version: testRendererVersion, Builder: testBuilderID},
+				ConfigHash: testConfigHash,
+				Artifact: deliveryv1alpha1.Artifact{
+					OCIRef: "oci://registry.kokumi.svc.cluster.local:5000/" + orderName + "@" + artifactDigest,
+					Digest: artifactDigest,
+				},
+				Checks: &deliveryv1alpha1.PromotionChecks{Vulnerabilities: &deliveryv1alpha1.VulnerabilityCheck{
+					MaxSeverity: deliveryv1alpha1.SeverityHigh,
+				}},
+				Images: []deliveryv1alpha1.PreparationImage{{
+					Ref: "nginx:1.27", Name: "docker.io/library/nginx", Digest: imageDigest,
+					Vendored: vendoredRepo + ":1.27@" + imageDigest,
+				}},
+			},
+		})).To(Succeed())
+		markPreparationReady(ctx, registry, types.NamespacedName{Namespace: testNamespace, Name: preparationName})
+		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Serving{
+			Name:      orderName,
+			Namespace: testNamespace,
+			Spec:      deliveryv1alpha1.ServingSpec{OrderName: orderName, PreparationName: preparationName},
+		})).To(Succeed())
+
+		DeferCleanup(func() {
+			s := &deliveryv1alpha1.Serving{}
+			if err := k8sClient.Get(ctx, key, s); err == nil {
+				s.SetFinalizers(nil)
+				_ = k8sClient.Update(ctx, s)
+				_ = k8sClient.Delete(ctx, s)
+			}
+			_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Preparation{Name: preparationName, Namespace: testNamespace})
+			_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Order{Name: orderName, Namespace: testNamespace})
+			_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Product{Name: productName, Namespace: testNamespace})
+			app := &unstructured.Unstructured{}
+			app.SetGroupVersionKind(argoAppGVK)
+			app.SetNamespace(argoNamespace)
+			app.SetName(orderName)
+			_ = k8sClient.Delete(ctx, app)
+		})
+	})
+
+	It("does not deploy a Preparation with vulnerabilities at or above the allowed severity", func() {
+		recordScan(vulnerable, now.Add(-time.Hour), deliveryv1alpha1.VulnerabilitySummary{Critical: 1, High: 2})
+
+		reconcileServing()
+		cond := checksPassed()
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(deliveryv1alpha1.ReasonVulnerabilitiesFound))
+		Expect(cond.Message).To(ContainSubstring("3 vulnerabilities at or above High"))
+		Expect(cond.Message).To(ContainSubstring("CVE-2026-19931 (Critical, curl)"))
+		Expect(appExists()).To(BeFalse())
+	})
+
+	It("deploys a Preparation that passes, and checks again before its scan gets too old", func() {
+		recordScan(clean, now.Add(-time.Hour), deliveryv1alpha1.VulnerabilitySummary{})
+
+		result := reconcileServing()
+		cond := checksPassed()
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Reason).To(Equal(deliveryv1alpha1.ReasonPassed))
+		Expect(appExists()).To(BeTrue())
+		Expect(result.RequeueAfter).To(Equal(47*time.Hour), "twice the default interval, less the hour since the scan")
+	})
+
+	It("does not deploy a Preparation whose images were not scanned, or long ago", func() {
+		reconcileServing()
+		Expect(checksPassed().Reason).To(Equal(deliveryv1alpha1.ReasonScanMissing))
+		Expect(checksPassed().Message).To(ContainSubstring("docker.io/library/nginx has not been scanned"))
+		Expect(appExists()).To(BeFalse())
+
+		recordScan(clean, now.Add(-72*time.Hour), deliveryv1alpha1.VulnerabilitySummary{})
+		reconcileServing()
+		Expect(checksPassed().Reason).To(Equal(deliveryv1alpha1.ReasonScanStale))
+		Expect(appExists()).To(BeFalse())
+	})
+
+	It("does not trust a report no trusted key signed", func() {
+		forged := attachReport(signingtest.NewSigner(GinkgoT()), cleanReport+" ")
+		recordScan(forged, now.Add(-time.Hour), deliveryv1alpha1.VulnerabilitySummary{})
+
+		reconcileServing()
+		Expect(checksPassed().Reason).To(Equal(deliveryv1alpha1.ReasonScanMissing))
+		Expect(checksPassed().Message).To(ContainSubstring("did not verify"))
+		Expect(appExists()).To(BeFalse())
+	})
+
+	It("keeps a deployed Preparation deployed when a new scan finds vulnerabilities, and warns", func() {
+		recordScan(clean, now.Add(-time.Hour), deliveryv1alpha1.VulnerabilitySummary{Low: 1})
+		reconcileServing()
+		setAppHealthy()
+		reconcileServing()
+		s := getServing()
+		Expect(s.Status.DeployedDigest).To(Equal(artifactDigest))
+		Expect(s.Status.DeployedVulnerabilities).To(Equal(&deliveryv1alpha1.VulnerabilitySummary{Low: 1}))
+
+		recordScan(vulnerable, now, deliveryv1alpha1.VulnerabilitySummary{Critical: 1, High: 2, Fixable: 2})
+		reconcileServing()
+
+		s = getServing()
+		Expect(apimeta.IsStatusConditionTrue(s.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)).To(BeTrue(), "the checks hold new deployments only")
+		Expect(checksPassed().Reason).To(Equal(deliveryv1alpha1.ReasonVulnerabilitiesFound))
+		Expect(s.Status.DeployedVulnerabilities).To(Equal(&deliveryv1alpha1.VulnerabilitySummary{Critical: 1, High: 2, Fixable: 2}))
+		Expect(recorder.Events).To(Receive(ContainSubstring("VulnerabilitiesIncreased")))
 	})
 })
 

@@ -295,6 +295,55 @@ type PromotionSpec struct {
 	// change produces a new Preparation that needs fresh approvals.
 	// +optional
 	Approvals *ApprovalPolicy `json:"approvals,omitempty"`
+
+	// checks configures checks a Preparation must pass before it is served,
+	// in both Automatic and Manual mode. Like approvals, they are copied
+	// into each Preparation when it is created, so a change produces a new
+	// Preparation. They hold new deployments only: a deployed Preparation
+	// that stops passing stays deployed.
+	// +optional
+	Checks *PromotionChecks `json:"checks,omitempty"`
+}
+
+// PromotionChecks configures the checks a Preparation must pass before it is
+// served.
+type PromotionChecks struct {
+	// vulnerabilities blocks serving a Preparation whose images have
+	// vulnerabilities at or above maxSeverity. It needs scanning enabled in
+	// the Kitchen and the Product's Vendor image policy: Kokumi scans only
+	// the images it vendors.
+	// +optional
+	Vulnerabilities *VulnerabilityCheck `json:"vulnerabilities,omitempty"`
+}
+
+// Severity is the severity of a vulnerability.
+// +kubebuilder:validation:Enum=Critical;High;Medium;Low
+type Severity string
+
+const (
+	SeverityCritical Severity = "Critical"
+	SeverityHigh     Severity = "High"
+	SeverityMedium   Severity = "Medium"
+	SeverityLow      Severity = "Low"
+)
+
+// VulnerabilityCheck blocks serving Preparations whose images have
+// vulnerabilities at or above a severity.
+type VulnerabilityCheck struct {
+	// maxSeverity is the lowest severity that blocks: High blocks findings
+	// of severity High and Critical.
+	// +required
+	MaxSeverity Severity `json:"maxSeverity"`
+
+	// ignoreUnfixed ignores vulnerabilities that no version fixes yet.
+	// +optional
+	IgnoreUnfixed bool `json:"ignoreUnfixed,omitempty"`
+
+	// maxAgeSeconds is how old the scan of every image may be. Defaults to
+	// twice the Kitchen's scanning intervalSeconds.
+	// +optional
+	// +kubebuilder:validation:Minimum=3600
+	MaxAgeSeconds int32 `json:"maxAgeSeconds,omitempty"`
 }
 
 // ApprovalPolicy defines the approval quorum required before a Preparation can be served.
@@ -401,6 +450,14 @@ func (o *Order) ApprovalPolicy() *ApprovalPolicy {
 		return nil
 	}
 	return o.Spec.Promotion.Approvals
+}
+
+// PromotionChecks returns spec.promotion.checks, or nil when no check applies.
+func (o *Order) PromotionChecks() *PromotionChecks {
+	if o.Spec.Promotion == nil {
+		return nil
+	}
+	return o.Spec.Promotion.Checks
 }
 
 // GetConditions returns the status conditions of the Order.

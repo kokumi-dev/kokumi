@@ -20,7 +20,9 @@ import (
 	"context"
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"os"
+	"runtime"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -28,7 +30,7 @@ import (
 
 	"github.com/spf13/afero"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/runtime"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -45,6 +47,7 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/namespace"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/registry"
+	"github.com/kokumi-dev/kokumi/internal/scanner"
 	"github.com/kokumi-dev/kokumi/internal/signing"
 	signingsource "github.com/kokumi-dev/kokumi/internal/signing/source"
 	"github.com/kokumi-dev/kokumi/internal/version"
@@ -52,7 +55,7 @@ import (
 )
 
 var (
-	scheme   = runtime.NewScheme()
+	scheme   = k8sruntime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
 )
 
@@ -72,6 +75,7 @@ func main() {
 	var probeAddr string
 	var secureMetrics bool
 	var enableHTTP2 bool
+	var scannerURL, scanPlatform string
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -90,6 +94,10 @@ func main() {
 	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
+	flag.StringVar(&scannerURL, "scanner-url", "",
+		"The URL of the kokumi-scanner component. Defaults to http://kokumi-scanner.<install namespace>.svc:8080.")
+	flag.StringVar(&scanPlatform, "scan-platform", runtime.GOOS+"/"+runtime.GOARCH,
+		"The platform scanned of multi-platform images, such as linux/amd64.")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -220,10 +228,12 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.ServingReconciler{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
-		Registries: registries,
-		Signing:    signingProvider,
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		Registries:       registries,
+		Signing:          signingProvider,
+		Recorder:         mgr.GetEventRecorder("kokumi-serving-controller"),
+		InstallNamespace: installNamespace,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Serving")
 		os.Exit(1)
@@ -292,6 +302,22 @@ func main() {
 		BundledHost: artifact.DefaultRegistryHost,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "registry")
+		os.Exit(1)
+	}
+	if scannerURL == "" {
+		scannerURL = fmt.Sprintf("http://kokumi-scanner.%s.svc:8080", installNamespace)
+	}
+	if err := (&controller.ScanReconciler{
+		Client:           mgr.GetClient(),
+		APIReader:        mgr.GetAPIReader(),
+		Scheme:           mgr.GetScheme(),
+		Registries:       registries,
+		Signing:          signingProvider,
+		Scanner:          scanner.NewClient(scannerURL),
+		InstallNamespace: installNamespace,
+		Platform:         scanPlatform,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "scan")
 		os.Exit(1)
 	}
 	if err := (&controller.RepositoryReconciler{

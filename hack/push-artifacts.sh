@@ -106,3 +106,16 @@ sbom_digest="$(
 )"
 echo "Signing SBOM: ${SIGNED_PACKAGE}@${sbom_digest}"
 sign "${REPO}/kokumi-dev/testdata/${SIGNED_PACKAGE}@${sbom_digest}"
+
+# Mirror the Trivy vulnerability database for the Kitchen sample's scanning,
+# as an air-gapped installation would (about 140 MB). The Java database, about
+# 1 GB, is only needed for images with Java archives: MIRROR_TRIVY_JAVA_DB=true
+# mirrors it too. MIRROR_TRIVY_DB=false skips both.
+if [ "${MIRROR_TRIVY_DB:-true}" = "true" ]; then
+  echo "Mirroring the Trivy database"
+  oras cp mirror.gcr.io/aquasec/trivy-db:2 "${REPO}/aquasec/trivy-db:2"
+  if [ "${MIRROR_TRIVY_JAVA_DB:-false}" = "true" ]; then
+    echo "Mirroring the Trivy Java database"
+    oras cp mirror.gcr.io/aquasec/trivy-java-db:1 "${REPO}/aquasec/trivy-java-db:1"
+  fi
+fi

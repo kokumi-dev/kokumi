@@ -149,6 +149,44 @@ spec:
                   deployed artifact
                 pattern: ^sha256:[a-f0-9]{64}$
                 type: string
+              deployedVulnerabilities:
+                description: |-
+                  deployedVulnerabilities sums the latest scans of the images of the
+                  deployed Preparation. It keeps changing after the deployment, as new
+                  vulnerabilities are published.
+                properties:
+                  critical:
+                    description: critical counts the findings of severity Critical.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  fixable:
+                    description: fixable counts the findings a newer version of the
+                      package fixes.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  high:
+                    description: high counts the findings of severity High.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  low:
+                    description: low counts the findings of severity Low.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  medium:
+                    description: medium counts the findings of severity Medium.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  unknown:
+                    description: unknown counts the findings without a severity.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                type: object
               observedGeneration:
                 description: observedGeneration is the most recent generation observed
                   by the controller

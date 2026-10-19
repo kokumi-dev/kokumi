@@ -17,6 +17,7 @@ resources:
 - delivery_v1alpha1_order_manifestfiles.yaml
 - delivery_v1alpha1_order_approval.yaml
 - delivery_v1alpha1_order_verified.yaml
+- delivery_v1alpha1_order_scanned.yaml
 - delivery_v1alpha1_registry_ghcr.yaml
 - delivery_v1alpha1_repository_ghcr.yaml
 - delivery_v1alpha1_repository_incluster.yaml

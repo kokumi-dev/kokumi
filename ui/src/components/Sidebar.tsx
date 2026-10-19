@@ -130,7 +130,7 @@ const sections: NavSection[] = [
         to: '/settings',
         label: 'Settings',
         icon: <IconSettings />,
-        requires: ['settings.general:update', 'settings.auth:update', 'settings.signing:update'],
+        requires: ['settings.general:update', 'settings.auth:update', 'settings.signing:update', 'settings.scanning:update'],
       },
     ],
   },

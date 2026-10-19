@@ -132,7 +132,7 @@ func TestCapabilities(t *testing.T) {
 			name:  "editor role gets everything but settings",
 			id:    personalLogin,
 			rbacs: []rbacFunc{editorRBAC},
-			want:  without(all, CapSettingsGeneralUpdate, CapSettingsAuthUpdate, CapSettingsSigningUpdate),
+			want:  without(all, CapSettingsGeneralUpdate, CapSettingsAuthUpdate, CapSettingsScanningUpdate, CapSettingsSigningUpdate),
 		},
 		{
 			name:  "viewer role gets nothing",
@@ -178,7 +178,7 @@ func TestCapabilities(t *testing.T) {
 			rbacs: []rbacFunc{func(ra authorizationv1.ResourceAttributes) (bool, error) {
 				return ra.Resource == kitchensResource && ra.Namespace == capsInstallNamespace && ra.Name == "default", nil
 			}},
-			want: []Capability{CapSettingsAuthUpdate, CapSettingsGeneralUpdate, CapSettingsSigningUpdate},
+			want: []Capability{CapSettingsAuthUpdate, CapSettingsGeneralUpdate, CapSettingsScanningUpdate, CapSettingsSigningUpdate},
 		},
 		{
 			name: "failed checks are left out and reported",
@@ -189,8 +189,8 @@ func TestCapabilities(t *testing.T) {
 				}
 				return true, nil
 			}},
-			want:             without(all, CapSettingsGeneralUpdate, CapSettingsAuthUpdate, CapSettingsSigningUpdate),
-			wantUndetermined: []Capability{CapSettingsAuthUpdate, CapSettingsGeneralUpdate, CapSettingsSigningUpdate},
+			want:             without(all, CapSettingsGeneralUpdate, CapSettingsAuthUpdate, CapSettingsScanningUpdate, CapSettingsSigningUpdate),
+			wantUndetermined: []Capability{CapSettingsAuthUpdate, CapSettingsGeneralUpdate, CapSettingsScanningUpdate, CapSettingsSigningUpdate},
 		},
 		{
 			name:  "a failing ServiceAccount does not mask a working one",
@@ -198,8 +198,8 @@ func TestCapabilities(t *testing.T) {
 			rbacs: []rbacFunc{unimpersonableRBAC, editorRBAC},
 			// Only the settings stay undetermined: the editor is denied them,
 			// and the failing ServiceAccount might have allowed them.
-			want:             without(all, CapSettingsGeneralUpdate, CapSettingsAuthUpdate, CapSettingsSigningUpdate),
-			wantUndetermined: []Capability{CapSettingsAuthUpdate, CapSettingsGeneralUpdate, CapSettingsSigningUpdate},
+			want:             without(all, CapSettingsGeneralUpdate, CapSettingsAuthUpdate, CapSettingsScanningUpdate, CapSettingsSigningUpdate),
+			wantUndetermined: []Capability{CapSettingsAuthUpdate, CapSettingsGeneralUpdate, CapSettingsScanningUpdate, CapSettingsSigningUpdate},
 		},
 		{
 			name:             "only failing ServiceAccounts leave everything undetermined",
@@ -329,8 +329,8 @@ func TestHandleWhoamiUndetermined(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	var body whoamiResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
-	assert.Equal(t, without(allCapabilities(), CapPreparationsApprove, CapSettingsGeneralUpdate, CapSettingsAuthUpdate, CapSettingsSigningUpdate), body.Capabilities)
-	assert.Equal(t, []Capability{CapSettingsAuthUpdate, CapSettingsGeneralUpdate, CapSettingsSigningUpdate}, body.Undetermined)
+	assert.Equal(t, without(allCapabilities(), CapPreparationsApprove, CapSettingsGeneralUpdate, CapSettingsAuthUpdate, CapSettingsScanningUpdate, CapSettingsSigningUpdate), body.Capabilities)
+	assert.Equal(t, []Capability{CapSettingsAuthUpdate, CapSettingsGeneralUpdate, CapSettingsScanningUpdate, CapSettingsSigningUpdate}, body.Undetermined)
 }
 
 func TestFirstAllowedSkipsFailingServiceAccounts(t *testing.T) {

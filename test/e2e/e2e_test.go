@@ -31,10 +31,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/crane"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/vulnerability"
 	"github.com/kokumi-dev/kokumi/test/utils"
 )
 
@@ -76,6 +79,22 @@ const imagesNamespace = "e2e-images"
 // registry. It has Linux platforms only, so every layer can be copied.
 const upstreamImage = "ghcr.io/stefanprodan/podinfo:6.14.1"
 
+// argoCDApplicationCRD is the Application CRD of the Argo CD release
+// "make argocd" installs. The Serving controller watches Applications and
+// does not start without it; the suite runs no Argo CD.
+const argoCDApplicationCRD = "https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.1/manifests/crds/application-crd.yaml"
+
+// scanningNamespace holds the Products, Orders and Pods of the scanning spec.
+const scanningNamespace = "e2e-scanning"
+
+// scannerDeploymentName is the kokumi-scanner Deployment, and its Service.
+const scannerDeploymentName = "kokumi-scanner"
+
+// vulnerableImage is alpine 3.14.0, pinned: its apk-tools and OpenSSL have
+// known Critical vulnerabilities that later releases fix
+// (CVE-2021-36159, CVE-2021-3711). It has Linux platforms only.
+const vulnerableImage = "mirror.gcr.io/library/alpine@sha256:adab3844f497ab9171f070d4cae4114b5aec565ac772e2f2579405b78be67c96"
+
 var _ = Describe("Manager", Ordered, func() {
 	var controllerPodName string
 
@@ -99,6 +118,11 @@ var _ = Describe("Manager", Ordered, func() {
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to install CRDs")
 
+		By("installing the Argo CD Application CRD")
+		cmd = exec.Command("kubectl", "apply", "--server-side", "-f", argoCDApplicationCRD)
+		_, err = utils.Run(cmd)
+		Expect(err).NotTo(HaveOccurred(), "Failed to install the Argo CD Application CRD")
+
 		By("deploying the controller-manager")
 		cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", managerImage))
 		_, err = utils.Run(cmd)
@@ -113,7 +137,7 @@ var _ = Describe("Manager", Ordered, func() {
 		_, _ = utils.Run(cmd)
 
 		By("removing the signing and images namespaces")
-		cmd = exec.Command("kubectl", "delete", "ns", signingNamespace, imagesNamespace, "--ignore-not-found", "--timeout=2m")
+		cmd = exec.Command("kubectl", "delete", "ns", signingNamespace, imagesNamespace, scanningNamespace, "--ignore-not-found", "--timeout=2m")
 		_, _ = utils.Run(cmd)
 
 		By("undeploying the controller-manager")
@@ -122,6 +146,8 @@ var _ = Describe("Manager", Ordered, func() {
 
 		By("uninstalling CRDs")
 		cmd = exec.Command("make", "uninstall")
+		_, _ = utils.Run(cmd)
+		cmd = exec.Command("kubectl", "delete", "--ignore-not-found", "-f", argoCDApplicationCRD)
 		_, _ = utils.Run(cmd)
 
 		By("removing manager namespace")
@@ -613,6 +639,188 @@ spec:
 					g.Expect(strings.Fields(line)[1:]).To(Equal([]string{imageDigest, vendored}))
 				}
 			}, 5*time.Minute).Should(Succeed())
+		})
+
+		It("should scan vendored images once per Product and hold promotions on findings", func() {
+			cosign := cosignBinary()
+			host := forwardRegistry()
+			ctx := context.Background()
+			client := oci.NewClient(oci.Options{PlainHTTP: true})
+
+			By("waiting for the scanner")
+			_, err := utils.Run(exec.Command("kubectl", "rollout", "status", "deployment/"+scannerDeploymentName,
+				"-n", namespace, "--timeout=5m"))
+			Expect(err).NotTo(HaveOccurred())
+
+			By("copying an image with known vulnerabilities, with an unsigned SBOM that lists no packages")
+			upstream := host + "/e2e/upstream/alpine:3.14.0"
+			Expect(crane.Copy(vulnerableImage, upstream, crane.Insecure)).To(Succeed())
+			upstreamRef, err := oci.Parse(upstream)
+			Expect(err).NotTo(HaveOccurred())
+			desc, err := client.Resolve(ctx, upstreamRef)
+			Expect(err).NotTo(HaveOccurred())
+			upstreamRef.Tag, upstreamRef.Digest = "", desc.Digest
+			_, err = client.PushReferrer(ctx, upstreamRef, oci.ReferrerArtifact{
+				ArtifactType: "application/vnd.cyclonedx+json",
+				MediaType:    "application/vnd.cyclonedx+json",
+				Payload:      []byte(`{"bomFormat":"CycloneDX","specVersion":"1.6","components":[]}`),
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("enabling scanning on the Kitchen")
+			_, err = utils.Run(exec.Command("kubectl", "patch", "kitchens.delivery.kokumi.dev", "default", "-n", namespace,
+				"--type=merge", "-p", `{"spec":{"scanning":{}}}`))
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func() {
+				_, _ = utils.Run(exec.Command("kubectl", "patch", "kitchens.delivery.kokumi.dev", "default", "-n", namespace,
+					"--type=json", "-p", `[{"op":"remove","path":"/spec/scanning"}]`))
+			})
+
+			By("rendering two Orders of a Product that vendors the image, one with a vulnerability check")
+			pushManifest(host, "e2e/scanned", fmt.Sprintf(`apiVersion: v1
+kind: Pod
+metadata:
+  name: app
+spec:
+  containers:
+    - name: app
+      image: %s/e2e/upstream/alpine:3.14.0
+`, inClusterRegistry))
+			createNamespace(scanningNamespace)
+			apply(fmt.Sprintf(`
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Product
+metadata:
+  name: scanned
+  namespace: %[1]s
+spec:
+  source:
+    url: oci://%[2]s/e2e/scanned
+    version: "1.0.0"
+  vendor:
+    url: oci://%[2]s/e2e/vendor/scanned
+  images:
+    policy: Vendor
+---
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Order
+metadata:
+  name: unchecked
+  namespace: %[1]s
+spec:
+  productRef:
+    name: scanned
+  destination:
+    url: oci://%[2]s/e2e/scanned-unchecked
+  promotion:
+    mode: Manual
+---
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Order
+metadata:
+  name: checked
+  namespace: %[1]s
+spec:
+  productRef:
+    name: scanned
+  destination:
+    url: oci://%[2]s/e2e/scanned-checked
+  promotion:
+    mode: Automatic
+    checks:
+      vulnerabilities:
+        maxSeverity: High
+`, scanningNamespace, inClusterRegistry))
+
+			var imageDigest string
+			Eventually(func(g Gomega) {
+				out, err := utils.Run(exec.Command("kubectl", "get", "preparations", "-n", scanningNamespace, "-o",
+					`jsonpath={range .items[*]}{.status.conditions[?(@.type=='Ready')].status} {.spec.images[0].digest}{"\n"}{end}`))
+				g.Expect(err).NotTo(HaveOccurred())
+				lines := utils.GetNonEmptyLines(out)
+				g.Expect(lines).To(HaveLen(2), "a Preparation per Order: "+out)
+				for _, line := range lines {
+					fields := strings.Fields(line)
+					g.Expect(fields).To(HaveLen(2), out)
+					g.Expect(fields[0]).To(Equal("True"), out)
+					imageDigest = fields[1]
+				}
+				g.Expect(strings.Count(out, imageDigest)).To(Equal(2), "both run the same vendored image")
+			}, 5*time.Minute).Should(Succeed())
+
+			By("scanning the vendored image, ignoring the unsigned SBOM")
+			var repository, report string
+			Eventually(func(g Gomega) {
+				out, err := utils.Run(exec.Command("kubectl", "get", "products.delivery.kokumi.dev", "scanned", "-n", scanningNamespace, "-o",
+					`jsonpath={.status.conditions[?(@.type=='Scanned')].reason} {range .status.vulnerabilities.images[*]}{.digest} {.repository} {.report} {.sbom.origin} {.summary.critical}{end}`))
+				g.Expect(err).NotTo(HaveOccurred())
+				fields := strings.Fields(out)
+				g.Expect(fields).To(HaveLen(6), "one scanned image: "+out)
+				g.Expect(fields[0]).To(Equal(deliveryv1alpha1.ReasonScanned), out)
+				g.Expect(fields[1]).To(Equal(imageDigest))
+				g.Expect(fields[4]).To(Equal(string(deliveryv1alpha1.SBOMOriginGenerated)), "an SBOM nobody signed is not used")
+				g.Expect(fields[5]).NotTo(Equal("0"), "the known Critical vulnerabilities are found")
+				repository, report = fields[2], fields[3]
+			}, 15*time.Minute, 5*time.Second).Should(Succeed())
+
+			By("attaching one signed report for both Orders")
+			vendored, err := oci.Parse(strings.Replace(repository, inClusterRegistry, host, 1) + "@" + imageDigest)
+			Expect(err).NotTo(HaveOccurred())
+			referrers, err := client.ListReferrers(ctx, vendored, oci.SigstoreBundleMediaType)
+			Expect(err).NotTo(HaveOccurred())
+			var reports []string
+			for _, r := range referrers {
+				if r.Annotations[oci.AnnotationBundlePredicateType] == vulnerability.PredicateType {
+					reports = append(reports, r.Digest)
+				}
+			}
+			Expect(reports).To(ConsistOf(report), "two Orders, one scan")
+
+			publicKey, err := utils.Run(exec.Command("kubectl", "get", "kitchen", "default", "-n", namespace,
+				"-o", "jsonpath={.status.signing.publicKey}"))
+			Expect(err).NotTo(HaveOccurred())
+			keyFile := filepath.Join(GinkgoT().TempDir(), "kokumi.pub")
+			Expect(os.WriteFile(keyFile, []byte(publicKey), 0o600)).To(Succeed())
+			_, err = utils.Run(exec.Command(cosign, "verify-attestation", "--key", keyFile,
+				"--insecure-ignore-tlog=true", "--allow-http-registry", "--type", "vuln", vendored.String()))
+			Expect(err).NotTo(HaveOccurred(), "stock cosign verifies the report")
+
+			By("holding the Preparation of the checked Order")
+			Eventually(func(g Gomega) {
+				out, err := utils.Run(exec.Command("kubectl", "get", "servings.delivery.kokumi.dev", "checked", "-n", scanningNamespace, "-o",
+					`jsonpath={.status.conditions[?(@.type=='ChecksPassed')].reason}|{.status.observedPreparationName}`))
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(out).To(Equal(deliveryv1alpha1.ReasonVulnerabilitiesFound+"|"), "nothing is deployed")
+			}, 5*time.Minute).Should(Succeed())
+
+			By("letting only the controller reach the scanner")
+			_, err = utils.Run(exec.Command("kubectl", "run", "curl-scanner", "--restart=Never",
+				"--namespace", scanningNamespace,
+				"--image=curlimages/curl:latest",
+				"--overrides", fmt.Sprintf(`{
+					"spec": {
+						"containers": [{
+							"name": "curl",
+							"image": "curlimages/curl:latest",
+							"command": ["curl", "-sS", "--max-time", "10", "http://%s.%s.svc:8080/healthz"],
+							"securityContext": {
+								"readOnlyRootFilesystem": true,
+								"allowPrivilegeEscalation": false,
+								"capabilities": {"drop": ["ALL"]},
+								"runAsNonRoot": true,
+								"runAsUser": 1000,
+								"seccompProfile": {"type": "RuntimeDefault"}
+							}
+						}]
+					}
+				}`, scannerDeploymentName, namespace)))
+			Expect(err).NotTo(HaveOccurred())
+			Eventually(func(g Gomega) {
+				out, err := utils.Run(exec.Command("kubectl", "get", "pod", "curl-scanner", "-n", scanningNamespace,
+					"-o", "jsonpath={.status.phase}"))
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(out).To(Equal("Failed"), "the NetworkPolicy drops connections from other Pods")
+			}, 2*time.Minute).Should(Succeed())
 		})
 
 		It("should keep the signing key away from everyone but the controller and cluster admins", func() {

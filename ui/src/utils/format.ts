@@ -60,3 +60,11 @@ export function formatRelative(iso?: string, now: number = Date.now()): string {
   }
   return rtf.format(0, 'second')
 }
+
+/** Formats a duration in seconds, e.g. "7 days", "36 hours", "1.5 hours", "30 minutes". */
+export function formatDuration(seconds: number): string {
+  const day = 24 * 3600
+  if (seconds >= day && seconds % day === 0) return plural(seconds / day, 'day')
+  if (seconds >= 3600) return plural(Math.round((seconds / 3600) * 10) / 10, 'hour')
+  return plural(Math.round(seconds / 60), 'minute')
+}

@@ -44,10 +44,14 @@ interface Props<T> {
   rowKey: (row: T) => string
   /** Makes the whole row navigate to this path. */
   rowHref?: (row: T) => string
+  /** Makes the whole row select it instead; a link in the row should select it too, for the keyboard. */
+  onRowClick?: (row: T) => void
+  /** Highlights the selected row. */
+  isRowSelected?: (row: T) => boolean
   expand?: RowExpansion<T>
 }
 
-export default function DataTable<T>({ rows, columns, rowKey, rowHref, expand }: Props<T>) {
+export default function DataTable<T>({ rows, columns, rowKey, rowHref, onRowClick, isRowSelected, expand }: Props<T>) {
   const navigate = useNavigate()
   const regionId = useId()
   // Rows the user has just opened. Their open animations run only while they
@@ -66,11 +70,12 @@ export default function DataTable<T>({ rows, columns, rowKey, rowHref, expand }:
   }
 
   function handleRowClick(e: MouseEvent<HTMLTableRowElement>, row: T) {
-    if (!rowHref) return
+    if (!rowHref && !onRowClick) return
     // Let links, buttons and text selection inside the row behave normally.
     if ((e.target as HTMLElement).closest('a, button, input, select, textarea')) return
     if (window.getSelection()?.toString()) return
-    navigate(rowHref(row))
+    if (onRowClick) onRowClick(row)
+    else navigate(rowHref!(row))
   }
 
   return (
@@ -97,7 +102,11 @@ export default function DataTable<T>({ rows, columns, rowKey, rowHref, expand }:
               <Fragment key={key}>
                 <tbody>
                   <tr
-                    className={[rowHref ? styles.rowLink : '', open ? styles.rowOpen : ''].filter(Boolean).join(' ') || undefined}
+                    className={[
+                      rowHref || onRowClick ? styles.rowLink : '',
+                      open ? styles.rowOpen : '',
+                      isRowSelected?.(row) ? styles.rowSelected : '',
+                    ].filter(Boolean).join(' ') || undefined}
                     onClick={(e) => handleRowClick(e, row)}
                   >
                     {expand && (

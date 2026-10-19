@@ -12,6 +12,7 @@ import { Button, Counter } from '../../components/ui'
 import { paths } from '../../routes/paths'
 import { formatDate } from '../../utils/format'
 import { orderDestinationLabel } from '../../utils/products'
+import { describeVulnerabilityCheck } from '../../utils/vulnerabilities'
 import { objectToYaml } from '../../utils/yaml'
 import { useOrderContext } from './orderContext'
 import { useDeniedReason } from '../../hooks/useCapability'
@@ -70,6 +71,10 @@ export default function OrderOverview() {
               value: order.approvals
                 ? `${order.approvals.requiredApprovals} required from ${order.approvals.allowedGroups.join(', ')}`
                 : 'Not required',
+            },
+            {
+              label: 'Vulnerability check',
+              value: order.checks?.vulnerabilities ? describeVulnerabilityCheck(order.checks.vulnerabilities) : 'Not required',
             },
           ]}
         />

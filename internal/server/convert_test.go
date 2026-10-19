@@ -94,7 +94,11 @@ func TestPreparationToDTO_images(t *testing.T) {
 		Vendored:  "registry.example.com/shop/app/images/docker.io/library/nginx:1.27@sha256:1111111111111111111111111111111111111111111111111111111111111111",
 	}}
 
-	dto := preparationToDTO(deliveryv1alpha1.Preparation{Spec: deliveryv1alpha1.PreparationSpec{Images: images}}, false)
+	dto := preparationToDTO(deliveryv1alpha1.Preparation{
+		Labels: map[string]string{deliveryv1alpha1.LabelVersion: "6.14.1"},
+		Spec:   deliveryv1alpha1.PreparationSpec{Images: images},
+	}, false)
+	assert.Equal(t, "6.14.1", dto.Version, "the version of the source, from its label")
 
 	require.Equal(t, []PreparationImageDTO{{
 		Ref:       images[0].Ref,

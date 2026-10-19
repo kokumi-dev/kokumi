@@ -70,6 +70,7 @@ func Preparation(order *deliveryv1alpha1.Order, rendered Rendered) *deliveryv1al
 			ParentDigest:   rendered.ParentDigest,
 			GitSource:      rendered.Git,
 			ApprovalPolicy: order.ApprovalPolicy().DeepCopy(),
+			Checks:         order.PromotionChecks().DeepCopy(),
 			Images:         preparationImages(rendered.Images),
 		},
 	}

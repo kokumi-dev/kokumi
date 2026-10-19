@@ -13,6 +13,8 @@ interface RegistryRefsEditorProps {
   owns: string
   /** Leaves out the label, for a section that is titled already. */
   unlabeled?: boolean
+  /** Shows the selection without letting it change. */
+  disabled?: boolean
 }
 
 /**
@@ -20,7 +22,7 @@ interface RegistryRefsEditorProps {
  * through. Each location the object owns uses the listed Registry with the
  * longest matching url, and no Registry when none matches.
  */
-export default function RegistryRefsEditor({ namespace, value, onChange, owns, unlabeled }: RegistryRefsEditorProps) {
+export default function RegistryRefsEditor({ namespace, value, onChange, owns, unlabeled, disabled }: RegistryRefsEditorProps) {
   const registries = useRegistries()
   const available = (registries ?? []).filter((r) => r.namespace === namespace)
   const selected = new Set(value.map((r) => r.name))
@@ -43,7 +45,12 @@ export default function RegistryRefsEditor({ namespace, value, onChange, owns, u
         <>
           {available.map((r) => (
             <label key={r.name} className={styles.checkRow}>
-              <input type="checkbox" checked={selected.has(r.name)} onChange={(e) => toggle(r.name, e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={selected.has(r.name)}
+                disabled={disabled}
+                onChange={(e) => toggle(r.name, e.target.checked)}
+              />
               <span>{r.name}</span>
               <span className={styles.hint}>
                 {stripOCIScheme(r.url)}
@@ -55,7 +62,7 @@ export default function RegistryRefsEditor({ namespace, value, onChange, owns, u
           {missing.map((r) => (
             <div key={r.name} className={styles.checkRow}>
               <span className={styles.fieldError}>Registry {r.name} does not exist</span>
-              <Button variant="ghost" size="sm" onClick={() => toggle(r.name, false)}>Remove</Button>
+              <Button variant="ghost" size="sm" onClick={() => toggle(r.name, false)} disabled={disabled}>Remove</Button>
             </div>
           ))}
           <span className={styles.hint}>

@@ -266,6 +266,84 @@ spec:
                     - prefix
                     x-kubernetes-list-type: map
                 type: object
+              scanning:
+                description: |-
+                  scanning enables scanning the images Products vendor for
+                  vulnerabilities. When unset, nothing is scanned. An empty object
+                  scans with the defaults.
+                properties:
+                  dbRepository:
+                    description: |-
+                      dbRepository is the oci:// URL of the Trivy vulnerability database.
+                      A repository is read at tag 2; a URL with a tag or digest pins the
+                      database, so that an update is a reviewed change. Defaults to
+                      oci://mirror.gcr.io/aquasec/trivy-db. Set it to a mirror in
+                      air-gapped clusters.
+                    maxLength: 2048
+                    type: string
+                    x-kubernetes-validations:
+                    - message: must be a valid OCI URL
+                      rule: isURL(self) && url(self).getScheme() == 'oci'
+                  intervalSeconds:
+                    default: 86400
+                    description: |-
+                      intervalSeconds is how often an image that a Preparation in use runs
+                      is scanned again, so that new vulnerabilities show up on what is
+                      already deployed.
+                    format: int32
+                    maximum: 2592000
+                    minimum: 3600
+                    type: integer
+                  javaDBRepository:
+                    description: |-
+                      javaDBRepository is the oci:// URL of the Trivy Java database, which
+                      identifies Java archives. A repository is read at tag 1. It is only
+                      downloaded when an image holds Java archives, and such images cannot
+                      be scanned without it. Defaults to
+                      oci://mirror.gcr.io/aquasec/trivy-java-db.
+                    maxLength: 2048
+                    type: string
+                    x-kubernetes-validations:
+                    - message: must be a valid OCI URL
+                      rule: isURL(self) && url(self).getScheme() == 'oci'
+                  maxDatabaseAgeSeconds:
+                    default: 604800
+                    description: |-
+                      maxDatabaseAgeSeconds is how old the vulnerability database may be.
+                      Scans with an older one still produce reports, but the Product
+                      reports them as DatabaseStale, so that an air-gapped installation
+                      notices a database it forgot to update.
+                    format: int32
+                    minimum: 3600
+                    type: integer
+                  registryRefs:
+                    description: |-
+                      registryRefs lists Registries in the install namespace that connect
+                      to the database repositories, for mirrors that need credentials, a
+                      CA or plain HTTP. The public default and the bundled registry need
+                      none.
+                    items:
+                      description: |-
+                        LocalObjectReference contains enough information to let you locate the
+                        referenced object inside the same namespace.
+                      properties:
+                        name:
+                          default: ""
+                          description: |-
+                            Name of the referent.
+                            This field is effectively required, but due to backwards compatibility is
+                            allowed to be empty. Instances of this type with an empty value here are
+                            almost certainly wrong.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                          type: string
+                      type: object
+                      x-kubernetes-map-type: atomic
+                    maxItems: 16
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                type: object
               signing:
                 description: |-
                   signing configures which keys Kokumi trusts besides its own signing

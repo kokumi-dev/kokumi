@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -29,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/events"
 	"k8s.io/utils/lru"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -45,13 +47,31 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/argocd"
 	"github.com/kokumi-dev/kokumi/internal/conditions"
 	"github.com/kokumi-dev/kokumi/internal/evidence"
+	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/registry"
 	"github.com/kokumi-dev/kokumi/internal/signing"
+	"github.com/kokumi-dev/kokumi/internal/vulnerability"
 )
 
 // verificationCacheSize bounds how many verified artifacts the Serving
 // controller remembers.
 const verificationCacheSize = 1024
+
+const (
+	// reportCacheSize bounds how many verified vulnerability reports the
+	// Serving controller remembers.
+	reportCacheSize = 256
+	// defaultScanIntervalSeconds is the Kitchen's default scanning interval,
+	// which a check's default maxAgeSeconds doubles.
+	defaultScanIntervalSeconds = 86400
+)
+
+// reportKey identifies a verified vulnerability report. Reports are
+// immutable, so their findings hold until the trust changes.
+type reportKey struct {
+	digest string
+	trust  string
+}
 
 // verificationKey identifies a verification result. Digests are immutable,
 // so a result holds until the trust changes; it is specific to the Order the
@@ -63,11 +83,12 @@ type verificationKey struct {
 	approvalRequired bool
 }
 
-// servingRegistries connects to the artifact of a Preparation.
-// *registry.Resolver implements it.
+// servingRegistries connects to the artifact of a Preparation, and to the
+// vendored images of a Product. *registry.Resolver implements it.
 type servingRegistries interface {
 	ConnectRecorded(ctx context.Context, namespace string, recorded *corev1.LocalObjectReference, url string,
 		fallback func(context.Context) ([]corev1.LocalObjectReference, error)) (registry.Connection, error)
+	Scope(ctx context.Context, namespace string, refs []corev1.LocalObjectReference) (registry.Scope, error)
 }
 
 // servingSigning provides the trust the evidence of a Preparation verifies
@@ -88,10 +109,21 @@ type ServingReconciler struct {
 	// Signing holds the keys the evidence of a Preparation must verify
 	// against before it is deployed.
 	Signing servingSigning
+	// Recorder records Events on Servings.
+	Recorder events.EventRecorder
+	// InstallNamespace holds the Kitchen, whose scanning interval sets the
+	// default age of the scans a check accepts.
+	InstallNamespace string
 
 	// verified remembers verified artifacts by verificationKey.
 	verified     *lru.Cache
 	verifiedOnce sync.Once
+	// reports remembers the findings of verified reports by reportKey.
+	reports     *lru.Cache
+	reportsOnce sync.Once
+
+	// now returns the current time. Tests set it.
+	now func() time.Time
 }
 
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=servings,verbs=get;list;watch;create;update;patch;delete
@@ -101,8 +133,11 @@ type ServingReconciler struct {
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=orders,verbs=get;list;watch
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=approvals,verbs=get;list;watch
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=registries,verbs=get;list;watch
+// +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=products,verbs=get;list;watch
+// +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=kitchens,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=argoproj.io,resources=applications,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
 
 // Reconcile deploys the Preparation the Serving converges to and reports on
 // its deployment.
@@ -170,6 +205,11 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 		return ctrl.Result{}, err
 	}
 
+	recheck, blocked, err := r.checks(ctx, serving, preparation)
+	if blocked || err != nil {
+		return ctrl.Result{RequeueAfter: recheck}, err
+	}
+
 	app, err := r.applyApplication(ctx, serving, preparation)
 	if err != nil {
 		if errors.Is(err, argocd.ErrOptInRequired) {
@@ -183,8 +223,12 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 		return ctrl.Result{}, fmt.Errorf("failed to deploy: %w", err)
 	}
 
+	deployedBefore := serving.Status.DeployedDigest
 	markDeployment(serving, preparation, argocd.StateOf(app))
-	return ctrl.Result{}, nil
+	if err := r.recordDeployedVulnerabilities(ctx, serving, preparation, deployedBefore); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{RequeueAfter: recheck}, nil
 }
 
 // targetPreparation returns the Preparation the Serving converges to, nil
@@ -320,6 +364,257 @@ func (r *ServingReconciler) verify(ctx context.Context, serving *deliveryv1alpha
 	conditions.MarkTrue(serving, deliveryv1alpha1.ConditionTypeVerified, deliveryv1alpha1.ReasonSignaturesVerified,
 		preparation.Name+": signature and attestations verified")
 	return false, nil
+}
+
+// checkReasons maps the outcome of a vulnerability check to the reason of
+// the ChecksPassed condition.
+var checkReasons = map[vulnerability.Outcome]string{
+	vulnerability.OutcomePassed:               deliveryv1alpha1.ReasonPassed,
+	vulnerability.OutcomeVulnerabilitiesFound: deliveryv1alpha1.ReasonVulnerabilitiesFound,
+	vulnerability.OutcomeScanMissing:          deliveryv1alpha1.ReasonScanMissing,
+	vulnerability.OutcomeScanStale:            deliveryv1alpha1.ReasonScanStale,
+}
+
+// checks evaluates the promotion checks preparation was rendered under
+// against the verified scan reports of its images. It returns how soon to
+// check again, as the scans age, and whether deployment must not proceed.
+// The checks hold new deployments only: the deployed Preparation that stops
+// passing them stays deployed.
+func (r *ServingReconciler) checks(
+	ctx context.Context, serving *deliveryv1alpha1.Serving, preparation *deliveryv1alpha1.Preparation,
+) (time.Duration, bool, error) {
+	var check *deliveryv1alpha1.VulnerabilityCheck
+	if preparation.Spec.Checks != nil {
+		check = preparation.Spec.Checks.Vulnerabilities
+	}
+	if check == nil {
+		conditions.Remove(serving, deliveryv1alpha1.ConditionTypeChecksPassed)
+		return 0, false, nil
+	}
+
+	verdict, err := r.evaluateVulnerabilities(ctx, serving, preparation, check)
+	if err != nil {
+		return 0, true, err
+	}
+	reason := checkReasons[verdict.Outcome]
+	if verdict.Outcome == vulnerability.OutcomePassed {
+		conditions.MarkTrue(serving, deliveryv1alpha1.ConditionTypeChecksPassed, reason, preparation.Name+": "+verdict.Message)
+		return verdict.Recheck, false, nil
+	}
+
+	conditions.MarkFalse(serving, deliveryv1alpha1.ConditionTypeChecksPassed, reason, preparation.Name+": "+verdict.Message)
+	if serving.Status.DeployedDigest == preparation.Spec.Artifact.Digest {
+		log.FromContext(ctx).Info("Deployed Preparation no longer passes its checks, keeping it deployed",
+			"preparation", preparation.Name, "reason", reason)
+		return 0, false, nil
+	}
+	log.FromContext(ctx).V(4).Info("Checks block deployment", "preparation", preparation.Name, "reason", reason)
+	return 0, true, nil
+}
+
+// evaluateVulnerabilities evaluates check against the latest scan of every
+// image of preparation, as the Product records it and the signed report in
+// the registry holds it.
+func (r *ServingReconciler) evaluateVulnerabilities(
+	ctx context.Context, serving *deliveryv1alpha1.Serving, preparation *deliveryv1alpha1.Preparation, check *deliveryv1alpha1.VulnerabilityCheck,
+) (vulnerability.Verdict, error) {
+	product, err := r.productOf(ctx, serving)
+	if err != nil {
+		return vulnerability.Verdict{}, err
+	}
+	if product == nil {
+		return vulnerability.Verdict{Outcome: vulnerability.OutcomeScanMissing, Message: "the Order or its Product was not found"}, nil
+	}
+	maxAge, err := r.maxScanAge(ctx, check)
+	if err != nil {
+		return vulnerability.Verdict{}, err
+	}
+
+	assessments := vulnerability.Read(ctx, releaseImagesOf(preparation, product), r.reportReader(product), 1)
+	return vulnerability.Evaluate(assessments, vulnerability.Check{
+		MaxSeverity:   vulnerability.Severity(check.MaxSeverity),
+		IgnoreUnfixed: check.IgnoreUnfixed,
+		MaxAge:        maxAge,
+	}, r.clock())
+}
+
+// reportReader returns the reader of the signed reports of the Product's
+// scans: through its Registries, verified against the Kitchen's keys, and
+// remembered by report digest until the keys change. Reports that do not
+// verify, or Registries that cannot be used, are vulnerability.ErrUnreadable.
+func (r *ServingReconciler) reportReader(product *deliveryv1alpha1.Product) vulnerability.FindingsReader {
+	var (
+		once     sync.Once
+		scope    registry.Scope
+		trust    *signing.TrustSet
+		setupErr error
+	)
+	return func(ctx context.Context, scan vulnerability.Scan) ([]vulnerability.Finding, error) {
+		once.Do(func() {
+			state, err := r.Signing.State(ctx)
+			if err != nil {
+				setupErr = fmt.Errorf("waiting for the signing key to verify the reports: %w", err)
+				return
+			}
+			trust = state.Trust
+			if scope, err = r.Registries.Scope(ctx, product.Namespace, product.Spec.RegistryRefs); err != nil {
+				setupErr = fmt.Errorf("connecting to the vendored images: %w", err)
+			}
+		})
+		if setupErr != nil {
+			return nil, vulnerability.Unreadable(setupErr)
+		}
+
+		r.reportsOnce.Do(func() { r.reports = lru.New(reportCacheSize) })
+		key := reportKey{digest: scan.Report, trust: trust.ID()}
+		if cached, ok := r.reports.Get(key); ok {
+			return cached.([]vulnerability.Finding), nil
+		}
+		findings, err := r.fetchReport(ctx, scope, trust, scan)
+		if err != nil {
+			if errors.Is(err, signing.ErrNotVerified) || errors.Is(err, oci.ErrPayloadTooLarge) || registry.Reason(err, "") != "" {
+				return nil, vulnerability.Unreadable(fmt.Errorf("its report did not verify: %w", err))
+			}
+			return nil, err
+		}
+		r.reports.Add(key, findings)
+		return findings, nil
+	}
+}
+
+// fetchReport reads the signed report of scan through scope and verifies it
+// against trust.
+func (r *ServingReconciler) fetchReport(
+	ctx context.Context, scope registry.Scope, trust *signing.TrustSet, scan vulnerability.Scan,
+) ([]vulnerability.Finding, error) {
+	conn, err := scope.Connect(scan.Repository)
+	if err != nil {
+		return nil, err
+	}
+	subject, err := oci.Parse(scan.Repository + "@" + scan.Digest)
+	if err != nil {
+		return nil, err
+	}
+	return vulnerability.Fetch(ctx, conn.Client, trust, subject, scan.Report)
+}
+
+// recordDeployedVulnerabilities records the summary of the deployed
+// Preparation's scans, and emits a Warning Event when the findings at or
+// above the severity its check allows increase while it stays deployed.
+// deployedBefore is the digest that was deployed before this reconcile.
+func (r *ServingReconciler) recordDeployedVulnerabilities(
+	ctx context.Context, serving *deliveryv1alpha1.Serving, preparation *deliveryv1alpha1.Preparation, deployedBefore string,
+) error {
+	// Until the target is healthy, the summary keeps describing what runs.
+	if serving.Status.DeployedDigest != preparation.Spec.Artifact.Digest {
+		return nil
+	}
+
+	product, err := r.productOf(ctx, serving)
+	if err != nil {
+		return err
+	}
+	var total vulnerability.Summary
+	scanned := false
+	if product != nil {
+		total, scanned = vulnerability.Total(releaseImagesOf(preparation, product))
+	}
+	previous := serving.Status.DeployedVulnerabilities
+	serving.Status.DeployedVulnerabilities = nil
+	if scanned {
+		serving.Status.DeployedVulnerabilities = &deliveryv1alpha1.VulnerabilitySummary{
+			Critical: total.Critical, High: total.High, Medium: total.Medium,
+			Low: total.Low, Unknown: total.Unknown, Fixable: total.Fixable,
+		}
+	}
+
+	if previous == nil || !scanned || deployedBefore != preparation.Spec.Artifact.Digest ||
+		preparation.Spec.Checks == nil || preparation.Spec.Checks.Vulnerabilities == nil || r.Recorder == nil {
+		return nil
+	}
+	maxSeverity := vulnerability.Severity(preparation.Spec.Checks.Vulnerabilities.MaxSeverity)
+	before := vulnerability.AtLeast(vulnerability.Summary{
+		Critical: previous.Critical, High: previous.High, Medium: previous.Medium, Low: previous.Low,
+	}, maxSeverity)
+	if after := vulnerability.AtLeast(total, maxSeverity); after > before {
+		r.Recorder.Eventf(serving, preparation, corev1.EventTypeWarning, deliveryv1alpha1.ReasonVulnerabilitiesIncreased, "Scan",
+			"Deployed Preparation %s has %d vulnerabilities at or above %s, up from %d", preparation.Name, after, maxSeverity, before)
+	}
+	return nil
+}
+
+// releaseImagesOf maps the images of preparation, with the latest scans the
+// Product records of their digests, to the images a check evaluates.
+func releaseImagesOf(preparation *deliveryv1alpha1.Preparation, product *deliveryv1alpha1.Product) []vulnerability.Image {
+	scans := map[string]deliveryv1alpha1.ImageScan{}
+	if product.Status.Vulnerabilities != nil {
+		for _, s := range product.Status.Vulnerabilities.Images {
+			scans[s.Digest] = s
+		}
+	}
+	images := make([]vulnerability.Image, 0, len(preparation.Spec.Images))
+	for _, img := range preparation.Spec.Images {
+		image := vulnerability.Image{Name: cmp.Or(img.Name, img.Ref), Digest: img.Digest, Vendored: img.Vendored != ""}
+		if s, ok := scans[img.Digest]; ok {
+			image.Scan = &vulnerability.Scan{
+				Repository: s.Repository,
+				Digest:     s.Digest,
+				Report:     s.Report,
+				ScannedAt:  s.ScannedTime.Time,
+				Summary: vulnerability.Summary{
+					Critical: s.Summary.Critical, High: s.Summary.High, Medium: s.Summary.Medium,
+					Low: s.Summary.Low, Unknown: s.Summary.Unknown, Fixable: s.Summary.Fixable,
+				},
+			}
+		}
+		images = append(images, image)
+	}
+	return images
+}
+
+// productOf returns the Product of the Serving's Order, nil when either
+// does not exist.
+func (r *ServingReconciler) productOf(ctx context.Context, serving *deliveryv1alpha1.Serving) (*deliveryv1alpha1.Product, error) {
+	order := &deliveryv1alpha1.Order{}
+	if err := r.Get(ctx, client.ObjectKey{Namespace: serving.Namespace, Name: serving.Spec.OrderName}, order); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get Order: %w", err)
+	}
+	product := &deliveryv1alpha1.Product{}
+	if err := r.Get(ctx, client.ObjectKey{Namespace: serving.Namespace, Name: order.Spec.ProductRef.Name}, product); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get Product: %w", err)
+	}
+	return product, nil
+}
+
+// maxScanAge returns how old a scan check accepts: its maxAgeSeconds, or
+// twice the Kitchen's scanning interval.
+func (r *ServingReconciler) maxScanAge(ctx context.Context, check *deliveryv1alpha1.VulnerabilityCheck) (time.Duration, error) {
+	if check.MaxAgeSeconds > 0 {
+		return time.Duration(check.MaxAgeSeconds) * time.Second, nil
+	}
+	interval := int32(defaultScanIntervalSeconds)
+	kitchen := &deliveryv1alpha1.Kitchen{}
+	switch err := r.Get(ctx, client.ObjectKey{Namespace: r.InstallNamespace, Name: deliveryv1alpha1.DefaultKitchenName}, kitchen); {
+	case err == nil:
+		interval = kitchen.Spec.Scanning.EffectiveIntervalSeconds()
+	case !apierrors.IsNotFound(err):
+		return 0, fmt.Errorf("failed to get Kitchen: %w", err)
+	}
+	return 2 * time.Duration(interval) * time.Second, nil
+}
+
+// clock returns the current time.
+func (r *ServingReconciler) clock() time.Time {
+	if r.now != nil {
+		return r.now()
+	}
+	return time.Now()
 }
 
 // applyApplication points the Serving's Argo CD Application at the artifact
@@ -539,6 +834,36 @@ var applicationChanged = predicate.Funcs{
 	},
 }
 
+// enqueueServingsOfProduct maps a Product to the Servings of its Orders,
+// which carry the Orders' names. It lists Orders by the index the Order
+// controller registers.
+func (r *ServingReconciler) enqueueServingsOfProduct(ctx context.Context, obj client.Object) []ctrl.Request {
+	orders := &deliveryv1alpha1.OrderList{}
+	if err := r.List(ctx, orders, client.InNamespace(obj.GetNamespace()),
+		client.MatchingFields{deliveryv1alpha1.FieldProductRefName: obj.GetName()}); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to list Orders of Product", "product", obj.GetName())
+		return nil
+	}
+	reqs := make([]ctrl.Request, 0, len(orders.Items))
+	for i := range orders.Items {
+		reqs = append(reqs, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&orders.Items[i])})
+	}
+	return reqs
+}
+
+// productScansChanged passes the Product updates that change its scans,
+// which the checks and the deployed summary of its Servings read.
+var productScansChanged = predicate.Funcs{
+	CreateFunc: func(event.CreateEvent) bool { return false },
+	DeleteFunc: func(event.DeleteEvent) bool { return false },
+	UpdateFunc: func(e event.UpdateEvent) bool {
+		oldProduct, okOld := e.ObjectOld.(*deliveryv1alpha1.Product)
+		newProduct, okNew := e.ObjectNew.(*deliveryv1alpha1.Product)
+		return okOld && okNew && !equality.Semantic.DeepEqual(oldProduct.Status.Vulnerabilities, newProduct.Status.Vulnerabilities)
+	},
+	GenericFunc: func(event.GenericEvent) bool { return false },
+}
+
 // enqueueAllServings enqueues every Serving, so that their targets are
 // verified again against changed trust.
 func (r *ServingReconciler) enqueueAllServings(ctx context.Context, _ client.Object) []ctrl.Request {
@@ -581,6 +906,9 @@ func (r *ServingReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(argocd.New(),
 			handler.EnqueueRequestsFromMapFunc(servingOfApplication),
 			builder.WithPredicates(applicationChanged)).
+		Watches(&deliveryv1alpha1.Product{},
+			handler.EnqueueRequestsFromMapFunc(r.enqueueServingsOfProduct),
+			builder.WithPredicates(productScansChanged)).
 		WatchesRawSource(source.Channel(r.signingChanges(), handler.EnqueueRequestsFromMapFunc(r.enqueueAllServings))).
 		Named("serving").
 		Complete(r)

@@ -70,6 +70,110 @@ type KitchenSpec struct {
 	// images that rendered manifests reference.
 	// +optional
 	Images *KitchenImages `json:"images,omitempty"`
+
+	// scanning enables scanning the images Products vendor for
+	// vulnerabilities. When unset, nothing is scanned. An empty object
+	// scans with the defaults.
+	// +optional
+	Scanning *KitchenScanning `json:"scanning,omitempty"`
+}
+
+// Default locations of the Trivy vulnerability databases.
+const (
+	// DefaultScanningDBRepository is the repository of the Trivy
+	// vulnerability database, read at tag 2.
+	DefaultScanningDBRepository = "oci://mirror.gcr.io/aquasec/trivy-db"
+	// DefaultScanningJavaDBRepository is the repository of the Trivy Java
+	// database, read at tag 1.
+	DefaultScanningJavaDBRepository = "oci://mirror.gcr.io/aquasec/trivy-java-db"
+)
+
+// KitchenScanning configures vulnerability scanning. Kokumi scans each image
+// a Product vendors once per digest, with the kokumi-scanner component, and
+// attaches the signed results to the vendored image.
+type KitchenScanning struct {
+	// intervalSeconds is how often an image that a Preparation in use runs
+	// is scanned again, so that new vulnerabilities show up on what is
+	// already deployed.
+	// +optional
+	// +kubebuilder:default=86400
+	// +kubebuilder:validation:Minimum=3600
+	// +kubebuilder:validation:Maximum=2592000
+	IntervalSeconds int32 `json:"intervalSeconds,omitempty"`
+
+	// maxDatabaseAgeSeconds is how old the vulnerability database may be.
+	// Scans with an older one still produce reports, but the Product
+	// reports them as DatabaseStale, so that an air-gapped installation
+	// notices a database it forgot to update.
+	// +optional
+	// +kubebuilder:default=604800
+	// +kubebuilder:validation:Minimum=3600
+	MaxDatabaseAgeSeconds int32 `json:"maxDatabaseAgeSeconds,omitempty"`
+
+	// dbRepository is the oci:// URL of the Trivy vulnerability database.
+	// A repository is read at tag 2; a URL with a tag or digest pins the
+	// database, so that an update is a reviewed change. Defaults to
+	// oci://mirror.gcr.io/aquasec/trivy-db. Set it to a mirror in
+	// air-gapped clusters.
+	// +optional
+	// +kubebuilder:validation:MaxLength=2048
+	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() == 'oci'",message="must be a valid OCI URL"
+	DBRepository string `json:"dbRepository,omitempty"`
+
+	// javaDBRepository is the oci:// URL of the Trivy Java database, which
+	// identifies Java archives. A repository is read at tag 1. It is only
+	// downloaded when an image holds Java archives, and such images cannot
+	// be scanned without it. Defaults to
+	// oci://mirror.gcr.io/aquasec/trivy-java-db.
+	// +optional
+	// +kubebuilder:validation:MaxLength=2048
+	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() == 'oci'",message="must be a valid OCI URL"
+	JavaDBRepository string `json:"javaDBRepository,omitempty"`
+
+	// registryRefs lists Registries in the install namespace that connect
+	// to the database repositories, for mirrors that need credentials, a
+	// CA or plain HTTP. The public default and the bundled registry need
+	// none.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	// +kubebuilder:validation:MaxItems=16
+	RegistryRefs []corev1.LocalObjectReference `json:"registryRefs,omitempty"`
+}
+
+// EffectiveIntervalSeconds returns intervalSeconds, defaulting to a day.
+func (s *KitchenScanning) EffectiveIntervalSeconds() int32 {
+	if s == nil || s.IntervalSeconds <= 0 {
+		return 86400
+	}
+	return s.IntervalSeconds
+}
+
+// EffectiveMaxDatabaseAgeSeconds returns maxDatabaseAgeSeconds, defaulting
+// to a week.
+func (s *KitchenScanning) EffectiveMaxDatabaseAgeSeconds() int32 {
+	if s == nil || s.MaxDatabaseAgeSeconds <= 0 {
+		return 604800
+	}
+	return s.MaxDatabaseAgeSeconds
+}
+
+// EffectiveDBRepository returns dbRepository, defaulting to
+// DefaultScanningDBRepository.
+func (s *KitchenScanning) EffectiveDBRepository() string {
+	if s == nil || s.DBRepository == "" {
+		return DefaultScanningDBRepository
+	}
+	return s.DBRepository
+}
+
+// EffectiveJavaDBRepository returns javaDBRepository, defaulting to
+// DefaultScanningJavaDBRepository.
+func (s *KitchenScanning) EffectiveJavaDBRepository() string {
+	if s == nil || s.JavaDBRepository == "" {
+		return DefaultScanningJavaDBRepository
+	}
+	return s.JavaDBRepository
 }
 
 // KitchenImages configures registry access for container images.

@@ -46,10 +46,10 @@ func fetchManifest(ctx context.Context, repo *remote.Repository, reference strin
 }
 
 // fetchBlobBytes reads the blob described by desc into memory, rejecting blobs
-// larger than maxBlobBytes.
-func fetchBlobBytes(ctx context.Context, repo *remote.Repository, desc ocispec.Descriptor) ([]byte, error) {
-	if desc.Size > maxBlobBytes {
-		return nil, fmt.Errorf("blob %s is %d bytes, limit is %d", desc.Digest, desc.Size, maxBlobBytes)
+// larger than limit.
+func fetchBlobBytes(ctx context.Context, repo *remote.Repository, desc ocispec.Descriptor, limit int64) ([]byte, error) {
+	if desc.Size > limit {
+		return nil, fmt.Errorf("blob %s is %d bytes, limit is %d: %w", desc.Digest, desc.Size, limit, ErrPayloadTooLarge)
 	}
 
 	data, err := content.FetchAll(ctx, repo.Blobs(), desc)
@@ -72,7 +72,7 @@ func (c *ORASClient) FetchConfig(ctx context.Context, ref Reference) (string, []
 		return "", nil, fmt.Errorf("fetch config of %s: %w", ref, err)
 	}
 
-	data, err := fetchBlobBytes(ctx, repo, manifest.Config)
+	data, err := fetchBlobBytes(ctx, repo, manifest.Config, maxBlobBytes)
 	if err != nil {
 		return "", nil, fmt.Errorf("fetch config of %s: %w", ref, err)
 	}
@@ -224,7 +224,19 @@ func descriptorOf(desc ocispec.Descriptor) Descriptor {
 		Digest:       desc.Digest.String(),
 		Size:         desc.Size,
 		Annotations:  desc.Annotations,
+		Platform:     platformString(desc.Platform),
 	}
+}
+
+// platformString returns p as "os/arch" or "os/arch/variant", "" for nil.
+func platformString(p *ocispec.Platform) string {
+	if p == nil || p.OS == "" || p.Architecture == "" {
+		return ""
+	}
+	if p.Variant != "" {
+		return p.OS + "/" + p.Architecture + "/" + p.Variant
+	}
+	return p.OS + "/" + p.Architecture
 }
 
 func optionalDescriptor(desc *ocispec.Descriptor) *Descriptor {

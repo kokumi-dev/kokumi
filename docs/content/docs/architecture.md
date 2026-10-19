@@ -62,7 +62,8 @@ restored instantly: No re-render, no drift.
 The entire pipeline — OCI pull → render → push to in-cluster registry — has no
 requirement for outbound internet access. All external dependencies are OCI
 artifacts that can be mirrored in advance, making Kokumi suitable for
-restricted and disconnected environments.
+restricted and disconnected environments. That includes the vulnerability
+database scanning reads.
 
 ### GitOps integration, not replacement
 
@@ -316,6 +317,18 @@ latest Preparation act as a lock file: a later render keeps the digest of
 every reference written the same way and resolves only new or changed ones.
 Orders cannot change the image settings. See
 [Container Images](user-guide/images/).
+
+#### Vulnerability scanning
+
+When the Kitchen enables scanning, Kokumi scans every vendored image that a
+Preparation in use runs, once per Product per digest and again every day.
+The `kokumi-scanner` component runs Trivy; the controller manager signs the
+SBOM and the vulnerability report and attaches them to the vendored image as
+OCI referrers, and records a summary in `status.vulnerabilities` with the
+`Scanned` condition. An SBOM that already comes with the image is reused only
+when it cannot be forged: one BuildKit wrote into the image index, or one a
+trusted key signed. See
+[Vulnerability Scanning](user-guide/security-scanning/).
 
 ### Recipe
 
@@ -645,12 +658,20 @@ When a Serving is reconciled, the controller:
    `SignatureInvalid`. Argo CD verifies no OCI signatures, so this is the only
    check, and Argo CD pulls exactly the digest that was verified. Results are
    cached per digest until the trusted keys change.
-4. Creates or updates the Argo CD `Application` in the `argocd` namespace,
+4. Enforces the promotion checks the target Preparation was rendered under
+   (`spec.promotion.checks` of its Order). For the vulnerability check, every
+   image needs a recent, signed report in the registry without findings at or
+   above the allowed severity. Otherwise the current deployment stays and the
+   `ChecksPassed` condition explains why. A Preparation that is already
+   deployed is not taken down; the Serving records the findings of what it
+   deploys in `status.deployedVulnerabilities` and emits a Warning Event when
+   they increase.
+5. Creates or updates the Argo CD `Application` in the `argocd` namespace,
    pointing `spec.source.repoURL` at the Preparation's OCI artifact and
    `spec.source.targetRevision` at its exact digest. A pre-existing
    Application without the opt-in annotation is never modified, and
    deleting the Serving keeps it.
-5. Derives the Serving status from the Application and records the
+6. Derives the Serving status from the Application and records the
    preparation as the observed (active) one: `Deploying` until the
    Application reports `Healthy` and is synced to the desired revision, then
    `Deployed`. An Application that is degraded at the desired revision
@@ -837,6 +858,8 @@ that stores rendered manifests as OCI artifacts. This means:
 ## Deployment architecture
 
 Kokumi pulls a source artifact from a registry, renders it into an immutable artifact, and stores it in a destination registry. Argo CD then fetches the manifests by content digest and syncs them to the cluster. The source OCI reference on the Product accepts any registry (including the in-cluster one), and each Order's destination defaults to the in-cluster registry when omitted but can be set to an external registry instead.
+
+When the Kitchen enables vulnerability scanning, the controller also calls the `kokumi-scanner` component, which pulls the vendored images and the vulnerability database and scans them. The controller signs the results and attaches them to the vendored images. Only the controller can reach it; see [Vulnerability Scanning](operator-guide/scanning/).
 
 ```mermaid
 %%{init: {
