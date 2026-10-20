@@ -361,6 +361,9 @@ spec:
   - name: ghcr-shop-push
   promotion:
     mode: Manual
+    after:               # upstream stages: Orders of the same Product
+    - order: podinfo-staging
+      soakSeconds: 86400
     approvals:
       requiredApprovals: 2
       allowedGroups:
@@ -374,14 +377,19 @@ spec:
 - **Edits** are applied after patches. The UI writes them when you edit a
   rendered file.
 - **Destination** and **promotion** are per Order: each variant has its own
-  Preparation history, Serving, and approval gate. The Order's
-  `registryRefs` authenticate its destination; the Preparation records the
-  Registry it was pushed through in `spec.artifact.registryRef`.
+  Preparation history, Serving, and gates. The Order's `registryRefs`
+  authenticate its destination; the Preparation records the Registry it was
+  pushed through in `spec.artifact.registryRef`.
+- **Upstream stages** (`promotion.after`) order the Orders of a Product into
+  a pipeline. See [Promotion pipelines](#promotion-pipelines).
 
 Every change to an Order or to its Product (a new source version, other values
-or patches) triggers a new reconciliation and, if the merged result changed, a
-new Preparation. Promotion stays per Order, so a new Product version can deploy
-automatically to `podinfo-dev` while `podinfo-prod` waits for approvals.
+or patches) triggers a new reconciliation and, if the intent changed, a new
+Preparation. A change to the Product always renders every Order again, also an
+Order whose own values or patches hide it, because the intent holds the
+[Product revision](#the-product-revision). Promotion stays per Order, so a new
+Product version can deploy automatically to `podinfo-dev` while `podinfo-prod`
+waits for `podinfo-staging` and for approvals.
 
 While its Product is missing, not `Ready`, or being deleted, an Order reports
 `Ready=False` with reason `ProductNotFound`, `ProductNotReady`, or
@@ -441,12 +449,13 @@ kokumi-registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod
 │        org.opencontainers.image.source / .version / .revision
 │        org.opencontainers.image.base.name / .base.digest
 │        kokumi.dev/parent: sha256:c1…
-│        kokumi.dev/approval-policy: {…}
 │
 ├─ referrers of sha256:c3…  (Sigstore bundles, application/vnd.dev.sigstore.bundle.v0.3+json)
 │   ├─ predicate https://sigstore.dev/cosign/sign/v1              signature
 │   ├─ predicate https://slsa.dev/provenance/v1                   SLSA v1 provenance
-│   └─ predicate https://kokumi.dev/attestations/approval/v1      written on promotion
+│   ├─ predicate https://kokumi.dev/attestations/approval/v1      sealed approvals, before promotion
+│   ├─ predicate https://kokumi.dev/attestations/promotion/v1     per promotion
+│   └─ predicate https://kokumi.dev/attestations/deployment/v1    per healthy deployment
 │
 └─ tag 6.10.2 → sha256:c3…
 
@@ -456,15 +465,16 @@ kokumi-registry.kokumi.svc.cluster.local:5000/shop/vendor/podinfo/images/ghcr.io
 └─ tag 6.10.2 → sha256:aa…
 ```
 
-- The **referrers** (Signature, provenance, approvals) are Sigstore bundles,
+- The **referrers** (signature, provenance, approvals, promotion and
+  deployment records) are Sigstore bundles,
   artifactType `application/vnd.dev.sigstore.bundle.v0.3+json`, attached
   through the OCI 1.1 referrers API: each names the Preparation's manifest in
   its `subject`. Registries without that API store them through the referrers
   tag schema; tools find them either way.
 - The **annotations** of the manifest: `org.opencontainers.image.description`
   (the commit message), `org.opencontainers.image.source`, `.version` and
-  `.revision`, `org.opencontainers.image.base.name` and `.base.digest`,
-  `kokumi.dev/parent`, and `kokumi.dev/approval-policy`.
+  `.revision`, `org.opencontainers.image.base.name` and `.base.digest`, and
+  `kokumi.dev/parent`.
 - The **tag** is the source version. A later Preparation of the same version
   moves it; the digest of this one never changes.
 - The **vendored images**, under `images.policy: Vendor`: every image the
@@ -499,7 +509,7 @@ fetching a blob.
   "destination": { "oci": "oci://kokumi-registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod" },
   "product": { "namespace": "shop", "name": "podinfo", "configHash": "sha256:77e0…" },
   "renderer": { "type": "Helm", "version": "v4.3.0", "builder": "ghcr.io/kokumi-dev/kokumi@sha256:bb…" },
-  "intent": { "source": {}, "destination": "", "render": {}, "patches": [], "edits": [], "images": {}, "promotion": {} },
+  "intent": { "source": {}, "productRevision": "sha256:5e1f…", "destination": "", "render": {}, "patches": [], "edits": [], "images": {}, "promotion": {} },
   "images": [
     {
       "ref": "ghcr.io/stefanprodan/podinfo:6.10.2", "name": "ghcr.io/stefanprodan/podinfo",
@@ -532,12 +542,14 @@ config blob stores the `intent` member with exactly these bytes, so equal
 hashes mean equal intent, and anyone can recompute the hash: it is the SHA-256
 of the `intent` value as it stands in the blob.
 
-- Changing the approval policy creates a new Preparation that needs fresh
-  approvals. Switching the promotion mode does not.
-- Changing a Product in a way that alters the merged result (a new source
-  version or digest, other values or patches) renders a new Preparation for
-  every Order of that Product. The source digest is part of the intent. Where a value or patch is set, on the Product or the
-  Order, is not part of the intent; only the merged result is.
+- The gates of `spec.promotion` (approvals, upstream stages, checks) are part
+  of the intent: changing one creates a new Preparation that needs fresh
+  approvals. Switching the promotion mode does not. The upstream stages are
+  sorted by Order.
+- Changing a Product renders a new Preparation for every Order of that
+  Product, because the intent holds the [Product
+  revision](#the-product-revision), also when an Order's own values or
+  patches hide the change. The source digest is part of the intent too.
 - The image policy and field specs are part of the intent unless they are the
   defaults (`Record`, no field specs), and under `Vendor` so is the location
   the images are copied below. The digests images resolve to are not: they
@@ -558,6 +570,36 @@ and with it the config blob, the rendered layer and the annotations: trust
 intent and lineage read from the registry only once the signature verifies
 against the Kitchen key.
 {{< /callout >}}
+
+#### The Product revision
+
+The **Product revision** links the Preparations that the Orders of a Product
+render from one Product change, as GitOps Promoter's dry commit links the
+hydrated commits of its environments. It identifies the change; it is never
+promoted. Each Order only ever deploys its own Preparations.
+
+It is the SHA-256 of the canonical JSON of the Product's part of the intent:
+
+- the resolved source digest;
+- the Product's render config, before an Order's values are merged;
+- the Product's patches;
+- the image policy and field specs, and under `Vendor` the location the images
+  are copied below, which the manifests pull from.
+
+The source URL and version, the overrides and the Registries are left out:
+they change no output. The digests images resolve to are left out too, so two
+stages run different digests of the same tag when their renders straddle an
+upstream tag move; each Preparation's provenance lists its images.
+
+The revision is recorded in the intent (`productRevision`) and in
+`Preparation.spec.productRevision`, a selectable field:
+
+```bash
+kubectl get preparations -n shop --field-selector spec.productRevision=sha256:5e1f…
+```
+
+Upstream stages are matched by it: see [Promotion
+pipelines](#promotion-pipelines).
 
 #### Lineage
 
@@ -640,46 +682,67 @@ Order's `spec.promotion.mode`:
   `Ready` Preparation of the Order (`status.targetPreparationName`).
 - **Manual** — click **Promote** on a Preparation in the Kokumi UI (or set the
   Serving's `spec.preparationName`). Rolling back is promoting an older
-  Preparation.
+  Preparation. A promotion is an intention: a Preparation its gates still
+  hold is **queued**, and the Serving deploys it once they pass. See
+  [Queued promotions](#queued-promotions).
 
-When a Serving is reconciled, the controller:
+When a Serving is reconciled, the controller decides whether to promote the
+Preparation it converges to, then deploys the promoted one.
 
-1. Resolves the target Preparation and its immutable OCI artifact digest.
-2. Enforces the approval gate of the target Preparation. If it is not
-   approved, or its approvals are not sealed yet, the currently deployed
-   Preparation stays active and the Serving's `Approved` condition explains
-   why.
-3. Verifies the evidence of the artifact **in the registry**, not in the
+1. Resolves the Preparation to serve and its immutable OCI artifact digest.
+   It must be `Ready`.
+2. Enforces its **upstream stages** (`spec.promotion.after`): each must have
+   deployed its own Preparation of the same Product revision healthily for
+   its soak time. Otherwise the `UpstreamDeployed` condition explains why. See
+   [Promotion pipelines](#promotion-pipelines).
+3. Enforces its **promotion checks** (`spec.promotion.checks`). For the
+   vulnerability check, every image needs a recent, signed report in the
+   registry without findings at or above the allowed severity. Otherwise the
+   `ChecksPassed` condition explains why.
+4. Enforces its **approval gate**. Once the upstream stages and checks pass,
+   the Preparation becomes the target (`status.targetPreparationName`), which
+   seals its votes. Until it is approved and its votes are sealed, the
+   `Approved` condition explains why.
+5. Verifies the evidence of the artifact **in the registry**, not in the
    Preparation's status: a signature by a trusted key, a signed provenance
    that names this Serving's Order (an artifact rendered for another Order
    cannot be deployed here), and, when an approval policy applies, signed
-   approvals with result `Approved`. Otherwise the current deployment stays,
-   and the `Verified` condition reports `SignatureMissing` or
-   `SignatureInvalid`. Argo CD verifies no OCI signatures, so this is the only
-   check, and Argo CD pulls exactly the digest that was verified. Results are
-   cached per digest until the trusted keys change.
-4. Enforces the promotion checks the target Preparation was rendered under
-   (`spec.promotion.checks` of its Order). For the vulnerability check, every
-   image needs a recent, signed report in the registry without findings at or
-   above the allowed severity. Otherwise the current deployment stays and the
-   `ChecksPassed` condition explains why. A Preparation that is already
-   deployed is not taken down; the Serving records the findings of what it
-   deploys in `status.deployedVulnerabilities` and emits a Warning Event when
-   they increase.
-5. Creates or updates the Argo CD `Application` in the `argocd` namespace,
-   pointing `spec.source.repoURL` at the Preparation's OCI artifact and
-   `spec.source.targetRevision` at its exact digest. A pre-existing
+   approvals with result `Approved`. Otherwise the `Verified` condition
+   reports `SignatureMissing` or `SignatureInvalid`. Argo CD verifies no OCI
+   signatures, so this is the only check, and Argo CD pulls exactly the digest
+   that was verified. Results are cached per digest until the trusted keys
+   change.
+6. **Records the promotion**: a new entry in `status.history`, and a signed
+   promotion record attached to the artifact that names the evidence of every
+   gate it passed. The time goes into the status first and the record into
+   the registry in the next pass, so a retry pushes the same bytes.
+7. Creates or updates the Argo CD `Application` in the `argocd` namespace,
+   pointing `spec.source.repoURL` at the deployed Preparation's OCI artifact
+   and `spec.source.targetRevision` at its exact digest. A pre-existing
    Application without the opt-in annotation is never modified, and
    deleting the Serving keeps it.
-6. Derives the Serving status from the Application and records the
-   preparation as the observed (active) one: `Deploying` until the
-   Application reports `Healthy` and is synced to the desired revision, then
-   `Deployed`. An Application that is degraded at the desired revision
+8. Derives the `Ready` condition from the Application: `Deploying` until the
+   Application reports `Healthy` and is synced to the deployed digest, then
+   `Deployed`. An Application that is degraded at the deployed digest
    surfaces as `DeploymentFailed`; the health of an older revision is not
-   reported for the new Preparation. The
-   status is written only when it changes, and the next reconcile is
-   triggered by a change to the Serving spec, its Order or Preparations, or
-   the Application's health or sync state.
+   reported for the new Preparation. `Ready` describes what runs; while a
+   newer Preparation waits for a gate, its message says what holds it.
+9. Records the deployment in the history: when it was first healthy, and
+   when it ended, `Superseded` by the next promotion or `Degraded`. Once it
+   is healthy, a signed deployment record is attached to the artifact. A
+   recovery after `Degraded` opens a new entry. The Serving records the
+   findings of what it deploys in `status.deployedVulnerabilities` and emits
+   a Warning Event when they increase.
+
+The gates hold new deployments only: a Preparation that is promoted stays
+deployed when a gate stops passing, such as a new scan with findings. The
+deployed Preparation is the newest entry of `status.history` with a
+promotion record; the history keeps the 16 most recent deployments.
+
+The status is written only when it changes, and the next reconcile is
+triggered by a change to the Serving spec, its Order or Preparations, the
+Application's health or sync state, the history of an upstream stage, or a
+soak that ends.
 
 Rollback is promoting any previous Preparation. No re-rendering required.
 
@@ -692,6 +755,30 @@ deployed workloads keep running: the Application Kokumi creates has no
 place. A pre-existing Application without the opt-in annotation is kept.
 `kubectl delete order <name> --cascade=orphan` keeps the Serving, and a later
 Order of the same name adopts it.
+
+#### Queued promotions
+
+Under Manual, Promote sets the Serving's `spec.preparationName` and nothing
+else. The Serving deploys that Preparation once it passes every gate:
+upstream stages, checks, approvals and the evidence in the registry. Until
+then the promotion is queued, and the Serving keeps what it deploys.
+
+- **One per Order.** Promoting another Preparation replaces the queued one;
+  promotions do not line up.
+- **Withdraw** by promoting the deployed Preparation again. The UI offers
+  **Withdraw** on a queued Preparation.
+- **Manual pins it.** A queued Preparation deploys even when newer ones are
+  rendered meanwhile. Promote the newer one to take it instead.
+- **It may deploy long after the click,** for example when a day-long soak
+  ends. The UI marks it as queued, with the gate it waits for, on the
+  Preparation, the Order and the Serving.
+- **The Dashboard's open promotions** list what still needs a person: an
+  approval under an approval policy, a promote under Manual. Each row offers
+  the viewer one step: Review while they may approve and have not, then
+  Promote. A queued Preparation stays there while it waits for approvals and
+  leaves once only the Serving's own gates, such as soaks and checks, hold it.
+- Promote is refused only for an Automatic Order and for a Preparation that
+  is not signed and ready.
 
 ### Approvals
 
@@ -707,17 +794,20 @@ spec:
       allowedGroups: [release-approvers]
 ```
 
-- The policy is **copied into each Preparation** (`spec.approvalPolicy`) and
-  recorded on its OCI artifact. Changing the policy produces a new
-  Preparation that needs fresh approvals.
+- The policy is **copied into each Preparation**
+  (`spec.promotion.approvals`) and recorded in the intent of its OCI artifact.
+  Changing the policy produces a new Preparation that needs fresh approvals.
 - Reviewers vote in the UI with **Approve** or **Request changes**. Each vote
   is an immutable `Approval` resource. Only the **latest vote per reviewer**
   counts, only reviewers in one of `allowedGroups` are eligible, and a single
   eligible "Request changes" blocks the Preparation.
 - Both promotion modes are gated. In Automatic mode the newest Preparation is
   deployed as soon as it is approved; an older approved Preparation is never
-  deployed in its place. In Manual mode a human still has to press Promote.
-- When an approved Preparation is promoted, its votes are **sealed**: they are
+  deployed in its place. In Manual mode a human still has to press Promote,
+  which may come before the approvals: the promotion is queued until they
+  are given.
+- When an approved Preparation becomes the Serving's target, after its
+  upstream stages and checks pass, its votes are **sealed**: they are
   locked in `status.approval` and pushed as a signed attestation (predicate
   type `https://kokumi.dev/attestations/approval/v1`) that references the
   Preparation's artifact as an OCI referrer. Votes submitted later are ignored.
@@ -750,15 +840,84 @@ who can change the policies themselves, impersonate the `kokumi-server`
 ServiceAccount, or write to etcd directly. Restrict those permissions and keep
 an audit policy on `approvals` and `admissionregistration.k8s.io` resources.
 
+### Promotion pipelines
+
+The Orders of a Product can form a pipeline: each Order names the Orders it
+runs after in `spec.promotion.after`, with a soak time.
+
+```yaml
+spec:
+  productRef:
+    name: podinfo
+  promotion:
+    mode: Automatic
+    after:                          # every entry must hold
+    - order: podinfo-staging
+      soakSeconds: 86400            # continuous healthy time upstream
+```
+
+**Nothing is promoted from stage to stage.** A Product change renders every
+Order into its own Preparation, with its own values, patches and image
+digests. The pipeline only decides when each stage promotes its own
+Preparation, as GitOps Promoter promotes each environment's own hydrated
+commit once the environments before it run the same dry commit healthily. The
+[Product revision](#the-product-revision) links the Preparations of one
+change.
+
+- **The gate.** A Serving deploys a Preparation once every upstream stage's
+  Serving records, in `status.history`, a deployment of its own Preparation of
+  the same Product revision that was healthy, without degrading, for
+  `soakSeconds`, and whose deployment record is in the registry. An upstream
+  stage that has moved on since still qualifies the revision. While a soak
+  runs, the `UpstreamDeployed` condition reports `Soaking` with the time it
+  ends, and the Serving reconciles again then.
+- **Evidence in the registry.** The history names the upstream deployment;
+  its signed deployment record is verified in the registry before the
+  promotion, through the Registry that pushed the upstream artifact.
+- **Rollback.** A Preparation the stage promoted before passes the upstream
+  gate again, so a rollback is never held by an upstream stage that moved on.
+- **Gate order.** Upstream stages and checks come before approvals, so votes
+  are sealed only once nothing but approval and verification stands between
+  a Preparation and its deployment.
+- **Invalid pipelines.** An Order whose `after` names an Order of another
+  Product, or whose stages lead back to itself, is `Ready=False` with reason
+  `InvalidPipeline` and renders nothing. An upstream Order that does not
+  exist yet holds the Serving with `NotDeployedUpstream`; it continues once
+  the upstream Order deploys.
+- **Same namespace.** Upstream Orders are in the Order's namespace, where its
+  Product is.
+
+Each promotion and each healthy deployment is recorded, signed by the Kitchen
+key, as a referrer of the deployed artifact:
+
+| Record | predicateType | Written when |
+|---|---|---|
+| Promotion | `https://kokumi.dev/attestations/promotion/v1` | the Preparation passed its gates |
+| Deployment | `https://kokumi.dev/attestations/deployment/v1` | the deployment was first healthy |
+
+The promotion record names the Order, the Preparation and the one before it,
+the Product revision, the promotion mode, and the evidence of each gate: the
+approval attestation, the upstream deployment records, and the vulnerability
+reports. The deployment record names the promotion it completes. Each
+downstream promotion names the upstream deployment record that qualified it,
+so the chain of evidence can be walked from the registry alone. Verify them
+with `cosign verify-attestation --key kokumi.pub --insecure-ignore-tlog=true
+--type https://kokumi.dev/attestations/promotion/v1 <artifact>`.
+
+Whoever may edit an Order may change its `after`, as they may change its
+approvals.
+
 ## Reconciliation loop
 
 ```
 Watch Order ──▶ Render source ──▶ Push OCI artifact ──▶ Create/update Preparation
                                                                    │
 Watch Preparation status ──────────────────────────────────────────▼
-Serving selects Preparation ──▶ Create/update Argo CD Application
-                                        │
-                                        └──▶ Argo CD syncs manifests to cluster
+Serving selects Preparation ──▶ Gates ──▶ Promotion record ──▶ Create/update Argo CD Application
+         ▲                                                                │
+         └── Upstream Servings' history                                   └──▶ Argo CD syncs manifests to cluster
+                                                                                     │
+                                         Deployment record ◀── healthy ◀────────────┘
 ```
 
 Rendering a source runs these stages:

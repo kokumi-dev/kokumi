@@ -1,0 +1,28 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "oci://registry.example/shop/podinfo-staging-77@sha256:04b77dea09cb0e1d61b2f4838260dad2366a3382cb4dedba93b5146c15f681bb",
+      "digest": {
+        "sha256": "04b77dea09cb0e1d61b2f4838260dad2366a3382cb4dedba93b5146c15f681bb"
+      }
+    }
+  ],
+  "predicateType": "https://kokumi.dev/attestations/deployment/v1",
+  "predicate": {
+    "order": "shop/podinfo-staging",
+    "preparation": {
+      "name": "podinfo-staging-77",
+      "digest": "sha256:04b77dea09cb0e1d61b2f4838260dad2366a3382cb4dedba93b5146c15f681bb"
+    },
+    "productRevision": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "promotion": "sha256:aaaa111111111111111111111111111111111111111111111111111111111111",
+    "healthyTime": "2026-11-04T10:00:00Z",
+    "targets": [
+      {
+        "server": "https://kubernetes.default.svc",
+        "namespace": "shop"
+      }
+    ]
+  }
+}

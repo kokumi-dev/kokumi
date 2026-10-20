@@ -58,8 +58,9 @@ var _ = Describe("Preparation Controller", func() {
 					Name:      resourceName,
 					Namespace: testNamespace,
 					Spec: deliveryv1alpha1.PreparationSpec{
-						OrderName:  "order",
-						ConfigHash: "sha256:448093f1b28dc7147740d8e400946e9b228650aa31a54b0ed734ca9ab0ae5b6b",
+						OrderName:       "order",
+						ConfigHash:      "sha256:448093f1b28dc7147740d8e400946e9b228650aa31a54b0ed734ca9ab0ae5b6b",
+						ProductRevision: testProductRevision,
 						Renderer: deliveryv1alpha1.Renderer{
 							Type:    deliveryv1alpha1.RenderTypeManifest,
 							Version: testVersion,
@@ -464,13 +465,16 @@ func createTestPreparation(ctx context.Context, name, orderName, digest string, 
 				Version: testRendererVersion,
 				Builder: testBuilderID,
 			},
-			ConfigHash: testConfigHash,
+			ConfigHash:      testConfigHash,
+			ProductRevision: testProductRevision,
 			Artifact: deliveryv1alpha1.Artifact{
 				OCIRef: "oci://registry.kokumi.svc.cluster.local:5000/" + orderName + "@" + digest,
 				Digest: digest,
 			},
-			ApprovalPolicy: policy,
 		},
+	}
+	if policy != nil {
+		prep.Spec.Promotion = &deliveryv1alpha1.PromotionGates{Approvals: policy}
 	}
 	Expect(k8sClient.Create(ctx, prep)).To(Succeed())
 	return prep

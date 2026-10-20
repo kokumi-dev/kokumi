@@ -48,6 +48,15 @@
   white-space: nowrap;
 }
 
+/* The Order runs the current Product revision. */
+.current {
+  flex: none;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-success);
+  white-space: nowrap;
+}
+
 /* ── New Order ── */
 
 .add {

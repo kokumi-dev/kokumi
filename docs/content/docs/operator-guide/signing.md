@@ -16,7 +16,9 @@ sources it renders to be signed by their publishers.
 | -------- | ---------------------------- | ------- |
 | Preparation | Signature (`https://sigstore.dev/cosign/sign/v1`) | When the Preparation is created |
 | Preparation | Provenance (`https://slsa.dev/provenance/v1`) | When the Preparation is created |
-| Preparation | Sealed approvals (`https://kokumi.dev/attestations/approval/v1`) | When an approved Preparation is promoted |
+| Preparation | Sealed approvals (`https://kokumi.dev/attestations/approval/v1`) | When an approved Preparation becomes the Serving's target |
+| Preparation | Promotion record (`https://kokumi.dev/attestations/promotion/v1`) | When a Serving promotes it, past its gates |
+| Preparation | Deployment record (`https://kokumi.dev/attestations/deployment/v1`) | When its deployment is first healthy |
 
 Each attestation is an OCI referrer of the artifact: a Sigstore bundle
 (`application/vnd.dev.sigstore.bundle.v0.3+json`) holding a DSSE envelope over
@@ -26,7 +28,9 @@ timestamp; they are verified against the public key alone.
 A Preparation is `Ready` only once it is `Signed` and its provenance is
 attached. Before the Serving controller deploys a Preparation, it reads the
 signature, the provenance and, when an approval policy applies, the sealed
-approvals from the registry and verifies them. Argo CD verifies no OCI
+approvals from the registry and verifies them, as it verifies the deployment
+records of the [upstream stages](../../user-guide/promotion-pipelines/) that
+qualify it. Argo CD verifies no OCI
 signatures, so this is the only check, and Argo CD pulls exactly the digest
 that was verified. The Serving's `Verified` condition reports the result.
 

@@ -13,15 +13,18 @@ export interface OrderInsight {
   versionLoading: boolean
   /** True when the latest Preparation is not the one being served. */
   updateReady: boolean
+  /** True when the active Preparation renders the Product revision its Orders render now. */
+  currentRevision: boolean
   /** What the Order changes on its Product, e.g. "2 values · 1 patch". */
   overlay: string
 }
 
 /**
  * Derives the insight for each Order. What an Order runs comes with the
- * Order; only its version needs the Preparations, which may still load.
+ * Order; only its version and revision need the Preparations, which may
+ * still load. revision is the Product revision its Orders render now.
  */
-export function orderInsights(orders: Order[], preparations: Preparation[] | null): OrderInsight[] {
+export function orderInsights(orders: Order[], preparations: Preparation[] | null, revision?: string): OrderInsight[] {
   return orders.map((order) => {
     const active = order.activePreparation
     const prep = active
@@ -34,6 +37,7 @@ export function orderInsights(orders: Order[], preparations: Preparation[] | nul
       activeVersion: prep ? versionOf(prep) : undefined,
       versionLoading: !!active && preparations === null,
       updateReady: !!order.latestRevision && !!active && order.latestRevision !== active,
+      currentRevision: !!revision && prep?.productRevision === revision,
       overlay: overlaySummary(order),
     }
   })

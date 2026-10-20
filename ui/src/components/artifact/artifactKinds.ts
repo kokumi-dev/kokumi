@@ -20,6 +20,8 @@ const knownPredicates: Record<string, Kind> = {
   [signaturePredicate]: { label: 'Signature', icon: 'signature' },
   'https://slsa.dev/provenance/v1': { label: 'SLSA provenance', icon: 'attestation' },
   'https://kokumi.dev/attestations/approval/v1': { label: 'Approvals', icon: 'approvals' },
+  'https://kokumi.dev/attestations/promotion/v1': { label: 'Promotion record', icon: 'attestation' },
+  'https://kokumi.dev/attestations/deployment/v1': { label: 'Deployment record', icon: 'attestation' },
   'https://spdx.dev/Document': { label: 'SBOM attestation', icon: 'sbom' },
   'https://cyclonedx.org/bom': { label: 'SBOM attestation', icon: 'sbom' },
 }

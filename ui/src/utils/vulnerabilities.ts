@@ -38,7 +38,7 @@ export interface ScannedImage {
 
 /** Which Preparations Kokumi keeps scanned, as the lists and the Security tab explain it. */
 export const scannedPreparationsHint =
-  'Kokumi keeps the three newest Ready Preparations of an Order, its target and the deployed one scanned.'
+  'Kokumi keeps the three newest Ready Preparations of an Order, the promoted, the target and the deployed one scanned.'
 
 /** Where to read about a vulnerability: the CVE record, else its OSV entry (GHSA, GO, PYSEC, …). */
 export function findingURL(id: string): string {

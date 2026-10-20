@@ -13,6 +13,8 @@ export interface Column<T> {
   title?: (row: T) => string | undefined
   /** Right-align header and cells, e.g. for a trailing action column. */
   alignEnd?: boolean
+  /** Wrap long content onto more lines instead of cutting it. */
+  wrap?: boolean
 }
 
 /**
@@ -136,7 +138,7 @@ export default function DataTable<T>({ rows, columns, rowKey, rowHref, onRowClic
                       </td>
                     )}
                     {columns.map((c, i) => (
-                      <td key={i} className={c.alignEnd ? styles.alignEnd : undefined}>
+                      <td key={i} className={[c.alignEnd ? styles.alignEnd : '', c.wrap ? styles.wrap : ''].filter(Boolean).join(' ') || undefined}>
                         {c.truncate ? (
                           <div className={styles.truncate} title={c.title?.(row)}>{c.cell(row)}</div>
                         ) : (

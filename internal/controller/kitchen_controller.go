@@ -314,7 +314,7 @@ func (r *KitchenReconciler) patchStatus(
 		log.FromContext(ctx).V(1).Info("Kitchen changed during the reconcile, reconciling it again")
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	default:
-		return result, errors.Join(err, fmt.Errorf("failed to patch Kitchen status: %w", perr))
+		return ctrl.Result{}, errors.Join(err, fmt.Errorf("failed to patch Kitchen status: %w", perr))
 	}
 }
 

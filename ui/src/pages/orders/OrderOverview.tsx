@@ -10,22 +10,26 @@ import CommitBox from '../../components/shared/CommitBox'
 import RegistryAccessList from '../../components/shared/RegistryAccessList'
 import { Button, Counter } from '../../components/ui'
 import { paths } from '../../routes/paths'
-import { formatDate } from '../../utils/format'
+import { formatDate, formatDuration } from '../../utils/format'
 import { orderDestinationLabel } from '../../utils/products'
 import { describeVulnerabilityCheck } from '../../utils/vulnerabilities'
 import { objectToYaml } from '../../utils/yaml'
 import { useOrderContext } from './orderContext'
+import OrderPipeline from './OrderPipeline'
+import { servingQueue } from '../../utils/promotion'
 import { useDeniedReason } from '../../hooks/useCapability'
 import layout from '../../components/layout/layout.module.css'
 
 export default function OrderOverview() {
-  const { order, product, preparations } = useOrderContext()
+  const { order, product, preparations, servings, allOrders, allServings } = useOrderContext()
   // Edits staged for removal; committed through the CommitBox below.
   const [pendingEdits, setPendingEdits] = useState<Patch[] | null>(null)
   const editDenied = useDeniedReason('orders:update')
 
   const edits = pendingEdits ?? order.edits ?? []
   const latest = preparations?.[0]
+  const serving = servings?.find((s) => s.name === order.name)
+  const queued = order.mode === 'Manual' && serving ? servingQueue(serving) : undefined
 
   function removeEdit(index: number) {
     setPendingEdits(edits.filter((_, i) => i !== index))
@@ -59,6 +63,16 @@ export default function OrderOverview() {
         <PropertyList
           items={[
             { label: 'Active Preparation', value: prepLink(order.activePreparation) },
+            {
+              label: 'Next Preparation',
+              value: queued && (
+                <>
+                  {prepLink(serving?.desiredPreparation)}{' '}
+                  <span className={layout.muted} title={queued.message}>queued, waits for {queued.waitingFor}</span>
+                </>
+              ),
+              show: !!queued,
+            },
             { label: 'Latest Preparation', value: prepLink(order.latestRevision) },
             {
               label: 'Latest change',
@@ -66,6 +80,13 @@ export default function OrderOverview() {
               show: !!latest,
             },
             { label: 'Promotion', value: order.mode },
+            {
+              label: 'Runs after',
+              value: order.after
+                ?.map((s) => `${s.order}${s.soakSeconds ? `, after a soak of ${formatDuration(s.soakSeconds)}` : ''}`)
+                .join('; '),
+              show: !!order.after?.length,
+            },
             {
               label: 'Approvals',
               value: order.approvals
@@ -79,6 +100,8 @@ export default function OrderOverview() {
           ]}
         />
       </Section>
+
+      <OrderPipeline order={order} product={product} orders={allOrders} servings={allServings} latest={latest} />
 
       <Section title="Configuration" description="What this variant changes on top of its Product">
         <PropertyList

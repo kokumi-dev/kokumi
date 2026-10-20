@@ -5,7 +5,7 @@ import { Code, Disclosures, Fact, Facts, Inspector, Mono, Prose } from '../../co
 import PatchList from '../../components/shared/PatchList'
 import { ButtonLink, Disclosure } from '../../components/ui'
 import { paths } from '../../routes/paths'
-import { formatDate, plural } from '../../utils/format'
+import { formatDate, formatDuration, plural } from '../../utils/format'
 import { orderDestinationLabel } from '../../utils/products'
 import { objectToYaml } from '../../utils/yaml'
 import layout from '../../components/layout/layout.module.css'
@@ -31,6 +31,11 @@ function promotionText(order: Order): string {
   if (!order.approvals) return order.mode
   const { requiredApprovals, allowedGroups } = order.approvals
   return `${order.mode}, ${plural(requiredApprovals, 'approval')} from ${allowedGroups.join(' or ')}`
+}
+
+/** The Orders the Order runs after, e.g. "podinfo-staging after a soak of 1 day". */
+function upstreamText(order: Order): string {
+  return (order.after ?? []).map((s) => (s.soakSeconds ? `${s.order} after a soak of ${formatDuration(s.soakSeconds)}` : s.order)).join(', ')
 }
 
 /** OrderDetails is the inspector of an Order: what it runs, what waits, and what it changes on its Product. */
@@ -70,6 +75,8 @@ export default function OrderDetails({ insight, onClose }: Props) {
         {insight.activeVersion && <Fact label="Version">{insight.activeVersion}</Fact>}
         <Fact label="Latest">{prepLink(order.latestRevision)}</Fact>
         <Fact label="Promotion">{promotionText(order)}</Fact>
+        {!!order.after?.length && <Fact label="Runs after">{upstreamText(order)}</Fact>}
+        {insight.currentRevision && <Fact label="Revision">Runs the current Product revision</Fact>}
         <Fact label="Changes on the Product">{insight.overlay}</Fact>
         <Fact label="Destination"><Mono>{orderDestinationLabel(order)}</Mono></Fact>
         <Fact label="Created">{formatDate(order.createdAt)}</Fact>

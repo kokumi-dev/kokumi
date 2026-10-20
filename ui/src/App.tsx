@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { RouterProvider } from 'react-router/dom'
 import Login from './pages/Login'
 import { router } from './routes/router'
-import { AppContext, type AppInfo } from './appContext'
+import { AppContext, type AppInfo, type Viewer } from './appContext'
 import { logout, onAuthChange, refresh, getTokenTTL, isAuthed, consumeFragmentToken } from './api/auth'
 import { getWhoAmI } from './api/client'
 import { mergeCapabilities, type Capability } from './api/capabilities'
@@ -20,6 +20,7 @@ function App() {
   const [bootRefreshDone, setBootRefreshDone] = useState(false)
   // null = unknown; guarded routes wait for it instead of redirecting.
   const [capabilities, setCapabilities] = useState<ReadonlySet<Capability> | null>(null)
+  const [viewer, setViewer] = useState<Viewer | null>(null)
 
   // Keep authed in sync with token changes (login/logout/401/OIDC fragment).
   // Registered before the mount effect so consumeFragmentToken() updates it via this subscription, not a direct setState.
@@ -28,12 +29,22 @@ function App() {
   useEffect(() => {
     if (!authed) {
       // Defer to a microtask to avoid a synchronous setState in the effect body.
-      void Promise.resolve().then(() => setCapabilities(null))
+      void Promise.resolve().then(() => {
+        setCapabilities(null)
+        setViewer(null)
+      })
       return
     }
     const fetchWhoAmI = () => {
       getWhoAmI()
-        .then((w) => setCapabilities((prev) => mergeCapabilities(prev, w.capabilities, w.undetermined)))
+        .then((w) => {
+          setCapabilities((prev) => mergeCapabilities(prev, w.capabilities, w.undetermined))
+          setViewer((prev) =>
+            prev?.subject === w.subject && prev.groups.join() === (w.groups ?? []).join()
+              ? prev
+              : { subject: w.subject, groups: w.groups ?? [] },
+          )
+        })
         // Fail closed on the first load, but keep the last known set when a
         // refetch fails, so a transient error does not bounce the user off a
         // guarded page and discard unsaved input.
@@ -107,9 +118,10 @@ function App() {
       operatorName: info?.name,
       operatorVersion: info?.version,
       capabilities,
+      viewer,
       onLogout: () => void logout(),
     }),
-    [info, capabilities],
+    [info, capabilities, viewer],
   )
 
   // Wait until /api/v1/info resolves. If we have no valid token, hold off

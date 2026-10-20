@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
-	"github.com/kokumi-dev/kokumi/internal/approval"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -14,7 +13,10 @@ import (
 
 // handlePromote handles POST /api/v1/orders/{namespace}/{name}/promote.
 // It points the Order's Serving at the requested Preparation (Manual
-// promotion only). Unapproved Preparations are rejected up front.
+// promotion only): a promotion is an intention. One that its gates hold,
+// its upstream stages, its checks or its approvals, is queued: the Serving
+// deploys it once they pass. Promoting the deployed Preparation withdraws a
+// queued promotion.
 func handlePromote(deps *apiDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if deps == nil {
@@ -70,27 +72,16 @@ func handlePromote(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		// Early feedback only: the Serving controller enforces readiness, the
-		// gate, and verifies the signatures in the registry.
+		// Early feedback only: the Serving controller enforces readiness and
+		// every gate, and verifies the evidence in the registry. A
+		// Preparation that is not ready may never be, unlike one its gates
+		// hold.
 		if !apimeta.IsStatusConditionTrue(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeSigned) {
 			respondError(w, http.StatusConflict, "preparation is not signed")
 			return
 		}
 		if !apimeta.IsStatusConditionTrue(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeReady) {
 			respondError(w, http.StatusConflict, "preparation is not ready")
-			return
-		}
-
-		approvals := &deliveryv1alpha1.ApprovalList{}
-		if err := uc.list(r.Context(), approvals,
-			client.InNamespace(namespace),
-			client.MatchingFields{deliveryv1alpha1.FieldPreparationRefName: prep.Name},
-		); err != nil {
-			respondForbiddenOrError(w, err, "failed to list approvals")
-			return
-		}
-		if res := approval.Evaluate(prep, approvals.Items); !res.Approved {
-			respondError(w, http.StatusConflict, "preparation is not approved: "+res.Message)
 			return
 		}
 

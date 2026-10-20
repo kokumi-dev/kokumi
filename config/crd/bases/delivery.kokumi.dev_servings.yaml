@@ -37,8 +37,12 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Verified')].reason
       name: Verified
       type: string
-    - jsonPath: .status.observedPreparationName
-      name: Observed
+    - jsonPath: .status.conditions[?(@.type=='UpstreamDeployed')].reason
+      name: Upstream
+      priority: 1
+      type: string
+    - jsonPath: .status.history[0].preparationName
+      name: Latest
       priority: 1
       type: string
     - jsonPath: .metadata.creationTimestamp
@@ -144,11 +148,6 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              deployedDigest:
-                description: deployedDigest is the SHA256 digest of the currently
-                  deployed artifact
-                pattern: ^sha256:[a-f0-9]{64}$
-                type: string
               deployedVulnerabilities:
                 description: |-
                   deployedVulnerabilities sums the latest scans of the images of the
@@ -187,20 +186,113 @@ spec:
                     minimum: 0
                     type: integer
                 type: object
+              history:
+                description: |-
+                  history lists the most recent deployments, newest first. The deployed
+                  Preparation is the newest entry with a promotionRecord; an entry
+                  without one is a promotion that is being recorded.
+                items:
+                  description: |-
+                    DeploymentEntry is one continuous deployment of a Preparation by a
+                    Serving: from its promotion, or its recovery, until it is superseded or
+                    degraded. It is self-contained, so its records can be read after the
+                    Preparation is gone.
+                  properties:
+                    deploymentRecord:
+                      description: |-
+                        deploymentRecord is the digest of the signed deployment record, a
+                        referrer of the artifact pushed once the deployment was healthy.
+                      maxLength: 71
+                      pattern: ^sha256:[a-f0-9]{64}$
+                      type: string
+                    digest:
+                      description: digest is the digest of the Preparation's artifact.
+                      maxLength: 71
+                      pattern: ^sha256:[a-f0-9]{64}$
+                      type: string
+                    endReason:
+                      description: endReason says why the deployment ended.
+                      enum:
+                      - Superseded
+                      - Degraded
+                      type: string
+                    endedTime:
+                      description: endedTime is when the deployment ended.
+                      format: date-time
+                      type: string
+                    healthyTime:
+                      description: |-
+                        healthyTime is when Argo CD first reported the deployment synced and
+                        healthy at the digest.
+                      format: date-time
+                      type: string
+                    ociRef:
+                      description: ociRef is the full OCI reference of the artifact,
+                        including digest.
+                      maxLength: 2048
+                      type: string
+                    preparationName:
+                      description: preparationName is the name of the deployed Preparation.
+                      maxLength: 253
+                      minLength: 1
+                      type: string
+                    productRevision:
+                      description: productRevision is the Product revision the Preparation
+                        renders.
+                      maxLength: 71
+                      pattern: ^sha256:[a-f0-9]{64}$
+                      type: string
+                    promotionRecord:
+                      description: |-
+                        promotionRecord is the digest of the signed promotion record, a
+                        referrer of the artifact. A recovery carries the record of the
+                        promotion it continues.
+                      maxLength: 71
+                      pattern: ^sha256:[a-f0-9]{64}$
+                      type: string
+                    registryRef:
+                      description: |-
+                        registryRef names the Registry that pushed the artifact, through which
+                        its records are read.
+                      properties:
+                        name:
+                          default: ""
+                          description: |-
+                            Name of the referent.
+                            This field is effectively required, but due to backwards compatibility is
+                            allowed to be empty. Instances of this type with an empty value here are
+                            almost certainly wrong.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                          type: string
+                      type: object
+                      x-kubernetes-map-type: atomic
+                    startedTime:
+                      description: startedTime is when the Preparation passed its
+                        gates, or recovered.
+                      format: date-time
+                      type: string
+                  required:
+                  - digest
+                  - ociRef
+                  - preparationName
+                  - productRevision
+                  - startedTime
+                  type: object
+                maxItems: 16
+                type: array
+                x-kubernetes-list-type: atomic
               observedGeneration:
                 description: observedGeneration is the most recent generation observed
                   by the controller
                 format: int64
                 type: integer
-              observedPreparationName:
-                description: observedPreparationName is the name of the Preparation
-                  that was last observed by the controller
-                type: string
               targetPreparationName:
                 description: |-
-                  targetPreparationName is the Preparation the Serving is converging to:
-                  spec.preparationName for Manual promotion, or the newest Ready
-                  Preparation of the Order for Automatic promotion.
+                  targetPreparationName is the Preparation the Serving is converging to
+                  once it is approved and its evidence verifies: spec.preparationName
+                  for Manual promotion, or the newest Ready Preparation of the Order for
+                  Automatic promotion, after it passed its upstream stages and checks.
+                  Its approvals are sealed when it becomes the target.
                 type: string
             type: object
         required:

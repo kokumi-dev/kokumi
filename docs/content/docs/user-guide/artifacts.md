@@ -132,7 +132,9 @@ out.
 Every Preparation is one manifest in its Order's destination repository, with
 the intent as its config blob and the rendered YAML as its layer. The
 Preparation controller attaches a signature and a SLSA provenance; promoting a
-Preparation with an approval policy attaches the sealed approvals. See
+Preparation with an approval policy attaches the sealed approvals. The Serving
+attaches a record of each promotion and of each healthy deployment (see
+[Promotion Pipelines](../promotion-pipelines/#signed-records)). See
 [What a Preparation looks like in the registry](../../architecture/#what-a-preparation-looks-like-in-the-registry)
 for the annotations and the config blob.
 

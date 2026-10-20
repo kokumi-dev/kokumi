@@ -359,7 +359,7 @@ func (r *PreparationReconciler) patchStatus(
 		log.FromContext(ctx).V(1).Info("Preparation changed during the reconcile, reconciling it again")
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	default:
-		return result, errors.Join(err, fmt.Errorf("failed to patch Preparation status: %w", perr))
+		return ctrl.Result{}, errors.Join(err, fmt.Errorf("failed to patch Preparation status: %w", perr))
 	}
 }
 

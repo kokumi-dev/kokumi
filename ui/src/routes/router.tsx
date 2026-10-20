@@ -30,7 +30,9 @@ import PreparationImages from '../pages/preparations/PreparationImages'
 import PreparationSecurity from '../pages/preparations/PreparationSecurity'
 import PreparationArtifact from '../pages/preparations/PreparationArtifact'
 import ServingsList from '../pages/servings/ServingsList'
-import ServingDetail from '../pages/servings/ServingDetail'
+import ServingLayout from '../pages/servings/ServingLayout'
+import ServingOverview from '../pages/servings/ServingOverview'
+import ServingHistory from '../pages/servings/ServingHistory'
 import RepositoriesList from '../pages/repositories/RepositoriesList'
 import RepositoryLayout from '../pages/repositories/RepositoryLayout'
 import RepositoryOverview from '../pages/repositories/RepositoryOverview'
@@ -93,7 +95,14 @@ export const router = createBrowserRouter([
       },
 
       { path: 'servings', element: <ServingsList /> },
-      { path: 'servings/:namespace/:name', element: <ServingDetail /> },
+      {
+        path: 'servings/:namespace/:name',
+        element: <ServingLayout />,
+        children: [
+          { index: true, element: <ServingOverview /> },
+          { path: 'history', element: <ServingHistory /> },
+        ],
+      },
 
       { path: 'repositories', element: <RepositoriesList /> },
       { path: 'repositories/new', element: <RequireCapability anyOf={['repositories:create']}><RepositoryEditor /></RequireCapability> },

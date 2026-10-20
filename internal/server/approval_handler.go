@@ -145,7 +145,7 @@ func handleSubmitApproval(deps *apiDeps) http.HandlerFunc {
 			respondForbiddenOrError(w, err, "failed to get preparation")
 			return
 		}
-		policy := prep.Spec.ApprovalPolicy
+		policy := prep.ApprovalPolicy()
 		switch {
 		case policy == nil:
 			respondError(w, http.StatusConflict, "preparation does not require approval")
@@ -221,7 +221,7 @@ func rejectVote(prep *deliveryv1alpha1.Preparation, existing []deliveryv1alpha1.
 func newApproval(prep *deliveryv1alpha1.Preparation, existing []deliveryv1alpha1.Approval, id *Identity, decision deliveryv1alpha1.ApprovalDecision, comment string) *deliveryv1alpha1.Approval {
 	var groups []string
 	for _, g := range id.Groups {
-		if slices.Contains(prep.Spec.ApprovalPolicy.AllowedGroups, g) && !slices.Contains(groups, g) {
+		if slices.Contains(prep.ApprovalPolicy().AllowedGroups, g) && !slices.Contains(groups, g) {
 			groups = append(groups, g)
 		}
 	}

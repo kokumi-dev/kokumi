@@ -35,7 +35,17 @@
       }
     }
   ],
+  "productRevision": "sha256:a1dd582184cfb17cdec7105579a02a712b69bd60fb45cb9f6d3dea38141a4f67",
   "promotion": {
+    "after": [
+      {
+        "order": "podinfo-qa"
+      },
+      {
+        "order": "podinfo-staging",
+        "soakSeconds": 86400
+      }
+    ],
     "approvals": {
       "allowedGroups": [
         "release",

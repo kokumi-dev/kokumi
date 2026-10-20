@@ -27,13 +27,15 @@ const orderNode = (order: Order) => `order:${order.name}`
 
 /**
  * OrderGraph draws a Product and its Orders from left to right, each Order
- * after what it builds on, and the details of the Order selected beside
- * them. Without dependencies between Orders, all of them follow the Product.
+ * after the Orders it runs after, and the details of the Order selected
+ * beside them. An Order without upstream stages follows the Product.
  */
 export default function OrderGraph({ product, orders, preparations, orderDenied }: Props) {
   const { selected, toggle, clear } = useGraphSelection()
-  const insights = orderInsights(orders ?? [], preparations)
+  const insights = orderInsights(orders ?? [], preparations, product.revision)
   const current = insights.find((i) => orderNode(i.order) === selected)
+  const names = new Set(insights.map((i) => i.order.name))
+  const upstreamsOf = (order: Order) => (order.after ?? []).map((s) => s.order).filter((n) => names.has(n))
 
   const nodes: GraphNode[] = [
     { id: productNode, card: <ProductCard product={product} /> },
@@ -44,7 +46,12 @@ export default function OrderGraph({ product, orders, preparations, orderDenied 
     { id: newOrderNode, card: <NewOrderCard product={product} first={insights.length === 0} denied={orderDenied} /> },
   ]
   const edges: GraphEdge[] = [
-    ...insights.map((insight) => ({ from: productNode, to: orderNode(insight.order) })),
+    ...insights.flatMap((insight) => {
+      const upstreams = upstreamsOf(insight.order)
+      return upstreams.length > 0
+        ? upstreams.map((name) => ({ from: `order:${name}`, to: orderNode(insight.order) }))
+        : [{ from: productNode, to: orderNode(insight.order) }]
+    }),
     { from: productNode, to: newOrderNode, style: 'dashed' },
   ]
 
@@ -82,7 +89,13 @@ function OrderCard({ insight, selected, onSelect }: { insight: OrderInsight; sel
         icon={<OrderIcon muted={!insight.active} />}
         title={order.name}
         status={stateStatus(order.state)}
-        extra={insight.updateReady && <span className={styles.update}>Update ready</span>}
+        extra={
+          insight.updateReady ? (
+            <span className={styles.update}>Update ready</span>
+          ) : insight.currentRevision && (
+            <span className={styles.current} title="Runs the Product revision its Orders render now">Current revision</span>
+          )
+        }
       />
       {insight.activeVersion ? (
         <Chip icon={<TagIcon />} mono className={styles.trail} title={`Runs ${insight.active}`}>{insight.activeVersion}</Chip>

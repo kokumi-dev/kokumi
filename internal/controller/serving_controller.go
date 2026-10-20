@@ -21,17 +21,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/events"
-	"k8s.io/utils/lru"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -48,40 +47,16 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/conditions"
 	"github.com/kokumi-dev/kokumi/internal/evidence"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/promotion"
 	"github.com/kokumi-dev/kokumi/internal/registry"
 	"github.com/kokumi-dev/kokumi/internal/signing"
 	"github.com/kokumi-dev/kokumi/internal/vulnerability"
 )
 
-// verificationCacheSize bounds how many verified artifacts the Serving
-// controller remembers.
-const verificationCacheSize = 1024
-
-const (
-	// reportCacheSize bounds how many verified vulnerability reports the
-	// Serving controller remembers.
-	reportCacheSize = 256
-	// defaultScanIntervalSeconds is the Kitchen's default scanning interval,
-	// which a check's default maxAgeSeconds doubles.
-	defaultScanIntervalSeconds = 86400
-)
-
-// reportKey identifies a verified vulnerability report. Reports are
-// immutable, so their findings hold until the trust changes.
-type reportKey struct {
-	digest string
-	trust  string
-}
-
-// verificationKey identifies a verification result. Digests are immutable,
-// so a result holds until the trust changes; it is specific to the Order the
-// provenance must name and to whether approvals are required.
-type verificationKey struct {
-	digest           string
-	trust            string
-	order            string
-	approvalRequired bool
-}
+// historyPassInterval is how soon a Serving reconciles again after it wrote
+// a time to its history that a record pushed in the next pass contains. Its
+// own status writes trigger no reconcile.
+const historyPassInterval = time.Second
 
 // servingRegistries connects to the artifact of a Preparation, and to the
 // vendored images of a Product. *registry.Resolver implements it.
@@ -98,9 +73,11 @@ type servingSigning interface {
 	OnChange(notify func())
 }
 
-// ServingReconciler reconciles a Serving object. It deploys the Preparation
-// the Serving converges to through an Argo CD Application, which lives in
-// the argocd namespace and is deleted with the Serving.
+// ServingReconciler reconciles a Serving object. It promotes the Preparation
+// the Serving converges to once it passes its gates, deploys it through an
+// Argo CD Application, which lives in the argocd namespace and is deleted
+// with the Serving, and records every promotion and every healthy
+// deployment in the Serving's history and, signed, in the registry.
 type ServingReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -115,12 +92,12 @@ type ServingReconciler struct {
 	// default age of the scans a check accepts.
 	InstallNamespace string
 
-	// verified remembers verified artifacts by verificationKey.
-	verified     *lru.Cache
-	verifiedOnce sync.Once
-	// reports remembers the findings of verified reports by reportKey.
-	reports     *lru.Cache
-	reportsOnce sync.Once
+	// artifacts remembers the Preparations whose evidence verified.
+	artifacts evidence.Verifier
+	// records remembers the upstream deployment records that verified.
+	records promotion.RecordVerifier
+	// reports remembers the findings of verified vulnerability reports.
+	reports vulnerability.Reports
 
 	// now returns the current time. Tests set it.
 	now func() time.Time
@@ -175,87 +152,202 @@ func (r *ServingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 	return r.reconcileServing(ctx, serving)
 }
 
-// reconcileServing deploys the Preparation the Serving converges to once it
-// is ready, approved, and its evidence verifies, and reports how its
-// deployment is doing. A Preparation that does not pass leaves the deployed
-// one untouched.
+// reconcileServing promotes the Preparation the Serving converges to once it
+// passes its gates, and deploys the promoted one. A Preparation that does not
+// pass leaves the deployed one untouched, which keeps being deployed and
+// observed meanwhile.
 func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliveryv1alpha1.Serving) (ctrl.Result, error) {
+	var wait time.Duration
+	order, candidate, held, err := r.targetPreparation(ctx, serving)
+	if candidate != nil {
+		wait, held, err = r.promote(ctx, serving, order, candidate)
+	} else if err == nil {
+		setHistory(serving, historyOf(serving).Drop())
+	}
+
+	next, derr := r.deploy(ctx, serving, held)
+	if err = errors.Join(err, derr); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{RequeueAfter: soonest(wait, next)}, nil
+}
+
+// promote decides whether the Serving promotes candidate. It does once
+// candidate passes its gates, in this order:
+//
+//  1. It is Ready.
+//  2. Its upstream stages deployed its Product revision healthily for their
+//     soak time (UpstreamDeployed).
+//  3. It passes its checks (ChecksPassed).
+//  4. It is approved (Approved). Passing its upstream stages and checks
+//     makes it the target, whose votes the Preparation controller seals.
+//  5. Its evidence verifies in the registry (Verified).
+//
+// A promotion takes two passes, because the record's bytes depend on the
+// time it is decided at: the first opens a pending entry in the history, the
+// second records the promotion in the registry and starts the entry, which
+// deploy then deploys. For the deployed Preparation the gates only report;
+// they hold new deployments. It returns how soon to reconcile again, and
+// what holds candidate, "" when nothing does.
+func (r *ServingReconciler) promote(
+	ctx context.Context, serving *deliveryv1alpha1.Serving, order *deliveryv1alpha1.Order, candidate *deliveryv1alpha1.Preparation,
+) (time.Duration, string, error) {
 	logger := log.FromContext(ctx)
 
-	preparation, err := r.targetPreparation(ctx, serving)
-	if preparation == nil || err != nil {
-		return ctrl.Result{}, err
+	history := historyOf(serving)
+	step := history.Next(candidate.Name)
+	current := step == promotion.StepDeployed
+	hold := func(msg string, wait time.Duration) (time.Duration, string, error) {
+		setHistory(serving, history.Drop())
+		return wait, msg, nil
 	}
 
 	// A Preparation is served only once it is Ready, under both promotion
 	// modes. The Preparation watch triggers the next reconcile.
-	if !meta.IsStatusConditionTrue(preparation.Status.Conditions, deliveryv1alpha1.ConditionTypeReady) {
-		logger.Info("Preparation not ready, waiting", "preparation", preparation.Name)
-		markPending(serving, fmt.Sprintf("Waiting for Preparation %q to become ready", preparation.Name))
-		return ctrl.Result{}, nil
+	if !meta.IsStatusConditionTrue(candidate.Status.Conditions, deliveryv1alpha1.ConditionTypeReady) {
+		logger.Info("Preparation not ready, waiting", "preparation", candidate.Name)
+		return hold(fmt.Sprintf("Waiting for Preparation %q to become ready", candidate.Name), 0)
 	}
 
-	if blocked, err := r.gate(ctx, serving, preparation); blocked || err != nil {
-		return ctrl.Result{}, err
+	upstream, err := r.upstream(ctx, serving, order, candidate, history.Drop())
+	if err != nil {
+		return 0, "", err
+	}
+	checks, err := r.checks(ctx, serving, candidate)
+	if err != nil {
+		return 0, "", err
+	}
+	if current && !checks.passed {
+		logger.Info("Deployed Preparation no longer passes its checks, keeping it deployed", "preparation", candidate.Name)
+	}
+	target := current || (upstream.Satisfied() && checks.passed)
+
+	approved, err := r.gate(ctx, serving, candidate, target)
+	if err != nil {
+		return 0, "", err
+	}
+	if !target {
+		conditions.MarkUnknown(serving, deliveryv1alpha1.ConditionTypeVerified, deliveryv1alpha1.ReasonPending,
+			candidate.Name+": verified once its upstream stages and checks pass")
+		if !upstream.Satisfied() {
+			return hold("Waiting for upstream stages: "+conditionMessage(serving, deliveryv1alpha1.ConditionTypeUpstreamDeployed), upstream.RequeueAfter)
+		}
+		return hold("Held by its checks: "+conditionMessage(serving, deliveryv1alpha1.ConditionTypeChecksPassed), checks.recheck)
+	}
+	if !approved && !current {
+		return hold("Waiting for approvals: "+conditionMessage(serving, deliveryv1alpha1.ConditionTypeApproved), 0)
 	}
 
 	// The registry is the record: the signature and attestations are
 	// verified there, not trusted from the Preparation's status.
-	if blocked, err := r.verify(ctx, serving, preparation); blocked || err != nil {
-		return ctrl.Result{}, err
+	verified, err := r.verify(ctx, serving, candidate)
+	if err != nil {
+		return 0, "", err
+	}
+	switch {
+	case current:
+		setHistory(serving, history.Drop())
+		return checks.recheck, "", nil
+	case !verified:
+		return hold("Waiting for its evidence to verify: "+conditionMessage(serving, deliveryv1alpha1.ConditionTypeVerified), 0)
+	case step == promotion.StepOpen:
+		setHistory(serving, history.Open(entryOf(candidate), r.clock()))
+		return historyPassInterval, "Recording the promotion of Preparation " + candidate.Name, nil
 	}
 
-	recheck, blocked, err := r.checks(ctx, serving, preparation)
-	if blocked || err != nil {
-		return ctrl.Result{RequeueAfter: recheck}, err
+	record, err := r.recordPromotion(ctx, serving, order, candidate, history, upstream, checks)
+	if err != nil {
+		return 0, "", err
 	}
+	setHistory(serving, history.Start(record))
+	logger.Info("Promoted Preparation", "preparation", candidate.Name, "productRevision", candidate.Spec.ProductRevision, "record", record)
+	return checks.recheck, "", nil
+}
 
-	app, err := r.applyApplication(ctx, serving, preparation)
+// deploy keeps the Serving's Argo CD Application pointed at the deployed
+// Preparation and records what Argo CD reports on it: the Ready condition,
+// its health in the history and, once it is healthy, its deployment record
+// and the summary of its scans. Ready describes what runs; held, what holds
+// the Preparation the Serving converges to, is added to its message, and is
+// its message while nothing runs. It returns how soon to reconcile again.
+func (r *ServingReconciler) deploy(ctx context.Context, serving *deliveryv1alpha1.Serving, held string) (time.Duration, error) {
+	logger := log.FromContext(ctx)
+
+	history := historyOf(serving)
+	deployed := history.Deployed()
+	if deployed == nil {
+		if held != "" {
+			markPending(serving, held)
+		}
+		return 0, nil
+	}
+	defer func() {
+		if ready := meta.FindStatusCondition(serving.Status.Conditions, deliveryv1alpha1.ConditionTypeReady); ready != nil && held != "" {
+			conditions.Set(serving, ready.Type, ready.Status, ready.Reason, ready.Message+". "+held)
+		}
+	}()
+
+	app, err := r.applyApplication(ctx, serving, deployed)
 	if err != nil {
 		if errors.Is(err, argocd.ErrOptInRequired) {
 			// Holds for this generation: the Application watch reports a
 			// change to the opt-in, and a spec change reports itself.
 			logger.Info("Could not update deployment, opt-in required", "error", err.Error())
 			markDeploymentFailed(serving, err.Error())
-			return ctrl.Result{}, nil
+			return 0, nil
 		}
 		markDeploymentFailed(serving, "failed to deploy: "+err.Error())
-		return ctrl.Result{}, fmt.Errorf("failed to deploy: %w", err)
+		return 0, fmt.Errorf("failed to deploy: %w", err)
 	}
 
-	deployedBefore := serving.Status.DeployedDigest
-	markDeployment(serving, preparation, argocd.StateOf(app))
-	if err := r.recordDeployedVulnerabilities(ctx, serving, preparation, deployedBefore); err != nil {
-		return ctrl.Result{}, err
+	state := argocd.StateOf(app)
+	markDeployment(serving, deployed, state)
+
+	// A time goes into the status a pass before the record that contains it
+	// goes into the registry, so that a retry pushes equal bytes.
+	if observed, changed := history.Observe(observationOf(state), r.clock()); changed {
+		logger.Info("Recorded deployment state", "preparation", deployed.Preparation, "phase", state.Phase)
+		if now := observed.Deployed(); deployed.Healthy.IsZero() && !now.Healthy.IsZero() {
+			// The summary described what ran before; the next pass
+			// describes the Preparation that is healthy now.
+			serving.Status.DeployedVulnerabilities = nil
+		}
+		setHistory(serving, observed)
+		return historyPassInterval, nil
 	}
-	return ctrl.Result{RequeueAfter: recheck}, nil
+
+	if err := r.recordDeployments(ctx, serving, history); err != nil {
+		return 0, err
+	}
+	return 0, r.recordDeployedVulnerabilities(ctx, serving, deployed)
 }
 
-// targetPreparation returns the Preparation the Serving converges to, nil
-// while there is none. The promotion mode is read from the Order: Manual
-// serves spec.preparationName, Automatic the newest Ready Preparation of the
-// Order. The Serving spec is never modified.
-func (r *ServingReconciler) targetPreparation(ctx context.Context, serving *deliveryv1alpha1.Serving) (*deliveryv1alpha1.Preparation, error) {
+// targetPreparation returns the Order of the Serving and the Preparation
+// the Serving converges to, nil while there is none, with what it waits for
+// then. The promotion mode is read from the Order: Manual serves
+// spec.preparationName, Automatic the newest Ready Preparation of the Order.
+// The Serving spec is never modified.
+func (r *ServingReconciler) targetPreparation(
+	ctx context.Context, serving *deliveryv1alpha1.Serving,
+) (*deliveryv1alpha1.Order, *deliveryv1alpha1.Preparation, string, error) {
 	order := &deliveryv1alpha1.Order{}
 	if err := r.Get(ctx, client.ObjectKey{Namespace: serving.Namespace, Name: serving.Spec.OrderName}, order); err != nil {
 		if !apierrors.IsNotFound(err) {
-			return nil, fmt.Errorf("failed to get Order: %w", err)
+			return nil, nil, "", fmt.Errorf("failed to get Order: %w", err)
 		}
-		markPending(serving, fmt.Sprintf("Waiting for Order %q", serving.Spec.OrderName))
-		return nil, nil
+		return nil, nil, fmt.Sprintf("Waiting for Order %q", serving.Spec.OrderName), nil
 	}
 
 	if order.EffectivePromotionMode() != deliveryv1alpha1.PromotionModeAutomatic {
 		if serving.Spec.PreparationName == "" {
-			markPending(serving, "Waiting for a Preparation to be promoted")
-			return nil, nil
+			return order, nil, "Waiting for a Preparation to be promoted", nil
 		}
 		preparation := &deliveryv1alpha1.Preparation{}
 		if err := r.Get(ctx, client.ObjectKey{Namespace: serving.Namespace, Name: serving.Spec.PreparationName}, preparation); err != nil {
 			markDeploymentFailed(serving, fmt.Sprintf("preparation not found: %v", err))
-			return nil, fmt.Errorf("failed to get Preparation %q: %w", serving.Spec.PreparationName, err)
+			return order, nil, "", fmt.Errorf("failed to get Preparation %q: %w", serving.Spec.PreparationName, err)
 		}
-		return preparation, nil
+		return order, preparation, "", nil
 	}
 
 	preparations := &deliveryv1alpha1.PreparationList{}
@@ -264,7 +356,7 @@ func (r *ServingReconciler) targetPreparation(ctx context.Context, serving *deli
 		client.MatchingFields{deliveryv1alpha1.FieldOrderName: serving.Spec.OrderName},
 	); err != nil {
 		markDeploymentFailed(serving, fmt.Sprintf("failed to list preparations: %v", err))
-		return nil, fmt.Errorf("failed to list Preparations: %w", err)
+		return order, nil, "", fmt.Errorf("failed to list Preparations: %w", err)
 	}
 
 	var latest *deliveryv1alpha1.Preparation
@@ -284,22 +376,34 @@ func (r *ServingReconciler) targetPreparation(ctx context.Context, serving *deli
 		if len(preparations.Items) == 0 {
 			msg = "Waiting for preparations"
 		}
-		markPending(serving, msg)
-		return nil, nil
+		return order, nil, msg, nil
 	}
-	return latest, nil
+	return order, latest, "", nil
 }
 
-// gate records the target Preparation and whether it passes its approval
-// gate, under both promotion modes. It reports whether deployment must not
-// proceed.
-func (r *ServingReconciler) gate(ctx context.Context, serving *deliveryv1alpha1.Serving, preparation *deliveryv1alpha1.Preparation) (bool, error) {
+// gate reports whether preparation passes its approval gate, under both
+// promotion modes, and records it in the Approved condition. As the target,
+// which it becomes once it passes the gates before, its approved votes are
+// sealed, and it passes once they are archived.
+func (r *ServingReconciler) gate(
+	ctx context.Context, serving *deliveryv1alpha1.Serving, preparation *deliveryv1alpha1.Preparation, target bool,
+) (bool, error) {
 	approvals := &deliveryv1alpha1.ApprovalList{}
 	if err := r.List(ctx, approvals,
 		client.InNamespace(preparation.Namespace),
 		client.MatchingFields{deliveryv1alpha1.FieldPreparationRefName: preparation.Name},
 	); err != nil {
-		return true, fmt.Errorf("failed to list Approvals: %w", err)
+		return false, fmt.Errorf("failed to list Approvals: %w", err)
+	}
+
+	if !target {
+		res := approval.Evaluate(preparation, approvals.Items)
+		status := metav1.ConditionFalse
+		if res.Approved {
+			status = metav1.ConditionTrue
+		}
+		conditions.Set(serving, deliveryv1alpha1.ConditionTypeApproved, status, res.Reason, preparation.Name+": "+res.Message)
+		return res.Approved, nil
 	}
 
 	gate := approval.Gate(preparation, approvals.Items)
@@ -308,13 +412,119 @@ func (r *ServingReconciler) gate(ctx context.Context, serving *deliveryv1alpha1.
 	}
 	serving.Status.TargetPreparationName = preparation.Name
 	conditions.Set(serving, deliveryv1alpha1.ConditionTypeApproved, gate.Status, gate.Reason, gate.Message)
-	return gate.Blocked, nil
+	return !gate.Blocked, nil
+}
+
+// upstreamReasons maps the outcome of the upstream gate to the reason of the
+// UpstreamDeployed condition.
+var upstreamReasons = map[promotion.Outcome]string{
+	promotion.OutcomeSatisfied:           deliveryv1alpha1.ReasonSatisfied,
+	promotion.OutcomeSoaking:             deliveryv1alpha1.ReasonSoaking,
+	promotion.OutcomeNotDeployedUpstream: deliveryv1alpha1.ReasonNotDeployedUpstream,
+	promotion.OutcomeInvalidPipeline:     deliveryv1alpha1.ReasonInvalidPipeline,
+}
+
+// upstream evaluates the upstream gate of preparation: every upstream stage
+// it names must have deployed its own Preparation of the same Product
+// revision healthily for its soak time, as the stage's Serving records it,
+// and the deployment record that qualifies it must verify in the registry.
+// It records the result in the UpstreamDeployed condition.
+func (r *ServingReconciler) upstream(
+	ctx context.Context, serving *deliveryv1alpha1.Serving, order *deliveryv1alpha1.Order,
+	preparation *deliveryv1alpha1.Preparation, history promotion.History,
+) (promotion.Result, error) {
+	stages := stagesOf(preparation)
+	if len(stages) == 0 {
+		conditions.Remove(serving, deliveryv1alpha1.ConditionTypeUpstreamDeployed)
+		return promotion.Result{Outcome: promotion.OutcomeSatisfied}, nil
+	}
+
+	req := promotion.Request{
+		Preparation: preparation.Name,
+		Product:     order.Spec.ProductRef.Name,
+		Revision:    preparation.Spec.ProductRevision,
+		Stages:      stages,
+		Self:        history,
+		Upstreams:   map[string]promotion.Upstream{},
+		Now:         r.clock(),
+	}
+	for _, stage := range stages {
+		upstreamOrder := &deliveryv1alpha1.Order{}
+		if err := r.Get(ctx, client.ObjectKey{Namespace: serving.Namespace, Name: stage.Order}, upstreamOrder); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return promotion.Result{}, fmt.Errorf("failed to get upstream Order %q: %w", stage.Order, err)
+		}
+		upstream := promotion.Upstream{Product: upstreamOrder.Spec.ProductRef.Name}
+		upstreamServing := &deliveryv1alpha1.Serving{}
+		switch err := r.Get(ctx, client.ObjectKey{Namespace: serving.Namespace, Name: stage.Order}, upstreamServing); {
+		case err == nil:
+			upstream.History = historyOf(upstreamServing)
+		case !apierrors.IsNotFound(err):
+			return promotion.Result{}, fmt.Errorf("failed to get the Serving of upstream Order %q: %w", stage.Order, err)
+		}
+		req.Upstreams[stage.Order] = upstream
+	}
+
+	result := promotion.Evaluate(req)
+	if !result.Satisfied() {
+		log.FromContext(ctx).V(4).Info("Upstream stages hold deployment", "preparation", preparation.Name, "outcome", result.Outcome)
+		conditions.MarkFalse(serving, deliveryv1alpha1.ConditionTypeUpstreamDeployed, upstreamReasons[result.Outcome],
+			preparation.Name+": "+result.Message)
+		return result, nil
+	}
+
+	for _, qualified := range result.Qualified {
+		reason, err := r.verifyDeployment(ctx, serving.Namespace, qualified)
+		if err == nil {
+			continue
+		}
+		msg := fmt.Sprintf("%s: the deployment record %s of Order %s did not verify: %v",
+			preparation.Name, qualified.Entry.DeploymentRecord, qualified.Stage.Order, err)
+		held := promotion.Result{Outcome: promotion.OutcomeNotDeployedUpstream, Message: msg}
+		if reason == "" {
+			// A record the registry cannot serve is retried.
+			conditions.MarkFalse(serving, deliveryv1alpha1.ConditionTypeUpstreamDeployed, deliveryv1alpha1.ReasonSignatureMissing, msg)
+			return held, err
+		}
+		conditions.MarkFalse(serving, deliveryv1alpha1.ConditionTypeUpstreamDeployed, reason, msg)
+		return held, nil
+	}
+
+	conditions.MarkTrue(serving, deliveryv1alpha1.ConditionTypeUpstreamDeployed, deliveryv1alpha1.ReasonSatisfied,
+		preparation.Name+": "+result.Message)
+	return result, nil
+}
+
+// verifyDeployment verifies, in the registry, the deployment record of the
+// upstream deployment that qualifies a revision. For a record that does not
+// verify it returns the condition reason that describes it, with why; for a
+// registry it could not read, only the error.
+func (r *ServingReconciler) verifyDeployment(ctx context.Context, namespace string, qualified promotion.Qualified) (string, error) {
+	state, err := r.Signing.State(ctx)
+	if err != nil {
+		// The provider notifies the watch once the key is loaded.
+		return deliveryv1alpha1.ReasonSigningKeyNotReady, err
+	}
+	e := qualified.Entry
+	err = r.records.Verify(ctx, state.Trust, namespace+"/"+qualified.Stage.Order, e, func(ctx context.Context) (oci.Client, error) {
+		return r.connect(ctx, namespace, qualified.Stage.Order, registryRef(e.Registry), e.OCIRef)
+	})
+	switch {
+	case err == nil:
+		return "", nil
+	case errors.Is(err, promotion.ErrRecordInvalid):
+		return deliveryv1alpha1.ReasonSignatureInvalid, err
+	default:
+		return registry.Reason(err, ""), err
+	}
 }
 
 // verify checks the evidence of preparation's artifact in the registry
 // before it is deployed: its signature, its provenance for the Serving's
 // Order, and, when an approval policy applies, its sealed approvals. It
-// reports whether deployment must not proceed.
+// reports whether the evidence verified.
 func (r *ServingReconciler) verify(ctx context.Context, serving *deliveryv1alpha1.Serving, preparation *deliveryv1alpha1.Preparation) (bool, error) {
 	logger := log.FromContext(ctx)
 
@@ -324,46 +534,33 @@ func (r *ServingReconciler) verify(ctx context.Context, serving *deliveryv1alpha
 		logger.Info("Waiting for the signing key to verify Preparation", "preparation", preparation.Name, "reason", err.Error())
 		conditions.MarkUnknown(serving, deliveryv1alpha1.ConditionTypeVerified, deliveryv1alpha1.ReasonSigningKeyNotReady,
 			preparation.Name+": waiting for the signing key: "+err.Error())
-		return true, nil
+		return false, nil
 	}
 
-	key := verificationKey{
-		digest:           preparation.Spec.Artifact.Digest,
-		trust:            state.Trust.ID(),
-		order:            serving.Namespace + "/" + serving.Spec.OrderName,
-		approvalRequired: preparation.Spec.ApprovalPolicy != nil,
-	}
-
-	r.verifiedOnce.Do(func() { r.verified = lru.New(verificationCacheSize) })
-	if _, ok := r.verified.Get(key); !ok {
-		conn, err := r.artifactConnection(ctx, preparation)
-		if err != nil {
-			if reason := registry.Reason(err, ""); reason != "" {
-				// The Registry watch of the Order reconciles again once
-				// the Registries change.
-				conditions.MarkFalse(serving, deliveryv1alpha1.ConditionTypeVerified, reason, preparation.Name+": "+err.Error())
-				return true, nil
-			}
-			return true, err
-		}
-
-		if err := evidence.Verify(ctx, conn.Client, state.Trust, preparation, key.order); err != nil {
-			var rejected *evidence.Rejected
-			if !errors.As(err, &rejected) {
-				return true, fmt.Errorf("failed to verify Preparation %q: %w", preparation.Name, err)
-			}
-			logger.Info("Evidence of Preparation did not verify, keeping the current deployment",
-				"preparation", preparation.Name, "reason", rejected.Reason, "error", err.Error())
-			conditions.MarkFalse(serving, deliveryv1alpha1.ConditionTypeVerified, rejected.Reason, preparation.Name+": "+err.Error())
-			return true, nil
-		}
-
-		r.verified.Add(key, struct{}{})
+	artifact := preparation.Spec.Artifact
+	err = r.artifacts.Verify(ctx, state.Trust, preparation, serving.Namespace+"/"+serving.Spec.OrderName,
+		func(ctx context.Context) (oci.Client, error) {
+			return r.connect(ctx, preparation.Namespace, preparation.Spec.OrderName, artifact.RegistryRef, artifact.OCIRef)
+		})
+	var rejected *evidence.Rejected
+	switch {
+	case errors.As(err, &rejected):
+		logger.Info("Evidence of Preparation did not verify, keeping the current deployment",
+			"preparation", preparation.Name, "reason", rejected.Reason, "error", err.Error())
+		conditions.MarkFalse(serving, deliveryv1alpha1.ConditionTypeVerified, rejected.Reason, preparation.Name+": "+err.Error())
+		return false, nil
+	case registry.Reason(err, "") != "":
+		// The Registry watch of the Order reconciles again once the
+		// Registries change.
+		conditions.MarkFalse(serving, deliveryv1alpha1.ConditionTypeVerified, registry.Reason(err, ""), preparation.Name+": "+err.Error())
+		return false, nil
+	case err != nil:
+		return false, fmt.Errorf("failed to verify Preparation %q: %w", preparation.Name, err)
 	}
 
 	conditions.MarkTrue(serving, deliveryv1alpha1.ConditionTypeVerified, deliveryv1alpha1.ReasonSignaturesVerified,
 		preparation.Name+": signature and attestations verified")
-	return false, nil
+	return true, nil
 }
 
 // checkReasons maps the outcome of a vulnerability check to the reason of
@@ -375,141 +572,110 @@ var checkReasons = map[vulnerability.Outcome]string{
 	vulnerability.OutcomeScanStale:            deliveryv1alpha1.ReasonScanStale,
 }
 
+// checksVerdict is the result of the promotion checks of a Preparation.
+type checksVerdict struct {
+	passed bool
+	// recheck is how soon to check again, as the scans age.
+	recheck time.Duration
+	// evidence names the reports a Preparation that passes passed with.
+	evidence *promotion.ChecksEvidence
+}
+
 // checks evaluates the promotion checks preparation was rendered under
-// against the verified scan reports of its images. It returns how soon to
-// check again, as the scans age, and whether deployment must not proceed.
-// The checks hold new deployments only: the deployed Preparation that stops
-// passing them stays deployed.
+// against the verified scan reports of its images, and records the result
+// in the ChecksPassed condition.
 func (r *ServingReconciler) checks(
 	ctx context.Context, serving *deliveryv1alpha1.Serving, preparation *deliveryv1alpha1.Preparation,
-) (time.Duration, bool, error) {
+) (checksVerdict, error) {
 	var check *deliveryv1alpha1.VulnerabilityCheck
-	if preparation.Spec.Checks != nil {
-		check = preparation.Spec.Checks.Vulnerabilities
+	if checks := preparation.PromotionChecks(); checks != nil {
+		check = checks.Vulnerabilities
 	}
 	if check == nil {
 		conditions.Remove(serving, deliveryv1alpha1.ConditionTypeChecksPassed)
-		return 0, false, nil
+		return checksVerdict{passed: true}, nil
 	}
 
-	verdict, err := r.evaluateVulnerabilities(ctx, serving, preparation, check)
+	verdict, assessments, err := r.evaluateVulnerabilities(ctx, serving, preparation, check)
 	if err != nil {
-		return 0, true, err
+		return checksVerdict{}, err
 	}
 	reason := checkReasons[verdict.Outcome]
-	if verdict.Outcome == vulnerability.OutcomePassed {
-		conditions.MarkTrue(serving, deliveryv1alpha1.ConditionTypeChecksPassed, reason, preparation.Name+": "+verdict.Message)
-		return verdict.Recheck, false, nil
+	if verdict.Outcome != vulnerability.OutcomePassed {
+		log.FromContext(ctx).V(4).Info("Checks block deployment", "preparation", preparation.Name, "reason", reason)
+		conditions.MarkFalse(serving, deliveryv1alpha1.ConditionTypeChecksPassed, reason, preparation.Name+": "+verdict.Message)
+		return checksVerdict{}, nil
 	}
 
-	conditions.MarkFalse(serving, deliveryv1alpha1.ConditionTypeChecksPassed, reason, preparation.Name+": "+verdict.Message)
-	if serving.Status.DeployedDigest == preparation.Spec.Artifact.Digest {
-		log.FromContext(ctx).Info("Deployed Preparation no longer passes its checks, keeping it deployed",
-			"preparation", preparation.Name, "reason", reason)
-		return 0, false, nil
-	}
-	log.FromContext(ctx).V(4).Info("Checks block deployment", "preparation", preparation.Name, "reason", reason)
-	return 0, true, nil
+	conditions.MarkTrue(serving, deliveryv1alpha1.ConditionTypeChecksPassed, reason, preparation.Name+": "+verdict.Message)
+	scanned := promotion.VulnerabilitiesEvidenceOf(string(check.MaxSeverity), assessments)
+	return checksVerdict{passed: true, recheck: verdict.Recheck, evidence: &promotion.ChecksEvidence{Vulnerabilities: scanned}}, nil
 }
 
 // evaluateVulnerabilities evaluates check against the latest scan of every
 // image of preparation, as the Product records it and the signed report in
-// the registry holds it.
+// the registry holds it. It returns the images it assessed.
 func (r *ServingReconciler) evaluateVulnerabilities(
 	ctx context.Context, serving *deliveryv1alpha1.Serving, preparation *deliveryv1alpha1.Preparation, check *deliveryv1alpha1.VulnerabilityCheck,
-) (vulnerability.Verdict, error) {
+) (vulnerability.Verdict, []vulnerability.Assessment, error) {
 	product, err := r.productOf(ctx, serving)
 	if err != nil {
-		return vulnerability.Verdict{}, err
+		return vulnerability.Verdict{}, nil, err
 	}
 	if product == nil {
-		return vulnerability.Verdict{Outcome: vulnerability.OutcomeScanMissing, Message: "the Order or its Product was not found"}, nil
+		return vulnerability.Verdict{Outcome: vulnerability.OutcomeScanMissing, Message: "the Order or its Product was not found"}, nil, nil
 	}
-	maxAge, err := r.maxScanAge(ctx, check)
+	interval, err := r.scanInterval(ctx)
 	if err != nil {
-		return vulnerability.Verdict{}, err
+		return vulnerability.Verdict{}, nil, err
 	}
 
-	assessments := vulnerability.Read(ctx, releaseImagesOf(preparation, product), r.reportReader(product), 1)
-	return vulnerability.Evaluate(assessments, vulnerability.Check{
+	assessments := vulnerability.Read(ctx, releaseImagesOf(preparation, product), r.reports.Reader(r.reportAccess(product)), 1)
+	verdict, err := vulnerability.Evaluate(assessments, vulnerability.Check{
 		MaxSeverity:   vulnerability.Severity(check.MaxSeverity),
 		IgnoreUnfixed: check.IgnoreUnfixed,
-		MaxAge:        maxAge,
+		MaxAge:        vulnerability.MaxAge(time.Duration(check.MaxAgeSeconds)*time.Second, interval),
 	}, r.clock())
+	return verdict, assessments, err
 }
 
-// reportReader returns the reader of the signed reports of the Product's
-// scans: through its Registries, verified against the Kitchen's keys, and
-// remembered by report digest until the keys change. Reports that do not
-// verify, or Registries that cannot be used, are vulnerability.ErrUnreadable.
-func (r *ServingReconciler) reportReader(product *deliveryv1alpha1.Product) vulnerability.FindingsReader {
-	var (
-		once     sync.Once
-		scope    registry.Scope
-		trust    *signing.TrustSet
-		setupErr error
-	)
-	return func(ctx context.Context, scan vulnerability.Scan) ([]vulnerability.Finding, error) {
-		once.Do(func() {
-			state, err := r.Signing.State(ctx)
-			if err != nil {
-				setupErr = fmt.Errorf("waiting for the signing key to verify the reports: %w", err)
-				return
-			}
-			trust = state.Trust
-			if scope, err = r.Registries.Scope(ctx, product.Namespace, product.Spec.RegistryRefs); err != nil {
-				setupErr = fmt.Errorf("connecting to the vendored images: %w", err)
-			}
-		})
-		if setupErr != nil {
-			return nil, vulnerability.Unreadable(setupErr)
-		}
-
-		r.reportsOnce.Do(func() { r.reports = lru.New(reportCacheSize) })
-		key := reportKey{digest: scan.Report, trust: trust.ID()}
-		if cached, ok := r.reports.Get(key); ok {
-			return cached.([]vulnerability.Finding), nil
-		}
-		findings, err := r.fetchReport(ctx, scope, trust, scan)
+// reportAccess returns the access to the signed reports of the Product's
+// scans: through its Registries, verified against the Kitchen's keys.
+// Registries that cannot be used leave the images without scans.
+func (r *ServingReconciler) reportAccess(product *deliveryv1alpha1.Product) func(context.Context) (vulnerability.Access, error) {
+	return func(ctx context.Context) (vulnerability.Access, error) {
+		state, err := r.Signing.State(ctx)
 		if err != nil {
-			if errors.Is(err, signing.ErrNotVerified) || errors.Is(err, oci.ErrPayloadTooLarge) || registry.Reason(err, "") != "" {
-				return nil, vulnerability.Unreadable(fmt.Errorf("its report did not verify: %w", err))
-			}
-			return nil, err
+			return vulnerability.Access{}, fmt.Errorf("waiting for the signing key to verify the reports: %w", err)
 		}
-		r.reports.Add(key, findings)
-		return findings, nil
+		scope, err := r.Registries.Scope(ctx, product.Namespace, product.Spec.RegistryRefs)
+		if err != nil {
+			return vulnerability.Access{}, fmt.Errorf("connecting to the vendored images: %w", err)
+		}
+		return vulnerability.Access{Trust: state.Trust, Connect: func(repository string) (oci.Client, error) {
+			conn, err := scope.Connect(repository)
+			if registry.Reason(err, "") != "" {
+				return nil, vulnerability.Unreadable(err)
+			}
+			return conn.Client, err
+		}}, nil
 	}
 }
 
-// fetchReport reads the signed report of scan through scope and verifies it
-// against trust.
-func (r *ServingReconciler) fetchReport(
-	ctx context.Context, scope registry.Scope, trust *signing.TrustSet, scan vulnerability.Scan,
-) ([]vulnerability.Finding, error) {
-	conn, err := scope.Connect(scan.Repository)
-	if err != nil {
-		return nil, err
-	}
-	subject, err := oci.Parse(scan.Repository + "@" + scan.Digest)
-	if err != nil {
-		return nil, err
-	}
-	return vulnerability.Fetch(ctx, conn.Client, trust, subject, scan.Report)
-}
-
-// recordDeployedVulnerabilities records the summary of the deployed
-// Preparation's scans, and emits a Warning Event when the findings at or
-// above the severity its check allows increase while it stays deployed.
-// deployedBefore is the digest that was deployed before this reconcile.
-func (r *ServingReconciler) recordDeployedVulnerabilities(
-	ctx context.Context, serving *deliveryv1alpha1.Serving, preparation *deliveryv1alpha1.Preparation, deployedBefore string,
-) error {
-	// Until the target is healthy, the summary keeps describing what runs.
-	if serving.Status.DeployedDigest != preparation.Spec.Artifact.Digest {
+// recordDeployedVulnerabilities records the summary of the scans of the
+// deployed Preparation once it was healthy, and emits a Warning Event when
+// the findings at or above the severity its check allows increase while it
+// stays deployed. Until it is healthy, the summary keeps describing what ran
+// before.
+func (r *ServingReconciler) recordDeployedVulnerabilities(ctx context.Context, serving *deliveryv1alpha1.Serving, deployed *promotion.Entry) error {
+	if deployed.Healthy.IsZero() {
 		return nil
 	}
 
+	preparation := &deliveryv1alpha1.Preparation{}
+	if err := r.Get(ctx, client.ObjectKey{Namespace: serving.Namespace, Name: deployed.Preparation}, preparation); err != nil {
+		return client.IgnoreNotFound(err)
+	}
 	product, err := r.productOf(ctx, serving)
 	if err != nil {
 		return err
@@ -528,18 +694,69 @@ func (r *ServingReconciler) recordDeployedVulnerabilities(
 		}
 	}
 
-	if previous == nil || !scanned || deployedBefore != preparation.Spec.Artifact.Digest ||
-		preparation.Spec.Checks == nil || preparation.Spec.Checks.Vulnerabilities == nil || r.Recorder == nil {
+	checks := preparation.PromotionChecks()
+	if previous == nil || !scanned || checks == nil || checks.Vulnerabilities == nil || r.Recorder == nil {
 		return nil
 	}
-	maxSeverity := vulnerability.Severity(preparation.Spec.Checks.Vulnerabilities.MaxSeverity)
-	before := vulnerability.AtLeast(vulnerability.Summary{
-		Critical: previous.Critical, High: previous.High, Medium: previous.Medium, Low: previous.Low,
-	}, maxSeverity)
-	if after := vulnerability.AtLeast(total, maxSeverity); after > before {
+	maxSeverity := vulnerability.Severity(checks.Vulnerabilities.MaxSeverity)
+	was := vulnerability.Summary{Critical: previous.Critical, High: previous.High, Medium: previous.Medium, Low: previous.Low}
+	if before, after, increased := vulnerability.Increased(was, total, maxSeverity); increased {
 		r.Recorder.Eventf(serving, preparation, corev1.EventTypeWarning, deliveryv1alpha1.ReasonVulnerabilitiesIncreased, "Scan",
 			"Deployed Preparation %s has %d vulnerabilities at or above %s, up from %d", preparation.Name, after, maxSeverity, before)
 	}
+	return nil
+}
+
+// recordPromotion records the promotion of the pending entry of history,
+// the Serving's promotion of candidate, in the registry: a signed statement
+// of the evidence of every gate it passed, attached to its artifact. It
+// returns the digest of the record.
+func (r *ServingReconciler) recordPromotion(
+	ctx context.Context, serving *deliveryv1alpha1.Serving, order *deliveryv1alpha1.Order, candidate *deliveryv1alpha1.Preparation,
+	history promotion.History, upstream promotion.Result, checks checksVerdict,
+) (string, error) {
+	state, err := r.Signing.State(ctx)
+	if err != nil {
+		return "", fmt.Errorf("waiting for the signing key to record the promotion: %w", err)
+	}
+	gates := promotion.Gates{After: promotion.StageEvidenceOf(serving.Namespace, stagesOf(candidate), upstream), Checks: checks.evidence}
+	if a := candidate.Status.Approval; candidate.ApprovalPolicy() != nil && a != nil && a.Attestation != nil {
+		gates.Approvals = &promotion.ApprovalsEvidence{Attestation: a.Attestation.Digest}
+	}
+	registryClient, err := r.connect(ctx, serving.Namespace, serving.Spec.OrderName, candidate.Spec.Artifact.RegistryRef, candidate.Spec.Artifact.OCIRef)
+	if err != nil {
+		return "", err
+	}
+	return promotion.PushPromotion(ctx, registryClient, state.Signer, serving.Namespace+"/"+serving.Spec.OrderName,
+		string(order.EffectivePromotionMode()), history, gates)
+}
+
+// recordDeployments records every deployment of history that was healthy
+// and is not recorded yet in the registry: a signed statement that it was
+// healthy, attached to its artifact.
+func (r *ServingReconciler) recordDeployments(ctx context.Context, serving *deliveryv1alpha1.Serving, history promotion.History) error {
+	unrecorded := history.Unrecorded()
+	if len(unrecorded) == 0 {
+		return nil
+	}
+	state, err := r.Signing.State(ctx)
+	if err != nil {
+		return fmt.Errorf("waiting for the signing key to record the deployment: %w", err)
+	}
+	targets := []promotion.Target{{Server: argocd.InClusterServer, Namespace: serving.Namespace}}
+	for _, e := range unrecorded {
+		registryClient, err := r.connect(ctx, serving.Namespace, serving.Spec.OrderName, registryRef(e.Registry), e.OCIRef)
+		if err != nil {
+			return err
+		}
+		record, err := promotion.PushDeployment(ctx, registryClient, state.Signer, serving.Namespace+"/"+serving.Spec.OrderName, e, targets)
+		if err != nil {
+			return err
+		}
+		history = history.RecordDeployment(e.Digest, e.Healthy, record)
+		log.FromContext(ctx).Info("Recorded deployment", "preparation", e.Preparation, "record", record)
+	}
+	setHistory(serving, history)
 	return nil
 }
 
@@ -592,21 +809,18 @@ func (r *ServingReconciler) productOf(ctx context.Context, serving *deliveryv1al
 	return product, nil
 }
 
-// maxScanAge returns how old a scan check accepts: its maxAgeSeconds, or
-// twice the Kitchen's scanning interval.
-func (r *ServingReconciler) maxScanAge(ctx context.Context, check *deliveryv1alpha1.VulnerabilityCheck) (time.Duration, error) {
-	if check.MaxAgeSeconds > 0 {
-		return time.Duration(check.MaxAgeSeconds) * time.Second, nil
-	}
-	interval := int32(defaultScanIntervalSeconds)
+// scanInterval returns the Kitchen's scanning interval, its default without
+// a Kitchen.
+func (r *ServingReconciler) scanInterval(ctx context.Context) (time.Duration, error) {
+	var scanning *deliveryv1alpha1.KitchenScanning
 	kitchen := &deliveryv1alpha1.Kitchen{}
 	switch err := r.Get(ctx, client.ObjectKey{Namespace: r.InstallNamespace, Name: deliveryv1alpha1.DefaultKitchenName}, kitchen); {
 	case err == nil:
-		interval = kitchen.Spec.Scanning.EffectiveIntervalSeconds()
+		scanning = kitchen.Spec.Scanning
 	case !apierrors.IsNotFound(err):
 		return 0, fmt.Errorf("failed to get Kitchen: %w", err)
 	}
-	return 2 * time.Duration(interval) * time.Second, nil
+	return time.Duration(scanning.EffectiveIntervalSeconds()) * time.Second, nil
 }
 
 // clock returns the current time.
@@ -618,17 +832,17 @@ func (r *ServingReconciler) clock() time.Time {
 }
 
 // applyApplication points the Serving's Argo CD Application at the artifact
-// of preparation, creating it when it is missing, and returns it as it is
-// now. An Application that already points there is left untouched, and
-// drift is reverted. A pre-existing Application that is not opted in for
+// of the deployed entry, creating it when it is missing, and returns it as
+// it is now. An Application that already points there is left untouched,
+// and drift is reverted. A pre-existing Application that is not opted in for
 // the Serving's Order is never changed: the error wraps
 // argocd.ErrOptInRequired.
 func (r *ServingReconciler) applyApplication(
-	ctx context.Context, serving *deliveryv1alpha1.Serving, preparation *deliveryv1alpha1.Preparation,
+	ctx context.Context, serving *deliveryv1alpha1.Serving, deployed *promotion.Entry,
 ) (*unstructured.Unstructured, error) {
 	logger := log.FromContext(ctx)
 
-	desired, err := argocd.Application(serving, preparation)
+	desired, err := argocd.Application(serving, deployed.OCIRef)
 	if err != nil {
 		return nil, err
 	}
@@ -641,7 +855,7 @@ func (r *ServingReconciler) applyApplication(
 		if err := r.Create(ctx, desired); err != nil {
 			return nil, fmt.Errorf("failed to create Application: %w", err)
 		}
-		logger.Info("Created Argo CD Application", "name", desired.GetName(), "namespace", desired.GetNamespace(), "preparation", preparation.Name)
+		logger.Info("Created Argo CD Application", "name", desired.GetName(), "namespace", desired.GetNamespace(), "preparation", deployed.Preparation)
 		return desired, nil
 	}
 
@@ -656,7 +870,7 @@ func (r *ServingReconciler) applyApplication(
 	if err := r.Update(ctx, desired); err != nil {
 		return nil, fmt.Errorf("failed to update Application: %w", err)
 	}
-	logger.Info("Updated Argo CD Application", "name", desired.GetName(), "namespace", desired.GetNamespace(), "preparation", preparation.Name)
+	logger.Info("Updated Argo CD Application", "name", desired.GetName(), "namespace", desired.GetNamespace(), "preparation", deployed.Preparation)
 	return desired, nil
 }
 
@@ -718,23 +932,25 @@ func (r *ServingReconciler) removeApplication(ctx context.Context, serving *deli
 	return nil
 }
 
-// artifactConnection connects to the registry holding prep's artifact:
-// through the Registry that authenticated its push, while it exists and
-// still covers the artifact, and through the Order's registryRefs
-// otherwise.
-func (r *ServingReconciler) artifactConnection(ctx context.Context, prep *deliveryv1alpha1.Preparation) (registry.Connection, error) {
-	conn, err := r.Registries.ConnectRecorded(ctx, prep.Namespace, prep.Spec.Artifact.RegistryRef, prep.Spec.Artifact.OCIRef,
+// connect returns a client for the registry holding the artifact at ociRef,
+// rendered for the Order orderName: through the Registry recorded with it,
+// while it exists and still covers the artifact, and through the Order's
+// registryRefs otherwise.
+func (r *ServingReconciler) connect(
+	ctx context.Context, namespace, orderName string, recorded *corev1.LocalObjectReference, ociRef string,
+) (oci.Client, error) {
+	conn, err := r.Registries.ConnectRecorded(ctx, namespace, recorded, ociRef,
 		func(ctx context.Context) ([]corev1.LocalObjectReference, error) {
 			order := &deliveryv1alpha1.Order{}
-			if err := r.Get(ctx, client.ObjectKey{Namespace: prep.Namespace, Name: prep.Spec.OrderName}, order); err != nil && !apierrors.IsNotFound(err) {
-				return nil, fmt.Errorf("failed to get Order %q: %w", prep.Spec.OrderName, err)
+			if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: orderName}, order); err != nil && !apierrors.IsNotFound(err) {
+				return nil, fmt.Errorf("failed to get Order %q: %w", orderName, err)
 			}
 			return order.Spec.RegistryRefs, nil
 		})
 	if err != nil {
-		return registry.Connection{}, fmt.Errorf("failed to connect to the destination of Preparation %q: %w", prep.Name, err)
+		return nil, fmt.Errorf("failed to connect to %s: %w", ociRef, err)
 	}
-	return conn, nil
+	return conn.Client, nil
 }
 
 // patchStatus writes the status serving took on in this reconcile, unless it
@@ -760,19 +976,17 @@ func (r *ServingReconciler) patchStatus(
 		log.FromContext(ctx).V(1).Info("Serving changed during the reconcile, reconciling it again")
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	default:
-		return result, errors.Join(err, fmt.Errorf("failed to patch Serving status: %w", perr))
+		return ctrl.Result{}, errors.Join(err, fmt.Errorf("failed to patch Serving status: %w", perr))
 	}
 }
 
 // markDeployment derives the Ready condition of the Serving from the state
-// of its Application. The health of another revision says nothing about
-// preparation, so until the Application reaches it the Serving is
+// of its Application. The health of another revision says nothing about the
+// deployed Preparation, so until the Application reaches it the Serving is
 // Deploying. An unchanged state changes nothing, so a Serving that stays
 // degraded or progressing settles until the Application changes.
-func markDeployment(serving *deliveryv1alpha1.Serving, preparation *deliveryv1alpha1.Preparation, state argocd.State) {
-	serving.Status.ObservedPreparationName = preparation.Name
-
-	atTarget := state.Revision == preparation.Spec.Artifact.Digest
+func markDeployment(serving *deliveryv1alpha1.Serving, deployed *promotion.Entry, state argocd.State) {
+	atTarget := state.Revision == deployed.Digest
 	switch {
 	case atTarget && state.Phase == argocd.PhaseDegraded:
 		msg := "deployment degraded"
@@ -781,10 +995,9 @@ func markDeployment(serving *deliveryv1alpha1.Serving, preparation *deliveryv1al
 		}
 		markDeploymentFailed(serving, msg)
 	case atTarget && state.Phase == argocd.PhaseHealthy:
-		serving.Status.DeployedDigest = preparation.Spec.Artifact.Digest
-		conditions.MarkTrue(serving, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonDeployed, "Successfully deployed component")
+		conditions.MarkTrue(serving, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonDeployed, "Deployed Preparation "+deployed.Preparation)
 	default:
-		conditions.MarkUnknown(serving, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonDeploying, "Deploying preparation "+preparation.Name)
+		conditions.MarkUnknown(serving, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonDeploying, "Deploying Preparation "+deployed.Preparation)
 	}
 }
 
@@ -796,6 +1009,139 @@ func markPending(serving *deliveryv1alpha1.Serving, msg string) {
 // markDeploymentFailed marks the Serving as not deployed, for msg.
 func markDeploymentFailed(serving *deliveryv1alpha1.Serving, msg string) {
 	conditions.MarkFalse(serving, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonDeploymentFailed, msg)
+}
+
+// conditionMessage returns the message of the condition of conditionType on
+// serving.
+func conditionMessage(serving *deliveryv1alpha1.Serving, conditionType string) string {
+	if c := meta.FindStatusCondition(serving.Status.Conditions, conditionType); c != nil {
+		return c.Message
+	}
+	return ""
+}
+
+// soonest returns the shortest of the waits that are set, 0 when none is.
+func soonest(waits ...time.Duration) time.Duration {
+	var shortest time.Duration
+	for _, wait := range waits {
+		if wait > 0 && (shortest == 0 || wait < shortest) {
+			shortest = wait
+		}
+	}
+	return shortest
+}
+
+// historyOf maps the history of serving to its domain form.
+func historyOf(serving *deliveryv1alpha1.Serving) promotion.History {
+	if len(serving.Status.History) == 0 {
+		return nil
+	}
+	history := make(promotion.History, 0, len(serving.Status.History))
+	for _, e := range serving.Status.History {
+		entry := promotion.Entry{
+			Preparation:      e.PreparationName,
+			Digest:           e.Digest,
+			OCIRef:           e.OCIRef,
+			ProductRevision:  e.ProductRevision,
+			Started:          e.StartedTime.UTC(),
+			EndReason:        promotion.EndReason(e.EndReason),
+			PromotionRecord:  e.PromotionRecord,
+			DeploymentRecord: e.DeploymentRecord,
+		}
+		if e.RegistryRef != nil {
+			entry.Registry = e.RegistryRef.Name
+		}
+		if e.HealthyTime != nil {
+			entry.Healthy = e.HealthyTime.UTC()
+		}
+		if e.EndedTime != nil {
+			entry.Ended = e.EndedTime.UTC()
+		}
+		history = append(history, entry)
+	}
+	return history
+}
+
+// setHistory records history as the history of serving.
+func setHistory(serving *deliveryv1alpha1.Serving, history promotion.History) {
+	if len(history) == 0 {
+		serving.Status.History = nil
+		return
+	}
+	entries := make([]deliveryv1alpha1.DeploymentEntry, 0, len(history))
+	for _, e := range history {
+		entry := deliveryv1alpha1.DeploymentEntry{
+			PreparationName:  e.Preparation,
+			Digest:           e.Digest,
+			OCIRef:           e.OCIRef,
+			RegistryRef:      registryRef(e.Registry),
+			ProductRevision:  e.ProductRevision,
+			StartedTime:      metav1.NewTime(e.Started),
+			HealthyTime:      optionalTime(e.Healthy),
+			EndedTime:        optionalTime(e.Ended),
+			EndReason:        deliveryv1alpha1.DeploymentEndReason(e.EndReason),
+			PromotionRecord:  e.PromotionRecord,
+			DeploymentRecord: e.DeploymentRecord,
+		}
+		entries = append(entries, entry)
+	}
+	serving.Status.History = entries
+}
+
+// optionalTime returns t as an optional status time, nil when it is zero.
+func optionalTime(t time.Time) *metav1.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return new(metav1.NewTime(t))
+}
+
+// registryRef references the Registry name, nil when it is "".
+func registryRef(name string) *corev1.LocalObjectReference {
+	if name == "" {
+		return nil
+	}
+	return &corev1.LocalObjectReference{Name: name}
+}
+
+// entryOf returns the history entry of a deployment of preparation, without
+// its times and records.
+func entryOf(preparation *deliveryv1alpha1.Preparation) promotion.Entry {
+	entry := promotion.Entry{
+		Preparation:     preparation.Name,
+		Digest:          preparation.Spec.Artifact.Digest,
+		OCIRef:          preparation.Spec.Artifact.OCIRef,
+		ProductRevision: preparation.Spec.ProductRevision,
+	}
+	if ref := preparation.Spec.Artifact.RegistryRef; ref != nil {
+		entry.Registry = ref.Name
+	}
+	return entry
+}
+
+// stagesOf returns the upstream stages preparation names.
+func stagesOf(preparation *deliveryv1alpha1.Preparation) []promotion.Stage {
+	upstreams := preparation.UpstreamStages()
+	if len(upstreams) == 0 {
+		return nil
+	}
+	stages := make([]promotion.Stage, 0, len(upstreams))
+	for _, u := range upstreams {
+		stages = append(stages, promotion.Stage{Order: u.Order, SoakSeconds: u.SoakSeconds})
+	}
+	return stages
+}
+
+// observationOf maps what Argo CD reports on an Application.
+func observationOf(state argocd.State) promotion.Observation {
+	observation := promotion.Observation{Revision: state.Revision, Health: promotion.HealthProgressing}
+	switch state.Phase {
+	case argocd.PhaseHealthy:
+		observation.Health = promotion.HealthHealthy
+	case argocd.PhaseDegraded:
+		observation.Health = promotion.HealthDegraded
+	}
+	return observation
 }
 
 // enqueueServingForOrderName maps an Order or Preparation to the Order's
@@ -851,6 +1197,38 @@ func (r *ServingReconciler) enqueueServingsOfProduct(ctx context.Context, obj cl
 	return reqs
 }
 
+// enqueueDownstreamServings maps the Serving of an Order to the Servings of
+// the Orders that run after it, which carry their Orders' names. It lists
+// Orders by the index the Order controller registers.
+func (r *ServingReconciler) enqueueDownstreamServings(ctx context.Context, obj client.Object) []ctrl.Request {
+	serving, ok := obj.(*deliveryv1alpha1.Serving)
+	if !ok {
+		return nil
+	}
+	orders := &deliveryv1alpha1.OrderList{}
+	if err := r.List(ctx, orders, client.InNamespace(serving.Namespace),
+		client.MatchingFields{orderUpstreamsField: serving.Spec.OrderName}); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to list downstream Orders", "order", serving.Spec.OrderName)
+		return nil
+	}
+	reqs := make([]ctrl.Request, 0, len(orders.Items))
+	for i := range orders.Items {
+		reqs = append(reqs, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&orders.Items[i])})
+	}
+	return reqs
+}
+
+// historyChanged passes the Serving events that change what its downstream
+// stages read from it: creates, deletes, and changes of its history.
+var historyChanged = predicate.Funcs{
+	UpdateFunc: func(e event.UpdateEvent) bool {
+		oldServing, okOld := e.ObjectOld.(*deliveryv1alpha1.Serving)
+		newServing, okNew := e.ObjectNew.(*deliveryv1alpha1.Serving)
+		return okOld && okNew && !equality.Semantic.DeepEqual(oldServing.Status.History, newServing.Status.History)
+	},
+	GenericFunc: func(event.GenericEvent) bool { return false },
+}
+
 // productScansChanged passes the Product updates that change its scans,
 // which the checks and the deployed summary of its Servings read.
 var productScansChanged = predicate.Funcs{
@@ -899,6 +1277,9 @@ func (r *ServingReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		// Status writes of the controller itself need no reconcile.
 		For(&deliveryv1alpha1.Serving{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Watches(&deliveryv1alpha1.Serving{},
+			handler.EnqueueRequestsFromMapFunc(r.enqueueDownstreamServings),
+			builder.WithPredicates(historyChanged)).
 		Watches(&deliveryv1alpha1.Preparation{}, handler.EnqueueRequestsFromMapFunc(enqueueServingForOrderName)).
 		Watches(&deliveryv1alpha1.Order{},
 			handler.EnqueueRequestsFromMapFunc(enqueueServingForOrderName),

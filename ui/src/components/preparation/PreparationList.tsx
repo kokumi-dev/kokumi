@@ -6,10 +6,13 @@ import RelativeTime from '../shared/RelativeTime'
 import PreparationFindings from '../vulnerability/PreparationFindings'
 import { Button, PromoteIcon, RollbackIcon } from '../ui'
 import PromoteDialog from './PromoteDialog'
+import QueuedPromotion from './QueuedPromotion'
 import { paths } from '../../routes/paths'
 import { shortDigest } from '../../utils/format'
 import { approvalLabel, promoteLabel } from '../../utils/preparations'
 import { useDeniedReason } from '../../hooks/useCapability'
+import { useServings } from '../../hooks/useServings'
+import { queuedPromotion } from '../../utils/promotion'
 import layout from '../layout/layout.module.css'
 import styles from './PreparationList.module.css'
 
@@ -24,11 +27,13 @@ interface Props {
 
 /**
  * PreparationList renders the history of an Order like a commit log. Each row
- * links to the Preparation and offers promote/rollback for Manual Orders.
+ * links to the Preparation and offers promote/rollback for Manual Orders; a
+ * promoted one that waits for its gates shows as queued.
  */
 export default function PreparationList({ preparations, mode, product }: Props) {
   const [promoting, setPromoting] = useState<{ prep: Preparation; action: 'Promote' | 'Rollback' } | null>(null)
   const promoteDenied = useDeniedReason('preparations:promote')
+  const servings = useServings()
   const active = preparations.find((p) => p.isActive)
 
   if (preparations.length === 0) {
@@ -41,7 +46,7 @@ export default function PreparationList({ preparations, mode, product }: Props) 
         {preparations.map((prep) => {
           const action = promoteLabel(prep.createdAt, active?.createdAt)
           const approval = prep.approval
-          const blockedByApproval = !!approval && !approval.approved
+          const queued = mode === 'Manual' ? queuedPromotion(prep, servings) : undefined
           const title = prep.commitMessage?.trim() || prep.name
           return (
             <li key={`${prep.namespace}/${prep.name}`} className={styles.row}>
@@ -87,15 +92,15 @@ export default function PreparationList({ preparations, mode, product }: Props) 
               <StatusIndicator state={prep.state} />
 
               <div className={styles.actions}>
-                {!prep.isActive && mode === 'Manual' && (
+                {queued ? (
+                  <QueuedPromotion preparation={prep} queued={queued} compact />
+                ) : !prep.isActive && mode === 'Manual' && (
                   <Button
                     variant={action === 'Rollback' ? 'rollback' : 'promote'}
                     size="sm"
                     icon={action === 'Rollback' ? <RollbackIcon /> : <PromoteIcon />}
                     onClick={() => setPromoting({ prep, action })}
-                    disabled={blockedByApproval}
                     disabledReason={promoteDenied}
-                    title={blockedByApproval ? approval?.message ?? 'Approval required' : undefined}
                   >
                     {action}
                   </Button>

@@ -66,9 +66,6 @@ type RenderRequest struct {
 	// ParentDigest, when non-empty, is stored as the kokumi.dev/parent
 	// annotation linking to the preceding artifact in a promotion chain.
 	ParentDigest string
-	// ExtraAnnotations are merged into the pushed manifest annotations
-	// (e.g. kokumi.dev/approval-policy) and may override computed ones.
-	ExtraAnnotations map[string]string
 	// ArtifactType is the artifactType of the pushed manifest.
 	ArtifactType string
 	// Config is pushed as the artifact's config blob. The caller fills what
@@ -143,7 +140,6 @@ func (p *Pipeline) Render(ctx context.Context, req RenderRequest) (*RenderResult
 		ParentDigest: req.ParentDigest,
 		SourceRef:    sourceRef,
 		SCM:          scm,
-		Extra:        req.ExtraAnnotations,
 	})
 
 	// The manifest and the config blob carry the same creation time.

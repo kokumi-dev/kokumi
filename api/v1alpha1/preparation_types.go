@@ -166,17 +166,20 @@ type PreparationSpec struct {
 	// +optional
 	GitSource GitSource `json:"gitSource,omitempty"` //nolint:lll
 
-	// approvalPolicy is the approval gate copied from the Order when this
-	// Preparation was created. When set, the Preparation is only served once
-	// the policy is satisfied. It is also recorded on the OCI artifact.
-	// +optional
-	ApprovalPolicy *ApprovalPolicy `json:"approvalPolicy,omitempty"`
+	// productRevision identifies the Product change this Preparation renders:
+	// the SHA-256 of the Product's part of the intent. The Preparations
+	// other Orders of the Product render from the same change carry the same
+	// revision, which is what upstream stages are matched by.
+	// +required
+	// +kubebuilder:validation:MaxLength=71
+	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
+	ProductRevision string `json:"productRevision"`
 
-	// checks are the promotion checks copied from the Order when this
-	// Preparation was created. The Preparation is only served while it
-	// passes them.
+	// promotion holds the gates copied from the Order's spec.promotion when
+	// this Preparation was created: the Preparation is only served once it
+	// passes them. They are part of the intent recorded on the OCI artifact.
 	// +optional
-	Checks *PromotionChecks `json:"checks,omitempty"`
+	Promotion *PromotionGates `json:"promotion,omitempty"`
 
 	// images lists the container images the rendered manifests reference,
 	// resolved to digests when the Preparation was rendered. The artifact's
@@ -381,7 +384,7 @@ type PreparationStatus struct {
 	Attestations []AttestationReference `json:"attestations,omitempty"`
 
 	// approval aggregates the Approvals of this Preparation. Only set when
-	// spec.approvalPolicy is set.
+	// spec.promotion.approvals is set.
 	// +optional
 	Approval *PreparationApprovalStatus `json:"approval,omitempty"`
 }
@@ -397,6 +400,7 @@ type PreparationStatus struct {
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 // +kubebuilder:resource:shortName=prep
 // +kubebuilder:selectablefield:JSONPath=`.spec.orderName`
+// +kubebuilder:selectablefield:JSONPath=`.spec.productRevision`
 
 // Preparation is the Schema for the preparations API
 type Preparation struct {
@@ -413,6 +417,32 @@ type Preparation struct {
 	// status defines the observed state of Preparation
 	// +optional
 	Status PreparationStatus `json:"status,omitzero"`
+}
+
+// ApprovalPolicy returns spec.promotion.approvals, or nil when no approval
+// gate applies.
+func (p *Preparation) ApprovalPolicy() *ApprovalPolicy {
+	if p.Spec.Promotion == nil {
+		return nil
+	}
+	return p.Spec.Promotion.Approvals
+}
+
+// UpstreamStages returns spec.promotion.after.
+func (p *Preparation) UpstreamStages() []UpstreamStage {
+	if p.Spec.Promotion == nil {
+		return nil
+	}
+	return p.Spec.Promotion.After
+}
+
+// PromotionChecks returns spec.promotion.checks, or nil when no check
+// applies.
+func (p *Preparation) PromotionChecks() *PromotionChecks {
+	if p.Spec.Promotion == nil {
+		return nil
+	}
+	return p.Spec.Promotion.Checks
 }
 
 // GetConditions returns the status conditions of the Preparation.

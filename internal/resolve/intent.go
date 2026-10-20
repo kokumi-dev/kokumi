@@ -19,6 +19,11 @@ import (
 type Intent struct {
 	// Source is the resolved source artifact.
 	Source IntentSource `json:"source"`
+	// ProductRevision identifies the Product change the artifact renders
+	// (see ProductRevision). Upstream stages are matched by it, so a Product
+	// change renders every Order again, also one whose own values or
+	// patches hide it.
+	ProductRevision string `json:"productRevision"`
 	// Destination is the resolved OCI URL the artifact is pushed to.
 	Destination string `json:"destination"`
 	// Render is the render configuration after merging the Order over its
@@ -31,8 +36,9 @@ type Intent struct {
 	// Images is how the images of the rendered manifests are handled. It is
 	// absent under the default Record policy without field specs.
 	Images *IntentImages `json:"images,omitempty"`
-	// Promotion holds the gates the artifact must pass before it is served.
-	Promotion *IntentPromotion `json:"promotion,omitempty"`
+	// Promotion holds the gates the artifact must pass before it is served,
+	// with the upstream stages sorted by Order.
+	Promotion *deliveryv1alpha1.PromotionGates `json:"promotion,omitempty"`
 }
 
 // IntentSource is the resolved source of an Intent.
@@ -57,34 +63,29 @@ type IntentImages struct {
 	Vendor string `json:"vendor,omitempty"`
 }
 
-// IntentPromotion holds the promotion gates that are part of an Intent.
-type IntentPromotion struct {
-	// Approvals is the approval policy the artifact is rendered under.
-	Approvals *deliveryv1alpha1.ApprovalPolicy `json:"approvals,omitempty"`
-	// Checks are the promotion checks the artifact is rendered under.
-	Checks *deliveryv1alpha1.PromotionChecks `json:"checks,omitempty"`
-}
-
 // NewIntent builds the Intent of order from its effective spec and its
 // destination URL.
 func NewIntent(order *deliveryv1alpha1.Order, effective *EffectiveSpec, destination string) Intent {
-	intent := Intent{
-		Source:      IntentSource{OCI: effective.Source.URL, Version: effective.Source.Version, Digest: effective.SourceDigest},
-		Destination: destination,
-		Render:      effective.Render,
-		Patches:     effective.Patches,
-		Edits:       effective.Edits,
+	return Intent{
+		Source:          IntentSource{OCI: effective.Source.URL, Version: effective.Source.Version, Digest: effective.SourceDigest},
+		ProductRevision: effective.ProductRevision,
+		Destination:     destination,
+		Render:          effective.Render,
+		Patches:         effective.Patches,
+		Edits:           effective.Edits,
+		Images:          intentImages(effective.Images, effective.ImagesVendorURL),
+		Promotion:       order.PromotionGates(),
 	}
+}
 
-	if policy := effective.Images.EffectivePolicy(); policy != deliveryv1alpha1.ImagePolicyRecord || len(effective.Images.FieldSpecs) > 0 {
-		intent.Images = &IntentImages{Policy: policy, FieldSpecs: effective.Images.FieldSpecs, Vendor: effective.ImagesVendorURL}
+// intentImages returns the image handling of images vendored below
+// vendorURL, nil under the default Record policy without field specs.
+func intentImages(images deliveryv1alpha1.ProductImages, vendorURL string) *IntentImages {
+	policy := images.EffectivePolicy()
+	if policy == deliveryv1alpha1.ImagePolicyRecord && len(images.FieldSpecs) == 0 {
+		return nil
 	}
-
-	if approvals, checks := order.ApprovalPolicy(), order.PromotionChecks(); approvals != nil || checks != nil {
-		intent.Promotion = &IntentPromotion{Approvals: approvals, Checks: checks}
-	}
-
-	return intent
+	return &IntentImages{Policy: policy, FieldSpecs: images.FieldSpecs, Vendor: vendorURL}
 }
 
 // Canonical returns the canonical JSON encoding of the intent: compact, with
@@ -92,9 +93,19 @@ func NewIntent(order *deliveryv1alpha1.Order, effective *EffectiveSpec, destinat
 // equal intents encode to equal bytes regardless of how inline values were
 // written.
 func (i Intent) Canonical() ([]byte, error) {
-	data, err := json.Marshal(i)
+	canonical, err := canonicalJSON(i)
 	if err != nil {
-		return nil, fmt.Errorf("failed to encode intent: %w", err)
+		return nil, fmt.Errorf("failed to canonicalize intent: %w", err)
+	}
+	return canonical, nil
+}
+
+// canonicalJSON returns the canonical JSON encoding of v (see
+// Intent.Canonical).
+func canonicalJSON(v any) ([]byte, error) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
 	}
 
 	// Decoding into any and encoding again sorts the keys of raw JSON
@@ -105,7 +116,7 @@ func (i Intent) Canonical() ([]byte, error) {
 
 	var generic any
 	if err := decoder.Decode(&generic); err != nil {
-		return nil, fmt.Errorf("failed to canonicalize intent: %w", err)
+		return nil, err
 	}
 
 	var canonical bytes.Buffer
@@ -114,7 +125,7 @@ func (i Intent) Canonical() ([]byte, error) {
 	encoder.SetEscapeHTML(false)
 
 	if err := encoder.Encode(generic); err != nil {
-		return nil, fmt.Errorf("failed to canonicalize intent: %w", err)
+		return nil, err
 	}
 
 	return bytes.TrimSuffix(canonical.Bytes(), []byte("\n")), nil

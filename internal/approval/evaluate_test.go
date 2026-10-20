@@ -33,7 +33,7 @@ func testPreparation(required int32) *deliveryv1alpha1.Preparation {
 		},
 	}
 	if required > 0 {
-		p.Spec.ApprovalPolicy = &deliveryv1alpha1.ApprovalPolicy{RequiredApprovals: required, AllowedGroups: []string{testGroup}}
+		p.Spec.Promotion = &deliveryv1alpha1.PromotionGates{Approvals: &deliveryv1alpha1.ApprovalPolicy{RequiredApprovals: required, AllowedGroups: []string{testGroup}}}
 	}
 	return p
 }

@@ -34,11 +34,11 @@ export default function OrderServings() {
             {
               header: 'Deployed',
               truncate: true,
-              title: (s) => s.observedPreparation,
+              title: (s) => s.deployedPreparation,
               cell: (s) =>
-                s.observedPreparation ? (
-                  <Link className={layout.refLink} to={paths.preparation(s.namespace, s.observedPreparation)}>
-                    {s.observedPreparation}
+                s.deployedPreparation ? (
+                  <Link className={layout.refLink} to={paths.preparation(s.namespace, s.deployedPreparation)}>
+                    {s.deployedPreparation}
                   </Link>
                 ) : (
                   <span className={layout.muted}>—</span>

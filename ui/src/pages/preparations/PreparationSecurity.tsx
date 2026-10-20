@@ -79,7 +79,7 @@ export default function PreparationSecurity() {
   const check = prep.checks?.vulnerabilities
   const images = (report?.images ?? []).map((image) => scannedImage(image, !!check))
   const selected = images.find((i) => i.key === imageParam) ?? images.find((i) => i.scan) ?? images[0]
-  const deployed = servings?.find((s) => s.namespace === prep.namespace && s.order === prep.order)?.observedPreparation === prep.name
+  const deployed = servings?.find((s) => s.namespace === prep.namespace && s.order === prep.order)?.deployedPreparation === prep.name
 
   return (
     <>

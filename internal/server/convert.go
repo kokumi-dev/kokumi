@@ -14,6 +14,7 @@ import (
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
+	"github.com/kokumi-dev/kokumi/internal/resolve"
 	"github.com/kokumi-dev/kokumi/internal/scmlink"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -118,6 +119,7 @@ func orderToDTO(r deliveryv1alpha1.Order, activePreparation string) OrderDTO {
 		Edits:             patchesToDTO(r.Spec.Edits),
 		Mode:              string(r.EffectivePromotionMode()),
 		Approvals:         approvalPolicyToDTO(r.ApprovalPolicy()),
+		After:             upstreamStagesToDTO(r.UpstreamStages()),
 		Checks:            checksToDTO(r.PromotionChecks()),
 		State:             stateFromConditions(r.Status.Conditions),
 		LatestRevision:    r.Status.LatestPreparationName,
@@ -233,10 +235,12 @@ func preparationToDTO(p deliveryv1alpha1.Preparation, isActive bool) Preparation
 			Version: p.Spec.Renderer.Version,
 			Builder: p.Spec.Renderer.Builder,
 		},
-		Conditions: conditionsToDTO(p.Status.Conditions),
-		Approval:   preparationApprovalToDTO(p),
-		Checks:     checksToDTO(p.Spec.Checks),
-		Version:    p.Labels[deliveryv1alpha1.LabelVersion],
+		Conditions:      conditionsToDTO(p.Status.Conditions),
+		Approval:        preparationApprovalToDTO(p),
+		Checks:          checksToDTO(p.PromotionChecks()),
+		After:           upstreamStagesToDTO(p.UpstreamStages()),
+		ProductRevision: p.Spec.ProductRevision,
+		Version:         p.Labels[deliveryv1alpha1.LabelVersion],
 	}
 	if ref := p.Spec.Artifact.RegistryRef; ref != nil {
 		dto.Artifact.RegistryRef = ref.Name
@@ -327,6 +331,30 @@ func productVulnerabilitiesToDTO(v *deliveryv1alpha1.ProductVulnerabilities) *Pr
 	return dto
 }
 
+// upstreamStagesToDTO converts upstream stages; none stay nil.
+func upstreamStagesToDTO(stages []deliveryv1alpha1.UpstreamStage) []UpstreamStageDTO {
+	if len(stages) == 0 {
+		return nil
+	}
+	out := make([]UpstreamStageDTO, 0, len(stages))
+	for _, s := range stages {
+		out = append(out, UpstreamStageDTO{Order: s.Order, SoakSeconds: s.SoakSeconds})
+	}
+	return out
+}
+
+// upstreamStagesFromDTO converts requested upstream stages; none stay nil.
+func upstreamStagesFromDTO(stages []UpstreamStageDTO) []deliveryv1alpha1.UpstreamStage {
+	if len(stages) == 0 {
+		return nil
+	}
+	out := make([]deliveryv1alpha1.UpstreamStage, 0, len(stages))
+	for _, s := range stages {
+		out = append(out, deliveryv1alpha1.UpstreamStage{Order: s.Order, SoakSeconds: s.SoakSeconds})
+	}
+	return out
+}
+
 // approvalPolicyToDTO converts an ApprovalPolicy; nil stays nil.
 func approvalPolicyToDTO(p *deliveryv1alpha1.ApprovalPolicy) *ApprovalPolicyDTO {
 	if p == nil {
@@ -346,13 +374,14 @@ func approvalPolicyFromDTO(dto *ApprovalPolicyDTO) *deliveryv1alpha1.ApprovalPol
 // preparationApprovalToDTO summarizes the approval gate from the
 // controller-owned Preparation status.
 func preparationApprovalToDTO(p deliveryv1alpha1.Preparation) *PreparationApprovalDTO {
-	if p.Spec.ApprovalPolicy == nil {
+	policy := p.ApprovalPolicy()
+	if policy == nil {
 		return nil
 	}
 	dto := &PreparationApprovalDTO{
-		Policy:            *approvalPolicyToDTO(p.Spec.ApprovalPolicy),
+		Policy:            *approvalPolicyToDTO(policy),
 		State:             deliveryv1alpha1.ReasonAwaitingApprovals,
-		RequiredApprovals: p.Spec.ApprovalPolicy.RequiredApprovals,
+		RequiredApprovals: policy.RequiredApprovals,
 	}
 	if c := apimeta.FindStatusCondition(p.Status.Conditions, deliveryv1alpha1.ConditionTypeApproved); c != nil {
 		dto.Approved = c.Status == metav1.ConditionTrue
@@ -598,13 +627,13 @@ func compareNewestFirst(a, b *time.Time) int {
 	return b.Compare(*a)
 }
 
-// activePreparationFor returns the observed preparation name for the Order
-// identified by namespace/name from the provided list of Servings.
-// Returns an empty string when no matching Serving is found.
+// activePreparationFor returns the name of the Preparation the Serving of
+// the Order identified by namespace/name deploys, from the provided list of
+// Servings. Returns an empty string when no matching Serving is found.
 func activePreparationFor(namespace, orderName string, servings []deliveryv1alpha1.Serving) string {
-	for _, s := range servings {
-		if s.Namespace == namespace && s.Spec.OrderName == orderName {
-			return s.Status.ObservedPreparationName
+	for i := range servings {
+		if s := &servings[i]; s.Namespace == namespace && s.Spec.OrderName == orderName {
+			return s.DeployedPreparationName()
 		}
 	}
 	return ""
@@ -624,7 +653,7 @@ func enrichOrders(orders []deliveryv1alpha1.Order, servings []deliveryv1alpha1.S
 	for i, r := range orders {
 		var activePrep string
 		if s, ok := servingMap[r.Namespace+"/"+r.Name]; ok {
-			activePrep = s.Status.ObservedPreparationName
+			activePrep = s.DeployedPreparationName()
 		}
 		out[i] = orderToDTO(r, activePrep)
 	}
@@ -634,11 +663,11 @@ func enrichOrders(orders []deliveryv1alpha1.Order, servings []deliveryv1alpha1.S
 
 // enrichPreparations joins Preparations with Servings to determine IsActive.
 func enrichPreparations(preps []deliveryv1alpha1.Preparation, servings []deliveryv1alpha1.Serving) []PreparationDTO {
-	// active key: "<namespace>/<spec.order>" → observedPreparation name
+	// active key: "<namespace>/<spec.order>" → deployed Preparation name
 	activeMap := make(map[string]string, len(servings))
-	for _, s := range servings {
-		if s.Status.ObservedPreparationName != "" {
-			activeMap[s.Namespace+"/"+s.Spec.OrderName] = s.Status.ObservedPreparationName
+	for i := range servings {
+		if name := servings[i].DeployedPreparationName(); name != "" {
+			activeMap[servings[i].Namespace+"/"+servings[i].Spec.OrderName] = name
 		}
 	}
 
@@ -661,15 +690,20 @@ func enrichPreparations(preps []deliveryv1alpha1.Preparation, servings []deliver
 // servingToDTO converts a Serving CRD object into a ServingDTO.
 func servingToDTO(s deliveryv1alpha1.Serving) ServingDTO {
 	dto := ServingDTO{
-		Name:                s.Name,
-		Namespace:           s.Namespace,
-		Order:               s.Spec.OrderName,
-		DesiredPreparation:  s.Spec.PreparationName,
-		TargetPreparation:   s.Status.TargetPreparationName,
-		ObservedPreparation: s.Status.ObservedPreparationName,
-		DeployedDigest:      s.Status.DeployedDigest,
-		State:               stateFromConditions(s.Status.Conditions),
-		Conditions:          conditionsToDTO(s.Status.Conditions),
+		Name:               s.Name,
+		Namespace:          s.Namespace,
+		Order:              s.Spec.OrderName,
+		DesiredPreparation: s.Spec.PreparationName,
+		TargetPreparation:  s.Status.TargetPreparationName,
+		State:              stateFromConditions(s.Status.Conditions),
+		Conditions:         conditionsToDTO(s.Status.Conditions),
+	}
+	if deployed := s.DeployedEntry(); deployed != nil {
+		dto.DeployedPreparation = deployed.PreparationName
+		dto.DeployedDigest = deployed.Digest
+	}
+	for _, e := range s.Status.History {
+		dto.History = append(dto.History, deploymentEntryToDTO(e))
 	}
 	if summary := s.Status.DeployedVulnerabilities; summary != nil {
 		dto.DeployedVulnerabilities = new(summaryToDTO(*summary))
@@ -677,6 +711,26 @@ func servingToDTO(s deliveryv1alpha1.Serving) ServingDTO {
 	if !s.CreationTimestamp.IsZero() {
 		t := s.CreationTimestamp.UTC()
 		dto.CreatedAt = &t
+	}
+	return dto
+}
+
+// deploymentEntryToDTO converts a DeploymentEntry.
+func deploymentEntryToDTO(e deliveryv1alpha1.DeploymentEntry) DeploymentEntryDTO {
+	dto := DeploymentEntryDTO{
+		Preparation:      e.PreparationName,
+		Digest:           e.Digest,
+		ProductRevision:  e.ProductRevision,
+		StartedAt:        e.StartedTime.UTC(),
+		EndReason:        string(e.EndReason),
+		PromotionRecord:  e.PromotionRecord,
+		DeploymentRecord: e.DeploymentRecord,
+	}
+	if e.HealthyTime != nil {
+		dto.HealthyAt = new(e.HealthyTime.UTC())
+	}
+	if e.EndedTime != nil {
+		dto.EndedAt = new(e.EndedTime.UTC())
 	}
 	return dto
 }
@@ -722,6 +776,8 @@ func productToDTO(p deliveryv1alpha1.Product) ProductDTO {
 			Digest:   src.Digest,
 			Verified: sourceVerificationToDTO(src.Verified),
 		}
+		// Only encoding the Product's own spec can fail, which it read.
+		dto.Revision, _ = resolve.ProductRevision(&p)
 	}
 	if !p.CreationTimestamp.IsZero() {
 		t := p.CreationTimestamp.UTC()

@@ -87,6 +87,12 @@ const argoCDApplicationCRD = "https://raw.githubusercontent.com/argoproj/argo-cd
 // scanningNamespace holds the Products, Orders and Pods of the scanning spec.
 const scanningNamespace = "e2e-scanning"
 
+// pipelineNamespace holds the Product and Orders of the pipeline spec.
+const pipelineNamespace = "e2e-pipeline"
+
+// argoCDNamespace holds the Applications of all Servings.
+const argoCDNamespace = "argocd"
+
 // scannerDeploymentName is the kokumi-scanner Deployment, and its Service.
 const scannerDeploymentName = "kokumi-scanner"
 
@@ -137,7 +143,8 @@ var _ = Describe("Manager", Ordered, func() {
 		_, _ = utils.Run(cmd)
 
 		By("removing the signing and images namespaces")
-		cmd = exec.Command("kubectl", "delete", "ns", signingNamespace, imagesNamespace, scanningNamespace, "--ignore-not-found", "--timeout=2m")
+		cmd = exec.Command("kubectl", "delete", "ns", signingNamespace, imagesNamespace, scanningNamespace, pipelineNamespace,
+			"--ignore-not-found", "--timeout=2m")
 		_, _ = utils.Run(cmd)
 
 		By("undeploying the controller-manager")
@@ -788,7 +795,7 @@ spec:
 			By("holding the Preparation of the checked Order")
 			Eventually(func(g Gomega) {
 				out, err := utils.Run(exec.Command("kubectl", "get", "servings.delivery.kokumi.dev", "checked", "-n", scanningNamespace, "-o",
-					`jsonpath={.status.conditions[?(@.type=='ChecksPassed')].reason}|{.status.observedPreparationName}`))
+					`jsonpath={.status.conditions[?(@.type=='ChecksPassed')].reason}|{.status.history[*].promotionRecord}`))
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(out).To(Equal(deliveryv1alpha1.ReasonVulnerabilitiesFound+"|"), "nothing is deployed")
 			}, 5*time.Minute).Should(Succeed())
@@ -821,6 +828,115 @@ spec:
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(out).To(Equal("Failed"), "the NetworkPolicy drops connections from other Pods")
 			}, 2*time.Minute).Should(Succeed())
+		})
+
+		It("should deploy each stage after the stage before it ran the Product revision healthily, and record it", func() {
+			cosign := cosignBinary()
+			host := forwardRegistry()
+
+			By("rendering two stages of a Product: prod runs after staging, with a soak")
+			pushSource(host, "e2e/pipeline")
+			createNamespace(pipelineNamespace)
+			createNamespace(argoCDNamespace)
+			DeferCleanup(func() {
+				_, _ = utils.Run(exec.Command("kubectl", "delete", "applications.argoproj.io", "pipeline-staging", "pipeline-prod",
+					"-n", argoCDNamespace, "--ignore-not-found"))
+			})
+			apply(fmt.Sprintf(`
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Product
+metadata:
+  name: pipeline
+  namespace: %[1]s
+spec:
+  source:
+    url: oci://%[2]s/e2e/pipeline
+    version: "1.0.0"
+---
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Order
+metadata:
+  name: pipeline-staging
+  namespace: %[1]s
+spec:
+  productRef:
+    name: pipeline
+  destination:
+    url: oci://%[2]s/e2e/pipeline-staging
+  promotion:
+    mode: Automatic
+---
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Order
+metadata:
+  name: pipeline-prod
+  namespace: %[1]s
+spec:
+  productRef:
+    name: pipeline
+  destination:
+    url: oci://%[2]s/e2e/pipeline-prod
+  promotion:
+    mode: Automatic
+    after:
+    - order: pipeline-staging
+      soakSeconds: 20
+`, pipelineNamespace, inClusterRegistry))
+
+			By("rendering one Preparation of the same Product revision per stage")
+			Eventually(func(g Gomega) {
+				out, err := utils.Run(exec.Command("kubectl", "get", "preparations", "-n", pipelineNamespace, "-o",
+					`jsonpath={range .items[*]}{.spec.productRevision}{"\n"}{end}`))
+				g.Expect(err).NotTo(HaveOccurred())
+				lines := utils.GetNonEmptyLines(out)
+				g.Expect(lines).To(HaveLen(2), out)
+				g.Expect(lines[0]).To(Equal(lines[1]), "both stages render the same Product change")
+			}, 3*time.Minute).Should(Succeed())
+
+			stagingDigest := applicationRevision("pipeline-staging")
+
+			By("holding prod until staging is healthy")
+			Eventually(func(g Gomega) {
+				g.Expect(servingCondition(g, "pipeline-prod", deliveryv1alpha1.ConditionTypeUpstreamDeployed)).
+					To(Equal(deliveryv1alpha1.ReasonNotDeployedUpstream))
+			}, time.Minute).Should(Succeed())
+
+			By("soaking prod once staging reports healthy")
+			reportHealthy("pipeline-staging", stagingDigest)
+			Eventually(func(g Gomega) {
+				g.Expect(servingCondition(g, "pipeline-prod", deliveryv1alpha1.ConditionTypeUpstreamDeployed)).
+					To(Equal(deliveryv1alpha1.ReasonSoaking))
+			}, time.Minute).Should(Succeed())
+			_, err := utils.Run(exec.Command("kubectl", "get", "applications.argoproj.io", "pipeline-prod", "-n", argoCDNamespace))
+			Expect(err).To(HaveOccurred(), "prod does not deploy during the soak")
+
+			By("deploying prod after the soak")
+			prodDigest := applicationRevision("pipeline-prod")
+			Expect(servingCondition(Default, "pipeline-prod", deliveryv1alpha1.ConditionTypeUpstreamDeployed)).
+				To(Equal(deliveryv1alpha1.ReasonSatisfied))
+			reportHealthy("pipeline-prod", prodDigest)
+			Eventually(func(g Gomega) {
+				out, err := utils.Run(exec.Command("kubectl", "get", "servings.delivery.kokumi.dev", "pipeline-prod", "-n", pipelineNamespace,
+					"-o", "jsonpath={.status.history[0].deploymentRecord}"))
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(out).To(HavePrefix("sha256:"), "the healthy deployment is recorded")
+			}, time.Minute).Should(Succeed())
+
+			By("verifying the promotion and deployment records with cosign")
+			publicKey, err := utils.Run(exec.Command("kubectl", "get", "kitchen", "default", "-n", namespace,
+				"-o", "jsonpath={.status.signing.publicKey}"))
+			Expect(err).NotTo(HaveOccurred())
+			keyFile := filepath.Join(GinkgoT().TempDir(), "kokumi.pub")
+			Expect(os.WriteFile(keyFile, []byte(publicKey), 0o600)).To(Succeed())
+			for _, record := range []struct{ predicateType, ref string }{
+				{"https://kokumi.dev/attestations/promotion/v1", host + "/e2e/pipeline-prod@" + prodDigest},
+				{"https://kokumi.dev/attestations/deployment/v1", host + "/e2e/pipeline-prod@" + prodDigest},
+				{"https://kokumi.dev/attestations/deployment/v1", host + "/e2e/pipeline-staging@" + stagingDigest},
+			} {
+				_, err = utils.Run(exec.Command(cosign, "verify-attestation", "--key", keyFile,
+					"--insecure-ignore-tlog=true", "--allow-http-registry", "--type", record.predicateType, record.ref))
+				Expect(err).NotTo(HaveOccurred(), "stock cosign verifies the %s record of %s", record.predicateType, record.ref)
+			}
 		})
 
 		It("should keep the signing key away from everyone but the controller and cluster admins", func() {
@@ -970,6 +1086,38 @@ func forwardRegistry() string {
 	}, time.Minute, time.Second).Should(Succeed())
 
 	return host
+}
+
+// applicationRevision waits for the Argo CD Application of the Serving name
+// and returns the digest it deploys.
+func applicationRevision(name string) string {
+	var revision string
+	Eventually(func(g Gomega) {
+		out, err := utils.Run(exec.Command("kubectl", "get", "applications.argoproj.io", name, "-n", argoCDNamespace,
+			"-o", "jsonpath={.spec.source.targetRevision}"))
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(out).To(HavePrefix("sha256:"))
+		revision = out
+	}, 2*time.Minute).Should(Succeed())
+	return revision
+}
+
+// reportHealthy reports the Application of the Serving name synced to
+// revision and healthy, as Argo CD would. The suite runs no Argo CD, and the
+// Application CRD has no status subresource.
+func reportHealthy(name, revision string) {
+	_, err := utils.Run(exec.Command("kubectl", "patch", "applications.argoproj.io", name, "-n", argoCDNamespace,
+		"--type=merge", "-p", fmt.Sprintf(`{"status":{"sync":{"status":"Synced","revision":%q},"health":{"status":"Healthy"}}}`, revision)))
+	Expect(err).NotTo(HaveOccurred())
+}
+
+// servingCondition returns the reason of the condition of conditionType of
+// the Serving name in the pipeline namespace.
+func servingCondition(g Gomega, name, conditionType string) string {
+	out, err := utils.Run(exec.Command("kubectl", "get", "servings.delivery.kokumi.dev", name, "-n", pipelineNamespace,
+		"-o", fmt.Sprintf(`jsonpath={.status.conditions[?(@.type=='%s')].reason}`, conditionType)))
+	g.Expect(err).NotTo(HaveOccurred())
+	return out
 }
 
 // cosignBinary returns the cosign CLI the e2e tests verify with.

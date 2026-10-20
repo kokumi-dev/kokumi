@@ -5,6 +5,10 @@ import ConditionList from '../../components/layout/ConditionList'
 import { paths } from '../../routes/paths'
 import { formatDate } from '../../utils/format'
 import { approvalLabel } from '../../utils/preparations'
+import { shortRevision, upstreamVerdict } from '../../utils/promotion'
+import { useOrders } from '../../hooks/useOrders'
+import { useServings } from '../../hooks/useServings'
+import VerdictLine from '../../components/vulnerability/VerdictLine'
 import { usePreparationContext } from './preparationContext'
 import layout from '../../components/layout/layout.module.css'
 
@@ -12,6 +16,10 @@ export default function PreparationOverview() {
   const { prep, parent } = usePreparationContext()
   const git = prep.gitSource
   const signed = prep.conditions?.find((c) => c.type === 'Signed')
+  const orders = useOrders()
+  const servings = useServings()
+  const order = orders?.find((o) => o.namespace === prep.namespace && o.name === prep.order)
+  const upstream = upstreamVerdict(prep, order, orders, servings)
 
   return (
     <>
@@ -40,6 +48,22 @@ export default function PreparationOverview() {
               value: prep.approval
                 ? approvalLabel(prep.approval.state, prep.approval.approvedCount, prep.approval.requiredApprovals)
                 : 'Not required',
+            },
+            {
+              label: 'Product revision',
+              value: <span className={layout.mono} title={prep.productRevision}>{shortRevision(prep.productRevision)}</span>,
+              show: !!prep.productRevision,
+            },
+            {
+              label: 'Runs after',
+              value: upstream ? (
+                <>
+                  {prep.after?.map((s) => s.order).join(', ')}: <VerdictLine verdict={upstream} />
+                </>
+              ) : (
+                prep.after?.map((s) => s.order).join(', ')
+              ),
+              show: !!prep.after?.length,
             },
           ]}
         />

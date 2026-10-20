@@ -17,6 +17,9 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"slices"
+	"strings"
+
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -296,11 +299,61 @@ type PromotionSpec struct {
 	// +optional
 	Approvals *ApprovalPolicy `json:"approvals,omitempty"`
 
+	// after lists the upstream stages: Orders in the same namespace, variants
+	// of the same Product, that must each have deployed their own
+	// Preparation of a Preparation's Product revision healthily, for their
+	// soakSeconds, before this Order deploys it. Like approvals, the stages
+	// are copied into each Preparation when it is created, so a change
+	// produces a new Preparation.
+	// +optional
+	// +listType=map
+	// +listMapKey=order
+	// +kubebuilder:validation:MaxItems=8
+	After []UpstreamStage `json:"after,omitempty"`
+
 	// checks configures checks a Preparation must pass before it is served,
 	// in both Automatic and Manual mode. Like approvals, they are copied
 	// into each Preparation when it is created, so a change produces a new
 	// Preparation. They hold new deployments only: a deployed Preparation
 	// that stops passing stays deployed.
+	// +optional
+	Checks *PromotionChecks `json:"checks,omitempty"`
+}
+
+// UpstreamStage is an Order that must deploy a Product revision before the
+// Order that names it may.
+type UpstreamStage struct {
+	// order is the name of the upstream Order, in the same namespace.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	Order string `json:"order"`
+
+	// soakSeconds is how long the upstream Order must have run its
+	// Preparation of the revision healthily, without interruption, before
+	// it qualifies. 0 qualifies it as soon as it is healthy.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	SoakSeconds int32 `json:"soakSeconds,omitempty"`
+}
+
+// PromotionGates is what must hold before a Preparation is served: the
+// gates of the Order's spec.promotion, without the mode. It is copied into
+// each Preparation when it is created.
+type PromotionGates struct {
+	// approvals is the approval policy the Preparation must satisfy.
+	// +optional
+	Approvals *ApprovalPolicy `json:"approvals,omitempty"`
+
+	// after lists the upstream stages that must deploy the Preparation's
+	// Product revision first.
+	// +optional
+	// +listType=map
+	// +listMapKey=order
+	// +kubebuilder:validation:MaxItems=8
+	After []UpstreamStage `json:"after,omitempty"`
+
+	// checks are the promotion checks the Preparation must pass.
 	// +optional
 	Checks *PromotionChecks `json:"checks,omitempty"`
 }
@@ -382,8 +435,9 @@ type OrderStatus struct {
 	LatestArtifactDigest string `json:"latestArtifactDigest,omitempty"`
 
 	// latestConfigHash is a SHA-256 hash of the intent: the resolved source and
-	// destination OCI URLs plus version, render, patches, edits, and approval
-	// policy after merging the Order over its Product.
+	// destination OCI URLs plus version, render, patches, edits, image
+	// handling and promotion gates after merging the Order over its Product,
+	// and the Product revision.
 	// +optional
 	LatestConfigHash string `json:"latestConfigHash,omitempty"`
 
@@ -416,6 +470,7 @@ type OrderStatus struct {
 // +kubebuilder:printcolumn:name="Promotion",type=string,JSONPath=`.spec.promotion.mode`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 // +kubebuilder:selectablefield:JSONPath=`.spec.productRef.name`
+// +kubebuilder:validation:XValidation:rule="!has(self.spec.promotion) || !has(self.spec.promotion.after) || self.spec.promotion.after.all(s, s.order != self.metadata.name)",message="an Order cannot run after itself"
 
 // Order is the Schema for the orders API.
 // An Order is a variant of a Product, such as one environment of an
@@ -458,6 +513,30 @@ func (o *Order) PromotionChecks() *PromotionChecks {
 		return nil
 	}
 	return o.Spec.Promotion.Checks
+}
+
+// UpstreamStages returns spec.promotion.after.
+func (o *Order) UpstreamStages() []UpstreamStage {
+	if o.Spec.Promotion == nil {
+		return nil
+	}
+	return o.Spec.Promotion.After
+}
+
+// PromotionGates returns a copy of the gates of spec.promotion, with the
+// upstream stages sorted by Order, or nil when no gate applies.
+func (o *Order) PromotionGates() *PromotionGates {
+	approvals, after, checks := o.ApprovalPolicy(), o.UpstreamStages(), o.PromotionChecks()
+	if approvals == nil && len(after) == 0 && checks == nil {
+		return nil
+	}
+	gates := &PromotionGates{
+		Approvals: approvals.DeepCopy(),
+		After:     slices.Clone(after),
+		Checks:    checks.DeepCopy(),
+	}
+	slices.SortFunc(gates.After, func(a, b UpstreamStage) int { return strings.Compare(a.Order, b.Order) })
+	return gates
 }
 
 // GetConditions returns the status conditions of the Order.

@@ -116,6 +116,8 @@ export interface Order {
   edits?: Patch[]
   mode: PromotionMode
   approvals?: ApprovalPolicy
+  /** The upstream stages: Orders of the same Product that deploy a Product revision first. */
+  after?: UpstreamStage[]
   checks?: PromotionChecks
   state: string
   latestRevision?: string
@@ -129,6 +131,15 @@ export type PromotionMode = 'Automatic' | 'Manual'
 export interface ApprovalPolicy {
   requiredApprovals: number
   allowedGroups: string[]
+}
+
+/**
+ * An Order that must have deployed its own Preparation of a Product revision
+ * healthily, for soakSeconds, before the Order naming it deploys it.
+ */
+export interface UpstreamStage {
+  order: string
+  soakSeconds?: number
 }
 
 /** The checks a Preparation must pass before it is served; copied into each Preparation. */
@@ -241,6 +252,10 @@ export interface Preparation {
   images?: PreparationImage[]
   /** The promotion checks the Preparation was rendered under; immutable. */
   checks?: PromotionChecks
+  /** The upstream stages the Preparation was rendered under; immutable. */
+  after?: UpstreamStage[]
+  /** The Product change it renders, shared by the Preparations every Order rendered from it. */
+  productRevision: string
   /** The source version it was rendered from, e.g. the chart version. */
   version?: string
 }
@@ -371,13 +386,36 @@ export interface Serving {
   order: string
   desiredPreparation?: string
   targetPreparation?: string
-  observedPreparation?: string
+  /** The Preparation the Serving deploys: the newest promoted entry of its history. */
+  deployedPreparation?: string
   deployedDigest?: string
+  /** The most recent deployments, newest first. */
+  history?: DeploymentEntry[]
   /** The latest scans of the deployed Preparation's images, summed; changes as vulnerabilities are published. */
   deployedVulnerabilities?: VulnerabilitySummary
   state: string
   conditions?: Condition[]
   createdAt?: string
+}
+
+/**
+ * One continuous deployment of a Preparation: from its promotion, or its
+ * recovery, until it is superseded or degraded. An entry without a promotion
+ * record is a promotion that is being recorded.
+ */
+export interface DeploymentEntry {
+  preparation: string
+  digest: string
+  productRevision: string
+  startedAt: string
+  /** When Argo CD first reported it synced and healthy. */
+  healthyAt?: string
+  endedAt?: string
+  endReason?: 'Superseded' | 'Degraded'
+  /** Digest of the signed promotion record, a referrer of the artifact. */
+  promotionRecord?: string
+  /** Digest of the signed deployment record, pushed once it was healthy. */
+  deploymentRecord?: string
 }
 
 // ── Vulnerability types ───────────────────────────────────────────────────────
@@ -606,6 +644,8 @@ export interface Product {
   /** Registries that authenticate the source, the images and the vendor location. */
   registryRefs?: RegistryRef[]
   resolvedSource?: ResolvedSource
+  /** The Product revision its Orders render now; absent until it is resolved. */
+  revision?: string
   registryAccess?: RegistryAccess[]
   /** The latest scans of the vendored images in use; set while the Kitchen enables scanning. */
   vulnerabilities?: ProductVulnerabilities
@@ -698,6 +738,8 @@ export interface OrderFormData {
   edits: Patch[]
   mode: PromotionMode
   approvals?: ApprovalPolicy
+  /** Always sent on update: an update without stages removes them. */
+  after: UpstreamStage[]
   /** Always sent on update: an update without checks removes them. */
   checks?: PromotionChecks
 }
@@ -712,6 +754,7 @@ export const emptyOrderForm = (product?: { namespace: string; name: string }): O
   patches: [],
   edits: [],
   mode: 'Manual',
+  after: [],
 })
 
 const copyPatches = (patches?: Patch[]): Patch[] =>
@@ -732,6 +775,7 @@ export const orderToFormData = (r: Order): OrderFormData => ({
   approvals: r.approvals
     ? { requiredApprovals: r.approvals.requiredApprovals, allowedGroups: [...r.approvals.allowedGroups] }
     : undefined,
+  after: (r.after ?? []).map((s) => ({ ...s })),
   checks: r.checks?.vulnerabilities ? { vulnerabilities: { ...r.checks.vulnerabilities } } : undefined,
 })
 

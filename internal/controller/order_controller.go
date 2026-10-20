@@ -43,11 +43,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
-	"github.com/kokumi-dev/kokumi/internal/approval"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/conditions"
 	"github.com/kokumi-dev/kokumi/internal/images"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/promotion"
 	"github.com/kokumi-dev/kokumi/internal/registry"
 	"github.com/kokumi-dev/kokumi/internal/resolve"
 	"github.com/kokumi-dev/kokumi/internal/resources"
@@ -71,6 +71,10 @@ const (
 // orderRegistriesField indexes Orders by the Registries their
 // spec.registryRefs list.
 const orderRegistriesField = "registryRefNames"
+
+// orderUpstreamsField indexes Orders by the upstream Orders their
+// spec.promotion.after lists. A selectable field cannot point into a list.
+const orderUpstreamsField = "upstreamOrderNames"
 
 // orderPipeline renders the intent of an Order into an artifact.
 // *artifact.Pipeline implements it.
@@ -167,15 +171,33 @@ func (r *OrderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (resu
 		}
 	}
 
-	return r.reconcileOrder(ctx, order)
+	result, err = r.reconcileOrder(ctx, order)
+
+	// Every outcome keeps the Serving, so that a Serving the first promote
+	// creates while the Order fails still goes with the Order.
+	if serr := r.ensureServing(ctx, order); serr != nil {
+		return result, errors.Join(err, serr)
+	}
+	return result, err
 }
 
 // reconcileOrder merges the Order over its Product and renders the intent
 // they form, unless its latest Preparation renders it already. An Order
 // whose Product is missing or not ready waits; the Product watch reconciles
-// it again.
+// it again. An Order whose upstream stages do not form a valid pipeline
+// renders nothing; the Order watch reconciles it again when they change.
 func (r *OrderReconciler) reconcileOrder(ctx context.Context, order *deliveryv1alpha1.Order) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
+
+	problem, err := r.pipelineProblem(ctx, order)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if problem != "" {
+		logger.Info("Order is not a valid stage of its pipeline", "problem", problem)
+		conditions.MarkFalse(order, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonInvalidPipeline, problem)
+		return ctrl.Result{}, nil
+	}
 
 	product, err := r.readyProduct(ctx, order)
 	if product == nil || err != nil {
@@ -224,6 +246,30 @@ func (r *OrderReconciler) reconcileOrder(ctx context.Context, order *deliveryv1a
 	}
 
 	return r.render(ctx, order, effective, conns, intent, specHash)
+}
+
+// pipelineProblem says why the upstream stages of the Order do not form a
+// valid pipeline with the Orders of its namespace, "" when they do.
+func (r *OrderReconciler) pipelineProblem(ctx context.Context, order *deliveryv1alpha1.Order) (string, error) {
+	if len(order.UpstreamStages()) == 0 {
+		return "", nil
+	}
+	orders := &deliveryv1alpha1.OrderList{}
+	if err := r.List(ctx, orders, client.InNamespace(order.Namespace)); err != nil {
+		return "", fmt.Errorf("failed to list Orders: %w", err)
+	}
+	pipeline := promotion.Pipeline{}
+	for i := range orders.Items {
+		pipeline[orders.Items[i].Name] = pipelineOrder(&orders.Items[i])
+	}
+	// The Order as this reconcile read it, which the cache may lag behind.
+	pipeline[order.Name] = pipelineOrder(order)
+	return pipeline.Problem(order.Name), nil
+}
+
+// pipelineOrder maps order to its stage of a pipeline.
+func pipelineOrder(order *deliveryv1alpha1.Order) promotion.PipelineOrder {
+	return promotion.PipelineOrder{Product: order.Spec.ProductRef.Name, Upstreams: orderUpstreamNames(order)}
 }
 
 // readyProduct returns the Product of the Order once Orders may render from
@@ -300,8 +346,7 @@ func (r *OrderReconciler) reconcileUpToDate(
 		return err
 	}
 	r.markUpToDate(ctx, order, effective, conns, latest)
-
-	return r.ensureServing(ctx, order)
+	return nil
 }
 
 // render renders the intent of the Order into an artifact and records it in
@@ -328,11 +373,6 @@ func (r *OrderReconciler) render(
 		return ctrl.Result{}, fmt.Errorf("failed to convert effective spec: %w", err)
 	}
 
-	extraAnnotations, err := approval.PolicyAnnotations(order.ApprovalPolicy())
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-
 	imageOpts, err := r.imageOptions(ctx, order, effective, spec.Images)
 	if err != nil {
 		return renderFailed(order, err)
@@ -346,21 +386,20 @@ func (r *OrderReconciler) render(
 	defer cancel()
 
 	result, err := r.Pipeline.Render(renderCtx, artifact.RenderRequest{
-		Source:           artifact.Source{OCI: effective.Source.URL, Version: spec.Source.Version, Digest: spec.Source.Digest},
-		Destination:      artifact.Destination{OCI: conns.destination},
-		Product:          conns.product,
-		Order:            conns.order,
-		Render:           spec.Render,
-		Patches:          spec.Patches,
-		Edits:            spec.Edits,
-		Images:           imageOpts,
-		Name:             order.Name,
-		Namespace:        order.Namespace,
-		Description:      commitMessage,
-		ParentDigest:     parentDigest,
-		ExtraAnnotations: extraAnnotations,
-		ArtifactType:     oci.PreparationArtifactType,
-		Config:           resolve.ArtifactConfig(order, effective, intent, specHash, renderer),
+		Source:       artifact.Source{OCI: effective.Source.URL, Version: spec.Source.Version, Digest: spec.Source.Digest},
+		Destination:  artifact.Destination{OCI: conns.destination},
+		Product:      conns.product,
+		Order:        conns.order,
+		Render:       spec.Render,
+		Patches:      spec.Patches,
+		Edits:        spec.Edits,
+		Images:       imageOpts,
+		Name:         order.Name,
+		Namespace:    order.Namespace,
+		Description:  commitMessage,
+		ParentDigest: parentDigest,
+		ArtifactType: oci.PreparationArtifactType,
+		Config:       resolve.ArtifactConfig(order, effective, intent, specHash, renderer),
 	})
 	if err != nil {
 		if reason := registry.Reason(err, ""); reason != "" {
@@ -374,15 +413,16 @@ func (r *OrderReconciler) render(
 	}
 
 	preparation, err := r.createPreparation(ctx, order, resources.Rendered{
-		Source:        result.SourceRef,
-		Artifact:      result.DestRef,
-		RegistryName:  conns.destConn.RegistryName(),
-		Git:           deliveryv1alpha1.GitSource{Repo: result.SCM.Repo, Tag: result.SCM.Tag, CommitHash: result.SCM.CommitHash},
-		Images:        result.Images,
-		Renderer:      renderer,
-		ConfigHash:    specHash,
-		CommitMessage: commitMessage,
-		ParentDigest:  parentDigest,
+		Source:          result.SourceRef,
+		Artifact:        result.DestRef,
+		RegistryName:    conns.destConn.RegistryName(),
+		Git:             deliveryv1alpha1.GitSource{Repo: result.SCM.Repo, Tag: result.SCM.Tag, CommitHash: result.SCM.CommitHash},
+		Images:          result.Images,
+		Renderer:        renderer,
+		ConfigHash:      specHash,
+		ProductRevision: effective.ProductRevision,
+		CommitMessage:   commitMessage,
+		ParentDigest:    parentDigest,
 	})
 	if err != nil {
 		return renderFailed(order, fmt.Errorf("failed to create revision: %w", err))
@@ -396,8 +436,7 @@ func (r *OrderReconciler) render(
 	order.Status.LatestPreparationName = preparation.Name
 	order.Status.LatestArtifactDigest = result.DestRef.Digest
 	r.markUpToDate(ctx, order, effective, conns, preparation)
-
-	return ctrl.Result{}, r.ensureServing(ctx, order)
+	return ctrl.Result{}, nil
 }
 
 // markUpToDate marks the Order ready, its intent rendered by its latest
@@ -579,16 +618,16 @@ func (r *OrderReconciler) consumeCommitMessage(ctx context.Context, order *deliv
 
 // ensureServing makes the Order the controller of its Serving, which carries
 // the Order's name, so that the Serving goes with the Order. Under Automatic
-// promotion it creates the Serving, so the Serving controller can pick up new
-// Preparations. Under Manual promotion the first promote creates it, and the
-// Order adopts it. The Serving spec is never changed; the promotion mode is
-// read from the Order directly.
+// promotion it creates the Serving once the Order has a Preparation, so the
+// Serving controller can pick up new Preparations. Under Manual promotion
+// the first promote creates it, and the Order adopts it. The Serving spec is
+// never changed; the promotion mode is read from the Order directly.
 func (r *OrderReconciler) ensureServing(ctx context.Context, order *deliveryv1alpha1.Order) error {
 	key := client.ObjectKey{Namespace: order.Namespace, Name: order.Name}
 	serving := &deliveryv1alpha1.Serving{}
 	err := r.Get(ctx, key, serving)
 	if apierrors.IsNotFound(err) {
-		if order.EffectivePromotionMode() != deliveryv1alpha1.PromotionModeAutomatic {
+		if order.EffectivePromotionMode() != deliveryv1alpha1.PromotionModeAutomatic || order.Status.LatestPreparationName == "" {
 			return nil
 		}
 		return r.createServing(ctx, order)
@@ -708,7 +747,7 @@ func (r *OrderReconciler) patchStatus(
 		log.FromContext(ctx).V(1).Info("Order changed during the reconcile, reconciling it again")
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	default:
-		return result, errors.Join(err, fmt.Errorf("failed to patch Order status: %w", perr))
+		return ctrl.Result{}, errors.Join(err, fmt.Errorf("failed to patch Order status: %w", perr))
 	}
 }
 
@@ -732,6 +771,20 @@ func orderRegistryNames(obj client.Object) []string {
 	names := make([]string, 0, len(order.Spec.RegistryRefs))
 	for _, ref := range order.Spec.RegistryRefs {
 		names = append(names, ref.Name)
+	}
+	return names
+}
+
+// orderUpstreamNames returns the upstream Orders an Order runs after, for
+// orderUpstreamsField.
+func orderUpstreamNames(obj client.Object) []string {
+	order, ok := obj.(*deliveryv1alpha1.Order)
+	if !ok {
+		return nil
+	}
+	names := make([]string, 0, len(order.UpstreamStages()))
+	for _, stage := range order.UpstreamStages() {
+		names = append(names, stage.Order)
 	}
 	return names
 }
@@ -802,6 +855,36 @@ func (r *OrderReconciler) enqueueOrdersForRegistry(ctx context.Context, obj clie
 	return reqs
 }
 
+// enqueueDownstreamOrders enqueues the Orders that run after the Order, so
+// that they check their pipeline again.
+func (r *OrderReconciler) enqueueDownstreamOrders(ctx context.Context, obj client.Object) []reconcile.Request {
+	orders, err := r.ordersOf(ctx, obj.GetNamespace(), orderUpstreamsField, obj.GetName())
+	if err != nil {
+		log.FromContext(ctx).Error(err, "Failed to list downstream Orders", "order", obj.GetName())
+		return nil
+	}
+	reqs := make([]reconcile.Request, 0, len(orders))
+	for i := range orders {
+		reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&orders[i])})
+	}
+	return reqs
+}
+
+// pipelineChanged passes the Order events after which the Orders that run
+// after it may form another pipeline: creates, deletes, spec changes, and
+// an Order that becomes or stops being an invalid stage, so that a cycle is
+// reported on every Order in it.
+var pipelineChanged = predicate.Funcs{
+	UpdateFunc: func(e event.UpdateEvent) bool {
+		oldOrder, okOld := e.ObjectOld.(*deliveryv1alpha1.Order)
+		newOrder, okNew := e.ObjectNew.(*deliveryv1alpha1.Order)
+		return okOld && okNew && (oldOrder.Generation != newOrder.Generation ||
+			conditions.HasReason(oldOrder, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonInvalidPipeline) !=
+				conditions.HasReason(newOrder, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonInvalidPipeline))
+	},
+	GenericFunc: func(event.GenericEvent) bool { return false },
+}
+
 // enqueueOrderOfServing maps a Serving to its Order, whose name it carries.
 func enqueueOrderOfServing(_ context.Context, obj client.Object) []reconcile.Request {
 	return []reconcile.Request{{NamespacedName: client.ObjectKeyFromObject(obj)}}
@@ -828,8 +911,8 @@ func controllerUID(obj client.Object) types.UID {
 }
 
 // SetupWithManager sets up the controller with the Manager. It indexes
-// Orders by their Product and Registries, which the Product controller lists
-// them by as well.
+// Orders by their Product, Registries and upstream Orders, which the
+// Product and Serving controllers list them by as well.
 func (r *OrderReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	indexer := mgr.GetFieldIndexer()
 	if err := indexer.IndexField(context.Background(), &deliveryv1alpha1.Order{}, deliveryv1alpha1.FieldProductRefName, orderProduct); err != nil {
@@ -838,10 +921,16 @@ func (r *OrderReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if err := indexer.IndexField(context.Background(), &deliveryv1alpha1.Order{}, orderRegistriesField, orderRegistryNames); err != nil {
 		return err
 	}
+	if err := indexer.IndexField(context.Background(), &deliveryv1alpha1.Order{}, orderUpstreamsField, orderUpstreamNames); err != nil {
+		return err
+	}
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&deliveryv1alpha1.Order{}).
 		Owns(&deliveryv1alpha1.Preparation{}).
+		Watches(&deliveryv1alpha1.Order{},
+			handler.EnqueueRequestsFromMapFunc(r.enqueueDownstreamOrders),
+			builder.WithPredicates(pipelineChanged)).
 		Watches(&deliveryv1alpha1.Product{}, handler.EnqueueRequestsFromMapFunc(r.enqueueOrdersForProduct)).
 		Watches(&deliveryv1alpha1.Registry{}, handler.EnqueueRequestsFromMapFunc(r.enqueueOrdersForRegistry)).
 		Watches(&deliveryv1alpha1.Serving{},

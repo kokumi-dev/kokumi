@@ -1,0 +1,14 @@
+.queued {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.waiting {
+  overflow: hidden;
+  font-size: 0.8rem;
+  color: var(--color-text-muted-light);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}

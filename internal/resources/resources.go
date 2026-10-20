@@ -36,8 +36,10 @@ type Rendered struct {
 	Images       []images.Image
 	Renderer     deliveryv1alpha1.Renderer
 	// ConfigHash is the hash of the intent the artifact renders.
-	ConfigHash    string
-	CommitMessage string
+	ConfigHash string
+	// ProductRevision is the Product revision the artifact renders.
+	ProductRevision string
+	CommitMessage   string
 	// ParentDigest is the digest of the artifact the Order rendered before,
 	// "" for its first.
 	ParentDigest string
@@ -60,18 +62,18 @@ func Preparation(order *deliveryv1alpha1.Order, rendered Rendered) *deliveryv1al
 				URL:        rendered.Source.OCIRepositoryReference(),
 				BaseDigest: rendered.Source.Digest,
 			},
-			Renderer:   rendered.Renderer,
-			ConfigHash: rendered.ConfigHash,
+			Renderer:        rendered.Renderer,
+			ConfigHash:      rendered.ConfigHash,
+			ProductRevision: rendered.ProductRevision,
 			Artifact: deliveryv1alpha1.Artifact{
 				OCIRef: rendered.Artifact.OCIString(),
 				Digest: rendered.Artifact.Digest,
 			},
-			CommitMessage:  rendered.CommitMessage,
-			ParentDigest:   rendered.ParentDigest,
-			GitSource:      rendered.Git,
-			ApprovalPolicy: order.ApprovalPolicy().DeepCopy(),
-			Checks:         order.PromotionChecks().DeepCopy(),
-			Images:         preparationImages(rendered.Images),
+			CommitMessage: rendered.CommitMessage,
+			ParentDigest:  rendered.ParentDigest,
+			GitSource:     rendered.Git,
+			Promotion:     order.PromotionGates(),
+			Images:        preparationImages(rendered.Images),
 		},
 	}
 	if rendered.RegistryName != "" {

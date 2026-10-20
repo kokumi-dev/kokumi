@@ -42,6 +42,9 @@ type EffectiveSpec struct {
 	RegistryRefs []corev1.LocalObjectReference
 	// Product identifies the Product the spec was merged from.
 	Product ProductIdentity
+	// ProductRevision is the Product revision the spec renders (see
+	// ProductRevision).
+	ProductRevision string
 }
 
 // ProductIdentity identifies the Product an EffectiveSpec was merged from.
@@ -87,19 +90,25 @@ func ForProduct(product *deliveryv1alpha1.Product, order *deliveryv1alpha1.Order
 		return nil, err
 	}
 
+	revision, err := ProductRevision(product)
+	if err != nil {
+		return nil, err
+	}
+
 	effective := &EffectiveSpec{
 		Source: deliveryv1alpha1.OCISource{
 			URL:     product.Status.Source.URL,
 			Version: product.Status.Source.Version,
 		},
-		SourceDigest:   product.Status.Source.Digest,
-		SourceVerified: product.Status.Source.Verified,
-		Render:         render,
-		Patches:        patches,
-		Edits:          order.Spec.Edits,
-		Images:         *product.Spec.Images.DeepCopy(),
-		RegistryRefs:   slices.Clone(product.Spec.RegistryRefs),
-		Product:        ProductIdentity{Name: product.Name, ConfigHash: product.Status.ConfigHash},
+		SourceDigest:    product.Status.Source.Digest,
+		SourceVerified:  product.Status.Source.Verified,
+		Render:          render,
+		Patches:         patches,
+		Edits:           order.Spec.Edits,
+		Images:          *product.Spec.Images.DeepCopy(),
+		RegistryRefs:    slices.Clone(product.Spec.RegistryRefs),
+		Product:         ProductIdentity{Name: product.Name, ConfigHash: product.Status.ConfigHash},
+		ProductRevision: revision,
 	}
 	if effective.Images.EffectivePolicy() == deliveryv1alpha1.ImagePolicyVendor {
 		effective.ImagesVendorURL = product.Status.Source.URL

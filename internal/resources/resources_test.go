@@ -49,9 +49,10 @@ func TestPreparation(t *testing.T) {
 			{Ref: "nginx:1.27", Name: "docker.io/library/nginx", Digest: testDigest},
 			{Ref: "unknown:latest", Error: "not found"},
 		},
-		Renderer:      deliveryv1alpha1.Renderer{Type: deliveryv1alpha1.RenderTypeManifest},
-		ConfigHash:    "sha256:intent",
-		CommitMessage: "Initial commit",
+		Renderer:        deliveryv1alpha1.Renderer{Type: deliveryv1alpha1.RenderTypeManifest},
+		ConfigHash:      "sha256:intent",
+		ProductRevision: "sha256:revision",
+		CommitMessage:   "Initial commit",
 	})
 
 	assert.Equal(t, "app-0123456789ab", prep.Name, "named after the Order and the artifact digest")
@@ -62,40 +63,45 @@ func TestPreparation(t *testing.T) {
 	assert.Equal(t, testDigest, prep.Spec.Artifact.Digest)
 	assert.Equal(t, &corev1.LocalObjectReference{Name: "rendered"}, prep.Spec.Artifact.RegistryRef)
 	assert.Equal(t, "sha256:intent", prep.Spec.ConfigHash)
+	assert.Equal(t, "sha256:revision", prep.Spec.ProductRevision)
 	assert.Equal(t, "Initial commit", prep.Spec.CommitMessage)
 	assert.Equal(t, []deliveryv1alpha1.PreparationImage{
 		{Ref: "nginx:1.27", Name: "docker.io/library/nginx", Digest: testDigest},
 		{Ref: "unknown:latest"},
 	}, prep.Spec.Images, "the Preparation leaves out why an image could not be resolved")
 
-	require.Equal(t, policy, prep.Spec.ApprovalPolicy)
-	assert.NotSame(t, policy, prep.Spec.ApprovalPolicy, "the policy is a snapshot")
-	assert.Nil(t, prep.Spec.Checks)
+	require.Equal(t, policy, prep.ApprovalPolicy())
+	assert.NotSame(t, policy, prep.ApprovalPolicy(), "the policy is a snapshot")
+	assert.Nil(t, prep.PromotionChecks())
 
 	anonymous := Preparation(testOrderObject(nil), Rendered{
 		Source:   mustParse(t, "oci://ghcr.io/org/chart:1.0.0@"+testDigest),
 		Artifact: mustParse(t, "oci://registry.example/order/app:1.0.0@"+testDigest),
 	})
 	assert.Nil(t, anonymous.Spec.Artifact.RegistryRef, "no Registry authenticated the push")
-	assert.Nil(t, anonymous.Spec.ApprovalPolicy)
+	assert.Nil(t, anonymous.Spec.Promotion, "no gate applies")
 	assert.Nil(t, anonymous.Spec.Images)
 }
 
-func TestPreparation_checks(t *testing.T) {
+func TestPreparation_gates(t *testing.T) {
 	checks := &deliveryv1alpha1.PromotionChecks{
 		Vulnerabilities: &deliveryv1alpha1.VulnerabilityCheck{MaxSeverity: deliveryv1alpha1.SeverityHigh},
 	}
 	order := testOrderObject(nil)
 	order.Spec.Promotion.Checks = checks
+	order.Spec.Promotion.After = []deliveryv1alpha1.UpstreamStage{{Order: "staging", SoakSeconds: 60}, {Order: "qa"}}
 
 	prep := Preparation(order, Rendered{
 		Source:   mustParse(t, "oci://ghcr.io/org/chart:1.0.0@"+testDigest),
 		Artifact: mustParse(t, "oci://registry.example/order/app:1.0.0@"+testDigest),
 	})
 
-	require.Equal(t, checks, prep.Spec.Checks)
-	assert.NotSame(t, checks, prep.Spec.Checks, "the checks are a snapshot")
-	assert.NotSame(t, checks.Vulnerabilities, prep.Spec.Checks.Vulnerabilities)
+	require.Equal(t, checks, prep.PromotionChecks())
+	assert.NotSame(t, checks, prep.PromotionChecks(), "the checks are a snapshot")
+	assert.NotSame(t, checks.Vulnerabilities, prep.PromotionChecks().Vulnerabilities)
+	assert.Equal(t, []deliveryv1alpha1.UpstreamStage{{Order: "qa"}, {Order: "staging", SoakSeconds: 60}}, prep.UpstreamStages(),
+		"the upstream stages are sorted, as in the intent")
+	assert.Equal(t, "staging", order.Spec.Promotion.After[0].Order, "the Order is left as written")
 }
 
 func TestServing(t *testing.T) {

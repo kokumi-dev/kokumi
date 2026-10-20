@@ -49,6 +49,16 @@ export function RollbackIcon(p: IconProps) {
   return <Svg {...p}><path d="M3 6h7a3 3 0 010 6H7M6 3L3 6l3 3" /></Svg>
 }
 
+/** Review: look at a Preparation before approving it or requesting changes. */
+export function EyeIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z" />
+      <circle cx="8" cy="8" r="2" />
+    </Svg>
+  )
+}
+
 export function DownloadIcon(p: IconProps) {
   return <Svg {...p}><path d="M8 2.5v8M4.5 7L8 10.5 11.5 7M3 13.5h10" /></Svg>
 }

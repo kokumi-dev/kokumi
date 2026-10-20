@@ -250,7 +250,9 @@ func (r *ScanReconciler) scanning(ctx context.Context) (*deliveryv1alpha1.Kitche
 
 // imagesInUse returns the vendored images, by digest, that the
 // Preparations in use of the Product's Orders run, as scan.InUse picks
-// them: the newest Ready ones, and each Serving's target and deployed one.
+// them: the newest Ready ones, and each Serving's promoted, target and
+// deployed one. A promoted one is held by its checks before it becomes the
+// target, so it must be scanned before.
 func (r *ScanReconciler) imagesInUse(ctx context.Context, product *deliveryv1alpha1.Product) (map[string]oci.Reference, error) {
 	orders := &deliveryv1alpha1.OrderList{}
 	if err := r.List(ctx, orders, client.InNamespace(product.Namespace),
@@ -269,7 +271,7 @@ func (r *ScanReconciler) imagesInUse(ctx context.Context, product *deliveryv1alp
 		serving := &deliveryv1alpha1.Serving{}
 		switch err := r.Get(ctx, client.ObjectKey{Namespace: product.Namespace, Name: order.Name}, serving); {
 		case err == nil:
-			named = append(named, serving.Status.TargetPreparationName, serving.Status.ObservedPreparationName)
+			named = append(named, serving.Status.TargetPreparationName, serving.Spec.PreparationName, serving.DeployedPreparationName())
 		case !apierrors.IsNotFound(err):
 			return nil, fmt.Errorf("failed to get Serving: %w", err)
 		}
@@ -543,7 +545,7 @@ func (r *ScanReconciler) patchStatus(
 		log.FromContext(ctx).V(1).Info("Product changed during the scan, reconciling it again")
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	default:
-		return result, errors.Join(err, fmt.Errorf("failed to patch Product status: %w", perr))
+		return ctrl.Result{}, errors.Join(err, fmt.Errorf("failed to patch Product status: %w", perr))
 	}
 }
 
@@ -607,15 +609,16 @@ var preparationReadyChanged = predicate.Funcs{
 }
 
 // servingPreparationsChanged passes the Serving events after which the
-// images in use may differ: creates, deletes, and a change of the target or
-// deployed Preparation.
+// images in use may differ: creates, deletes, and a change of the promoted,
+// target or deployed Preparation.
 var servingPreparationsChanged = predicate.Funcs{
 	UpdateFunc: func(e event.UpdateEvent) bool {
 		oldServing, okOld := e.ObjectOld.(*deliveryv1alpha1.Serving)
 		newServing, okNew := e.ObjectNew.(*deliveryv1alpha1.Serving)
 		return okOld && okNew &&
-			(oldServing.Status.TargetPreparationName != newServing.Status.TargetPreparationName ||
-				oldServing.Status.ObservedPreparationName != newServing.Status.ObservedPreparationName)
+			(oldServing.Spec.PreparationName != newServing.Spec.PreparationName ||
+				oldServing.Status.TargetPreparationName != newServing.Status.TargetPreparationName ||
+				oldServing.DeployedPreparationName() != newServing.DeployedPreparationName())
 	},
 	GenericFunc: func(event.GenericEvent) bool { return false },
 }

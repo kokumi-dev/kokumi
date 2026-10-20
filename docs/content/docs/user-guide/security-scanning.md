@@ -30,14 +30,15 @@ the Product:
 
 - the Order's three newest `Ready` Preparations: the next release and the
   ones a rollback returns to;
+- the Preparation promoted to its Serving (Manual);
 - the Preparation its Serving targets;
 - the Preparation its Serving deploys.
 
 An image that one of these runs is scanned when it first appears, and again
 when its last scan is older than the Kitchen's interval, one day by default.
 Images that nothing uses any more drop out of the Product's status. Promoting
-an older Preparation makes it the Serving's target, so it is scanned again
-before the check decides.
+an older Preparation puts it in use, so it is scanned again before the check
+decides.
 
 A scan belongs to an image digest, not to a Preparation: Preparations that
 run the same images have the same findings, however their values differ.
@@ -178,7 +179,9 @@ The Serving reports the result in its `ChecksPassed` condition:
 | `ScanStale` | An image's scan is older than `maxAgeSeconds`. |
 
 **The check holds new deployments only.** While a Preparation does not pass,
-the Serving keeps the Preparation it deploys, as with approvals. A
+the Serving keeps the Preparation it deploys, as with approvals. The check
+runs after the [upstream stages](../promotion-pipelines/) and before the
+approval gate, so the votes of a Preparation the check holds stay open. A
 Preparation that is already deployed stays deployed when a later scan finds
 new vulnerabilities. Rolling it back or replacing it is a decision the check
 does not make for you. Instead:
@@ -226,8 +229,8 @@ scan on either side are listed, since the comparison misses their findings.
   findings, and the comparison with the deployed release.
 - **Preparations lists:** the version and the findings of every Preparation.
 - **Promote dialog:** whether the Preparation passes its check, and how its
-  findings compare with the deployed release. A promote is still possible;
-  the Serving then waits for the check.
+  findings compare with the deployed release. A promote is still possible:
+  it is queued, and the Serving deploys it once the check passes.
 - **Servings and Dashboard:** a severity badge for what each Serving deploys,
   and on the Dashboard a list of the Servings deployed with critical
   findings, shown while there are any.

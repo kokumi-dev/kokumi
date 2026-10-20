@@ -2,6 +2,7 @@ package server
 
 import (
 	"math/rand/v2"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +11,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/resolve"
+)
+
+// Names the conversion tests use.
+const (
+	testProduct       = "app"
+	testSourceVersion = "1.0.0"
+	testStage         = "staging"
 )
 
 func TestStateFromConditions(t *testing.T) {
@@ -42,7 +51,7 @@ func TestProductToDTO(t *testing.T) {
 	t.Run("a deleted Product waiting for its Orders is deleting", func(t *testing.T) {
 		now := metav1.Now()
 		product := deliveryv1alpha1.Product{
-			Name: "app", DeletionTimestamp: &now,
+			Name: testProduct, DeletionTimestamp: &now,
 			Status: deliveryv1alpha1.ProductStatus{Conditions: []metav1.Condition{{
 				Type: deliveryv1alpha1.ConditionTypeReady, Status: metav1.ConditionFalse, Reason: deliveryv1alpha1.ReasonInUse,
 			}}},
@@ -68,6 +77,16 @@ func TestProductToDTO(t *testing.T) {
 		}
 
 		require.Equal(t, overrides, overridesFromDTO(overridesToDTO(overrides)))
+	})
+
+	t.Run("a resolved Product has the revision its Orders render", func(t *testing.T) {
+		product := deliveryv1alpha1.Product{Name: testProduct, Status: deliveryv1alpha1.ProductStatus{
+			Source: &deliveryv1alpha1.ProductSourceStatus{URL: "oci://ghcr.io/org/app", Version: testSourceVersion, Digest: "sha256:" + strings.Repeat("1", 64)},
+		}}
+		revision, err := resolve.ProductRevision(&product)
+		require.NoError(t, err)
+		require.Equal(t, revision, productToDTO(product).Revision)
+		require.Empty(t, productToDTO(deliveryv1alpha1.Product{}).Revision, "an unresolved Product has none")
 	})
 
 	t.Run("an unset image policy reads as Record", func(t *testing.T) {
@@ -191,4 +210,58 @@ func TestEnrichPreparations_newestFirstThenByKey(t *testing.T) {
 
 		assert.Equal(t, want, keysOf(enrichPreparations(preps, nil), func(d PreparationDTO) [2]string { return [2]string{d.Namespace, d.Name} }))
 	}
+}
+
+func TestServingToDTO_history(t *testing.T) {
+	digest := func(c string) string { return "sha256:" + strings.Repeat(c, 64) }
+	started := metav1.NewTime(time.Date(2026, 11, 3, 10, 0, 0, 0, time.UTC))
+	healthy := metav1.NewTime(started.Add(time.Minute))
+	serving := deliveryv1alpha1.Serving{
+		Name: "prod", Namespace: "shop",
+		Spec: deliveryv1alpha1.ServingSpec{OrderName: "prod"},
+		Status: deliveryv1alpha1.ServingStatus{History: []deliveryv1alpha1.DeploymentEntry{
+			{PreparationName: "prod-2", Digest: digest("2"), StartedTime: started},
+			{PreparationName: "prod-1", Digest: digest("1"), ProductRevision: digest("7"), StartedTime: started, HealthyTime: &healthy,
+				PromotionRecord: digest("a"), DeploymentRecord: digest("b")},
+		}},
+	}
+
+	dto := servingToDTO(serving)
+	assert.Equal(t, "prod-1", dto.DeployedPreparation, "a promotion that is being recorded deploys nothing yet")
+	assert.Equal(t, digest("1"), dto.DeployedDigest)
+	require.Len(t, dto.History, 2)
+	assert.Equal(t, DeploymentEntryDTO{
+		Preparation: "prod-1", Digest: digest("1"), ProductRevision: digest("7"), StartedAt: started.Time,
+		HealthyAt: &healthy.Time, PromotionRecord: digest("a"), DeploymentRecord: digest("b"),
+	}, dto.History[1])
+
+	assert.Equal(t, "prod-1", activePreparationFor("shop", "prod", []deliveryv1alpha1.Serving{serving}))
+	assert.Empty(t, servingToDTO(deliveryv1alpha1.Serving{}).DeployedPreparation)
+}
+
+func TestOrderToDTO_upstreamStages(t *testing.T) {
+	stages := []deliveryv1alpha1.UpstreamStage{{Order: testStage, SoakSeconds: 3600}}
+	order := deliveryv1alpha1.Order{Spec: deliveryv1alpha1.OrderSpec{Promotion: &deliveryv1alpha1.PromotionSpec{After: stages}}}
+
+	dto := orderToDTO(order, "")
+	require.Equal(t, []UpstreamStageDTO{{Order: testStage, SoakSeconds: 3600}}, dto.After)
+	require.Equal(t, stages, upstreamStagesFromDTO(dto.After))
+	require.Nil(t, upstreamStagesFromDTO(nil))
+}
+
+func TestPreparationToDTO_gates(t *testing.T) {
+	revision := "sha256:" + strings.Repeat("7", 64)
+	prep := deliveryv1alpha1.Preparation{Spec: deliveryv1alpha1.PreparationSpec{
+		ProductRevision: revision,
+		Promotion: &deliveryv1alpha1.PromotionGates{
+			After:  []deliveryv1alpha1.UpstreamStage{{Order: testStage}},
+			Checks: &deliveryv1alpha1.PromotionChecks{Vulnerabilities: &deliveryv1alpha1.VulnerabilityCheck{MaxSeverity: deliveryv1alpha1.SeverityHigh}},
+		},
+	}}
+
+	dto := preparationToDTO(prep, false)
+	assert.Equal(t, revision, dto.ProductRevision)
+	assert.Equal(t, []UpstreamStageDTO{{Order: testStage}}, dto.After)
+	assert.Equal(t, "High", dto.Checks.Vulnerabilities.MaxSeverity)
+	assert.Nil(t, dto.Approval, "no approval policy applies")
 }

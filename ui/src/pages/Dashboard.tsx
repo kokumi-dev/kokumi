@@ -45,7 +45,7 @@ export default function Dashboard() {
 
       <CriticalDeployments />
 
-      <Section title="Open Promotions" description="Orders whose latest Preparation is not live yet" flush>
+      <Section title="Open Promotions" description="Latest Preparations that still need a person: a promote or an approval" flush>
         <OpenPromotions />
       </Section>
     </div>
