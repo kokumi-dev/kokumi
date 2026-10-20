@@ -1,8 +1,6 @@
 package artifact
 
 import (
-	"maps"
-
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/scmlink"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -20,8 +18,6 @@ type AnnotationInputs struct {
 	SourceRef oci.Reference
 	// SCM carries Git provenance (source repo, version, revision).
 	SCM SCMInfo
-	// Extra annotations are merged last and may override computed ones.
-	Extra map[string]string
 }
 
 // buildAnnotations assembles the annotation set for a pushed artifact.
@@ -49,8 +45,6 @@ func buildAnnotations(in AnnotationInputs) map[string]string {
 		annotations[ocispec.AnnotationBaseImageName] = in.SourceRef.RepositoryReference()
 		annotations[ocispec.AnnotationBaseImageDigest] = in.SourceRef.Digest
 	}
-
-	maps.Copy(annotations, in.Extra)
 
 	return annotations
 }

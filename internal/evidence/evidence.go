@@ -7,6 +7,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+
+	"k8s.io/utils/lru"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/approval"
@@ -15,6 +18,55 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/provenance"
 	"github.com/kokumi-dev/kokumi/internal/signing"
 )
+
+// verifiedCacheSize bounds how many verified artifacts a Verifier remembers.
+const verifiedCacheSize = 1024
+
+// Verifier verifies the evidence of Preparations and remembers what
+// verified. Digests are immutable, so a result holds until the trust
+// changes; it is specific to the Order the provenance must name and to
+// whether approvals are required. The zero value is ready to use.
+type Verifier struct {
+	once     sync.Once
+	verified *lru.Cache
+}
+
+// verifiedKey identifies evidence that verified.
+type verifiedKey struct {
+	digest           string
+	trust            string
+	order            string
+	approvalRequired bool
+}
+
+// Verify is Verify, for evidence it has not verified before: only then does
+// it connect to the registry with connect. Errors of connect are returned as
+// they are.
+func (v *Verifier) Verify(
+	ctx context.Context, trust *signing.TrustSet, preparation *deliveryv1alpha1.Preparation, order string,
+	connect func(context.Context) (oci.Client, error),
+) error {
+	v.once.Do(func() { v.verified = lru.New(verifiedCacheSize) })
+	key := verifiedKey{
+		digest:           preparation.Spec.Artifact.Digest,
+		trust:            trust.ID(),
+		order:            order,
+		approvalRequired: preparation.ApprovalPolicy() != nil,
+	}
+	if _, ok := v.verified.Get(key); ok {
+		return nil
+	}
+
+	client, err := connect(ctx)
+	if err != nil {
+		return err
+	}
+	if err := Verify(ctx, client, trust, preparation, order); err != nil {
+		return err
+	}
+	v.verified.Add(key, struct{}{})
+	return nil
+}
 
 // Rejected reports evidence that is missing or does not verify, as opposed
 // to a registry that could not be read. Reason is the condition reason that
@@ -57,7 +109,7 @@ func Verify(ctx context.Context, client oci.Client, trust *signing.TrustSet, pre
 		return invalid(fmt.Errorf("provenance %s attests a render for Order %q, not %q", found.Digest, attested, order))
 	}
 
-	if preparation.Spec.ApprovalPolicy == nil {
+	if preparation.ApprovalPolicy() == nil {
 		return nil
 	}
 

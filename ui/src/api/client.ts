@@ -99,6 +99,7 @@ export function createOrder(data: OrderFormData, commitMessage?: string): Promis
       patches: data.patches,
       mode: data.mode,
       approvals: data.approvals,
+      after: data.after,
       checks: data.checks,
       commitMessage: commitMessage ?? '',
     }),
@@ -107,7 +108,8 @@ export function createOrder(data: OrderFormData, commitMessage?: string): Promis
 
 /**
  * Replaces the spec of an Order. Its Product cannot be changed. The
- * promotion is replaced as a whole, so checks left out are removed.
+ * promotion is replaced as a whole, so stages and checks left out are
+ * removed.
  */
 export function updateOrder(
   namespace: string,
@@ -125,6 +127,7 @@ export function updateOrder(
       edits: data.edits,
       mode: data.mode,
       approvals: data.approvals,
+      after: data.after,
       checks: data.checks,
       commitMessage: commitMessage ?? '',
     }),

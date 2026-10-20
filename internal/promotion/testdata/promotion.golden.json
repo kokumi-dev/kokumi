@@ -1,0 +1,57 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "oci://registry.example/shop/podinfo-prod-c3@sha256:64146894e861122a293f3e09eb1d3351d42bbbab401737244ac20846fe902ab0",
+      "digest": {
+        "sha256": "64146894e861122a293f3e09eb1d3351d42bbbab401737244ac20846fe902ab0"
+      }
+    }
+  ],
+  "predicateType": "https://kokumi.dev/attestations/promotion/v1",
+  "predicate": {
+    "order": "shop/podinfo-prod",
+    "preparation": {
+      "name": "podinfo-prod-c3",
+      "digest": "sha256:64146894e861122a293f3e09eb1d3351d42bbbab401737244ac20846fe902ab0"
+    },
+    "previous": {
+      "name": "podinfo-prod-9f",
+      "digest": "sha256:110a26615b6c98c3cf046d72b671315b105809541547ec3b2921a748253dda7f"
+    },
+    "productRevision": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "mode": "Automatic",
+    "time": "2026-11-05T10:00:00Z",
+    "gates": {
+      "approvals": {
+        "attestation": "sha256:aaaa111111111111111111111111111111111111111111111111111111111111"
+      },
+      "after": [
+        {
+          "order": "shop/podinfo-staging",
+          "soakSeconds": 86400,
+          "deployment": {
+            "preparation": {
+              "name": "podinfo-staging-77",
+              "digest": "sha256:04b77dea09cb0e1d61b2f4838260dad2366a3382cb4dedba93b5146c15f681bb"
+            },
+            "healthyTime": "2026-11-04T10:00:00Z",
+            "record": "sha256:aaaa222222222222222222222222222222222222222222222222222222222222"
+          }
+        }
+      ],
+      "checks": {
+        "vulnerabilities": {
+          "maxSeverity": "High",
+          "images": [
+            {
+              "name": "ghcr.io/stefanprodan/podinfo",
+              "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+              "report": "sha256:aaaa222222222222222222222222222222222222222222222222222222222222"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

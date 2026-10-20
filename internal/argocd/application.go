@@ -21,6 +21,10 @@ import (
 // Namespace holds the Applications of all Servings.
 const Namespace = "argocd"
 
+// InClusterServer is the API server Applications deploy to: the cluster
+// Kokumi runs in.
+const InClusterServer = "https://kubernetes.default.svc"
+
 // GroupVersionKind is the kind of Argo CD Applications.
 var GroupVersionKind = schema.GroupVersionKind{Group: "argoproj.io", Version: "v1alpha1", Kind: "Application"}
 
@@ -69,11 +73,11 @@ func Key(serving *deliveryv1alpha1.Serving) types.NamespacedName {
 	return types.NamespacedName{Namespace: Namespace, Name: serving.Name}
 }
 
-// Application returns the Application that deploys the artifact of
-// preparation for serving. It is opted in for the Serving's Order and
+// Application returns the Application that deploys the artifact at ociRef,
+// with its digest, for serving. It is opted in for the Serving's Order and
 // labeled with the Serving, so that its events map back to it.
-func Application(serving *deliveryv1alpha1.Serving, preparation *deliveryv1alpha1.Preparation) (*unstructured.Unstructured, error) {
-	ref, err := oci.Parse(preparation.Spec.Artifact.OCIRef)
+func Application(serving *deliveryv1alpha1.Serving, ociRef string) (*unstructured.Unstructured, error) {
+	ref, err := oci.Parse(ociRef)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse OCI Ref: %w", err)
 	}
@@ -100,7 +104,7 @@ func Application(serving *deliveryv1alpha1.Serving, preparation *deliveryv1alpha
 				"path":           ".",
 			},
 			"destination": map[string]any{
-				"server":    "https://kubernetes.default.svc",
+				"server":    InClusterServer,
 				"namespace": serving.Namespace,
 			},
 			"syncPolicy": map[string]any{

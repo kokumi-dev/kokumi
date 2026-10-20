@@ -4,11 +4,14 @@ import { useOrders } from '../../hooks/useOrders'
 import { useProducts } from '../../hooks/useProducts'
 import { usePreparations } from '../../hooks/usePreparations'
 import { useCan, useDeniedReason } from '../../hooks/useCapability'
+import { useServings } from '../../hooks/useServings'
+import { queuedPromotion } from '../../utils/promotion'
 import PageHeader from '../../components/layout/PageHeader'
 import ResourceNotFound from '../../components/layout/ResourceNotFound'
 import Badge from '../../components/shared/Badge'
 import { Button, PromoteIcon, RollbackIcon, TabNav } from '../../components/ui'
 import PromoteDialog from '../../components/preparation/PromoteDialog'
+import QueuedPromotion from '../../components/preparation/QueuedPromotion'
 import { paths } from '../../routes/paths'
 import { promoteLabel } from '../../utils/preparations'
 import { allowsPatches, productOf } from '../../utils/products'
@@ -18,6 +21,7 @@ import layout from '../../components/layout/layout.module.css'
 export default function PreparationLayout() {
   const { namespace = '', name = '' } = useParams()
   const preparations = usePreparations()
+  const servings = useServings()
   const orders = useOrders()
   const products = useProducts()
   const [promoting, setPromoting] = useState(false)
@@ -47,8 +51,8 @@ export default function PreparationLayout() {
   const editsAllowed = canEditOrders && !!product && allowsPatches(product)
 
   const action = promoteLabel(prep.createdAt, active?.createdAt)
-  const blockedByApproval = !!prep.approval && !prep.approval.approved
   const canPromote = !prep.isActive && order?.mode === 'Manual'
+  const queued = order?.mode === 'Manual' ? queuedPromotion(prep, servings) : undefined
 
   const ctx: PreparationContext = { prep, order, product, parent, active, editsAllowed }
 
@@ -68,14 +72,14 @@ export default function PreparationLayout() {
           </>
         }
         subtitle={prep.commitMessage?.trim() || undefined}
-        actions={canPromote && (
+        actions={queued ? (
+          <QueuedPromotion preparation={prep} queued={queued} />
+        ) : canPromote && (
           <Button
             variant={action === 'Rollback' ? 'rollback' : 'promote'}
             icon={action === 'Rollback' ? <RollbackIcon /> : <PromoteIcon />}
             onClick={() => setPromoting(true)}
-            disabled={blockedByApproval}
             disabledReason={promoteDenied}
-            title={blockedByApproval ? prep.approval?.message ?? 'Approval required' : undefined}
           >
             {action}
           </Button>

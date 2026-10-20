@@ -43,6 +43,11 @@ const (
 	// ConditionTypeChecksPassed reports on Servings whether the target
 	// Preparation passes the promotion checks it was rendered under.
 	ConditionTypeChecksPassed = "ChecksPassed"
+
+	// ConditionTypeUpstreamDeployed reports on Servings whether the upstream
+	// stages of the Preparation to serve deployed its Product revision
+	// healthily for their soak time.
+	ConditionTypeUpstreamDeployed = "UpstreamDeployed"
 )
 
 // Ready condition reasons of the objects Kokumi reconciles.
@@ -210,4 +215,24 @@ const (
 	// that the deployed Preparation has more findings at or above the
 	// severity its check allows than before.
 	ReasonVulnerabilitiesIncreased = "VulnerabilitiesIncreased"
+)
+
+// Condition reasons used by promotion pipelines.
+const (
+	// ReasonSatisfied reports on a Serving that every upstream stage
+	// deployed the Product revision of the Preparation to serve for its
+	// soak time, or that the Serving promoted the Preparation before.
+	ReasonSatisfied = "Satisfied"
+	// ReasonNotDeployedUpstream reports on a Serving that an upstream stage
+	// has not deployed the Product revision of the Preparation to serve
+	// healthily, or does not exist.
+	ReasonNotDeployedUpstream = "NotDeployedUpstream"
+	// ReasonSoaking reports on a Serving that an upstream stage runs the
+	// Product revision of the Preparation to serve, but not for its soak
+	// time yet.
+	ReasonSoaking = "Soaking"
+	// ReasonInvalidPipeline reports on an Order or Serving that an upstream
+	// stage is a variant of another Product, or that the stages form a
+	// cycle.
+	ReasonInvalidPipeline = "InvalidPipeline"
 )

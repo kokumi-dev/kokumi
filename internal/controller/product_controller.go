@@ -650,7 +650,7 @@ func (r *ProductReconciler) patchStatus(
 		log.FromContext(ctx).V(1).Info("Product changed during the reconcile, reconciling it again")
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	default:
-		return result, errors.Join(err, fmt.Errorf("failed to patch Product status: %w", perr))
+		return ctrl.Result{}, errors.Join(err, fmt.Errorf("failed to patch Product status: %w", perr))
 	}
 }
 

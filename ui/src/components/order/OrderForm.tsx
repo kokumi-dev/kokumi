@@ -10,7 +10,17 @@ import RegistryRefsEditor from '../shared/RegistryRefsEditor'
 import HelmValuesEditor from '../shared/HelmValuesEditor'
 import PatchesEditor from '../shared/PatchesEditor'
 import DiffTab from './DiffTab'
-import type { Order, OrderFormData, OrderPreviewRequest, OverridePolicy, Product, Severity, VulnerabilityCheck } from '../../api/types'
+import UpstreamStagesEditor from './UpstreamStagesEditor'
+import type {
+  Order,
+  OrderFormData,
+  OrderPreviewRequest,
+  OverridePolicy,
+  Product,
+  Severity,
+  UpstreamStage,
+  VulnerabilityCheck,
+} from '../../api/types'
 import { emptyOrderForm, imagePolicy, orderToFormData, severities } from '../../api/types'
 import { previewOrder } from '../../api/client'
 import { useChartInfo } from '../../hooks/useChartInfo'
@@ -52,6 +62,35 @@ function parseGroups(text: string): string[] {
 
 function hasValues(values: Record<string, unknown>): boolean {
   return Object.keys(values).length > 0
+}
+
+/** The most upstream stages an Order runs after. */
+const maxUpstreamStages = 8
+
+/** An upstream stage without its unset soak, as written in YAML and compared for changes. */
+function normalizedStage(s: UpstreamStage): UpstreamStage {
+  return s.soakSeconds ? { order: s.order, soakSeconds: s.soakSeconds } : { order: s.order }
+}
+
+function upstreamStagesFromYaml(raw: unknown): UpstreamStage[] {
+  const path = 'promotion.after'
+  if (raw === undefined || raw === null) return []
+  if (!Array.isArray(raw)) throw new Error(`${path} must be a list`)
+  if (raw.length > maxUpstreamStages) throw new Error(`${path} lists at most ${maxUpstreamStages} Orders`)
+  const seen = new Set<string>()
+  return raw.map((item, i) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error(`${path}[${i}] must be a mapping`)
+    const stage = item as Record<string, unknown>
+    assertKnownKeys(stage, ['order', 'soakSeconds'], `${path}[${i}]`)
+    if (typeof stage.order !== 'string' || !stage.order) throw new Error(`${path}[${i}].order must name an Order`)
+    if (seen.has(stage.order)) throw new Error(`${path} lists Order ${stage.order} twice`)
+    seen.add(stage.order)
+    const soak = stage.soakSeconds
+    if (soak !== undefined && (typeof soak !== 'number' || !Number.isInteger(soak) || soak < 0)) {
+      throw new Error(`${path}[${i}].soakSeconds must be an integer of at least 0`)
+    }
+    return normalizedStage({ order: stage.order, soakSeconds: soak as number | undefined })
+  })
 }
 
 /** The lowest maxAgeSeconds of a vulnerability check: an hour. */
@@ -111,6 +150,7 @@ function formToYaml(data: OrderFormData, helm: boolean | undefined): string {
   if (data.registryRefs.length > 0) doc.registryRefs = data.registryRefs.map((r) => ({ name: r.name }))
   const promotion: Record<string, unknown> = { mode: data.mode }
   if (data.approvals) promotion.approvals = data.approvals
+  if (data.after.length > 0) promotion.after = data.after.map(normalizedStage)
   if (data.checks?.vulnerabilities) promotion.checks = { vulnerabilities: normalizedCheck(data.checks.vulnerabilities) }
   doc.promotion = promotion
   return dump(doc, { lineWidth: 100 })
@@ -151,7 +191,7 @@ function yamlToPartialForm(text: string, ctx: ParseContext): Omit<OrderFormData,
   const rawApprovals = promotion?.approvals as Record<string, unknown> | undefined
   const rawChecks = promotion?.checks as Record<string, unknown> | undefined
   const rawVulnerabilities = rawChecks?.vulnerabilities as Record<string, unknown> | undefined
-  assertKnownKeys(promotion, ['mode', 'approvals', 'checks'], 'promotion')
+  assertKnownKeys(promotion, ['mode', 'approvals', 'after', 'checks'], 'promotion')
   assertKnownKeys(rawApprovals, ['requiredApprovals', 'allowedGroups'], 'promotion.approvals')
   assertKnownKeys(rawChecks, ['vulnerabilities'], 'promotion.checks')
   assertKnownKeys(rawVulnerabilities, ['maxSeverity', 'ignoreUnfixed', 'maxAgeSeconds'], 'promotion.checks.vulnerabilities')
@@ -179,6 +219,7 @@ function yamlToPartialForm(text: string, ctx: ParseContext): Omit<OrderFormData,
             : [],
         }
       : undefined,
+    after: upstreamStagesFromYaml(promotion?.after),
     checks: rawVulnerabilities ? { vulnerabilities: vulnerabilityCheckFromYaml(rawVulnerabilities) } : undefined,
     patches: patchesFromYaml(doc.patches),
   }
@@ -280,6 +321,7 @@ export default function OrderForm({ order, initialProduct, products, onCancel, o
       }
     }
     if (!data.productRef.name) throw new Error('Pick the Product this Order is a variant of')
+    if (data.after.some((s) => s.order === data.name)) throw new Error('An Order cannot run after itself')
     const scanAge = data.checks?.vulnerabilities?.maxAgeSeconds
     if (scanAge !== undefined && scanAge < minScanAgeSeconds) throw new Error('The max scan age must be at least 1 hour')
     const deleting = deletingReason(data)
@@ -536,8 +578,17 @@ function FormView({ formData, isEdit, product, products, deletingReason, onField
           checked={formData.mode === 'Automatic'}
           onChange={(e) => onFieldChange('mode', e.target.checked ? 'Automatic' : 'Manual')}
         />
-        Automatic promotion — promote new Preparations as soon as they are ready and approved
+        Automatic promotion — promote new Preparations as soon as they are ready and pass their gates
       </label>
+
+      {/* Upstream stages */}
+      <UpstreamStagesEditor
+        namespace={formData.namespace}
+        product={formData.productRef.name}
+        self={formData.name}
+        value={formData.after}
+        onChange={(stages) => onFieldChange('after', stages)}
+      />
 
       {/* Approval gate */}
       <label className={styles.checkRow}>

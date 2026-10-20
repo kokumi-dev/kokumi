@@ -31,7 +31,7 @@ export default function CriticalDeployments() {
   const rows: Row[] = (servings ?? [])
     .flatMap((serving) => {
       const summary = serving.deployedVulnerabilities
-      const preparation = serving.observedPreparation
+      const preparation = serving.deployedPreparation
       if (!summary || summary.critical === 0 || !preparation) return []
       const version = preparations?.find((p) => p.namespace === serving.namespace && p.name === preparation)?.version
       return [{ serving, preparation, version, summary }]

@@ -10,8 +10,8 @@ kind: Kustomization
 # official Trivy image, pinned by digest: a Trivy update is a digest bump.
 images:
 - name: scanner
-  newName: example.com/kokumi
-  newTag: v0.0.1
+  newName: ghcr.io/kokumi-dev/kokumi
+  newTag: latest
 - digest: sha256:016eae51fdcf989332a5404af7e8f625cd5d95d7c0907a221d080a996f556500
   name: trivy
   newName: ghcr.io/aquasecurity/trivy

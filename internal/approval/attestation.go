@@ -75,7 +75,7 @@ func Archive(ctx context.Context, c oci.Client, signer *signing.Signer, prep *de
 // approvals of prep, so retries produce the same OCI digest. Votes submitted
 // after the seal are excluded.
 func buildAttestation(prep *deliveryv1alpha1.Preparation, approvals []deliveryv1alpha1.Approval) ([]byte, error) {
-	if prep.Spec.ApprovalPolicy == nil {
+	if prep.ApprovalPolicy() == nil {
 		return nil, errors.New("preparation has no approval policy")
 	}
 	if !IsSealed(prep) {
@@ -116,7 +116,7 @@ func buildAttestation(prep *deliveryv1alpha1.Preparation, approvals []deliveryv1
 			Name:      prep.Name,
 			UID:       prep.UID,
 		},
-		Policy:      *prep.Spec.ApprovalPolicy,
+		Policy:      *prep.ApprovalPolicy(),
 		Result:      res.Reason,
 		SealedTime:  prep.Status.Approval.SealedTime.UTC().Format(time.RFC3339),
 		Submissions: submissions,

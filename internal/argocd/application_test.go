@@ -41,14 +41,10 @@ func testServing() *deliveryv1alpha1.Serving {
 	}
 }
 
-func testPreparation() *deliveryv1alpha1.Preparation {
-	return &deliveryv1alpha1.Preparation{Spec: deliveryv1alpha1.PreparationSpec{
-		Artifact: deliveryv1alpha1.Artifact{OCIRef: "oci://registry.example/order/app@" + testDigest, Digest: testDigest},
-	}}
-}
+const testOCIRef = "oci://registry.example/order/app@" + testDigest
 
 func TestApplication(t *testing.T) {
-	app, err := Application(testServing(), testPreparation())
+	app, err := Application(testServing(), testOCIRef)
 	require.NoError(t, err)
 
 	assert.Equal(t, GroupVersionKind, app.GroupVersionKind())
@@ -63,12 +59,12 @@ func TestApplication(t *testing.T) {
 	assert.Equal(t, "oci://registry.example/order/app", repoURL)
 	assert.Equal(t, testDigest, revision)
 
-	_, err = Application(testServing(), &deliveryv1alpha1.Preparation{})
+	_, err = Application(testServing(), "")
 	assert.Error(t, err)
 }
 
 func TestMatches(t *testing.T) {
-	desired, err := Application(testServing(), testPreparation())
+	desired, err := Application(testServing(), testOCIRef)
 	require.NoError(t, err)
 
 	same := desired.DeepCopy()

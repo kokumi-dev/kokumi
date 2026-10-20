@@ -65,33 +65,6 @@ spec:
           spec:
             description: spec defines the desired state of Preparation
             properties:
-              approvalPolicy:
-                description: |-
-                  approvalPolicy is the approval gate copied from the Order when this
-                  Preparation was created. When set, the Preparation is only served once
-                  the policy is satisfied. It is also recorded on the OCI artifact.
-                properties:
-                  allowedGroups:
-                    description: allowedGroups lists the groups whose members are
-                      eligible to approve.
-                    items:
-                      maxLength: 253
-                      type: string
-                    maxItems: 16
-                    minItems: 1
-                    type: array
-                    x-kubernetes-list-type: set
-                  requiredApprovals:
-                    description: requiredApprovals is the minimum number of distinct
-                      eligible approvers.
-                    format: int32
-                    maximum: 32
-                    minimum: 1
-                    type: integer
-                required:
-                - allowedGroups
-                - requiredApprovals
-                type: object
               artifact:
                 description: artifact defines the output artifact information
                 properties:
@@ -126,44 +99,6 @@ spec:
                 required:
                 - digest
                 - ociRef
-                type: object
-              checks:
-                description: |-
-                  checks are the promotion checks copied from the Order when this
-                  Preparation was created. The Preparation is only served while it
-                  passes them.
-                properties:
-                  vulnerabilities:
-                    description: |-
-                      vulnerabilities blocks serving a Preparation whose images have
-                      vulnerabilities at or above maxSeverity. It needs scanning enabled in
-                      the Kitchen and the Product's Vendor image policy: Kokumi scans only
-                      the images it vendors.
-                    properties:
-                      ignoreUnfixed:
-                        description: ignoreUnfixed ignores vulnerabilities that no
-                          version fixes yet.
-                        type: boolean
-                      maxAgeSeconds:
-                        description: |-
-                          maxAgeSeconds is how old the scan of every image may be. Defaults to
-                          twice the Kitchen's scanning intervalSeconds.
-                        format: int32
-                        minimum: 3600
-                        type: integer
-                      maxSeverity:
-                        description: |-
-                          maxSeverity is the lowest severity that blocks: High blocks findings
-                          of severity High and Critical.
-                        enum:
-                        - Critical
-                        - High
-                        - Medium
-                        - Low
-                        type: string
-                    required:
-                    - maxSeverity
-                    type: object
                 type: object
               commitMessage:
                 description: |-
@@ -268,6 +203,114 @@ spec:
                 maxLength: 71
                 pattern: ^sha256:[a-f0-9]{64}$
                 type: string
+              productRevision:
+                description: |-
+                  productRevision identifies the Product change this Preparation renders:
+                  the SHA-256 of the Product's part of the intent. The Preparations
+                  other Orders of the Product render from the same change carry the same
+                  revision, which is what upstream stages are matched by.
+                maxLength: 71
+                pattern: ^sha256:[a-f0-9]{64}$
+                type: string
+              promotion:
+                description: |-
+                  promotion holds the gates copied from the Order's spec.promotion when
+                  this Preparation was created: the Preparation is only served once it
+                  passes them. They are part of the intent recorded on the OCI artifact.
+                properties:
+                  after:
+                    description: |-
+                      after lists the upstream stages that must deploy the Preparation's
+                      Product revision first.
+                    items:
+                      description: |-
+                        UpstreamStage is an Order that must deploy a Product revision before the
+                        Order that names it may.
+                      properties:
+                        order:
+                          description: order is the name of the upstream Order, in
+                            the same namespace.
+                          maxLength: 253
+                          minLength: 1
+                          type: string
+                        soakSeconds:
+                          description: |-
+                            soakSeconds is how long the upstream Order must have run its
+                            Preparation of the revision healthily, without interruption, before
+                            it qualifies. 0 qualifies it as soon as it is healthy.
+                          format: int32
+                          minimum: 0
+                          type: integer
+                      required:
+                      - order
+                      type: object
+                    maxItems: 8
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - order
+                    x-kubernetes-list-type: map
+                  approvals:
+                    description: approvals is the approval policy the Preparation
+                      must satisfy.
+                    properties:
+                      allowedGroups:
+                        description: allowedGroups lists the groups whose members
+                          are eligible to approve.
+                        items:
+                          maxLength: 253
+                          type: string
+                        maxItems: 16
+                        minItems: 1
+                        type: array
+                        x-kubernetes-list-type: set
+                      requiredApprovals:
+                        description: requiredApprovals is the minimum number of distinct
+                          eligible approvers.
+                        format: int32
+                        maximum: 32
+                        minimum: 1
+                        type: integer
+                    required:
+                    - allowedGroups
+                    - requiredApprovals
+                    type: object
+                  checks:
+                    description: checks are the promotion checks the Preparation must
+                      pass.
+                    properties:
+                      vulnerabilities:
+                        description: |-
+                          vulnerabilities blocks serving a Preparation whose images have
+                          vulnerabilities at or above maxSeverity. It needs scanning enabled in
+                          the Kitchen and the Product's Vendor image policy: Kokumi scans only
+                          the images it vendors.
+                        properties:
+                          ignoreUnfixed:
+                            description: ignoreUnfixed ignores vulnerabilities that
+                              no version fixes yet.
+                            type: boolean
+                          maxAgeSeconds:
+                            description: |-
+                              maxAgeSeconds is how old the scan of every image may be. Defaults to
+                              twice the Kitchen's scanning intervalSeconds.
+                            format: int32
+                            minimum: 3600
+                            type: integer
+                          maxSeverity:
+                            description: |-
+                              maxSeverity is the lowest severity that blocks: High blocks findings
+                              of severity High and Critical.
+                            enum:
+                            - Critical
+                            - High
+                            - Medium
+                            - Low
+                            type: string
+                        required:
+                        - maxSeverity
+                        type: object
+                    type: object
+                type: object
               renderer:
                 description: renderer identifies what rendered this preparation
                 properties:
@@ -324,6 +367,7 @@ spec:
             - artifact
             - configHash
             - orderName
+            - productRevision
             - renderer
             - source
             type: object
@@ -336,7 +380,7 @@ spec:
               approval:
                 description: |-
                   approval aggregates the Approvals of this Preparation. Only set when
-                  spec.approvalPolicy is set.
+                  spec.promotion.approvals is set.
                 properties:
                   approvedCount:
                     description: approvedCount is the number of eligible approvers
@@ -552,6 +596,7 @@ spec:
         type: object
     selectableFields:
     - jsonPath: .spec.orderName
+    - jsonPath: .spec.productRevision
     served: true
     storage: true
     subresources:

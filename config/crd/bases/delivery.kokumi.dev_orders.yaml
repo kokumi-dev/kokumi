@@ -182,6 +182,41 @@ spec:
                 description: promotion configures how new Preparations become active
                   Servings.
                 properties:
+                  after:
+                    description: |-
+                      after lists the upstream stages: Orders in the same namespace, variants
+                      of the same Product, that must each have deployed their own
+                      Preparation of a Preparation's Product revision healthily, for their
+                      soakSeconds, before this Order deploys it. Like approvals, the stages
+                      are copied into each Preparation when it is created, so a change
+                      produces a new Preparation.
+                    items:
+                      description: |-
+                        UpstreamStage is an Order that must deploy a Product revision before the
+                        Order that names it may.
+                      properties:
+                        order:
+                          description: order is the name of the upstream Order, in
+                            the same namespace.
+                          maxLength: 253
+                          minLength: 1
+                          type: string
+                        soakSeconds:
+                          description: |-
+                            soakSeconds is how long the upstream Order must have run its
+                            Preparation of the revision healthily, without interruption, before
+                            it qualifies. 0 qualifies it as soon as it is healthy.
+                          format: int32
+                          minimum: 0
+                          type: integer
+                      required:
+                      - order
+                      type: object
+                    maxItems: 8
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - order
+                    x-kubernetes-list-type: map
                   approvals:
                     description: |-
                       approvals configures an approval gate on the promoted artifact. When
@@ -372,8 +407,9 @@ spec:
               latestConfigHash:
                 description: |-
                   latestConfigHash is a SHA-256 hash of the intent: the resolved source and
-                  destination OCI URLs plus version, render, patches, edits, and approval
-                  policy after merging the Order over its Product.
+                  destination OCI URLs plus version, render, patches, edits, image
+                  handling and promotion gates after merging the Order over its Product,
+                  and the Product revision.
                 type: string
               latestPreparationName:
                 description: |-
@@ -440,6 +476,10 @@ spec:
         required:
         - spec
         type: object
+        x-kubernetes-validations:
+        - message: an Order cannot run after itself
+          rule: '!has(self.spec.promotion) || !has(self.spec.promotion.after) || self.spec.promotion.after.all(s,
+            s.order != self.metadata.name)'
     selectableFields:
     - jsonPath: .spec.productRef.name
     served: true

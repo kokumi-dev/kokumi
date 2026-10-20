@@ -934,6 +934,41 @@ spec:
                 description: promotion configures how new Preparations become active
                   Servings.
                 properties:
+                  after:
+                    description: |-
+                      after lists the upstream stages: Orders in the same namespace, variants
+                      of the same Product, that must each have deployed their own
+                      Preparation of a Preparation's Product revision healthily, for their
+                      soakSeconds, before this Order deploys it. Like approvals, the stages
+                      are copied into each Preparation when it is created, so a change
+                      produces a new Preparation.
+                    items:
+                      description: |-
+                        UpstreamStage is an Order that must deploy a Product revision before the
+                        Order that names it may.
+                      properties:
+                        order:
+                          description: order is the name of the upstream Order, in
+                            the same namespace.
+                          maxLength: 253
+                          minLength: 1
+                          type: string
+                        soakSeconds:
+                          description: |-
+                            soakSeconds is how long the upstream Order must have run its
+                            Preparation of the revision healthily, without interruption, before
+                            it qualifies. 0 qualifies it as soon as it is healthy.
+                          format: int32
+                          minimum: 0
+                          type: integer
+                      required:
+                      - order
+                      type: object
+                    maxItems: 8
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - order
+                    x-kubernetes-list-type: map
                   approvals:
                     description: |-
                       approvals configures an approval gate on the promoted artifact. When
@@ -1124,8 +1159,9 @@ spec:
               latestConfigHash:
                 description: |-
                   latestConfigHash is a SHA-256 hash of the intent: the resolved source and
-                  destination OCI URLs plus version, render, patches, edits, and approval
-                  policy after merging the Order over its Product.
+                  destination OCI URLs plus version, render, patches, edits, image
+                  handling and promotion gates after merging the Order over its Product,
+                  and the Product revision.
                 type: string
               latestPreparationName:
                 description: |-
@@ -1192,6 +1228,10 @@ spec:
         required:
         - spec
         type: object
+        x-kubernetes-validations:
+        - message: an Order cannot run after itself
+          rule: '!has(self.spec.promotion) || !has(self.spec.promotion.after) || self.spec.promotion.after.all(s,
+            s.order != self.metadata.name)'
     selectableFields:
     - jsonPath: .spec.productRef.name
     served: true
@@ -1265,33 +1305,6 @@ spec:
           spec:
             description: spec defines the desired state of Preparation
             properties:
-              approvalPolicy:
-                description: |-
-                  approvalPolicy is the approval gate copied from the Order when this
-                  Preparation was created. When set, the Preparation is only served once
-                  the policy is satisfied. It is also recorded on the OCI artifact.
-                properties:
-                  allowedGroups:
-                    description: allowedGroups lists the groups whose members are
-                      eligible to approve.
-                    items:
-                      maxLength: 253
-                      type: string
-                    maxItems: 16
-                    minItems: 1
-                    type: array
-                    x-kubernetes-list-type: set
-                  requiredApprovals:
-                    description: requiredApprovals is the minimum number of distinct
-                      eligible approvers.
-                    format: int32
-                    maximum: 32
-                    minimum: 1
-                    type: integer
-                required:
-                - allowedGroups
-                - requiredApprovals
-                type: object
               artifact:
                 description: artifact defines the output artifact information
                 properties:
@@ -1326,44 +1339,6 @@ spec:
                 required:
                 - digest
                 - ociRef
-                type: object
-              checks:
-                description: |-
-                  checks are the promotion checks copied from the Order when this
-                  Preparation was created. The Preparation is only served while it
-                  passes them.
-                properties:
-                  vulnerabilities:
-                    description: |-
-                      vulnerabilities blocks serving a Preparation whose images have
-                      vulnerabilities at or above maxSeverity. It needs scanning enabled in
-                      the Kitchen and the Product's Vendor image policy: Kokumi scans only
-                      the images it vendors.
-                    properties:
-                      ignoreUnfixed:
-                        description: ignoreUnfixed ignores vulnerabilities that no
-                          version fixes yet.
-                        type: boolean
-                      maxAgeSeconds:
-                        description: |-
-                          maxAgeSeconds is how old the scan of every image may be. Defaults to
-                          twice the Kitchen's scanning intervalSeconds.
-                        format: int32
-                        minimum: 3600
-                        type: integer
-                      maxSeverity:
-                        description: |-
-                          maxSeverity is the lowest severity that blocks: High blocks findings
-                          of severity High and Critical.
-                        enum:
-                        - Critical
-                        - High
-                        - Medium
-                        - Low
-                        type: string
-                    required:
-                    - maxSeverity
-                    type: object
                 type: object
               commitMessage:
                 description: |-
@@ -1468,6 +1443,114 @@ spec:
                 maxLength: 71
                 pattern: ^sha256:[a-f0-9]{64}$
                 type: string
+              productRevision:
+                description: |-
+                  productRevision identifies the Product change this Preparation renders:
+                  the SHA-256 of the Product's part of the intent. The Preparations
+                  other Orders of the Product render from the same change carry the same
+                  revision, which is what upstream stages are matched by.
+                maxLength: 71
+                pattern: ^sha256:[a-f0-9]{64}$
+                type: string
+              promotion:
+                description: |-
+                  promotion holds the gates copied from the Order's spec.promotion when
+                  this Preparation was created: the Preparation is only served once it
+                  passes them. They are part of the intent recorded on the OCI artifact.
+                properties:
+                  after:
+                    description: |-
+                      after lists the upstream stages that must deploy the Preparation's
+                      Product revision first.
+                    items:
+                      description: |-
+                        UpstreamStage is an Order that must deploy a Product revision before the
+                        Order that names it may.
+                      properties:
+                        order:
+                          description: order is the name of the upstream Order, in
+                            the same namespace.
+                          maxLength: 253
+                          minLength: 1
+                          type: string
+                        soakSeconds:
+                          description: |-
+                            soakSeconds is how long the upstream Order must have run its
+                            Preparation of the revision healthily, without interruption, before
+                            it qualifies. 0 qualifies it as soon as it is healthy.
+                          format: int32
+                          minimum: 0
+                          type: integer
+                      required:
+                      - order
+                      type: object
+                    maxItems: 8
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - order
+                    x-kubernetes-list-type: map
+                  approvals:
+                    description: approvals is the approval policy the Preparation
+                      must satisfy.
+                    properties:
+                      allowedGroups:
+                        description: allowedGroups lists the groups whose members
+                          are eligible to approve.
+                        items:
+                          maxLength: 253
+                          type: string
+                        maxItems: 16
+                        minItems: 1
+                        type: array
+                        x-kubernetes-list-type: set
+                      requiredApprovals:
+                        description: requiredApprovals is the minimum number of distinct
+                          eligible approvers.
+                        format: int32
+                        maximum: 32
+                        minimum: 1
+                        type: integer
+                    required:
+                    - allowedGroups
+                    - requiredApprovals
+                    type: object
+                  checks:
+                    description: checks are the promotion checks the Preparation must
+                      pass.
+                    properties:
+                      vulnerabilities:
+                        description: |-
+                          vulnerabilities blocks serving a Preparation whose images have
+                          vulnerabilities at or above maxSeverity. It needs scanning enabled in
+                          the Kitchen and the Product's Vendor image policy: Kokumi scans only
+                          the images it vendors.
+                        properties:
+                          ignoreUnfixed:
+                            description: ignoreUnfixed ignores vulnerabilities that
+                              no version fixes yet.
+                            type: boolean
+                          maxAgeSeconds:
+                            description: |-
+                              maxAgeSeconds is how old the scan of every image may be. Defaults to
+                              twice the Kitchen's scanning intervalSeconds.
+                            format: int32
+                            minimum: 3600
+                            type: integer
+                          maxSeverity:
+                            description: |-
+                              maxSeverity is the lowest severity that blocks: High blocks findings
+                              of severity High and Critical.
+                            enum:
+                            - Critical
+                            - High
+                            - Medium
+                            - Low
+                            type: string
+                        required:
+                        - maxSeverity
+                        type: object
+                    type: object
+                type: object
               renderer:
                 description: renderer identifies what rendered this preparation
                 properties:
@@ -1524,6 +1607,7 @@ spec:
             - artifact
             - configHash
             - orderName
+            - productRevision
             - renderer
             - source
             type: object
@@ -1536,7 +1620,7 @@ spec:
               approval:
                 description: |-
                   approval aggregates the Approvals of this Preparation. Only set when
-                  spec.approvalPolicy is set.
+                  spec.promotion.approvals is set.
                 properties:
                   approvedCount:
                     description: approvedCount is the number of eligible approvers
@@ -1752,6 +1836,7 @@ spec:
         type: object
     selectableFields:
     - jsonPath: .spec.orderName
+    - jsonPath: .spec.productRevision
     served: true
     storage: true
     subresources:
@@ -3212,8 +3297,12 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Verified')].reason
       name: Verified
       type: string
-    - jsonPath: .status.observedPreparationName
-      name: Observed
+    - jsonPath: .status.conditions[?(@.type=='UpstreamDeployed')].reason
+      name: Upstream
+      priority: 1
+      type: string
+    - jsonPath: .status.history[0].preparationName
+      name: Latest
       priority: 1
       type: string
     - jsonPath: .metadata.creationTimestamp
@@ -3319,11 +3408,6 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              deployedDigest:
-                description: deployedDigest is the SHA256 digest of the currently
-                  deployed artifact
-                pattern: ^sha256:[a-f0-9]{64}$
-                type: string
               deployedVulnerabilities:
                 description: |-
                   deployedVulnerabilities sums the latest scans of the images of the
@@ -3362,20 +3446,113 @@ spec:
                     minimum: 0
                     type: integer
                 type: object
+              history:
+                description: |-
+                  history lists the most recent deployments, newest first. The deployed
+                  Preparation is the newest entry with a promotionRecord; an entry
+                  without one is a promotion that is being recorded.
+                items:
+                  description: |-
+                    DeploymentEntry is one continuous deployment of a Preparation by a
+                    Serving: from its promotion, or its recovery, until it is superseded or
+                    degraded. It is self-contained, so its records can be read after the
+                    Preparation is gone.
+                  properties:
+                    deploymentRecord:
+                      description: |-
+                        deploymentRecord is the digest of the signed deployment record, a
+                        referrer of the artifact pushed once the deployment was healthy.
+                      maxLength: 71
+                      pattern: ^sha256:[a-f0-9]{64}$
+                      type: string
+                    digest:
+                      description: digest is the digest of the Preparation's artifact.
+                      maxLength: 71
+                      pattern: ^sha256:[a-f0-9]{64}$
+                      type: string
+                    endReason:
+                      description: endReason says why the deployment ended.
+                      enum:
+                      - Superseded
+                      - Degraded
+                      type: string
+                    endedTime:
+                      description: endedTime is when the deployment ended.
+                      format: date-time
+                      type: string
+                    healthyTime:
+                      description: |-
+                        healthyTime is when Argo CD first reported the deployment synced and
+                        healthy at the digest.
+                      format: date-time
+                      type: string
+                    ociRef:
+                      description: ociRef is the full OCI reference of the artifact,
+                        including digest.
+                      maxLength: 2048
+                      type: string
+                    preparationName:
+                      description: preparationName is the name of the deployed Preparation.
+                      maxLength: 253
+                      minLength: 1
+                      type: string
+                    productRevision:
+                      description: productRevision is the Product revision the Preparation
+                        renders.
+                      maxLength: 71
+                      pattern: ^sha256:[a-f0-9]{64}$
+                      type: string
+                    promotionRecord:
+                      description: |-
+                        promotionRecord is the digest of the signed promotion record, a
+                        referrer of the artifact. A recovery carries the record of the
+                        promotion it continues.
+                      maxLength: 71
+                      pattern: ^sha256:[a-f0-9]{64}$
+                      type: string
+                    registryRef:
+                      description: |-
+                        registryRef names the Registry that pushed the artifact, through which
+                        its records are read.
+                      properties:
+                        name:
+                          default: ""
+                          description: |-
+                            Name of the referent.
+                            This field is effectively required, but due to backwards compatibility is
+                            allowed to be empty. Instances of this type with an empty value here are
+                            almost certainly wrong.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                          type: string
+                      type: object
+                      x-kubernetes-map-type: atomic
+                    startedTime:
+                      description: startedTime is when the Preparation passed its
+                        gates, or recovered.
+                      format: date-time
+                      type: string
+                  required:
+                  - digest
+                  - ociRef
+                  - preparationName
+                  - productRevision
+                  - startedTime
+                  type: object
+                maxItems: 16
+                type: array
+                x-kubernetes-list-type: atomic
               observedGeneration:
                 description: observedGeneration is the most recent generation observed
                   by the controller
                 format: int64
                 type: integer
-              observedPreparationName:
-                description: observedPreparationName is the name of the Preparation
-                  that was last observed by the controller
-                type: string
               targetPreparationName:
                 description: |-
-                  targetPreparationName is the Preparation the Serving is converging to:
-                  spec.preparationName for Manual promotion, or the newest Ready
-                  Preparation of the Order for Automatic promotion.
+                  targetPreparationName is the Preparation the Serving is converging to
+                  once it is approved and its evidence verifies: spec.preparationName
+                  for Manual promotion, or the newest Ready Preparation of the Order for
+                  Automatic promotion, after it passed its upstream stages and checks.
+                  Its approvals are sealed when it becomes the target.
                 type: string
             type: object
         required:

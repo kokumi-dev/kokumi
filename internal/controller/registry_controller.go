@@ -169,7 +169,7 @@ func (r *RegistryReconciler) patchStatus(
 		log.FromContext(ctx).V(1).Info("Registry changed during the reconcile, reconciling it again")
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	default:
-		return result, errors.Join(err, fmt.Errorf("failed to patch Registry status: %w", perr))
+		return ctrl.Result{}, errors.Join(err, fmt.Errorf("failed to patch Registry status: %w", perr))
 	}
 }
 

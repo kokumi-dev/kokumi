@@ -2,7 +2,6 @@ package approval
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -95,19 +94,6 @@ func TestArchive(t *testing.T) {
 
 	_, err = Archive(context.Background(), fake, signer, testPreparation(1), approvals)
 	require.Error(t, err, "unsealed approvals must not be archived")
-}
-
-func TestPolicyAnnotations(t *testing.T) {
-	got, err := PolicyAnnotations(nil)
-	require.NoError(t, err)
-	assert.Nil(t, got)
-
-	policy := &deliveryv1alpha1.ApprovalPolicy{RequiredApprovals: 2, AllowedGroups: []string{testGroup}}
-	got, err = PolicyAnnotations(policy)
-	require.NoError(t, err)
-	var decoded deliveryv1alpha1.ApprovalPolicy
-	require.NoError(t, json.Unmarshal([]byte(got[oci.AnnotationApprovalPolicy]), &decoded))
-	assert.Equal(t, *policy, decoded)
 }
 
 func TestNewSealTime(t *testing.T) {

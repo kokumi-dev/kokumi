@@ -139,6 +139,7 @@ type OrderDTO struct {
 	Edits                []PatchDTO          `json:"edits,omitempty"`
 	Mode                 string              `json:"mode"`
 	Approvals            *ApprovalPolicyDTO  `json:"approvals,omitempty"`
+	After                []UpstreamStageDTO  `json:"after,omitempty"`
 	Checks               *PromotionChecksDTO `json:"checks,omitempty"`
 	State                string              `json:"state"`
 	LatestRevision       string              `json:"latestRevision,omitempty"`
@@ -151,6 +152,13 @@ type OrderDTO struct {
 type ApprovalPolicyDTO struct {
 	RequiredApprovals int32    `json:"requiredApprovals"`
 	AllowedGroups     []string `json:"allowedGroups"`
+}
+
+// UpstreamStageDTO is the data-transfer representation of an UpstreamStage:
+// an Order that must deploy a Product revision first.
+type UpstreamStageDTO struct {
+	Order       string `json:"order"`
+	SoakSeconds int32  `json:"soakSeconds,omitempty"`
 }
 
 // ApprovalVoteDTO is the latest vote of one approver on a Preparation.
@@ -245,6 +253,12 @@ type PreparationDTO struct {
 	Version string `json:"version,omitempty"`
 	// Checks are the promotion checks the Preparation was rendered under.
 	Checks *PromotionChecksDTO `json:"checks,omitempty"`
+	// After are the upstream stages the Preparation was rendered under.
+	After []UpstreamStageDTO `json:"after,omitempty"`
+	// ProductRevision identifies the Product change the Preparation
+	// renders, which the Preparations of the other Orders of the Product
+	// rendered from the same change share.
+	ProductRevision string `json:"productRevision"`
 }
 
 // PreparationImageDTO is a container image a Preparation's manifests
@@ -364,6 +378,7 @@ type CreateOrderRequest struct {
 	Edits         []PatchDTO          `json:"edits,omitempty"`
 	Mode          string              `json:"mode"`
 	Approvals     *ApprovalPolicyDTO  `json:"approvals,omitempty"`
+	After         []UpstreamStageDTO  `json:"after,omitempty"`
 	Checks        *PromotionChecksDTO `json:"checks,omitempty"`
 	CommitMessage *string             `json:"commitMessage,omitempty"`
 }
@@ -378,6 +393,7 @@ type UpdateOrderRequest struct {
 	Edits         []PatchDTO          `json:"edits,omitempty"`
 	Mode          string              `json:"mode"`
 	Approvals     *ApprovalPolicyDTO  `json:"approvals,omitempty"`
+	After         []UpstreamStageDTO  `json:"after,omitempty"`
 	Checks        *PromotionChecksDTO `json:"checks,omitempty"`
 	CommitMessage *string             `json:"commitMessage,omitempty"`
 }
@@ -389,19 +405,37 @@ type PromoteRequest struct {
 
 // ServingDTO is the enriched view of a Serving served to the UI.
 type ServingDTO struct {
-	Name                string `json:"name"`
-	Namespace           string `json:"namespace"`
-	Order               string `json:"order"`
-	DesiredPreparation  string `json:"desiredPreparation,omitempty"`
-	TargetPreparation   string `json:"targetPreparation,omitempty"`
-	ObservedPreparation string `json:"observedPreparation,omitempty"`
+	Name               string `json:"name"`
+	Namespace          string `json:"namespace"`
+	Order              string `json:"order"`
+	DesiredPreparation string `json:"desiredPreparation,omitempty"`
+	TargetPreparation  string `json:"targetPreparation,omitempty"`
+	// DeployedPreparation and DeployedDigest are of the deployed entry of
+	// History.
+	DeployedPreparation string `json:"deployedPreparation,omitempty"`
 	DeployedDigest      string `json:"deployedDigest,omitempty"`
+	// History lists the most recent deployments, newest first.
+	History []DeploymentEntryDTO `json:"history,omitempty"`
 	// DeployedVulnerabilities sums the latest scans of the deployed
 	// Preparation's images.
 	DeployedVulnerabilities *VulnerabilitySummaryDTO `json:"deployedVulnerabilities,omitempty"`
 	State                   string                   `json:"state"`
 	Conditions              []ConditionDTO           `json:"conditions,omitempty"`
 	CreatedAt               *time.Time               `json:"createdAt,omitempty"`
+}
+
+// DeploymentEntryDTO is the data-transfer representation of a
+// DeploymentEntry: one continuous deployment of a Preparation.
+type DeploymentEntryDTO struct {
+	Preparation      string     `json:"preparation"`
+	Digest           string     `json:"digest"`
+	ProductRevision  string     `json:"productRevision"`
+	StartedAt        time.Time  `json:"startedAt"`
+	HealthyAt        *time.Time `json:"healthyAt,omitempty"`
+	EndedAt          *time.Time `json:"endedAt,omitempty"`
+	EndReason        string     `json:"endReason,omitempty"`
+	PromotionRecord  string     `json:"promotionRecord,omitempty"`
+	DeploymentRecord string     `json:"deploymentRecord,omitempty"`
 }
 
 // --- Product DTOs ---
@@ -474,7 +508,10 @@ type ProductDTO struct {
 	ProductSpecDTO
 	// ResolvedSource is status.source; absent until the Product is resolved.
 	ResolvedSource *ProductSourceStatusDTO `json:"resolvedSource,omitempty"`
-	RegistryAccess []RegistryAccessDTO     `json:"registryAccess,omitempty"`
+	// Revision is the Product revision its Orders render now; absent until
+	// the Product is resolved.
+	Revision       string              `json:"revision,omitempty"`
+	RegistryAccess []RegistryAccessDTO `json:"registryAccess,omitempty"`
 	// Vulnerabilities is status.vulnerabilities: the latest scan of each
 	// vendored image in use, without the findings.
 	Vulnerabilities *ProductVulnerabilitiesDTO `json:"vulnerabilities,omitempty"`

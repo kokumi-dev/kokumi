@@ -59,6 +59,10 @@ const (
 
 	// FieldProductRefName selects Orders by spec.productRef.name.
 	FieldProductRefName = "spec.productRef.name"
+
+	// FieldProductRevision selects Preparations by spec.productRevision: the
+	// Preparations every Order of a Product rendered from one Product change.
+	FieldProductRevision = "spec.productRevision"
 )
 
 // Finalizer names registered on kokumi-managed resources.

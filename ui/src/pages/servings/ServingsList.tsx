@@ -1,6 +1,8 @@
 import { Link } from 'react-router'
 import type { Serving } from '../../api/types'
 import { useServings } from '../../hooks/useServings'
+import { useOrders } from '../../hooks/useOrders'
+import { servingQueue } from '../../utils/promotion'
 import { matchesFilter, useFilterParam } from '../../hooks/useFilterParam'
 import PageHeader from '../../components/layout/PageHeader'
 import Section from '../../components/layout/Section'
@@ -14,14 +16,17 @@ import SeverityBadge from '../../components/vulnerability/SeverityBadge'
 import { paths } from '../../routes/paths'
 import layout from '../../components/layout/layout.module.css'
 
-function syncLabel(s: Serving): string {
+function syncLabel(s: Serving, manual: boolean): string {
+  if (manual && servingQueue(s)) return 'Queued'
   const target = s.targetPreparation || s.desiredPreparation
   if (!target) return '—'
-  return target === s.observedPreparation ? 'In sync' : 'Rolling out'
+  return target === s.deployedPreparation ? 'In sync' : 'Rolling out'
 }
 
 export default function ServingsList() {
   const servings = useServings()
+  const orders = useOrders()
+  const manual = (s: Serving) => orders?.find((o) => o.namespace === s.namespace && o.name === s.order)?.mode === 'Manual'
   const [query, setQuery] = useFilterParam()
 
   const filtered = (servings ?? []).filter((s) => matchesFilter(query, s.name, s.namespace, s.order))
@@ -61,11 +66,11 @@ export default function ServingsList() {
                 header: 'Deployed',
                 width: '18%',
                 truncate: true,
-                title: (s) => s.observedPreparation,
+                title: (s) => s.deployedPreparation,
                 cell: (s) =>
-                  s.observedPreparation ? (
-                    <Link className={layout.refLink} to={paths.preparation(s.namespace, s.observedPreparation)}>
-                      {s.observedPreparation}
+                  s.deployedPreparation ? (
+                    <Link className={layout.refLink} to={paths.preparation(s.namespace, s.deployedPreparation)}>
+                      {s.deployedPreparation}
                     </Link>
                   ) : (
                     <span className={layout.muted}>—</span>
@@ -74,9 +79,9 @@ export default function ServingsList() {
               {
                 header: 'Sync',
                 width: '110px',
-                title: (s) => s.targetPreparation || s.desiredPreparation,
+                title: (s) => (manual(s) && servingQueue(s)?.message) || s.targetPreparation || s.desiredPreparation,
                 truncate: true,
-                cell: syncLabel,
+                cell: (s) => syncLabel(s, manual(s)),
               },
               {
                 header: 'Findings',

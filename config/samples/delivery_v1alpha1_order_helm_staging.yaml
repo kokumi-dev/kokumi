@@ -19,5 +19,9 @@ spec:
   destination:
     url: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/podinfo-staging
 
+  # A Product revision deploys here once podinfo-dev runs its own
+  # Preparation of it healthily.
   promotion:
     mode: Manual
+    after:
+    - order: podinfo-dev

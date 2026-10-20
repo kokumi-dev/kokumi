@@ -480,7 +480,7 @@ var _ = Describe("Order Controller", func() {
 			Expect(k8sClient.List(ctx, preps, client.InNamespace(testNamespace),
 				client.MatchingFields{deliveryv1alpha1.FieldOrderName: orderName})).To(Succeed())
 			Expect(preps.Items).To(HaveLen(1))
-			Expect(preps.Items[0].Spec.ApprovalPolicy).To(Equal(policy))
+			Expect(preps.Items[0].ApprovalPolicy()).To(Equal(policy))
 			Expect(preps.Items[0].Labels).NotTo(HaveKey("delivery.kokumi.dev/auto-deploy"))
 
 			serving := &deliveryv1alpha1.Serving{}
@@ -1498,7 +1498,8 @@ var _ = Describe("Image schema", func() {
 					Version: testRendererVersion,
 					Builder: testBuilderID,
 				},
-				ConfigHash: testConfigHash,
+				ConfigHash:      testConfigHash,
+				ProductRevision: testProductRevision,
 				Artifact: deliveryv1alpha1.Artifact{
 					OCIRef: "oci://registry.kokumi.svc.cluster.local:5000/images-sha512@" + digest,
 					Digest: digest,
@@ -1582,5 +1583,218 @@ var _ = Describe("servingControllerChanged", func() {
 		Entry("controlled by another Order", types.UID("a"), types.UID("b"), true),
 		Entry("unchanged controller", types.UID("a"), types.UID("a"), false),
 		Entry("no controller", types.UID(""), types.UID(""), false),
+	)
+})
+
+var _ = Describe("Order pipelines", func() {
+	const (
+		ns           = testNamespace
+		otherProduct = "pipeline-other-product"
+	)
+
+	ctx := context.Background()
+
+	var (
+		fake *oci.FakeClient
+		r    *OrderReconciler
+	)
+
+	BeforeEach(func() {
+		fake = oci.NewFakeClient(afero.NewMemMapFs())
+		r = newTestOrderReconciler(fake)
+	})
+
+	// createStage creates a Manual Order of product that runs after the
+	// given upstream stages.
+	createStage := func(name, product string, after ...deliveryv1alpha1.UpstreamStage) {
+		createTestProduct(ctx, product, deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion})
+		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Order{
+			Name: name, Namespace: ns,
+			Spec: deliveryv1alpha1.OrderSpec{
+				ProductRef: deliveryv1alpha1.ProductRef{Name: product},
+				Promotion:  &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual, After: after},
+			},
+		})).To(Succeed())
+		DeferCleanup(func() {
+			_ = k8sClient.DeleteAllOf(ctx, &deliveryv1alpha1.Preparation{},
+				client.InNamespace(ns), client.MatchingLabels{deliveryv1alpha1.LabelOrder: name})
+			order := &deliveryv1alpha1.Order{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, order); err == nil {
+				order.SetFinalizers(nil)
+				_ = k8sClient.Update(ctx, order)
+				_ = k8sClient.Delete(ctx, order)
+			}
+			_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Serving{Name: name, Namespace: ns})
+		})
+	}
+
+	settle := func(name string) {
+		Expect(settleOrder(ctx, r, types.NamespacedName{Namespace: ns, Name: name})).To(Succeed())
+	}
+
+	ready := func(name string) *metav1.Condition {
+		order := &deliveryv1alpha1.Order{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, order)).To(Succeed())
+		return meta.FindStatusCondition(order.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)
+	}
+
+	preparationsOf := func(name string) []deliveryv1alpha1.Preparation {
+		list := &deliveryv1alpha1.PreparationList{}
+		Expect(k8sClient.List(ctx, list, client.InNamespace(ns),
+			client.MatchingLabels{deliveryv1alpha1.LabelOrder: name})).To(Succeed())
+		return list.Items
+	}
+
+	It("renders a stage with its upstream stages and the Product revision", func() {
+		createStage("pipeline-dev", testProductName)
+		createStage("pipeline-prod", testProductName, deliveryv1alpha1.UpstreamStage{Order: "pipeline-dev", SoakSeconds: 600})
+		settle("pipeline-dev")
+		settle("pipeline-prod")
+
+		Expect(ready("pipeline-prod").Status).To(Equal(metav1.ConditionTrue))
+		preps := preparationsOf("pipeline-prod")
+		Expect(preps).To(HaveLen(1))
+		Expect(preps[0].UpstreamStages()).To(Equal([]deliveryv1alpha1.UpstreamStage{{Order: "pipeline-dev", SoakSeconds: 600}}))
+
+		revision, err := resolve.ProductRevision(getTestProduct(ctx, testProductName))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(preps[0].Spec.ProductRevision).To(Equal(revision))
+
+		By("recording the revision in the intent of the artifact")
+		last := fake.Pushes[len(fake.Pushes)-1]
+		config, err := artifact.ParseConfig(last.Options.ConfigMediaType, last.Options.Config)
+		Expect(err).NotTo(HaveOccurred())
+		var intent resolve.Intent
+		Expect(json.Unmarshal(config.Intent, &intent)).To(Succeed())
+		Expect(intent.ProductRevision).To(Equal(revision))
+		Expect(intent.Promotion.After).To(Equal(preps[0].UpstreamStages()))
+
+		By("selecting the Preparations every stage rendered from the revision")
+		list := &deliveryv1alpha1.PreparationList{}
+		Expect(k8sClient.List(ctx, list, client.InNamespace(ns),
+			client.MatchingFields{deliveryv1alpha1.FieldProductRevision: revision})).To(Succeed())
+		orders := make([]string, 0, len(list.Items))
+		for _, p := range list.Items {
+			orders = append(orders, p.Spec.OrderName)
+		}
+		Expect(orders).To(ContainElements("pipeline-dev", "pipeline-prod"))
+	})
+
+	It("renders a stage whose upstream Order does not exist yet; its Serving waits for it", func() {
+		createStage("pipeline-early", testProductName, deliveryv1alpha1.UpstreamStage{Order: "pipeline-later"})
+		settle("pipeline-early")
+		Expect(ready("pipeline-early").Status).To(Equal(metav1.ConditionTrue))
+	})
+
+	It("does not render a stage that runs after an Order of another Product", func() {
+		createStage("pipeline-foreign", otherProduct)
+		DeferCleanup(func() { deleteTestProduct(ctx, otherProduct) })
+		createStage("pipeline-mixed", testProductName, deliveryv1alpha1.UpstreamStage{Order: "pipeline-foreign"})
+		settle("pipeline-mixed")
+
+		cond := ready("pipeline-mixed")
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal(deliveryv1alpha1.ReasonInvalidPipeline))
+		Expect(cond.Message).To(ContainSubstring("Product " + otherProduct))
+		Expect(preparationsOf("pipeline-mixed")).To(BeEmpty())
+	})
+
+	It("reports a cycle on every Order in it", func() {
+		createStage("pipeline-a", testProductName, deliveryv1alpha1.UpstreamStage{Order: "pipeline-b"})
+		createStage("pipeline-b", testProductName, deliveryv1alpha1.UpstreamStage{Order: "pipeline-a"})
+		settle("pipeline-a")
+		settle("pipeline-b")
+
+		for _, name := range []string{"pipeline-a", "pipeline-b"} {
+			cond := ready(name)
+			Expect(cond.Reason).To(Equal(deliveryv1alpha1.ReasonInvalidPipeline), name)
+			Expect(cond.Message).To(ContainSubstring("cycle"))
+			Expect(preparationsOf(name)).To(BeEmpty())
+		}
+	})
+
+	It("indexes an Order by the Orders it runs after", func() {
+		order := &deliveryv1alpha1.Order{Spec: deliveryv1alpha1.OrderSpec{Promotion: &deliveryv1alpha1.PromotionSpec{
+			After: []deliveryv1alpha1.UpstreamStage{{Order: "staging"}, {Order: "qa", SoakSeconds: 60}},
+		}}}
+		Expect(orderUpstreamNames(order)).To(Equal([]string{"staging", "qa"}))
+		Expect(orderUpstreamNames(&deliveryv1alpha1.Order{})).To(BeEmpty())
+	})
+
+	It("adopts the Serving of a stage that does not render", func() {
+		const loop, loopBack = "pipeline-loop", "pipeline-loop-back"
+		createStage(loop, testProductName, deliveryv1alpha1.UpstreamStage{Order: loopBack})
+		createStage(loopBack, testProductName, deliveryv1alpha1.UpstreamStage{Order: loop})
+		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Serving{
+			Name: loop, Namespace: ns,
+			Spec: deliveryv1alpha1.ServingSpec{OrderName: loop, PreparationName: "promoted-before"},
+		})).To(Succeed())
+
+		settle(loop)
+		Expect(ready(loop).Reason).To(Equal(deliveryv1alpha1.ReasonInvalidPipeline))
+
+		order := &deliveryv1alpha1.Order{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: loop}, order)).To(Succeed())
+		serving := &deliveryv1alpha1.Serving{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: loop}, serving)).To(Succeed())
+		Expect(metav1.IsControlledBy(serving, order)).To(BeTrue())
+	})
+
+	It("renders every stage again when a Product change its own patches hide", func() {
+		const product = "pipeline-hidden-change"
+		patch := func(replicas string) []deliveryv1alpha1.Patch {
+			return []deliveryv1alpha1.Patch{{
+				Target: deliveryv1alpha1.PatchTarget{Kind: testDeploymentKind, Name: testDeploymentName},
+				Set:    map[string]string{testReplicasPath: replicas},
+			}}
+		}
+		createTestProduct(ctx, product, deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion})
+		DeferCleanup(func() { deleteTestProduct(ctx, product) })
+		p := getTestProduct(ctx, product)
+		p.Spec.Patches = patch("1")
+		Expect(k8sClient.Update(ctx, p)).To(Succeed())
+		resolveTestProduct(ctx, product, testOCIRef, testVersion)
+
+		createStage("pipeline-hiding", product)
+		order := &deliveryv1alpha1.Order{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: "pipeline-hiding"}, order)).To(Succeed())
+		order.Spec.Patches = patch("3")
+		Expect(k8sClient.Update(ctx, order)).To(Succeed())
+		settle("pipeline-hiding")
+		Expect(preparationsOf("pipeline-hiding")).To(HaveLen(1))
+
+		By("changing the Product's patch, which the Order's own patch overrides")
+		p = getTestProduct(ctx, product)
+		p.Spec.Patches = patch("2")
+		Expect(k8sClient.Update(ctx, p)).To(Succeed())
+		resolveTestProduct(ctx, product, testOCIRef, testVersion)
+		settle("pipeline-hiding")
+
+		preps := preparationsOf("pipeline-hiding")
+		Expect(preps).To(HaveLen(2), "every Product revision gets a Preparation in every stage")
+		revision, err := resolve.ProductRevision(getTestProduct(ctx, product))
+		Expect(err).NotTo(HaveOccurred())
+		Expect([]string{preps[0].Spec.ProductRevision, preps[1].Spec.ProductRevision}).To(ContainElement(revision))
+	})
+})
+
+var _ = Describe("pipelineChanged", func() {
+	invalid := func(generation int64, invalid bool) *deliveryv1alpha1.Order {
+		order := &deliveryv1alpha1.Order{}
+		order.Generation = generation
+		if invalid {
+			order.Status.Conditions = []metav1.Condition{{Type: deliveryv1alpha1.ConditionTypeReady, Reason: deliveryv1alpha1.ReasonInvalidPipeline}}
+		}
+		return order
+	}
+
+	DescribeTable("passes the updates after which the Orders after it check their pipeline again",
+		func(oldOrder, newOrder *deliveryv1alpha1.Order, want bool) {
+			Expect(pipelineChanged.Update(event.UpdateEvent{ObjectOld: oldOrder, ObjectNew: newOrder})).To(Equal(want))
+		},
+		Entry("a spec change", invalid(1, false), invalid(2, false), true),
+		Entry("becoming an invalid stage", invalid(1, false), invalid(1, true), true),
+		Entry("staying an invalid stage", invalid(1, true), invalid(1, true), false),
+		Entry("a status write", invalid(1, false), invalid(1, false), false),
 	)
 })

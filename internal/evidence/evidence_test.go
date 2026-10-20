@@ -26,16 +26,19 @@ const (
 )
 
 func testPreparation(policy *deliveryv1alpha1.ApprovalPolicy) *deliveryv1alpha1.Preparation {
-	return &deliveryv1alpha1.Preparation{
+	prep := &deliveryv1alpha1.Preparation{
 		Name:      "podinfo-prod-c3c3c3c3c3c3",
 		Namespace: "shop",
 		UID:       "6f0c",
 		Spec: deliveryv1alpha1.PreparationSpec{
-			OrderName:      "podinfo-prod",
-			Artifact:       deliveryv1alpha1.Artifact{OCIRef: "oci://registry.example/shop/podinfo-prod@" + digest, Digest: digest},
-			ApprovalPolicy: policy,
+			OrderName: "podinfo-prod",
+			Artifact:  deliveryv1alpha1.Artifact{OCIRef: "oci://registry.example/shop/podinfo-prod@" + digest, Digest: digest},
 		},
 	}
+	if policy != nil {
+		prep.Spec.Promotion = &deliveryv1alpha1.PromotionGates{Approvals: policy}
+	}
+	return prep
 }
 
 // sign pushes the signature and the provenance of prep's artifact, rendered
@@ -171,4 +174,33 @@ type unreadable struct {
 
 func (unreadable) ListReferrers(context.Context, oci.Reference, string) ([]oci.Descriptor, error) {
 	return nil, errors.New("registry unreachable")
+}
+
+func TestVerifier(t *testing.T) {
+	ctx := context.Background()
+	signer := signingtest.NewSigner(t)
+	registry := oci.NewFakeClient(nil)
+	prep := testPreparation(nil)
+	sign(t, registry, signer, prep, order)
+
+	connects := 0
+	connect := func(context.Context) (oci.Client, error) {
+		connects++
+		return registry, nil
+	}
+	var verifier Verifier
+
+	require.NoError(t, verifier.Verify(ctx, signer.TrustSet(), prep, order, connect))
+	require.NoError(t, verifier.Verify(ctx, signer.TrustSet(), prep, order, connect))
+	require.Equal(t, 1, connects, "verified evidence is remembered")
+
+	requireRejected(t, verifier.Verify(ctx, signer.TrustSet(), prep, "shop/podinfo-dev", connect), deliveryv1alpha1.ReasonSignatureInvalid)
+	requireRejected(t, verifier.Verify(ctx, signer.TrustSet(), testPreparation(&deliveryv1alpha1.ApprovalPolicy{RequiredApprovals: 1}), order, connect),
+		deliveryv1alpha1.ReasonSignatureMissing)
+	requireRejected(t, verifier.Verify(ctx, signer.TrustSet(), prep, "shop/podinfo-dev", connect), deliveryv1alpha1.ReasonSignatureInvalid)
+	require.Equal(t, 4, connects, "rejected evidence is verified again; the result is specific to the Order and the approval policy")
+
+	unreachable := errors.New("registry unreachable")
+	err := verifier.Verify(ctx, signingtest.NewSigner(t).TrustSet(), prep, order, func(context.Context) (oci.Client, error) { return nil, unreachable })
+	require.ErrorIs(t, err, unreachable, "changed trust verifies again, and errors of connect are returned as they are")
 }

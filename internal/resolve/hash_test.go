@@ -27,6 +27,9 @@ const (
 	nextVersion = "1.0.1"
 	hashDigest  = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
 	namespace   = "shop"
+	appName     = "app"
+	depKind     = "Deployment"
+	testPath    = ".spec.replicas"
 )
 
 // resolvedProduct returns a Product whose source is resolved to hashSource
@@ -34,7 +37,7 @@ const (
 // anything.
 func resolvedProduct(render *deliveryv1alpha1.Render) *deliveryv1alpha1.Product {
 	return &deliveryv1alpha1.Product{
-		Name: "app",
+		Name: appName,
 		Spec: deliveryv1alpha1.ProductSpec{
 			Source: deliveryv1alpha1.OCISource{URL: hashSource, Version: hashVersion},
 			Render: render,
@@ -52,7 +55,7 @@ func resolvedProduct(render *deliveryv1alpha1.Render) *deliveryv1alpha1.Product 
 
 // orderOf returns an Order of the Product "app".
 func orderOf(spec deliveryv1alpha1.OrderSpec) *deliveryv1alpha1.Order {
-	spec.ProductRef = deliveryv1alpha1.ProductRef{Name: "app"}
+	spec.ProductRef = deliveryv1alpha1.ProductRef{Name: appName}
 	return &deliveryv1alpha1.Order{Spec: spec}
 }
 
@@ -156,7 +159,7 @@ func TestCalculateSpecHash(t *testing.T) {
 		vendor := product()
 		vendor.Spec.Images.Policy = deliveryv1alpha1.ImagePolicyVendor
 		specs := product()
-		specs.Spec.Images.FieldSpecs = []deliveryv1alpha1.ImageFieldSpec{{Kind: "Prometheus", Path: "spec/image"}}
+		specs.Spec.Images.FieldSpecs = []deliveryv1alpha1.ImageFieldSpec{{Kind: prometheusKind, Path: prometheusImagePath}}
 
 		hashes := []string{base, hashOf(t, pin, order(), hashDest), hashOf(t, vendor, order(), hashDest), hashOf(t, specs, order(), hashDest)}
 		require.Len(t, slices.Compact(slices.Sorted(slices.Values(hashes))), 4)
@@ -172,6 +175,22 @@ func TestCalculateSpecHash(t *testing.T) {
 
 		o.Spec.Promotion.Approvals.RequiredApprovals = 2
 		require.NotEqual(t, one, hashOf(t, product(), o, hashDest))
+	})
+
+	t.Run("upstream stages produce different hashes, in any order", func(t *testing.T) {
+		o := order()
+		o.Spec.Promotion = &deliveryv1alpha1.PromotionSpec{After: []deliveryv1alpha1.UpstreamStage{{Order: "staging"}}}
+		staging := hashOf(t, product(), o, hashDest)
+		require.NotEqual(t, base, staging)
+
+		o.Spec.Promotion.After[0].SoakSeconds = 3600
+		soaked := hashOf(t, product(), o, hashDest)
+		require.NotEqual(t, staging, soaked)
+
+		o.Spec.Promotion.After = append(o.Spec.Promotion.After, deliveryv1alpha1.UpstreamStage{Order: "qa"})
+		reversed := order()
+		reversed.Spec.Promotion = &deliveryv1alpha1.PromotionSpec{After: []deliveryv1alpha1.UpstreamStage{{Order: "qa"}, {Order: "staging", SoakSeconds: 3600}}}
+		require.Equal(t, hashOf(t, product(), o, hashDest), hashOf(t, product(), reversed, hashDest))
 	})
 
 	t.Run("promotion checks produce different hashes", func(t *testing.T) {
@@ -230,10 +249,25 @@ func TestCalculateSpecHash_product(t *testing.T) {
 		require.Equal(t, base, hashOf(t, p, order, hashDest))
 	})
 
-	t.Run("where a value is set is not hashed, only the merged result", func(t *testing.T) {
-		merged := resolvedProduct(helmRender(`{"image":{"tag":"1.0.0"},"replicaCount":1}`))
-		require.Equal(t, base, hashOf(t, merged, orderOf(deliveryv1alpha1.OrderSpec{}), hashDest))
+	t.Run("product change the Order's values hide produces different hash", func(t *testing.T) {
+		p := product()
+		p.Spec.Render = helmRender(`{"replicaCount":1,"image":{"tag":"0.9.0"}}`)
+		require.Equal(t, canonicalRender(t, product(), order), canonicalRender(t, p, order), "the merged render is the same")
+		require.NotEqual(t, base, hashOf(t, p, order, hashDest), "the Product revision is not")
 	})
+}
+
+// canonicalRender returns the canonical JSON of the render order merges
+// from product.
+func canonicalRender(t *testing.T, product *deliveryv1alpha1.Product, order *deliveryv1alpha1.Order) string {
+	t.Helper()
+
+	effective, err := resolve.ForProduct(product, order)
+	require.NoError(t, err)
+	render, err := json.Marshal(effective.Render)
+	require.NoError(t, err)
+
+	return string(render)
 }
 
 func TestCalculateProductHash(t *testing.T) {
@@ -299,20 +333,20 @@ func TestIntent_golden(t *testing.T) {
 		},
 	})
 	product.Spec.Patches = []deliveryv1alpha1.Patch{{
-		Target: deliveryv1alpha1.PatchTarget{Kind: "Deployment", Name: name, Namespace: namespace},
-		Set:    map[string]string{".spec.replicas": "1", ".metadata.labels.tier": "web"},
+		Target: deliveryv1alpha1.PatchTarget{Kind: depKind, Name: name, Namespace: namespace},
+		Set:    map[string]string{testPath: "1", ".metadata.labels.tier": "web"},
 	}}
 	product.Spec.Images = deliveryv1alpha1.ProductImages{
 		Policy:     deliveryv1alpha1.ImagePolicyVendor,
-		FieldSpecs: []deliveryv1alpha1.ImageFieldSpec{{Group: "monitoring.coreos.com", Kind: "Prometheus", Path: "spec/image"}},
+		FieldSpecs: []deliveryv1alpha1.ImageFieldSpec{{Group: "monitoring.coreos.com", Kind: prometheusKind, Path: prometheusImagePath}},
 	}
 	product.Spec.RegistryRefs = []corev1.LocalObjectReference{{Name: "registry-credentials"}}
 
 	order := orderOf(deliveryv1alpha1.OrderSpec{
 		Values: &apiextensionsv1.JSON{Raw: []byte(`{"replicaCount": 2, "id": 9007199254740993}`)},
 		Patches: []deliveryv1alpha1.Patch{{
-			Target: deliveryv1alpha1.PatchTarget{Kind: "Deployment", Name: name, Namespace: namespace},
-			Set:    map[string]string{".spec.replicas": "3"},
+			Target: deliveryv1alpha1.PatchTarget{Kind: depKind, Name: name, Namespace: namespace},
+			Set:    map[string]string{testPath: "3"},
 		}},
 		Edits: []deliveryv1alpha1.Patch{{
 			Target: deliveryv1alpha1.PatchTarget{Kind: "Service", Name: name},
@@ -321,6 +355,7 @@ func TestIntent_golden(t *testing.T) {
 		Promotion: &deliveryv1alpha1.PromotionSpec{
 			Mode:      deliveryv1alpha1.PromotionModeManual,
 			Approvals: &deliveryv1alpha1.ApprovalPolicy{RequiredApprovals: 2, AllowedGroups: []string{"release", "security"}},
+			After:     []deliveryv1alpha1.UpstreamStage{{Order: "podinfo-staging", SoakSeconds: 86400}, {Order: "podinfo-qa"}},
 			Checks: &deliveryv1alpha1.PromotionChecks{Vulnerabilities: &deliveryv1alpha1.VulnerabilityCheck{
 				MaxSeverity: deliveryv1alpha1.SeverityHigh, IgnoreUnfixed: true, MaxAgeSeconds: 172800,
 			}},

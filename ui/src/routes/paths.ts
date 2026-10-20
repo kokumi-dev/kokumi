@@ -26,7 +26,7 @@ export const paths = {
   preparation: (ns: string, name: string, tab?: 'files' | 'changes' | 'images' | 'security' | 'intent' | 'artifact' | 'approvals') =>
     `/preparations/${seg(ns)}/${seg(name)}${tab ? `/${tab}` : ''}`,
   servings: () => '/servings',
-  serving: (ns: string, name: string) => `/servings/${seg(ns)}/${seg(name)}`,
+  serving: (ns: string, name: string, tab?: 'history') => `/servings/${seg(ns)}/${seg(name)}${tab ? `/${tab}` : ''}`,
   repositories: () => '/repositories',
   newRepository: () => '/repositories/new',
   repository: (ns: string, name: string, tab?: 'tags' | 'edit') =>

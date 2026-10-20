@@ -41,7 +41,7 @@ type Result struct {
 // sealed votes in its status are authoritative.
 func Evaluate(prep *deliveryv1alpha1.Preparation, approvals []deliveryv1alpha1.Approval) Result {
 	res := Result{Verdicts: make(map[string]Verdict, len(approvals))}
-	policy := prep.Spec.ApprovalPolicy
+	policy := prep.ApprovalPolicy()
 
 	if policy == nil {
 		res.Approved = true

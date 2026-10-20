@@ -69,27 +69,6 @@ func TestBuildAnnotations(t *testing.T) {
 		assert.Equal(t, "registry.example.com/charts/app", annotations[ocispec.AnnotationBaseImageName])
 		assert.Equal(t, "sha256:base", annotations[ocispec.AnnotationBaseImageDigest])
 	})
-
-	t.Run("extra annotations override computed ones", func(t *testing.T) {
-		ref, err := oci.Parse("oci://registry.example.com/charts/app")
-		assert.NoError(t, err)
-		ref.Tag = "1.0.0"
-		ref.Digest = "sha256:base"
-
-		annotations := buildAnnotations(AnnotationInputs{
-			Description: "computed",
-			SourceRef:   ref,
-			Extra: map[string]string{
-				ocispec.AnnotationDescription:     "overridden",
-				ocispec.AnnotationBaseImageDigest: "sha256:hijacked",
-				oci.AnnotationApprovalPolicy:      "{}",
-			},
-		})
-
-		assert.Equal(t, "overridden", annotations[ocispec.AnnotationDescription])
-		assert.Equal(t, "sha256:hijacked", annotations[ocispec.AnnotationBaseImageDigest])
-		assert.Equal(t, "{}", annotations[oci.AnnotationApprovalPolicy])
-	})
 }
 
 func TestSCMInfoFromAnnotations(t *testing.T) {

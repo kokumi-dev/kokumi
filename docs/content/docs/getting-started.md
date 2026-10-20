@@ -174,7 +174,8 @@ kubectl apply -f podinfo.yaml
 ### Add another variant
 
 More Orders of the same Product are its other variants, for example a
-production environment that runs more replicas and needs approvals:
+production environment that runs more replicas, deploys a change only after
+`podinfo` ran it healthily for an hour, and needs approvals:
 
 ```yaml
 apiVersion: delivery.kokumi.dev/v1alpha1
@@ -192,6 +193,9 @@ spec:
 
   promotion:
     mode: Manual
+    after:
+      - order: podinfo
+        soakSeconds: 3600
     approvals:
       requiredApprovals: 2
       allowedGroups:
@@ -199,9 +203,12 @@ spec:
 ```
 
 The source version is set only on the Product. Changing it renders a new
-Preparation for every Order of the Product, and each Order promotes it on its
-own terms: `podinfo` can deploy it automatically while `podinfo-prod` waits for
-approvals. The `productRef` of an Order cannot be changed after creation.
+Preparation for every Order of the Product, and each Order promotes its own
+Preparation on its own terms: once `podinfo` is promoted, `podinfo-prod` waits
+until `podinfo` ran the change healthily for an hour, and for its approvals.
+Nothing is copied from `podinfo` to `podinfo-prod`; see
+[Promotion Pipelines](../user-guide/promotion-pipelines/). The `productRef` of
+an Order cannot be changed after creation.
 
 ## Watch a Preparation being created
 
@@ -225,10 +232,12 @@ Two ways to activate or change a Serving:
 
 | Method | How |
 |---|---|
-| **Auto-deploy** | Set `spec.promotion.mode: Automatic` on the Order. Kokumi deploys every new Preparation once it is ready (and approved, if the Order requires approvals) |
+| **Auto-deploy** | Set `spec.promotion.mode: Automatic` on the Order. Kokumi deploys every new Preparation once it is ready and passes its gates |
 | **UI** | Set `spec.promotion.mode: Manual` and click **Promote** on any Preparation in the Kokumi UI |
 
-To require reviews before anything is deployed, add
+Both modes hold a Preparation until it passes its gates: its upstream stages
+(`spec.promotion.after`, see [Promotion Pipelines](../user-guide/promotion-pipelines/)),
+its promotion checks, and its approvals. To require reviews, add
 `spec.promotion.approvals` to the Order. Reviewers vote in the UI; see
 [Approvals](../architecture/#approvals).
 
@@ -248,8 +257,8 @@ namespace and Argo CD syncs the manifests into the cluster.
 
 ```bash
 kubectl get servings
-# NAME               ORDER              PREPARATION                     READY   REASON     AGE
-# external-secrets   external-secrets   external-secrets-d7ce0c46a686   True    Deployed   10s
+# NAME               ORDER              TARGET                          READY   REASON     APPROVED              VERIFIED             AGE
+# external-secrets   external-secrets   external-secrets-d7ce0c46a686   True    Deployed   ApprovalNotRequired   SignaturesVerified   10s
 
 kubectl get applications -n argocd
 # NAME               SYNC STATUS   HEALTH STATUS

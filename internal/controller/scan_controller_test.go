@@ -201,10 +201,11 @@ var _ = Describe("Scan Controller", func() {
 			Name:      scanPreparationName,
 			Namespace: scanNamespace,
 			Spec: deliveryv1alpha1.PreparationSpec{
-				OrderName:  scanOrderName,
-				Source:     deliveryv1alpha1.OrderSource{URL: "oci://ghcr.io/org/app", BaseDigest: oci.FakeDigest},
-				Renderer:   deliveryv1alpha1.Renderer{Type: deliveryv1alpha1.RenderTypeManifest, Version: testRendererVersion, Builder: testBuilderID},
-				ConfigHash: testConfigHash,
+				OrderName:       scanOrderName,
+				Source:          deliveryv1alpha1.OrderSource{URL: "oci://ghcr.io/org/app", BaseDigest: oci.FakeDigest},
+				Renderer:        deliveryv1alpha1.Renderer{Type: deliveryv1alpha1.RenderTypeManifest, Version: testRendererVersion, Builder: testBuilderID},
+				ConfigHash:      testConfigHash,
+				ProductRevision: testProductRevision,
 				Artifact: deliveryv1alpha1.Artifact{
 					OCIRef: "oci://kokumi-registry.kokumi.svc.cluster.local:5000/scan-test/scanned-prod@" + oci.FakeDigest,
 					Digest: oci.FakeDigest,

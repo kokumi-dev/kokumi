@@ -118,6 +118,7 @@ func handleCreateOrder(deps *apiDeps) http.HandlerFunc {
 				Promotion: &deliveryv1alpha1.PromotionSpec{
 					Mode:      deliveryv1alpha1.PromotionMode(req.Mode),
 					Approvals: approvalPolicyFromDTO(req.Approvals),
+					After:     upstreamStagesFromDTO(req.After),
 					Checks:    checksFromDTO(req.Checks),
 				},
 			},
@@ -185,6 +186,7 @@ func handleUpdateOrder(deps *apiDeps) http.HandlerFunc {
 		order.Spec.Promotion = &deliveryv1alpha1.PromotionSpec{
 			Mode:      deliveryv1alpha1.PromotionMode(req.Mode),
 			Approvals: approvalPolicyFromDTO(req.Approvals),
+			After:     upstreamStagesFromDTO(req.After),
 			Checks:    checksFromDTO(req.Checks),
 		}
 

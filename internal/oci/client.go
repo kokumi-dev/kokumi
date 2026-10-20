@@ -14,10 +14,6 @@ var ErrIsIndex = errors.New("reference is an image index")
 // Its presence on a manifest makes the revision chain explicit and tamper-evident.
 const AnnotationParentDigest = "kokumi.dev/parent"
 
-// AnnotationApprovalPolicy is the OCI manifest annotation key that records the
-// JSON-encoded approval policy the artifact was rendered under.
-const AnnotationApprovalPolicy = "kokumi.dev/approval-policy"
-
 // PushOptions configures Push. The zero value pushes a single-layer artifact
 // with an unknown artifact type and no config blob.
 type PushOptions struct {

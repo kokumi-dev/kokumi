@@ -110,7 +110,7 @@ func TestHandlePreview(t *testing.T) {
 		Name:      "web",
 		Namespace: nsA,
 		Status: deliveryv1alpha1.ProductStatus{
-			Source: &deliveryv1alpha1.ProductSourceStatus{URL: source, Version: "1.0.0"},
+			Source: &deliveryv1alpha1.ProductSourceStatus{URL: source, Version: testSourceVersion},
 		},
 	}
 
@@ -142,7 +142,7 @@ func TestPreviewRequest(t *testing.T) {
 	helm := func(values string) *deliveryv1alpha1.Render {
 		return &deliveryv1alpha1.Render{Helm: &deliveryv1alpha1.HelmRender{Values: &apiextensionsv1.JSON{Raw: []byte(values)}}}
 	}
-	source := deliveryv1alpha1.OCISource{URL: "oci://registry/charts/app", Version: "1.0.0"}
+	source := deliveryv1alpha1.OCISource{URL: "oci://registry/charts/app", Version: testSourceVersion}
 
 	t.Run("rejects Helm values that are not an object", func(t *testing.T) {
 		p := &preview{spec: &resolve.EffectiveSpec{Source: source, Render: helm(`[1,2]`)}}

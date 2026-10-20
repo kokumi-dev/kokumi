@@ -229,6 +229,19 @@
   text-overflow: ellipsis;
 }
 
+/* A column whose content wraps instead of being cut. */
+.table td.wrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* The last column keeps the inset of the section header above the table, so
+   trailing buttons do not crowd the card's edge. */
+.table th:last-child,
+.table td:last-child {
+  padding-right: 20px;
+}
+
 .table tbody:last-child > tr:last-child > td {
   border-bottom: none;
 }
@@ -463,6 +476,11 @@
 }
 
 /* ── Misc ── */
+/* Text a wrapping cell must not break, such as a group name with hyphens. */
+.nobreak {
+  white-space: nowrap;
+}
+
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.8rem;

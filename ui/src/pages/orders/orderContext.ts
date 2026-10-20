@@ -10,6 +10,9 @@ export interface OrderContext {
   /** Newest first; null until loaded. */
   preparations: Preparation[] | null
   servings: Serving[] | null
+  /** Every Order and Serving, for the Order's pipeline; null until loaded. */
+  allOrders: Order[] | null
+  allServings: Serving[] | null
 }
 
 export function useOrderContext(): OrderContext {

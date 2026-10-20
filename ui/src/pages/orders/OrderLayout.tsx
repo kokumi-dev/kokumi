@@ -57,7 +57,7 @@ export default function OrderLayout() {
   // Until the Product has loaded, deny edits (fail closed).
   const editsAllowed = !editDenied && !!product && allowsPatches(product)
 
-  const ctx: OrderContext = { order, product, editsAllowed, preparations, servings }
+  const ctx: OrderContext = { order, product, editsAllowed, preparations, servings, allOrders: orders, allServings }
 
   return (
     <div className={layout.page}>
