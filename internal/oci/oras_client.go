@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -197,8 +198,10 @@ func (c *ORASClient) pingAnonymous(ctx context.Context, host string) error {
 }
 
 // Pull fetches an OCI artifact from ref:tag into targetDir.
-// It inspects the manifest's first layer media type and branches accordingly:
-//   - HelmChartLayerMediaType: fetches the blob directly to targetDir/chart.tgz
+// It inspects the manifest's layer media types and branches accordingly:
+//   - HelmChartLayerMediaType: fetches that layer's blob directly to
+//     targetDir/chart.tgz, wherever it is among the layers (Helm places the
+//     provenance layer before or after it)
 //   - FluxContentMediaType:    extracts the layer's tar archive into targetDir
 //     (Flux layers carry no io.deis.oras.content.unpack annotation, so ORAS
 //     would otherwise store them as a raw blob)
@@ -252,10 +255,11 @@ func (c *ORASClient) Pull(ctx context.Context, ref Reference, targetDir string) 
 		return "", "", nil, fmt.Errorf("artifact %s:%s has no layers", ref, reference)
 	}
 
-	if manifest.Layers[0].MediaType == HelmChartLayerMediaType {
+	isChart := func(layer ocispec.Descriptor) bool { return layer.MediaType == HelmChartLayerMediaType }
+	if i := slices.IndexFunc(manifest.Layers, isChart); i >= 0 {
 		log.Info("Pulling Helm chart blob", "ref", fmt.Sprintf("%s:%s", ref, reference))
 
-		if err := c.fetchBlob(ctx, repo, manifest.Layers[0], filepath.Join(targetDir, "chart.tgz")); err != nil {
+		if err := c.fetchBlob(ctx, repo, manifest.Layers[i], filepath.Join(targetDir, "chart.tgz")); err != nil {
 			return "", "", nil, fmt.Errorf("fetch helm chart blob: %w", err)
 		}
 

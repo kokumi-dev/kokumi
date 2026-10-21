@@ -13,12 +13,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/oras-project/oras-go/v3/registry/remote"
 	"github.com/oras-project/oras-go/v3/registry/remote/auth"
 	"github.com/oras-project/oras-go/v3/registry/remote/credentials"
 	"github.com/oras-project/oras-go/v3/registry/remote/errcode"
@@ -119,6 +121,58 @@ func TestExtractGzipTar(t *testing.T) {
 
 		require.Error(t, extractGzipTar(buf, FluxContentMediaType, dir))
 	})
+}
+
+func TestORASClient_Pull_helmChart(t *testing.T) {
+	const provenanceMediaType = "application/vnd.cncf.helm.chart.provenance.v1.prov"
+
+	for name, provenanceFirst := range map[string]bool{
+		"chart layer first":      false,
+		"provenance layer first": true,
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			host := newTestRegistry(t, false)
+			repo, err := remote.NewRepository(host + "/charts/podinfo")
+			require.NoError(t, err)
+			repo.Registry.PlainHTTP = true
+
+			describe := func(mediaType string, data []byte) ocispec.Descriptor {
+				return ocispec.Descriptor{MediaType: mediaType, Digest: digest.FromBytes(data), Size: int64(len(data))}
+			}
+			push := func(mediaType string, data []byte) ocispec.Descriptor {
+				desc := describe(mediaType, data)
+				require.NoError(t, repo.Push(ctx, desc, bytes.NewReader(data)))
+				return desc
+			}
+			config := push("application/vnd.cncf.helm.config.v1+json", []byte(`{"name":"podinfo","version":"6.14.1"}`))
+			layers := []ocispec.Descriptor{push(HelmChartLayerMediaType, []byte("chart")), push(provenanceMediaType, []byte("provenance"))}
+			if provenanceFirst {
+				slices.Reverse(layers)
+			}
+			manifest, err := json.Marshal(ocispec.Manifest{
+				SchemaVersion: 2,
+				MediaType:     ocispec.MediaTypeImageManifest,
+				Config:        config,
+				Layers:        layers,
+			})
+			require.NoError(t, err)
+			manifestDesc := describe(ocispec.MediaTypeImageManifest, manifest)
+			require.NoError(t, repo.PushReference(ctx, manifestDesc, bytes.NewReader(manifest), "6.14.1"))
+
+			ref, err := Parse("oci://" + host + "/charts/podinfo:6.14.1")
+			require.NoError(t, err)
+			dir := t.TempDir()
+			mediaType, pulled, _, err := NewClient(Options{PlainHTTP: true}).Pull(ctx, ref, dir)
+			require.NoError(t, err)
+
+			require.Equal(t, HelmChartLayerMediaType, mediaType)
+			require.Equal(t, manifestDesc.Digest.String(), pulled)
+			chart, err := os.ReadFile(filepath.Join(dir, "chart.tgz"))
+			require.NoError(t, err)
+			require.Equal(t, "chart", string(chart))
+		})
+	}
 }
 
 func TestORASClient_authenticatedClientCachesTokens(t *testing.T) {
