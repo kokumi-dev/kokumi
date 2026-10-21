@@ -46,7 +46,7 @@ also exports the logs of the Kind nodes, their kubelet and every container to
 | OIDC sign-in | Real Dex from `hack/oidc`, in the approvals and API server specs. |
 | Private registry | A registry fixture that requires a password, in the registries spec. |
 | Sources | Public: `ghcr.io/stefanprodan/charts/podinfo`, `ghcr.io/kokumi-dev/testdata`. Sources only a spec needs, such as an unsigned one, are pushed to the bundled registry. |
-| Argo CD | Simulated by default: only its Application CRD is installed, and `framework.SyncHealthy` reports an Application synced and healthy, as Argo CD would. This keeps the promotion gates deterministic and fast. With `E2E_ARGOCD=real`, `make argocd` installs Argo CD and `framework.SyncHealthy` waits for it to deploy for real. |
+| Argo CD | Simulated by default: only its Application CRD is installed, and `framework.SyncHealthy` reports an Application synced and healthy, as Argo CD would. This keeps the promotion gates deterministic and fast. With `E2E_ARGOCD=real`, `framework.InstallArgoCD` installs Argo CD with `make argocd` and `framework.SyncHealthy` waits for it to deploy for real. Its Redis pulls the same image from Docker Hub instead of ECR Public, which rate-limits the shared IPs of CI runners. |
 
 ## Layout
 

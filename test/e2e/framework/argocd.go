@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2" //nolint:revive,staticcheck
@@ -28,6 +30,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/kokumi-dev/kokumi/test/utils"
 )
 
 // ArgoCDApplicationCRD is the Application CRD of the Argo CD release
@@ -36,12 +40,45 @@ import (
 const ArgoCDApplicationCRD = "https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.1/" +
 	"manifests/crds/application-crd.yaml"
 
+// ecrPublicDockerHub is where ECR Public mirrors the images of Docker Hub,
+// such as the Redis image of Argo CD.
+const ecrPublicDockerHub = "public.ecr.aws/docker/"
+
 // RealArgoCD reports whether the suite runs a real Argo CD, E2E_ARGOCD=real,
 // instead of only its Application CRD. By default SyncHealthy simulates Argo
 // CD's sync and health reports, so that promotion gates run deterministically
 // and fast.
 func RealArgoCD() bool {
 	return os.Getenv("E2E_ARGOCD") == "real"
+}
+
+// InstallArgoCD installs Argo CD with "make argocd" and waits until all of
+// its workloads run.
+//
+// Argo CD pulls its Redis image from ECR Public, which rate-limits anonymous
+// pulls, and CI runners share their IPs. Without Redis, Argo CD cannot
+// generate manifests, and every Application stays Unknown. So the suite has
+// Redis pull the same image from Docker Hub instead.
+func InstallArgoCD() {
+	_, err := utils.Run(exec.Command("make", "argocd"))
+	Expect(err).NotTo(HaveOccurred(), "Failed to install Argo CD")
+
+	image, err := Kubectl("get", "deployment/argocd-redis", "-n", ArgoCDNamespace,
+		"-o", `jsonpath={.spec.template.spec.containers[?(@.name=="redis")].image}`)
+	Expect(err).NotTo(HaveOccurred(), "Failed to read the Redis image of Argo CD")
+	name, mirrored := strings.CutPrefix(strings.TrimSpace(image), ecrPublicDockerHub)
+	Expect(mirrored).To(BeTrue(), "The Redis image of Argo CD, %s, is not a Docker Hub image on ECR Public", image)
+
+	By("having the Redis of Argo CD pull its image from Docker Hub")
+	_, err = Kubectl("set", "image", "deployment/argocd-redis", "-n", ArgoCDNamespace, "redis=docker.io/"+name)
+	Expect(err).NotTo(HaveOccurred(), "Failed to set the Redis image of Argo CD")
+
+	workloads, err := Kubectl("get", "deployments,statefulsets", "-n", ArgoCDNamespace, "-o", "name")
+	Expect(err).NotTo(HaveOccurred(), "Failed to list the workloads of Argo CD")
+	for _, workload := range utils.GetNonEmptyLines(workloads) {
+		_, err = Kubectl("rollout", "status", workload, "-n", ArgoCDNamespace, "--timeout=5m")
+		Expect(err).NotTo(HaveOccurred(), "Argo CD's %s did not become ready", workload)
+	}
 }
 
 // Application returns a function for Eventually that fetches the Argo CD
