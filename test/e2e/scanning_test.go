@@ -21,9 +21,11 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/crane"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -35,7 +37,10 @@ import (
 
 // vulnerableImage is alpine 3.14.0, pinned: its apk-tools and OpenSSL have
 // known Critical vulnerabilities that later releases fix
-// (CVE-2021-36159, CVE-2021-3711). It has Linux platforms only.
+// (CVE-2021-36159, CVE-2021-3711). It has Linux platforms only. The specs
+// copy only the one of the architecture they run on: mirror.gcr.io caches
+// Docker Hub, and the layers of the platforms hardly anyone pulls are the
+// likeliest to fail to download.
 const vulnerableImage = "mirror.gcr.io/library/alpine@" +
 	"sha256:adab3844f497ab9171f070d4cae4114b5aec565ac772e2f2579405b78be67c96"
 
@@ -83,7 +88,11 @@ var _ = Describe("Vulnerability scanning", Label("scanning", "slow"), Serial, Or
 			upstream := fmt.Sprintf("e2e/%s/upstream/alpine:3.14.0", ns)
 
 			By("copying the image to the bundled registry, with an unsigned SBOM that lists no packages")
-			Expect(crane.Copy(vulnerableImage, framework.RegistryHost()+"/"+upstream, crane.Insecure)).To(Succeed())
+			platform := &v1.Platform{OS: "linux", Architecture: runtime.GOARCH}
+			Eventually(func() error {
+				return crane.Copy(vulnerableImage, framework.RegistryHost()+"/"+upstream,
+					crane.Insecure, crane.WithPlatform(platform))
+			}, time.Minute, 10*time.Second).Should(Succeed(), "Failed to copy %s from the mirror", vulnerableImage)
 			upstreamRef := framework.Ref(framework.RegistryHost() + "/" + upstream)
 			desc, err := framework.Registry().Resolve(ctx, upstreamRef)
 			Expect(err).NotTo(HaveOccurred())
