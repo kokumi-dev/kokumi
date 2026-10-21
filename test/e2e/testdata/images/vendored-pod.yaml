@@ -1,0 +1,18 @@
+# A Pod that runs a vendored image by the reference a Preparation records, so
+# that the node pulls it from the bundled registry.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vendored
+spec:
+  containers:
+  - name: podinfo
+    image: ${IMAGE}
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+      runAsNonRoot: true
+      runAsUser: 1000
+      seccompProfile:
+        type: RuntimeDefault

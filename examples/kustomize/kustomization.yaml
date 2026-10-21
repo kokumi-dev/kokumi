@@ -1,0 +1,8 @@
+# A Product of a Kustomize source, and one Order of it.
+#
+#   kubectl apply -n <namespace> -k examples/kustomize
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- product.yaml
+- order.yaml

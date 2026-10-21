@@ -1,0 +1,16 @@
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Order
+metadata:
+  name: podinfo-private
+spec:
+  productRef:
+    name: podinfo-private
+
+  # The render of a private source stays private: Kokumi refuses to push it
+  # to the bundled registry, which anyone in the cluster reads without
+  # credentials. Push it below the Registry instead, and give Argo CD
+  # credentials for it too.
+  destination:
+    url: oci://ghcr.io/my-org/preparations/podinfo-private
+  registryRefs:
+  - name: my-org

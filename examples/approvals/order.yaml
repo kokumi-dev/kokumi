@@ -1,0 +1,18 @@
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Order
+metadata:
+  name: podinfo-approvals
+spec:
+  productRef:
+    name: podinfo-approvals
+
+  # Every Preparation is promoted right away, and deploys once two distinct
+  # members of release-approvers approved it. The policy is copied into each
+  # Preparation, so changing it renders a new Preparation that needs fresh
+  # approvals.
+  promotion:
+    mode: Automatic
+    approvals:
+      requiredApprovals: 2
+      allowedGroups:
+      - release-approvers

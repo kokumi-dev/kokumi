@@ -142,18 +142,31 @@ recently scanned and the message says how many are left out.
 ## Holding promotions on findings
 
 An Order can require that the images of a Preparation pass a vulnerability
-check before it is deployed:
+check before it is deployed. In the vulnerability-scanning example, a Product
+vendors the podinfo chart's image, and its Order deploys only Preparations
+without fixable Critical findings:
 
-```yaml
-spec:
-  promotion:
-    mode: Automatic
-    checks:
-      vulnerabilities:
-        maxSeverity: High        # Critical | High | Medium | Low
-        ignoreUnfixed: true      # findings no package version fixes yet do not count
-        maxAgeSeconds: 172800    # how old a scan may be; default twice the Kitchen's interval
-```
+{{< tabs >}}
+{{< tab name="order.yaml" >}}
+{{< example file="vulnerability-scanning/order.yaml" >}}
+{{< /tab >}}
+{{< tab name="product.yaml" >}}
+{{< example file="vulnerability-scanning/product.yaml" >}}
+{{< /tab >}}
+{{< /tabs >}}
+
+Once a cluster admin has [enabled scanning](../../operator-guide/scanning/#enabling-scanning),
+apply it:
+
+{{< apply-example name="vulnerability-scanning" >}}
+
+`vulnerabilities` takes:
+
+| Field | Meaning |
+|---|---|
+| `maxSeverity` | `Critical`, `High`, `Medium` or `Low`: findings at or above it block. |
+| `ignoreUnfixed` | Findings that no package version fixes yet do not count. |
+| `maxAgeSeconds` | How old a scan may be; by default twice the Kitchen's interval. |
 
 A Preparation passes when every one of its images has a scan that is recent
 enough, and no finding at or above `maxSeverity`. Findings of unknown

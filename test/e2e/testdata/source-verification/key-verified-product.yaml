@@ -1,0 +1,13 @@
+# A Product that requires a signature, by the testdata key in the Secret
+# testdata-signing-key, of a source the spec pushed to the bundled registry.
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Product
+metadata:
+  name: key-verified
+spec:
+  source:
+    url: oci://${REGISTRY}/e2e/${NAMESPACE}/source
+    version: "1.0.0"
+    verify:
+      secretRef:
+        name: testdata-signing-key

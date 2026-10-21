@@ -1,6 +1,9 @@
 version: "2"
 run:
   allow-parallel-runners: true
+  # Lint the e2e specs too, which only build with the e2e tag.
+  build-tags:
+    - e2e
 linters:
   default: none
   enable:

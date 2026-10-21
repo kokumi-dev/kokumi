@@ -1,0 +1,21 @@
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Product
+metadata:
+  name: podinfo-kustomize
+spec:
+  # An OCI artifact with a kustomization.yaml at its root. Kokumi keeps its
+  # files as they are and Argo CD builds the kustomization when it deploys.
+  source:
+    url: oci://ghcr.io/stefanprodan/manifests/podinfo
+    version: "6.14.1"
+
+  # Orders of this Product may only scale the podinfo Deployment.
+  overrides:
+    patches:
+      policy: Listed
+      targets:
+      - target:
+          kind: Deployment
+          name: podinfo
+        paths:
+        - .spec.replicas

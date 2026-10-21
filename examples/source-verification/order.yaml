@@ -1,0 +1,7 @@
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Order
+metadata:
+  name: podinfo-verified
+spec:
+  productRef:
+    name: podinfo-verified

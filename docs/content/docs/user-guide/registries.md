@@ -132,27 +132,32 @@ a public image read through a Docker Hub Registry is not blocked.
 ## Creating a Registry
 
 Create a `kubernetes.io/dockerconfigjson` Secret with the credentials, then a
-Registry that names it:
+Registry that names it. The private-registry example connects to
+`ghcr.io/my-org`:
 
 ```bash
-kubectl create secret docker-registry ghcr-myorg \
-  --namespace team-a \
+kubectl create secret docker-registry my-org-credentials \
+  --namespace shop \
   --docker-server=ghcr.io \
   --docker-username=<user> \
   --docker-password=<token>
 ```
 
-```yaml
-apiVersion: delivery.kokumi.dev/v1alpha1
-kind: Registry
-metadata:
-  name: ghcr-myorg
-  namespace: team-a
-spec:
-  url: oci://ghcr.io/myorg
-  secretRef:
-    name: ghcr-myorg
-```
+{{< example file="private-registry/registry.yaml" >}}
+
+A Product lists the Registries it connects through:
+
+{{< example file="private-registry/product.yaml" >}}
+
+The render of a private source must stay private too (see
+[Private content stays private](#private-content-stays-private)), so its Order
+pushes the Preparations below the same Registry:
+
+{{< example file="private-registry/order.yaml" >}}
+
+Replace `ghcr.io/my-org` in the example with your registry, then apply it:
+
+{{< apply-example name="private-registry" >}}
 
 The entry of the Secret is chosen the way the kubelet chooses one in an image
 pull Secret: the key's host and port must match the Registry's, a `*` stands
@@ -164,10 +169,10 @@ The controller checks the Secrets and then calls the registry's API base
 endpoint, `GET /v2/`, with the credentials:
 
 ```bash
-kubectl -n team-a get registries
-# NAME         URL                   READY   REASON         AGE
-# ghcr-myorg   oci://ghcr.io/myorg   True    Connected      12s
-# harbor       oci://harbor.corp     False   Unauthorized   3m
+kubectl -n shop get registries
+# NAME     URL                    READY   REASON         AGE
+# my-org   oci://ghcr.io/my-org   True    Connected      12s
+# harbor   oci://harbor.corp      False   Unauthorized   3m
 ```
 
 | Reason | Meaning |
@@ -227,18 +232,7 @@ platform admin grants by binding the `kokumi-registry-credentials` ClusterRole
 
 A Repository adds an OCI repository to the catalog of the UI:
 
-```yaml
-apiVersion: delivery.kokumi.dev/v1alpha1
-kind: Repository
-metadata:
-  name: mychart
-  namespace: team-a
-spec:
-  url: oci://ghcr.io/myorg/mychart
-  registryRef:
-    name: ghcr-myorg
-  description: The team's application chart
-```
+{{< example file="private-registry/repository.yaml" >}}
 
 Its `Ready` condition says whether the Registry exists (`RegistryNotFound`)
 and covers the URL (`NotCovered`); it makes no network calls.

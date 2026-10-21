@@ -1,0 +1,9 @@
+# A Product of manifests spread over several files that keeps them apart, and
+# one Order of it.
+#
+#   kubectl apply -n <namespace> -k examples/multi-file-manifests
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- product.yaml
+- order.yaml

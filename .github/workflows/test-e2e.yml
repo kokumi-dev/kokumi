@@ -6,10 +6,25 @@ on:
 
 jobs:
   test-e2e:
-    name: Run on Ubuntu
+    # Each shard runs its specs on a Kind cluster of its own; see
+    # test/e2e/README.md for the labels.
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Features
+            labels: "!slow"
+            argocd: ""
+          - name: Vulnerability scanning
+            labels: "slow"
+            argocd: ""
+          - name: Promotion with Argo CD
+            labels: "promotion"
+            argocd: "real"
     steps:
       - name: Clone the code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -31,6 +46,17 @@ jobs:
         run: kind version
 
       - name: Running Test e2e
+        env:
+          E2E_LABELS: ${{ matrix.labels }}
+          E2E_ARGOCD: ${{ matrix.argocd }}
         run: |
           go mod tidy
           make test-e2e
+
+      - name: Upload the diagnostics
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-${{ strategy.job-index }}
+          path: _artifacts/
+          retention-days: 14

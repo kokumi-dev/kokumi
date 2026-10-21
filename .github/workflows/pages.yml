@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "docs/**"
+      - "examples/**"
   workflow_dispatch:
 
 concurrency:

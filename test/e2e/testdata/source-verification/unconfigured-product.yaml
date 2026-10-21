@@ -1,0 +1,10 @@
+# A Product of a source the spec pushed and signed, which asks for no
+# verification.
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Product
+metadata:
+  name: unconfigured
+spec:
+  source:
+    url: oci://${REGISTRY}/e2e/${NAMESPACE}/signed
+    version: "1.0.0"

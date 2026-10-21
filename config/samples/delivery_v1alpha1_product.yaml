@@ -1,0 +1,15 @@
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Product
+metadata:
+  labels:
+    app.kubernetes.io/name: kokumi
+    app.kubernetes.io/managed-by: kustomize
+  name: podinfo
+spec:
+  # A Helm chart pushed to an OCI registry, rendered with its default values.
+  # examples/ holds a Product and Orders for each feature.
+  source:
+    url: oci://ghcr.io/stefanprodan/charts/podinfo
+    version: "6.14.1"
+  render:
+    helm: {}

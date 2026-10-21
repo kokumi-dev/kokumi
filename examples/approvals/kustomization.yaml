@@ -1,0 +1,10 @@
+# An Order whose Preparations deploy only once two members of the
+# release-approvers group approved them. Approvers sign in through OIDC; the
+# shared admin account cannot approve.
+#
+#   kubectl apply -n <namespace> -k examples/approvals
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- product.yaml
+- order.yaml

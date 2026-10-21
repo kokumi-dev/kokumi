@@ -1,0 +1,40 @@
+# The private-registry example, with what a user fills in: the URL of the
+# registry fixture (registries/private-registry.yaml) instead of
+# ghcr.io/my-org, and its credentials.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- ../../../../examples/private-registry
+- credentials.yaml
+patches:
+- target:
+    kind: Registry
+    name: my-org
+  patch: |
+    - op: replace
+      path: /spec/url
+      value: oci://private-registry.e2e-private-registry.svc.cluster.local:5000
+    - op: add
+      path: /spec/scheme
+      value: HTTP
+- target:
+    kind: Repository
+    name: podinfo-chart
+  patch: |
+    - op: replace
+      path: /spec/url
+      value: oci://private-registry.e2e-private-registry.svc.cluster.local:5000/charts/podinfo
+- target:
+    kind: Product
+    name: podinfo-private
+  patch: |
+    - op: replace
+      path: /spec/source/url
+      value: oci://private-registry.e2e-private-registry.svc.cluster.local:5000/charts/podinfo
+- target:
+    kind: Order
+    name: podinfo-private
+  patch: |
+    - op: replace
+      path: /spec/destination/url
+      value: oci://private-registry.e2e-private-registry.svc.cluster.local:5000/preparations/podinfo-private

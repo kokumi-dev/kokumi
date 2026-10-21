@@ -1,0 +1,21 @@
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Product
+metadata:
+  name: podinfo-vendored
+spec:
+  source:
+    url: oci://ghcr.io/stefanprodan/charts/podinfo
+    version: "6.14.1"
+
+  render:
+    helm: {}
+
+  # Where the source and the images are copied to. Without a url it is
+  # oci://kokumi-registry.kokumi.svc.cluster.local:5000/<namespace>/vendor/<product>.
+  vendor: {}
+
+  # Copy each image, with all its platforms, into a repository of its own
+  # below the vendor location, and rewrite the manifests to run the copy by
+  # digest.
+  images:
+    policy: Vendor

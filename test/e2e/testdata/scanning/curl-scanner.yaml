@@ -1,0 +1,21 @@
+# A Pod that is not the controller and tries to reach the scanner. It fails
+# when the scanner's NetworkPolicy drops the connection.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: curl-scanner
+spec:
+  restartPolicy: Never
+  containers:
+  - name: curl
+    image: curlimages/curl:latest
+    command: ["curl", "-sS", "--max-time", "10", "http://kokumi-scanner.kokumi.svc:8080/healthz"]
+    securityContext:
+      readOnlyRootFilesystem: true
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+      runAsNonRoot: true
+      runAsUser: 1000
+      seccompProfile:
+        type: RuntimeDefault

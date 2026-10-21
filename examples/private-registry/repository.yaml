@@ -1,0 +1,10 @@
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Repository
+metadata:
+  name: podinfo-chart
+spec:
+  # Lists the chart's tags in the UI, read through the Registry.
+  url: oci://ghcr.io/my-org/charts/podinfo
+  registryRef:
+    name: my-org
+  description: The podinfo chart of my-org

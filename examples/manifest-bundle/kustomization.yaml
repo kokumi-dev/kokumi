@@ -1,0 +1,9 @@
+# Pre-rendered manifests from an OCI registry as a Product, and one Order of
+# it that patches them.
+#
+#   kubectl apply -n <namespace> -k examples/manifest-bundle
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- product.yaml
+- order.yaml

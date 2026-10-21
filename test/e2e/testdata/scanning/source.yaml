@@ -1,0 +1,9 @@
+# A source whose Pod runs the image a spec copied into the bundled registry.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: app
+spec:
+  containers:
+  - name: app
+    image: ${IMAGE}

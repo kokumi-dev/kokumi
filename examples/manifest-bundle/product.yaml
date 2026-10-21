@@ -1,0 +1,21 @@
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Product
+metadata:
+  name: external-secrets
+spec:
+  # An OCI artifact with a single manifest.yaml at its root. Several files are
+  # merged into one manifest.yaml unless render.manifest.layout is Multi.
+  source:
+    url: oci://ghcr.io/kokumi-dev/testdata/external-secrets
+    version: "0.1.0"
+
+  # Orders of this Product may only scale the webhook Deployment.
+  overrides:
+    patches:
+      policy: Listed
+      targets:
+      - target:
+          kind: Deployment
+          name: external-secrets-webhook
+        paths:
+        - .spec.replicas

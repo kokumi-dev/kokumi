@@ -1,0 +1,18 @@
+{{- /*
+Show the command that applies an example from examples/ in the repository to a
+namespace, from the release in site.Params.kokumiVersion. The build fails if
+the example does not exist.
+
+@param {string} name The example, a directory in examples/.
+@param {string} namespace The namespace to apply it to. Defaults to shop.
+
+@example {{< apply-example name="promotion-pipeline" >}}
+*/ -}}
+
+{{- $name := .Get "name" -}}
+{{- $namespace := .Get "namespace" | default "shop" -}}
+{{- if not (resources.Get (printf "examples/%s/kustomization.yaml" $name)) -}}
+  {{- errorf "The example %q does not exist in examples/: %s" $name $.Position -}}
+{{- end -}}
+{{- $url := printf "%s//examples/%s?ref=%s" site.Params.repository $name site.Params.kokumiVersion -}}
+{{- $.Page.RenderString (printf "```bash\nkubectl apply -n %s -k \"%s\"\n```" $namespace $url) -}}

@@ -71,11 +71,21 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
-# TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
-# The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
-# CertManager is installed by default; skip with:
-# - CERT_MANAGER_INSTALL_SKIP=true
+# The e2e tests run on a Kind cluster of their own, which they build and load
+# the manager image into; see test/e2e/README.md.
 KIND_CLUSTER ?= kokumi-test-e2e
+# E2E_LABELS selects specs by Ginkgo label filter, e.g. E2E_LABELS=promotion
+# or E2E_LABELS='!slow'. Empty runs every spec.
+E2E_LABELS ?=
+# E2E_ARGOCD=real installs Argo CD and lets it deploy, instead of simulating
+# its reports.
+E2E_ARGOCD ?=
+# ARTIFACTS receives the JUnit report, the diagnostics of failed specs and,
+# when a spec failed, the logs of the Kind nodes and all their containers.
+ARTIFACTS ?= $(shell pwd)/_artifacts
+# The e2e cluster's kubeconfig is a file of its own, so that the e2e tests
+# never deploy to the cluster of the current kubeconfig context.
+E2E_KUBECONFIG ?= $(LOCALBIN)/$(KIND_CLUSTER).kubeconfig
 
 .PHONY: setup-test-e2e
 setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
@@ -88,18 +98,31 @@ setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
 			echo "Kind cluster '$(KIND_CLUSTER)' already exists. Skipping creation." ;; \
 		*) \
 			echo "Creating Kind cluster '$(KIND_CLUSTER)'..."; \
-			$(KIND) create cluster --name $(KIND_CLUSTER) --config hack/kind/kokumi-test-e2e.yaml ;; \
+			mkdir -p "$(LOCALBIN)"; \
+			$(KIND) create cluster --name $(KIND_CLUSTER) --config hack/kind/kokumi-test-e2e.yaml \
+				--kubeconfig "$(E2E_KUBECONFIG)" ;; \
 	esac
+	@$(KIND) export kubeconfig --name $(KIND_CLUSTER) --kubeconfig "$(E2E_KUBECONFIG)"
 	@KIND=$(KIND) hack/kind/registry-mirror.sh $(KIND_CLUSTER)
 
 .PHONY: test-e2e
-test-e2e: setup-test-e2e manifests generate fmt vet cosign ## Run the e2e tests. Expected an isolated environment using Kind.
-	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) COSIGN="$(COSIGN)" go test -tags=e2e ./test/e2e/ -v -ginkgo.v
+test-e2e: setup-test-e2e manifests generate fmt vet cosign ## Run the e2e tests on a Kind cluster of their own. Filter with E2E_LABELS.
+	@mkdir -p "$(ARTIFACTS)"
+	KUBECONFIG="$(E2E_KUBECONFIG)" KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) COSIGN="$(COSIGN)" \
+		E2E_ARGOCD=$(E2E_ARGOCD) ARTIFACTS="$(ARTIFACTS)" \
+		go test -tags=e2e ./test/e2e/ -v -timeout 2h -ginkgo.v \
+		-ginkgo.label-filter="$(E2E_LABELS)" -ginkgo.junit-report="$(ARTIFACTS)/junit-e2e.xml" \
+		|| { $(KIND) export logs "$(ARTIFACTS)/kind" --name $(KIND_CLUSTER); exit 1; }
 	$(MAKE) cleanup-test-e2e
+
+.PHONY: test-e2e-plan
+test-e2e-plan: ## List the e2e specs and their labels without running them. Filter with E2E_LABELS.
+	go test -tags=e2e ./test/e2e/ -v -count=1 -ginkgo.dry-run -ginkgo.v -ginkgo.label-filter="$(E2E_LABELS)"
 
 .PHONY: cleanup-test-e2e
 cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
-	@$(KIND) delete cluster --name $(KIND_CLUSTER)
+	@$(KIND) delete cluster --name $(KIND_CLUSTER) --kubeconfig "$(E2E_KUBECONFIG)"
+	@rm -f "$(E2E_KUBECONFIG)"
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter

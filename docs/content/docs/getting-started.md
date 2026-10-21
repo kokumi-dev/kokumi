@@ -64,112 +64,61 @@ It only declares what differs: Helm values, patches, where the rendered
 artifact is pushed, and how it is promoted. Every application has at least one
 Order; a Product on its own is never rendered or deployed.
 
-Kokumi supports two source types:
+This Product renders the [podinfo](https://github.com/stefanprodan/podinfo)
+Helm chart, and its Order sets two values:
 
-- **Pre-rendered manifest bundle** — an OCI artifact containing `*.yaml` files
-  at its root (no `spec.render` needed).
-- **Helm chart in OCI format** — a standard Helm chart pushed to an OCI registry;
-  add `spec.render.helm` to the Product to control rendering.
+{{< example file="getting-started/product.yaml" >}}
 
-#### Example: pre-rendered manifest bundle
-
-```yaml
-apiVersion: delivery.kokumi.dev/v1alpha1
-kind: Product
-metadata:
-  name: external-secrets
-spec:
-  source:
-    url: oci://ghcr.io/kokumi-dev/testdata/external-secrets
-    version: "0.1.0"
-
-  # Orders may patch anything. Without overrides they may change nothing.
-  overrides:
-    patches:
-      policy: All
----
-apiVersion: delivery.kokumi.dev/v1alpha1
-kind: Order
-metadata:
-  name: external-secrets
-spec:
-  productRef:
-    name: external-secrets
-
-  patches:
-    - target:
-        kind: Deployment
-        name: external-secrets-webhook
-      set:
-        .spec.replicas: "3"
-
-  destination:
-    url: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/external-secrets
-```
-
-#### Example: Helm chart in OCI format
-
-```yaml
-apiVersion: delivery.kokumi.dev/v1alpha1
-kind: Product
-metadata:
-  name: podinfo
-spec:
-  source:
-    url: oci://ghcr.io/stefanprodan/charts/podinfo
-    version: "6.14.1"
-
-  render:
-    helm:
-      namespace: default
-      values:
-        ui:
-          color: "#EF6461"
-          logo: "https://kokumi.dev/images/logo.png"
-
-  overrides:
-    values:
-      policy: All
-    patches:
-      policy: All
----
-apiVersion: delivery.kokumi.dev/v1alpha1
-kind: Order
-metadata:
-  name: podinfo
-spec:
-  productRef:
-    name: podinfo
-
-  values:
-    ui:
-      message: "Hello from Kokumi"
-
-  patches:
-    - target:
-        kind: Deployment
-        name: podinfo
-      set:
-        .spec.replicas: "2"
-
-  destination:
-    url: oci://kokumi-registry.kokumi.svc.cluster.local:5000/preparation/podinfo
-
-  promotion:
-    mode: Manual
-```
+{{< example file="getting-started/order.yaml" >}}
 
 The Order's `values` are deep-merged over the Product's
-`spec.render.helm.values`, and its patches over the Product's patches. The
-Order's settings win. An Order may only change what the Product's `overrides`
-allow; both Products above allow everything (see
-[Restrict what Orders may change](#restrict-what-orders-may-change)).
+`spec.render.helm.values`; the Order's settings win. An Order may only change
+what the Product's `overrides` allow (see
+[Restrict what Orders may change](#restrict-what-orders-may-change)). Every
+Order pushes its Preparations to the bundled registry, below its namespace,
+unless it names another `spec.destination`.
 
-Apply it:
+Apply both to a new namespace, straight from the repository:
 
 ```bash
-kubectl apply -f podinfo.yaml
+kubectl create namespace shop
 ```
+
+{{< apply-example name="getting-started" >}}
+
+The files live in
+[`examples/getting-started`](https://github.com/kokumi-dev/kokumi/tree/main/examples/getting-started),
+next to more examples of what Kokumi does. The e2e tests apply every example
+the same way and check that it does what its docs say.
+
+### Kinds of sources
+
+Kokumi renders four kinds of OCI artifacts. A Preparation holds the result:
+
+| Source | Product | A Preparation holds | Example |
+|---|---|---|---|
+| A Helm chart | `spec.render.helm` | `manifest.yaml`, the rendered chart | `getting-started` |
+| YAML files at the artifact's root | nothing | one `manifest.yaml`, the files merged | `manifest-bundle` |
+| YAML files at the artifact's root | `spec.render.manifest.layout: Multi` | the files, as they are | `multi-file-manifests` |
+| A `kustomization.yaml` at the artifact's root | nothing | the files, as they are; Argo CD builds the kustomization | `kustomize` |
+
+Orders patch every kind of source with `spec.patches`, which set fields by
+path; Helm values are only for charts.
+
+{{< tabs >}}
+{{< tab name="manifest-bundle" >}}
+{{< example file="manifest-bundle/product.yaml" >}}
+{{< example file="manifest-bundle/order.yaml" >}}
+{{< /tab >}}
+{{< tab name="multi-file-manifests" >}}
+{{< example file="multi-file-manifests/product.yaml" >}}
+{{< example file="multi-file-manifests/order.yaml" >}}
+{{< /tab >}}
+{{< tab name="kustomize" >}}
+{{< example file="kustomize/product.yaml" >}}
+{{< example file="kustomize/order.yaml" >}}
+{{< /tab >}}
+{{< /tabs >}}
 
 ### Add another variant
 
@@ -217,9 +166,9 @@ You never create Preparations manually. Every Order change produces a new one
 and the full history is retained indefinitely.
 
 ```bash
-kubectl get preparations --watch
-# NAME                            ORDER              READY   REASON   CREATED   AGE
-# external-secrets-d7ce0c46a686   external-secrets   True    Ready    5s        5s
+kubectl get preparations -n shop --watch
+# NAME                   ORDER     READY   REASON   CREATED   AGE
+# podinfo-d7ce0c46a686   podinfo   True    Ready    5s        5s
 ```
 
 ## Activate with a Serving
@@ -256,13 +205,13 @@ namespace and Argo CD syncs the manifests into the cluster.
 > the matching annotation; any other `Application` is kept.
 
 ```bash
-kubectl get servings
-# NAME               ORDER              TARGET                          READY   REASON     APPROVED              VERIFIED             AGE
-# external-secrets   external-secrets   external-secrets-d7ce0c46a686   True    Deployed   ApprovalNotRequired   SignaturesVerified   10s
+kubectl get servings -n shop
+# NAME      ORDER     TARGET                 READY   REASON     APPROVED              VERIFIED             AGE
+# podinfo   podinfo   podinfo-d7ce0c46a686   True    Deployed   ApprovalNotRequired   SignaturesVerified   10s
 
 kubectl get applications -n argocd
-# NAME               SYNC STATUS   HEALTH STATUS
-# external-secrets   Synced        Healthy
+# NAME      SYNC STATUS   HEALTH STATUS
+# podinfo   Synced        Healthy
 ```
 
 To roll back, promote any previous Preparation. No re-rendering required.
@@ -279,36 +228,25 @@ Orders. Helm values and patches each have a policy:
 | `Listed` | only what is listed in `paths` (values) or `targets` (patches) |
 | `All` | anything |
 
+The getting-started Product lets its Orders set two Helm values, and the
+kustomize Product lets them scale one Deployment:
+
 ```yaml
-apiVersion: delivery.kokumi.dev/v1alpha1
-kind: Product
-metadata:
-  name: podinfo
 spec:
-  source:
-    url: oci://ghcr.io/stefanprodan/charts/podinfo
-    version: "6.14.1"
-
-  render:
-    helm:
-      values:
-        ui:
-          color: "#EF6461"
-
   overrides:
     values:
       policy: Listed
       paths:
-        - ui.message
-        - replicaCount
+      - ui.message
+      - replicaCount
     patches:
       policy: Listed
       targets:
-        - target:
-            kind: Deployment
-            name: podinfo
-          paths:
-            - .spec.replicas
+      - target:
+          kind: Deployment
+          name: podinfo
+        paths:
+        - .spec.replicas
 ```
 
 Here Orders may only set the listed Helm value paths and patch the listed
@@ -350,36 +288,16 @@ time.
 
 If your source lives in a private registry, store the credentials in a
 `kubernetes.io/dockerconfigjson` Secret, create a **Registry** for the part of
-the registry they are for, and list it on the Product:
+the registry they are for, and list it on the Product, as the
+[private-registry example](https://github.com/kokumi-dev/kokumi/tree/main/examples/private-registry)
+does:
 
 ```bash
-kubectl create secret docker-registry ghcr-my-org -n kokumi \
+kubectl create secret docker-registry my-org-credentials -n shop \
     --docker-server=ghcr.io --docker-username=<user> --docker-password=<token>
 ```
 
-```yaml
-apiVersion: delivery.kokumi.dev/v1alpha1
-kind: Registry
-metadata:
-  name: ghcr-my-org
-  namespace: kokumi
-spec:
-  url: oci://ghcr.io/my-org
-  secretRef:
-    name: ghcr-my-org
----
-apiVersion: delivery.kokumi.dev/v1alpha1
-kind: Product
-metadata:
-  name: my-app
-  namespace: kokumi
-spec:
-  source:
-    url: oci://ghcr.io/my-org/charts/my-app
-    version: "1.2.3"
-  registryRefs:
-  - name: ghcr-my-org
-```
+{{< example file="private-registry/registry.yaml" >}}
 
 The Product's Registries authenticate its source, its images and its vendored
 copy; an Order lists the Registries of its own destination. See
