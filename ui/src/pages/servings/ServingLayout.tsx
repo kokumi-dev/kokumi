@@ -6,6 +6,7 @@ import ResourceNotFound from '../../components/layout/ResourceNotFound'
 import Badge from '../../components/shared/Badge'
 import { TabNav } from '../../components/ui'
 import { paths } from '../../routes/paths'
+import { stateTone } from '../../utils/state'
 import type { ServingContext } from './servingContext'
 import layout from '../../components/layout/layout.module.css'
 
@@ -40,7 +41,7 @@ export default function ServingLayout() {
           { label: serving.order, to: paths.order(serving.namespace, serving.order, 'servings') },
         ]}
         title={serving.name}
-        badge={<Badge state={serving.state} />}
+        badge={<Badge state={serving.state} tone={stateTone(serving)} />}
         actions={argoURL && (
           <a className={layout.inlineLink} href={argoURL} target="_blank" rel="noopener noreferrer">Open in Argo CD ↗</a>
         )}

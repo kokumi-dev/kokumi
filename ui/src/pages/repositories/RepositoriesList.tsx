@@ -14,6 +14,7 @@ import RelativeTime from '../../components/shared/RelativeTime'
 import { ButtonLink, PlusIcon } from '../../components/ui'
 import { paths } from '../../routes/paths'
 import { stripOCIScheme } from '../../utils/format'
+import { stateTone } from '../../utils/state'
 import layout from '../../components/layout/layout.module.css'
 
 export default function RepositoriesList() {
@@ -54,7 +55,7 @@ export default function RepositoriesList() {
                 width: '24%',
                 cell: (r) => <NameCell to={paths.repository(r.namespace, r.name)} name={r.name} secondary={r.namespace} />,
               },
-              { header: 'Status', width: '130px', cell: (r) => <StatusIndicator state={r.state} /> },
+              { header: 'Status', width: '130px', cell: (r) => <StatusIndicator state={r.state} tone={stateTone(r)} /> },
               { header: 'URL', truncate: true, title: (r) => r.url, cell: (r) => stripOCIScheme(r.url) },
               {
                 header: 'Registry',

@@ -117,7 +117,7 @@ export function signatures(node: ArtifactNode): Verification[] {
  */
 export function statusOf(node: ArtifactNode): Status {
   const v = node.verification
-  if (v?.verified) return { tone: 'ok', label: 'Verified' }
+  if (v?.verified) return { tone: 'success', label: 'Verified' }
   switch (v?.reason) {
     case 'UntrustedSigner':
       return { tone: 'neutral', label: 'Unknown signer' }
@@ -126,8 +126,8 @@ export function statusOf(node: ArtifactNode): Status {
     case 'NotChecked':
       return { tone: 'neutral', label: 'Not checked yet' }
   }
-  if (v) return { tone: 'bad', label: 'Not verified' }
-  if (signatures(node).length > 0) return { tone: 'ok', label: 'Signed' }
+  if (v) return { tone: 'danger', label: 'Not verified' }
+  if (signatures(node).length > 0) return { tone: 'success', label: 'Signed' }
   if (isEvidence(node)) return { tone: 'neutral', label: 'Not checked' }
   if ((node.referrers ?? []).some(claimsSignature)) return { tone: 'neutral', label: 'Signed · not checked' }
   return { tone: 'neutral', label: 'No signature' }

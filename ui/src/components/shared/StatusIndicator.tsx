@@ -1,40 +1,12 @@
 import styles from './StatusIndicator.module.css'
+import type { Tone } from './tone'
 
-type Tone = 'success' | 'warning' | 'error' | 'neutral'
-
-function toneFor(state: string): Tone {
-  switch (state.toLowerCase()) {
-    case 'ready':
-    case 'deployed':
-    case 'resolved':
-    case 'vendored':
-    case 'connected':
-    case 'listed':
-    case 'approved':
-      return 'success'
-    case 'pending':
-    case 'processing':
-    case 'deploying':
-    case 'progressing':
-    case 'waiting':
-    case 'deleting':
-      return 'warning'
-    case 'failed':
-    case 'error':
-    case 'deploymentfailed':
-      return 'error'
-    default:
-      return 'neutral'
-  }
-}
-
-/** Compact status for lists: a coloured dot followed by the state text. */
-export default function StatusIndicator({ state }: { state?: string }) {
-  const label = state || 'Unknown'
+/** Compact status for lists: a dot in the colour of tone followed by the state text. */
+export default function StatusIndicator({ state, tone }: { state?: string; tone: Tone }) {
   return (
-    <span className={`${styles.status} ${styles[toneFor(label)]}`}>
+    <span className={`${styles.status} ${styles[tone]}`}>
       <span className={styles.dot} aria-hidden />
-      {label}
+      {state || 'Unknown'}
     </span>
   )
 }

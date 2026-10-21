@@ -37,27 +37,7 @@
   text-overflow: ellipsis;
 }
 
-/* ── Order ── */
-
-/* A newer Preparation waits for promotion. */
-.update {
-  flex: none;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--color-accent);
-  white-space: nowrap;
-}
-
-/* The Order runs the current Product revision. */
-.current {
-  flex: none;
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--color-success);
-  white-space: nowrap;
-}
-
-/* ── New Order ── */
+/* ── First Order ── */
 
 .add {
   display: flex;
@@ -69,13 +49,12 @@
   border-radius: 12px;
   font-size: 0.875rem;
   font-weight: 600;
-  color: var(--color-text-muted-light);
+  color: var(--color-accent);
   text-decoration: none;
 }
 
 a.add:hover {
   border-color: var(--color-accent);
-  color: var(--color-accent);
 }
 
 a.add:focus-visible {
@@ -83,12 +62,8 @@ a.add:focus-visible {
   box-shadow: var(--control-focus-ring);
 }
 
-/* The next step of a Product without Orders stands out. */
-a.addFirst {
-  color: var(--color-accent);
-}
-
 .addDisabled {
+  color: var(--color-text-muted-light);
   cursor: not-allowed;
   opacity: 0.6;
 }

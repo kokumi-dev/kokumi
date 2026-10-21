@@ -3,6 +3,7 @@ import type { Serving } from '../../api/types'
 import { useServings } from '../../hooks/useServings'
 import { useOrders } from '../../hooks/useOrders'
 import { servingQueue } from '../../utils/promotion'
+import { stateTone } from '../../utils/state'
 import { matchesFilter, useFilterParam } from '../../hooks/useFilterParam'
 import PageHeader from '../../components/layout/PageHeader'
 import Section from '../../components/layout/Section'
@@ -55,7 +56,7 @@ export default function ServingsList() {
                 width: '20%',
                 cell: (s) => <NameCell to={paths.serving(s.namespace, s.name)} name={s.name} secondary={s.namespace} />,
               },
-              { header: 'Status', width: '130px', cell: (s) => <StatusIndicator state={s.state} /> },
+              { header: 'Status', width: '130px', cell: (s) => <StatusIndicator state={s.state} tone={stateTone(s)} /> },
               {
                 header: 'Order',
                 truncate: true,

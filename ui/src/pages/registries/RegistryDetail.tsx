@@ -14,6 +14,7 @@ import ConfirmDialog from '../../components/shared/ConfirmDialog'
 import { Button, ButtonLink, EditIcon, TrashIcon } from '../../components/ui'
 import { paths } from '../../routes/paths'
 import { formatDate } from '../../utils/format'
+import { stateTone } from '../../utils/state'
 import layout from '../../components/layout/layout.module.css'
 
 export default function RegistryDetail() {
@@ -37,7 +38,7 @@ export default function RegistryDetail() {
       <PageHeader
         breadcrumbs={[{ label: 'Registries', to: paths.registries() }, { label: registry.namespace }]}
         title={registry.name}
-        badge={<Badge state={registry.state ?? ''} />}
+        badge={<Badge state={registry.state ?? ''} tone={stateTone(registry)} />}
         subtitle={<span className={layout.mono}>{registry.url}</span>}
         actions={
           <>

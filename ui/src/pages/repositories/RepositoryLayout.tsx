@@ -9,6 +9,7 @@ import Badge from '../../components/shared/Badge'
 import ConfirmDialog from '../../components/shared/ConfirmDialog'
 import { Button, ButtonLink, EditIcon, PlusIcon, TabNav, TrashIcon } from '../../components/ui'
 import { paths } from '../../routes/paths'
+import { stateTone } from '../../utils/state'
 import layout from '../../components/layout/layout.module.css'
 
 export default function RepositoryLayout() {
@@ -32,7 +33,7 @@ export default function RepositoryLayout() {
       <PageHeader
         breadcrumbs={[{ label: 'Repositories', to: paths.repositories() }, { label: repository.namespace }]}
         title={repository.name}
-        badge={<Badge state={repository.state ?? ''} />}
+        badge={<Badge state={repository.state ?? ''} tone={stateTone(repository)} />}
         subtitle={<span className={layout.mono}>{repository.url}</span>}
         actions={
           <>

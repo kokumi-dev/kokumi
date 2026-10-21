@@ -3,6 +3,7 @@ import type { Product } from '../../api/types'
 import { useProducts } from '../../hooks/useProducts'
 import { useOrders } from '../../hooks/useOrders'
 import { usePreparations } from '../../hooks/usePreparations'
+import { useServings } from '../../hooks/useServings'
 import { matchesFilter, useFilterParam } from '../../hooks/useFilterParam'
 import { useDeniedReason } from '../../hooks/useCapability'
 import PageHeader from '../../components/layout/PageHeader'
@@ -16,6 +17,7 @@ import RelativeTime from '../../components/shared/RelativeTime'
 import { ButtonLink, Counter, PlusIcon } from '../../components/ui'
 import { paths } from '../../routes/paths'
 import { ordersByProduct, productDeletingReason, productKey, productSourceRef } from '../../utils/products'
+import { stateTone } from '../../utils/state'
 import layout from '../../components/layout/layout.module.css'
 import { orderInsights } from './orderInsights'
 import ProductOrderTree from './ProductOrderTree'
@@ -24,6 +26,7 @@ export default function ProductsList() {
   const products = useProducts()
   const orders = useOrders()
   const preparations = usePreparations()
+  const servings = useServings()
   const orderDenied = useDeniedReason('orders:create')
   const [query, setQuery] = useFilterParam()
   const createDenied = useDeniedReason('products:create')
@@ -79,7 +82,7 @@ export default function ProductsList() {
               render: (p) => (
                 <ProductOrderTree
                   product={p}
-                  insights={orders === null ? null : orderInsights(ordersOf(p), preparations)}
+                  insights={orders === null ? null : orderInsights(ordersOf(p), preparations, servings)}
                   orderDenied={productDeletingReason(p) ?? orderDenied}
                 />
               ),
@@ -91,7 +94,7 @@ export default function ProductsList() {
                 width: '22%',
                 cell: (p) => <NameCell to={paths.product(p.namespace, p.name)} name={p.name} secondary={p.namespace} />,
               },
-              { header: 'Status', width: '130px', cell: (p) => <StatusIndicator state={p.state} /> },
+              { header: 'Status', width: '130px', cell: (p) => <StatusIndicator state={p.state} tone={stateTone(p)} /> },
               { header: 'Source', truncate: true, title: (p) => p.source.url || productSourceRef(p), cell: productSourceRef },
               {
                 header: 'Version',

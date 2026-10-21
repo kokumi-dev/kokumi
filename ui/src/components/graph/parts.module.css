@@ -64,15 +64,23 @@
   height: 13px;
 }
 
-.status_ok {
+.status_success {
   color: var(--color-success);
+}
+
+.status_warning {
+  color: var(--color-warning);
+}
+
+.status_accent {
+  color: var(--color-accent);
 }
 
 .status_neutral {
   color: var(--color-text-muted-light);
 }
 
-.status_bad {
+.status_danger {
   color: var(--color-danger);
 }
 
@@ -101,13 +109,6 @@
   white-space: nowrap;
   text-overflow: ellipsis;
   color: var(--color-text-on-light);
-}
-
-.summaryLine {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
 }
 
 /* ── Node button and cards ── */

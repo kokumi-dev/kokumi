@@ -5,6 +5,8 @@ import StatusIndicator from '../../components/shared/StatusIndicator'
 import RelativeTime from '../../components/shared/RelativeTime'
 import { paths } from '../../routes/paths'
 import { plural } from '../../utils/format'
+import { pendingLabel, pendingText } from '../../utils/promotion'
+import { stateTone } from '../../utils/state'
 import layout from '../../components/layout/layout.module.css'
 import type { OrderInsight } from './orderInsights'
 import styles from './ProductOrderTree.module.css'
@@ -70,7 +72,7 @@ export default function ProductOrderTree({ product, insights, orderDenied }: Pro
                 </span>
               </span>
             </td>
-            <td><StatusIndicator state={order.state} /></td>
+            <td><StatusIndicator state={order.state} tone={stateTone(order)} /></td>
             <td>
               <span className={styles.running}>
                 {insight.active ? (
@@ -81,8 +83,10 @@ export default function ProductOrderTree({ product, insights, orderDenied }: Pro
                 ) : (
                   <span className={styles.muted}>Not deployed</span>
                 )}
-                {insight.updateReady && (
-                  <span className={styles.update} title="A newer Preparation is waiting to be promoted">Update ready</span>
+                {insight.pending && (
+                  <span className={insight.pending.kind === 'unpromoted' ? styles.update : styles.waiting} title={pendingText(insight.pending)}>
+                    {pendingLabel(insight.pending)}
+                  </span>
                 )}
               </span>
             </td>

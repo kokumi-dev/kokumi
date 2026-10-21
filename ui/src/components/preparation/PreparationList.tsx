@@ -13,6 +13,7 @@ import { approvalLabel, promoteLabel } from '../../utils/preparations'
 import { useDeniedReason } from '../../hooks/useCapability'
 import { useServings } from '../../hooks/useServings'
 import { queuedPromotion } from '../../utils/promotion'
+import { stateTone } from '../../utils/state'
 import layout from '../layout/layout.module.css'
 import styles from './PreparationList.module.css'
 
@@ -89,7 +90,7 @@ export default function PreparationList({ preparations, mode, product }: Props) 
                 <PreparationFindings preparation={prep} product={product} />
               </div>
 
-              <StatusIndicator state={prep.state} />
+              <StatusIndicator state={prep.state} tone={stateTone(prep)} />
 
               <div className={styles.actions}>
                 {queued ? (

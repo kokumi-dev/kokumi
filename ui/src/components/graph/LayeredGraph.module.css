@@ -2,8 +2,10 @@
  * The ranks sit side by side, centred on each other; the cards of a rank
  * share its width and the height of its tallest card. With equal heights
  * the middle of a rank is the middle of its middle card, so an edge from a
- * lone node to the middle card of the next rank runs straight. The edges
- * are drawn behind them, in the colour --edge of the graph view.
+ * lone node to the middle card of the next rank runs straight. A lane, the
+ * slot of an edge that crosses the rank, is a row of no height
+ * between the gaps. The edges are drawn behind them, in the colour --edge
+ * of the graph view.
  */
 .graph {
   position: relative;
@@ -40,11 +42,10 @@
   stroke-linecap: round;
 }
 
+/* Its rows, row gap and padding are set per rank, around its lanes. */
 .rank {
   position: relative;
   display: grid;
-  grid-auto-rows: 1fr;
-  gap: 12px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -58,4 +59,8 @@
 /* The card fills its row, so the row's middle is the card's middle. */
 .node > * {
   flex: 1;
+}
+
+.lane {
+  display: block;
 }

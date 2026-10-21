@@ -100,7 +100,7 @@
   color: var(--color-text-muted-light);
 }
 
-.noteOk {
+.noteSuccess {
   color: var(--color-success);
 }
 

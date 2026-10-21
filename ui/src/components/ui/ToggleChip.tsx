@@ -1,3 +1,4 @@
+import type { Tone } from '../shared/tone'
 import styles from './ToggleChip.module.css'
 
 interface ToggleChipProps {
@@ -7,7 +8,7 @@ interface ToggleChipProps {
   pressed: boolean
   onToggle: () => void
   /** Colours a dot before the label, e.g. by severity. */
-  tone?: 'success' | 'warning' | 'danger' | 'neutral'
+  tone?: Tone
 }
 
 /** A filter that is on or off; several chips together select any of their values. */

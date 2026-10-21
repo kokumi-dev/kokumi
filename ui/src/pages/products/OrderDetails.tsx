@@ -7,6 +7,7 @@ import { ButtonLink, Disclosure } from '../../components/ui'
 import { paths } from '../../routes/paths'
 import { formatDate, formatDuration, plural } from '../../utils/format'
 import { orderDestinationLabel } from '../../utils/products'
+import { pendingText } from '../../utils/promotion'
 import { objectToYaml } from '../../utils/yaml'
 import layout from '../../components/layout/layout.module.css'
 import { OrderIcon } from './orderIcons'
@@ -17,12 +18,12 @@ interface Props {
   onClose: () => void
 }
 
-/** What the Order runs and whether something newer waits, in a sentence. */
-function deliveryText({ active, activeVersion, updateReady, order }: OrderInsight): string {
+/** What the Order runs and what its latest Preparation waits for, in a sentence or two. */
+function deliveryText({ active, activeVersion, pending }: OrderInsight): string {
   const version = activeVersion ? `, version ${activeVersion}` : ''
-  if (active && updateReady) return `Runs an older Preparation${version}. Its latest Preparation is not promoted yet.`
+  if (active && pending) return `Runs an older Preparation${version}. ${pendingText(pending)}`
   if (active) return `Runs its latest Preparation${version}.`
-  if (order.latestRevision) return 'Nothing is deployed yet: its latest Preparation is not promoted.'
+  if (pending) return `Nothing is deployed yet. ${pendingText(pending)}`
   return 'Nothing is rendered yet.'
 }
 
@@ -42,7 +43,7 @@ function upstreamText(order: Order): string {
 export default function OrderDetails({ insight, onClose }: Props) {
   const [open, setOpen] = useState<string | null>(null)
   const { order } = insight
-  const status = stateStatus(order.state)
+  const status = stateStatus(order)
   const ready = order.conditions?.find((c) => c.type === 'Ready')
   const values = objectToYaml(order.values ?? {})
   const patches = order.patches ?? []
@@ -66,7 +67,7 @@ export default function OrderDetails({ insight, onClose }: Props) {
       onClose={onClose}
     >
       <Prose>
-        {status.tone !== 'ok' && ready?.message && <p>{ready.message}</p>}
+        {status.tone !== 'success' && ready?.message && <p>{ready.message}</p>}
         <p>{deliveryText(insight)}</p>
       </Prose>
 

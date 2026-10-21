@@ -1,10 +1,11 @@
 import { useState, type ReactNode } from 'react'
 import { Button } from '../ui'
+import type { Tone } from '../shared/tone'
 import styles from './GraphView.module.css'
 
 /** A line of explanation shown with a graph. */
 export interface Note {
-  tone?: 'ok' | 'warning'
+  tone?: Extract<Tone, 'success' | 'warning'>
   text: ReactNode
 }
 
@@ -54,7 +55,7 @@ export default function GraphView({ loading, error, help, inspector, notes = [],
       {notes.length > 0 && (
         <ul className={styles.notes}>
           {notes.map((note, i) => (
-            <li key={i} className={note.tone === 'ok' ? styles.noteOk : note.tone === 'warning' ? styles.noteWarning : undefined}>
+            <li key={i} className={note.tone === 'success' ? styles.noteSuccess : note.tone === 'warning' ? styles.noteWarning : undefined}>
               {note.text}
             </li>
           ))}

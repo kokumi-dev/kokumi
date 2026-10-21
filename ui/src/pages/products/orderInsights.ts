@@ -1,6 +1,8 @@
-import type { Order, Preparation } from '../../api/types'
+import type { Order, Preparation, Serving } from '../../api/types'
 import type { Status } from '../../components/graph/parts'
 import { plural } from '../../utils/format'
+import { pendingUpdate, type PendingUpdate } from '../../utils/promotion'
+import { stateTone, type Readiness } from '../../utils/state'
 
 /** What an Order currently runs and whether something newer waits. */
 export interface OrderInsight {
@@ -11,8 +13,8 @@ export interface OrderInsight {
   activeVersion?: string
   /** True while the Preparations that hold the active version load. */
   versionLoading: boolean
-  /** True when the latest Preparation is not the one being served. */
-  updateReady: boolean
+  /** Why the latest Preparation is not deployed yet; undefined when it is, or there is none. */
+  pending?: PendingUpdate
   /** True when the active Preparation renders the Product revision its Orders render now. */
   currentRevision: boolean
   /** What the Order changes on its Product, e.g. "2 values · 1 patch". */
@@ -20,23 +22,30 @@ export interface OrderInsight {
 }
 
 /**
- * Derives the insight for each Order. What an Order runs comes with the
- * Order; only its version and revision need the Preparations, which may
- * still load. revision is the Product revision its Orders render now.
+ * Derives the insight for each Order of one Product. What an Order runs
+ * comes with the Order; only its version and revision need the
+ * Preparations, and what holds its latest Preparation the Servings, which
+ * may still load. revision is the Product revision its Orders render now.
  */
-export function orderInsights(orders: Order[], preparations: Preparation[] | null, revision?: string): OrderInsight[] {
+export function orderInsights(
+  orders: Order[],
+  preparations: Preparation[] | null,
+  servings: Serving[] | null,
+  revision?: string,
+): OrderInsight[] {
+  const find = (order: Order, name?: string) =>
+    name ? preparations?.find((p) => p.namespace === order.namespace && p.name === name) : undefined
+
   return orders.map((order) => {
     const active = order.activePreparation
-    const prep = active
-      ? preparations?.find((p) => p.namespace === order.namespace && p.name === active)
-      : undefined
+    const prep = find(order, active)
 
     return {
       order,
       active,
       activeVersion: prep ? versionOf(prep) : undefined,
       versionLoading: !!active && preparations === null,
-      updateReady: !!order.latestRevision && !!active && order.latestRevision !== active,
+      pending: pendingUpdate(order, find(order, order.latestRevision), orders, servings),
       currentRevision: !!revision && prep?.productRevision === revision,
       overlay: overlaySummary(order),
     }
@@ -66,15 +75,6 @@ function countLeaves(value: unknown): number {
 }
 
 /** The status mark of the state of a Product or an Order. */
-export function stateStatus(state?: string): Status {
-  const label = state || 'Unknown'
-  switch (label) {
-    case 'Ready':
-    case 'Resolved':
-      return { tone: 'ok', label }
-    case 'Failed':
-      return { tone: 'bad', label }
-    default:
-      return { tone: 'neutral', label }
-  }
+export function stateStatus(object: Readiness): Status {
+  return { tone: stateTone(object), label: object.state || 'Unknown' }
 }

@@ -7,6 +7,7 @@ import NameCell from '../../components/layout/NameCell'
 import StatusIndicator from '../../components/shared/StatusIndicator'
 import RelativeTime from '../../components/shared/RelativeTime'
 import { paths } from '../../routes/paths'
+import { stateTone } from '../../utils/state'
 import { useOrderContext } from './orderContext'
 import layout from '../../components/layout/layout.module.css'
 
@@ -30,7 +31,7 @@ export default function OrderServings() {
               width: '30%',
               cell: (s) => <NameCell to={paths.serving(s.namespace, s.name)} name={s.name} secondary={s.namespace} />,
             },
-            { header: 'Status', width: '130px', cell: (s) => <StatusIndicator state={s.state} /> },
+            { header: 'Status', width: '130px', cell: (s) => <StatusIndicator state={s.state} tone={stateTone(s)} /> },
             {
               header: 'Deployed',
               truncate: true,

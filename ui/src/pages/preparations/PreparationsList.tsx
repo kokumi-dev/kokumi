@@ -16,6 +16,7 @@ import PreparationFindings from '../../components/vulnerability/PreparationFindi
 import { paths } from '../../routes/paths'
 import { approvalLabel } from '../../utils/preparations'
 import { productOf } from '../../utils/products'
+import { stateTone } from '../../utils/state'
 import layout from '../../components/layout/layout.module.css'
 
 export default function PreparationsList() {
@@ -68,7 +69,7 @@ export default function PreparationsList() {
                   />
                 ),
               },
-              { header: 'Status', width: '110px', cell: (p) => <StatusIndicator state={p.state} /> },
+              { header: 'Status', width: '110px', cell: (p) => <StatusIndicator state={p.state} tone={stateTone(p)} /> },
               {
                 header: 'Order',
                 truncate: true,
