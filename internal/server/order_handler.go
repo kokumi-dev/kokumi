@@ -8,6 +8,7 @@ import (
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/namespace"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -124,6 +125,11 @@ func handleCreateOrder(deps *apiDeps) http.HandlerFunc {
 			},
 		}
 
+		if err := setEnvironment(order, req.Environment); err != nil {
+			respondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
 		if req.CommitMessage != nil {
 			if order.Annotations == nil {
 				order.Annotations = map[string]string{}
@@ -179,6 +185,10 @@ func handleUpdateOrder(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
+		if err := setEnvironment(order, req.Environment); err != nil {
+			respondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		order.Spec.Values = valuesFromDTO(req.Values)
 		order.Spec.Destination = destinationFromDTO(req.Destination)
 		order.Spec.Patches = patchesFromDTO(req.Patches)
@@ -205,6 +215,23 @@ func handleUpdateOrder(deps *apiDeps) http.HandlerFunc {
 
 		respondJSON(w, http.StatusOK, orderToDTO(*order, ""))
 	}
+}
+
+// setEnvironment sets the environment label of order to environment, or
+// removes it when environment is empty, and leaves the other labels alone.
+func setEnvironment(order *deliveryv1alpha1.Order, environment string) error {
+	if environment == "" {
+		delete(order.Labels, deliveryv1alpha1.LabelEnvironment)
+		return nil
+	}
+	if errs := validation.IsValidLabelValue(environment); len(errs) > 0 {
+		return fmt.Errorf("environment %q is not a valid label value: %s", environment, errs[0])
+	}
+	if order.Labels == nil {
+		order.Labels = map[string]string{}
+	}
+	order.Labels[deliveryv1alpha1.LabelEnvironment] = environment
+	return nil
 }
 
 // UpdateOrderEditsRequest is the body for PUT /api/v1/orders/{namespace}/{name}/edits.

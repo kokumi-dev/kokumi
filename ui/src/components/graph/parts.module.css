@@ -147,11 +147,6 @@
   border-color: var(--color-border-emphasis);
 }
 
-.staticCard,
-.staticCard:hover {
-  border-color: var(--color-border);
-}
-
 .selected,
 .selected:hover {
   border-color: var(--color-accent);

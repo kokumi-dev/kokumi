@@ -97,10 +97,11 @@ func stateFromConditions(conditions []metav1.Condition) string {
 // Preparation (from the linked Serving) into a OrderDTO.
 func orderToDTO(r deliveryv1alpha1.Order, activePreparation string) OrderDTO {
 	dto := OrderDTO{
-		Name:       r.Name,
-		Namespace:  r.Namespace,
-		Labels:     r.Labels,
-		ProductRef: ProductRefDTO{Name: r.Spec.ProductRef.Name},
+		Name:        r.Name,
+		Namespace:   r.Namespace,
+		Labels:      r.Labels,
+		Environment: r.Labels[deliveryv1alpha1.LabelEnvironment],
+		ProductRef:  ProductRefDTO{Name: r.Spec.ProductRef.Name},
 		Destination: func() OCIDestinationDTO {
 			if d := destinationToDTO(r.Spec.Destination); d != nil {
 				return *d

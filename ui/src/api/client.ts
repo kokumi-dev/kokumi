@@ -93,6 +93,7 @@ export function createOrder(data: OrderFormData, commitMessage?: string): Promis
       namespace: data.namespace,
       name: data.name,
       productRef: data.productRef,
+      environment: data.environment || undefined,
       values: valuesBody(data.values),
       destination: data.destination,
       registryRefs: data.registryRefs,
@@ -107,9 +108,9 @@ export function createOrder(data: OrderFormData, commitMessage?: string): Promis
 }
 
 /**
- * Replaces the spec of an Order. Its Product cannot be changed. The
- * promotion is replaced as a whole, so stages and checks left out are
- * removed.
+ * Replaces the spec of an Order, and its environment. Its Product cannot be
+ * changed. The promotion is replaced as a whole, so stages and checks left
+ * out are removed, and an empty environment removes the Order's.
  */
 export function updateOrder(
   namespace: string,
@@ -120,6 +121,7 @@ export function updateOrder(
   return request<Order>(`/orders/${namespace}/${name}`, {
     method: 'PUT',
     body: JSON.stringify({
+      environment: data.environment,
       values: valuesBody(data.values),
       destination: data.destination,
       registryRefs: data.registryRefs,

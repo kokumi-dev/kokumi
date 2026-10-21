@@ -32,6 +32,12 @@ const (
 	// which lives in the argocd namespace, back to the Serving, which lives
 	// in its own namespace.
 	LabelServingNamespace = "delivery.kokumi.dev/serving-namespace"
+
+	// LabelEnvironment groups the Orders of a Product that form one
+	// environment of its promotion pipeline, such as the regional variants of
+	// int or prod. Users set it; the UI draws an environment as one column of
+	// the pipeline. It is metadata, not intent: changing it renders nothing.
+	LabelEnvironment = "delivery.kokumi.dev/environment"
 )
 
 // Annotation keys applied to kokumi-managed resources.

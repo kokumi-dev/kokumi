@@ -75,6 +75,7 @@ export default function OrderDetails({ insight, onClose }: Props) {
         <Fact label="Running">{prepLink(order.activePreparation)}</Fact>
         {insight.activeVersion && <Fact label="Version">{insight.activeVersion}</Fact>}
         <Fact label="Latest">{prepLink(order.latestRevision)}</Fact>
+        {order.environment && <Fact label="Environment">{order.environment}</Fact>}
         <Fact label="Promotion">{promotionText(order)}</Fact>
         {!!order.after?.length && <Fact label="Runs after">{upstreamText(order)}</Fact>}
         {insight.currentRevision && <Fact label="Revision">Runs the current Product revision</Fact>}

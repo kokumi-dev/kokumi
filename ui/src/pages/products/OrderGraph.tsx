@@ -1,14 +1,14 @@
 import { Link } from 'react-router'
 import type { Order, Preparation, Product, Serving } from '../../api/types'
-import GraphView from '../../components/graph/GraphView'
+import GraphView, { type Note } from '../../components/graph/GraphView'
 import LayeredGraph, { type GraphEdge, type GraphNode } from '../../components/graph/LayeredGraph'
-import { Chip, NodeCard, NodeIcon, NodeSummary, StaticCard, TagIcon, type Status } from '../../components/graph/parts'
+import { Chip, NodeCard, NodeIcon, NodeSummary, TagIcon, type Status } from '../../components/graph/parts'
 import { useGraphSelection } from '../../components/graph/useGraphSelection'
 import { paths } from '../../routes/paths'
-import { productSourceRef } from '../../utils/products'
 import { pendingLabel, pendingText } from '../../utils/promotion'
 import OrderDetails from './OrderDetails'
-import { OrderIcon, ProductIcon } from './orderIcons'
+import { environmentLayout } from './environments'
+import { OrderIcon } from './orderIcons'
 import { orderInsights, stateStatus, type OrderInsight } from './orderInsights'
 import styles from './OrderGraph.module.css'
 
@@ -24,65 +24,63 @@ interface Props {
   orderDenied?: string
 }
 
-const productNode = 'product'
 const newOrderNode = 'new-order'
-const orderNode = (order: Order) => `order:${order.name}`
+const orderNode = (name: string) => `order:${name}`
 
 /**
- * OrderGraph draws a Product and its Orders from left to right, each Order
- * after the Orders it runs after, and the details of the Order selected
- * beside them. An Order without upstream stages follows the Product. A
- * Product without Orders is followed by a link to create the first; the page
- * header offers it otherwise.
+ * OrderGraph draws the Orders of a Product from left to right, each after
+ * the Orders it runs after, and the details of the Order selected beside
+ * them. When Orders name their environment, each environment is a column,
+ * its Orders stacked by wave, and only the edges between environments are
+ * drawn. A Product without Orders shows a link to create the first; the
+ * page header offers it otherwise.
  */
 export default function OrderGraph({ product, orders, preparations, servings, orderDenied }: Props) {
   const { selected, toggle, clear } = useGraphSelection()
-  const insights = orderInsights(orders ?? [], preparations, servings, product.revision)
-  const current = insights.find((i) => orderNode(i.order) === selected)
+  const environments = environmentLayout(orders ?? [])
+  const layout = environments && 'orders' in environments ? environments : undefined
+  const insights = orderInsights(layout?.orders ?? orders ?? [], preparations, servings, product.revision)
+  const current = insights.find((i) => orderNode(i.order.name) === selected)
   const names = new Set(insights.map((i) => i.order.name))
-  const upstreamsOf = (order: Order) => (order.after ?? []).map((s) => s.order).filter((n) => names.has(n))
 
-  const first = insights.length === 0
-  const nodes: GraphNode[] = [
-    { id: productNode, card: <ProductCard product={product} /> },
-    ...insights.map((insight) => ({
-      id: orderNode(insight.order),
-      card: <OrderCard insight={insight} selected={insight === current} onSelect={() => toggle(orderNode(insight.order))} />,
-    })),
-    ...(first ? [{ id: newOrderNode, card: <FirstOrderCard product={product} denied={orderDenied} /> }] : []),
-  ]
-  const edges: GraphEdge[] = [
-    ...insights.flatMap((insight) => {
-      const upstreams = upstreamsOf(insight.order)
-      return upstreams.length > 0
-        ? upstreams.map((name) => ({ from: `order:${name}`, to: orderNode(insight.order) }))
-        : [{ from: productNode, to: orderNode(insight.order) }]
-    }),
-    ...(first ? [{ from: productNode, to: newOrderNode, style: 'dashed' as const }] : []),
-  ]
+  const nodes: GraphNode[] =
+    insights.length === 0
+      ? [{ id: newOrderNode, card: <FirstOrderCard product={product} denied={orderDenied} /> }]
+      : insights.map((insight) => ({
+          id: orderNode(insight.order.name),
+          card: (
+            <OrderCard
+              insight={insight}
+              wave={layout?.wave.get(insight.order.name)}
+              selected={insight === current}
+              onSelect={() => toggle(orderNode(insight.order.name))}
+            />
+          ),
+        }))
+  const edges: GraphEdge[] = insights.flatMap(({ order }) =>
+    (order.after ?? [])
+      .filter((s) => names.has(s.order) && !layout?.inside(s.order, order.name))
+      .map((s) => ({ from: orderNode(s.order), to: orderNode(order.name) })),
+  )
+  const notes: Note[] =
+    environments && 'conflict' in environments
+      ? [{ tone: 'warning', text: `${environments.conflict} The graph shows the Orders by the Orders they run after instead.` }]
+      : []
 
   return (
     <GraphView
       loading={orders === null}
       inspector={current && <OrderDetails key={current.order.name} insight={current} onClose={clear} />}
+      notes={notes}
     >
-      <LayeredGraph nodes={nodes} edges={edges} label={`${product.name} and its Orders`} />
+      <LayeredGraph
+        nodes={nodes}
+        edges={edges}
+        rank={layout && ((id) => layout.column.get(id.slice('order:'.length)) ?? 0)}
+        titles={layout?.titles}
+        label={`The Orders of ${product.name}`}
+      />
     </GraphView>
-  )
-}
-
-/** The Product the Orders are variants of: its state and the source it renders. */
-function ProductCard({ product }: { product: Product }) {
-  return (
-    <StaticCard className={styles.product}>
-      <span className={styles.row}>
-        <NodeSummary icon={<ProductIcon />} title={product.name} status={stateStatus(product)} />
-        {product.source.version && (
-          <Chip icon={<TagIcon />} mono className={styles.trail} title="The version of the source">{product.source.version}</Chip>
-        )}
-      </span>
-      <span className={styles.source} title={productSourceRef(product)}>{productSourceRef(product)}</span>
-    </StaticCard>
   )
 }
 
@@ -106,14 +104,41 @@ function deliveryStatus({ pending, currentRevision }: OrderInsight): Status | un
   return undefined
 }
 
-/** An Order: its state, the version it runs and what its latest Preparation waits for. */
-function OrderCard({ insight, selected, onSelect }: { insight: OrderInsight; selected: boolean; onSelect: () => void }) {
+/** The wave of an Order in its environment, as a tooltip says it. */
+function waveText(environment: string | undefined, { wave, after }: { wave: number; after: string[] }): string {
+  return `Wave ${wave} of ${environment}: ${after.length > 0 ? `runs after ${after.join(', ')}` : 'runs first'}`
+}
+
+/**
+ * An Order: its state, the version it runs and what its latest Preparation
+ * waits for, and its wave in an environment of several waves.
+ */
+function OrderCard({
+  insight,
+  wave,
+  selected,
+  onSelect,
+}: {
+  insight: OrderInsight
+  wave?: { wave: number; after: string[] }
+  selected: boolean
+  onSelect: () => void
+}) {
   const { order } = insight
   return (
-    <NodeCard nodeKey={orderNode(order)} selected={selected} onClick={onSelect}>
+    <NodeCard nodeKey={orderNode(order.name)} selected={selected} onClick={onSelect}>
       <NodeSummary
         icon={<OrderIcon muted={!insight.active} />}
-        title={order.name}
+        title={
+          wave ? (
+            <>
+              <span className={styles.wave} title={waveText(order.environment, wave)}>{wave.wave}</span>
+              {order.name}
+            </>
+          ) : (
+            order.name
+          )
+        }
         status={stateStatus(order)}
         detail={deliveryStatus(insight)}
       />

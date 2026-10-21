@@ -53,7 +53,7 @@ export default function OrderPipeline({ order, product, orders, servings, latest
           {
             header: 'Stage',
             width: '20%',
-            cell: (s) => <NameCell to={paths.order(s.order.namespace, s.order.name)} name={s.order.name} secondary={s.order.mode} />,
+            cell: (s) => <NameCell to={paths.order(s.order.namespace, s.order.name)} name={s.order.name} secondary={[s.order.environment, s.order.mode].filter(Boolean).join(' · ')} />,
           },
           {
             header: 'Runs after',

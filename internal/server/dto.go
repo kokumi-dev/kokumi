@@ -129,6 +129,7 @@ type OrderDTO struct {
 	Name                 string              `json:"name"`
 	Namespace            string              `json:"namespace"`
 	Labels               map[string]string   `json:"labels,omitempty"`
+	Environment          string              `json:"environment,omitempty"`
 	ProductRef           ProductRefDTO       `json:"productRef"`
 	Values               json.RawMessage     `json:"values,omitempty"`
 	Destination          OCIDestinationDTO   `json:"destination"`
@@ -371,6 +372,7 @@ type CreateOrderRequest struct {
 	Namespace     string              `json:"namespace"`
 	Name          string              `json:"name"`
 	ProductRef    ProductRefDTO       `json:"productRef"`
+	Environment   string              `json:"environment,omitempty"`
 	Values        json.RawMessage     `json:"values,omitempty"`
 	Destination   *OCIDestinationDTO  `json:"destination,omitempty"`
 	RegistryRefs  []RegistryRefDTO    `json:"registryRefs,omitempty"`
@@ -386,6 +388,7 @@ type CreateOrderRequest struct {
 // UpdateOrderRequest is the body for PUT /api/v1/orders/{namespace}/{name}.
 // The Product of an Order cannot be changed.
 type UpdateOrderRequest struct {
+	Environment   string              `json:"environment,omitempty"`
 	Values        json.RawMessage     `json:"values,omitempty"`
 	Destination   *OCIDestinationDTO  `json:"destination,omitempty"`
 	RegistryRefs  []RegistryRefDTO    `json:"registryRefs,omitempty"`

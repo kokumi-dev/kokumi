@@ -56,7 +56,7 @@ export default function ProductOrderTree({ product, insights, orderDenied }: Pro
       {insights.map((insight) => {
         const { order } = insight
         const to = paths.order(order.namespace, order.name)
-        const detail = `${promotion(order)} · ${insight.overlay}`
+        const detail = [order.environment, promotion(order), insight.overlay].filter(Boolean).join(' · ')
         return (
           <tr key={order.name} className={`${styles.row} ${styles.orderRow}`} onClick={(e) => openOrder(e, to)}>
             <td className={styles.lead} />

@@ -5,7 +5,8 @@
  * lone node to the middle card of the next rank runs straight. A lane, the
  * slot of an edge that crosses the rank, is a row of no height
  * between the gaps. The edges are drawn behind them, in the colour --edge
- * of the graph view.
+ * of the graph view. Each rank sits in a column of the full height, so that
+ * the titles of all ranks line up above them.
  */
 .graph {
   position: relative;
@@ -40,6 +41,30 @@
 .dotted .line {
   stroke-dasharray: 0 3.5;
   stroke-linecap: round;
+}
+
+.column {
+  position: relative;
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+}
+
+.title {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  margin-bottom: 10px;
+  overflow: hidden;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-align: center;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--color-text-muted-light);
 }
 
 /* Its rows, row gap and padding are set per rank, around its lanes. */

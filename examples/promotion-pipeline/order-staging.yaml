@@ -2,6 +2,12 @@ apiVersion: delivery.kokumi.dev/v1alpha1
 kind: Order
 metadata:
   name: podinfo-staging
+  # The environment of the pipeline this stage belongs to. The Orders of a
+  # Product that share one, such as the regions of staging, are drawn as one
+  # column of its pipeline. It only groups the drawing; after decides the
+  # order.
+  labels:
+    delivery.kokumi.dev/environment: staging
 spec:
   productRef:
     name: podinfo-pipeline

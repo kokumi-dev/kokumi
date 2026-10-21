@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from 'react'
+import type { ButtonHTMLAttributes, ReactNode } from 'react'
 import type { Tone } from '../shared/tone'
 import styles from './parts.module.css'
 
@@ -92,11 +92,6 @@ export function NodeButton({ nodeKey, selected, className, ...rest }: NodeButton
 /** A node drawn as a card that selects it. */
 export function NodeCard({ selected, className, ...rest }: NodeButtonProps) {
   return <NodeButton selected={selected} className={`${styles.card} ${selected ? styles.selected : ''} ${className ?? ''}`} {...rest} />
-}
-
-/** A node drawn as a card that is not selectable. */
-export function StaticCard({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
-  return <div className={`${styles.card} ${styles.staticCard} ${className ?? ''}`} {...rest} />
 }
 
 /** The shape of a chip: plain, accent for something that wants attention, faded for something that no longer holds. */
