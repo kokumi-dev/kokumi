@@ -1,5 +1,5 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { layers, type Link } from './layers'
+import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { layers, type Link, type Slot } from './layers'
 import styles from './LayeredGraph.module.css'
 
 /** How an edge is drawn: solid, or dashed or dotted for a looser tie. */
@@ -23,6 +23,8 @@ interface Props {
 
 /** Space between ranks; edges turn in the middle of it. */
 const GAP = 56
+/** Space between the cards and lanes of a rank. */
+const ROW_GAP = 12
 /** Radius of the corners of an edge, as of the elbows of a tree. */
 const RADIUS = 8
 /** Length and half the width of an arrowhead. */
@@ -37,39 +39,67 @@ interface DrawnEdge {
 }
 
 /**
- * The path of an edge from the right of box a to the left of box b, both
- * relative to origin. It turns in the gap before b, with rounded corners,
- * and ends in an arrowhead.
+ * The path of an edge through boxes, relative to origin: from the right of
+ * each box to the left of the next, and across the lanes between the first
+ * box and the last. Each hop turns in the gap before the next box,
+ * with rounded corners; the edge ends in an arrowhead.
  */
-function route(a: DOMRect, b: DOMRect, origin: DOMRect): Pick<DrawnEdge, 'line' | 'arrow'> {
-  const x1 = a.right - origin.left
-  const y1 = a.top + a.height / 2 - origin.top
-  const x2 = b.left - origin.left
-  const y2 = b.top + b.height / 2 - origin.top
-  const end = x2 - ARROW
-  const arrow = `M${x2} ${y2}L${end} ${y2 - ARROW_HALF}L${end} ${y2 + ARROW_HALF}Z`
-  const dy = y2 - y1
-  if (Math.abs(dy) < 1) return { line: `M${x1} ${y1}H${end}`, arrow }
+function route(boxes: DOMRect[], origin: DOMRect): Pick<DrawnEdge, 'line' | 'arrow'> {
+  const middle = (box: DOMRect) => box.top + box.height / 2 - origin.top
+  let line = ''
+  let arrow = ''
+  for (let i = 1; i < boxes.length; i++) {
+    const x1 = boxes[i - 1].right - origin.left
+    const y1 = middle(boxes[i - 1])
+    const x2 = boxes[i].left - origin.left
+    const y2 = middle(boxes[i])
+    const last = i === boxes.length - 1
+    const end = last ? x2 - ARROW : x2
+    // The first hop starts the path; a later one crosses the lane before it.
+    line += i === 1 ? `M${x1} ${y1}` : `H${x1}`
+    if (last) arrow = `M${x2} ${y2}L${end} ${y2 - ARROW_HALF}L${end} ${y2 + ARROW_HALF}Z`
 
-  const mid = x2 - GAP / 2
-  const r = Math.min(RADIUS, Math.abs(dy) / 2)
-  const s = Math.sign(dy)
+    const dy = y2 - y1
+    if (Math.abs(dy) < 1) {
+      line += `H${end}`
+      continue
+    }
+    const mid = x2 - GAP / 2
+    const r = Math.min(RADIUS, Math.abs(dy) / 2)
+    const s = Math.sign(dy)
+    line += `H${mid - r}Q${mid} ${y1} ${mid} ${y1 + s * r}V${y2 - s * r}Q${mid} ${y2} ${mid + r} ${y2}H${end}`
+  }
+  return { line, arrow }
+}
+
+/**
+ * The rows of a rank: 1fr for a card, none for a lane. Lanes above or below
+ * the cards are matched with padding on the other side, so that the cards
+ * stay centred on the rank and a lone card on the cards of the ranks beside
+ * it.
+ */
+function rankStyle(slots: Slot[]): CSSProperties {
+  const above = slots.findIndex((s) => s.kind === 'node')
+  const below = [...slots].reverse().findIndex((s) => s.kind === 'node')
   return {
-    line: `M${x1} ${y1}H${mid - r}Q${mid} ${y1} ${mid} ${y1 + s * r}V${y2 - s * r}Q${mid} ${y2} ${mid + r} ${y2}H${end}`,
-    arrow,
+    gridTemplateRows: slots.map((s) => (s.kind === 'lane' ? '0' : '1fr')).join(' '),
+    rowGap: ROW_GAP,
+    paddingTop: Math.max(0, below - above) * ROW_GAP,
+    paddingBottom: Math.max(0, above - below) * ROW_GAP,
   }
 }
 
 /**
  * LayeredGraph draws a directed acyclic graph from left to right: each node
  * one rank after the furthest node with an edge to it, the ranks side by
- * side, and the edges between the cards. The cards are laid out by CSS; the
- * edges follow them as they are measured.
+ * side, and the edges between the cards. An edge that spans several ranks
+ * runs through a lane of its own in each rank it crosses. The cards and
+ * lanes are laid out by CSS; the edges follow them as they are measured.
  */
 export default function LayeredGraph({ nodes, edges, label }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const [drawn, setDrawn] = useState<DrawnEdge[]>([])
-  const ranks = layers(nodes.map((n) => n.id), edges)
+  const { ranks, paths } = layers(nodes.map((n) => n.id), edges)
   const cards = new Map(nodes.map((n) => [n.id, n.card]))
 
   useLayoutEffect(() => {
@@ -77,14 +107,17 @@ export default function LayeredGraph({ nodes, edges, label }: Props) {
     if (!graph) return
     const measure = () => {
       const origin = graph.getBoundingClientRect()
-      const boxes = new Map<string, DOMRect>()
+      const boxes = { node: new Map<string, DOMRect>(), lane: new Map<string, DOMRect>() }
       for (const el of graph.querySelectorAll<HTMLElement>('[data-layer-node]')) {
-        boxes.set(el.dataset.layerNode ?? '', el.getBoundingClientRect())
+        boxes.node.set(el.dataset.layerNode ?? '', el.getBoundingClientRect())
       }
-      const next = edges.flatMap((e) => {
-        const a = boxes.get(e.from)
-        const b = boxes.get(e.to)
-        return a && b ? [{ key: `${e.from}>${e.to}`, style: e.style ?? 'solid', ...route(a, b, origin) }] : []
+      for (const el of graph.querySelectorAll<HTMLElement>('[data-layer-lane]')) {
+        boxes.lane.set(el.dataset.layerLane ?? '', el.getBoundingClientRect())
+      }
+      const next = edges.flatMap((e, i) => {
+        const chain = paths[i].map((slot) => boxes[slot.kind].get(slot.id))
+        if (chain.length < 2 || chain.some((box) => !box)) return []
+        return [{ key: `${e.from}>${e.to}`, style: e.style ?? 'solid', ...route(chain as DOMRect[], origin) }]
       })
       setDrawn((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next))
     }
@@ -93,7 +126,7 @@ export default function LayeredGraph({ nodes, edges, label }: Props) {
     observer.observe(graph)
     for (const el of graph.querySelectorAll('[data-layer-node]')) observer.observe(el)
     return () => observer.disconnect()
-  }, [nodes, edges])
+  }, [nodes, edges, paths])
 
   return (
     <div ref={ref} className={styles.graph} style={{ columnGap: GAP }} role="group" aria-label={label}>
@@ -105,11 +138,15 @@ export default function LayeredGraph({ nodes, edges, label }: Props) {
           </g>
         ))}
       </svg>
-      {ranks.map((ids, i) => (
-        <ul key={i} className={styles.rank}>
-          {ids.map((id) => (
-            <li key={id} className={styles.node} data-layer-node={id}>{cards.get(id)}</li>
-          ))}
+      {ranks.map((slots, i) => (
+        <ul key={i} className={styles.rank} style={rankStyle(slots)}>
+          {slots.map((slot) =>
+            slot.kind === 'lane' ? (
+              <li key={`lane:${slot.id}`} className={styles.lane} data-layer-lane={slot.id} aria-hidden />
+            ) : (
+              <li key={slot.id} className={styles.node} data-layer-node={slot.id}>{cards.get(slot.id)}</li>
+            ),
+          )}
         </ul>
       ))}
     </div>

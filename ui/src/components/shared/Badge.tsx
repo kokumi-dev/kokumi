@@ -1,35 +1,22 @@
 import styles from './Badge.module.css'
+import type { Tone } from './tone'
 
-const classForState: Record<string, string> = {
-  Ready: styles.ready,
-  Deployed: styles.deployed,
-  Pending: styles.pending,
-  Processing: styles.processing,
-  Deploying: styles.deploying,
-  Waiting: styles.waiting,
-  Deleting: styles.deleting,
-  Failed: styles.failed,
-}
-
-/** Colours a badge independently of its text, e.g. for a severity. */
-export type BadgeTone = 'success' | 'warning' | 'danger' | 'neutral'
-
-const classForTone: Record<BadgeTone, string> = {
-  success: styles.ready,
-  warning: styles.pending,
-  danger: styles.failed,
-  neutral: styles.unknown,
+const classForTone: Record<Tone, string> = {
+  success: styles.success,
+  warning: styles.warning,
+  danger: styles.danger,
+  accent: styles.accent,
+  neutral: styles.neutral,
 }
 
 interface Props {
   state: string
-  /** Overrides the colour of the state. */
-  tone?: BadgeTone
+  /** Neutral unless given; stateTone gives the tone of an object's state. */
+  tone?: Tone
   title?: string
 }
 
-/** Renders a coloured state pill for an Order, Preparation, or Serving. */
-export default function Badge({ state, tone, title }: Props) {
-  const cls = tone ? classForTone[tone] : classForState[state] ?? styles.unknown
-  return <span className={`${styles.badge} ${cls}`} title={title}>{state || '—'}</span>
+/** Renders a coloured pill, e.g. the state of an Order, Preparation, or Serving. */
+export default function Badge({ state, tone = 'neutral', title }: Props) {
+  return <span className={`${styles.badge} ${classForTone[tone]}`} title={title}>{state || '—'}</span>
 }

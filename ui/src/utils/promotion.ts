@@ -1,5 +1,5 @@
 import type { DeploymentEntry, Order, Preparation, Serving, UpstreamStage } from '../api/types'
-import type { BadgeTone } from '../components/shared/Badge'
+import type { Tone } from '../components/shared/tone'
 import { formatDuration } from './format'
 
 /** The deployment a Serving deploys: the newest entry of its history whose promotion is recorded. */
@@ -41,7 +41,7 @@ export interface StageVerdict {
 
 /** The verdict of a Preparation's upstream gate. */
 export interface UpstreamVerdict {
-  tone: BadgeTone
+  tone: Tone
   outcome: UpstreamOutcome
   text: string
   /** False while the gate holds the Preparation back. */
@@ -51,7 +51,7 @@ export interface UpstreamVerdict {
 
 const severity: Record<UpstreamOutcome, number> = { Satisfied: 0, Soaking: 1, NotDeployedUpstream: 2, InvalidPipeline: 3 }
 
-const tones: Record<UpstreamOutcome, BadgeTone> = {
+const tones: Record<UpstreamOutcome, Tone> = {
   Satisfied: 'success',
   Soaking: 'warning',
   NotDeployedUpstream: 'warning',
@@ -217,17 +217,95 @@ export function queuedPromotion(prep: Preparation, servings: Serving[] | null): 
 export function servingQueue(serving: Serving): QueuedPromotion | undefined {
   const name = serving.desiredPreparation
   if (!name || serving.deployedPreparation === name) return undefined
+  return { serving, ...(heldBy(serving, name) ?? { waitingFor: 'the deployment to start', message: 'The Serving starts deploying it' }) }
+}
 
-  // The gate conditions describe the Preparation the Serving converges to,
-  // and name it first.
+/**
+ * The first gate of serving that holds the Preparation name, and why;
+ * undefined when none does. The gate conditions describe the Preparation the
+ * Serving converges to, and name it first.
+ */
+function heldBy(serving: Serving, name: string): Pick<QueuedPromotion, 'waitingFor' | 'message'> | undefined {
   const prefix = `${name}: `
   for (const [type, label] of gates) {
     const c = serving.conditions?.find((c) => c.type === type)
     if (c && c.status !== 'True' && c.message?.startsWith(prefix)) {
-      return { serving, waitingFor: label, message: c.message.slice(prefix.length) }
+      return { waitingFor: label, message: c.message.slice(prefix.length) }
     }
   }
-  return { serving, waitingFor: 'the deployment to start', message: 'The Serving starts deploying it' }
+  return undefined
+}
+
+/** Why the newest Preparation of an Order is not deployed yet. */
+export interface PendingUpdate {
+  /** The newest Preparation. */
+  preparation: string
+  /**
+   * queued: promoted to the Serving of a Manual Order, which holds it.
+   * waiting: the Serving of an Automatic Order holds it.
+   * unpromoted: nobody promoted it to the Serving of a Manual Order yet.
+   */
+  kind: 'queued' | 'waiting' | 'unpromoted'
+  /**
+   * The gate that holds it, e.g. "approvals", or would hold it once
+   * promoted; undefined while it deploys, or when a promotion would deploy
+   * it at once.
+   */
+  waitingFor?: string
+  /** Why, as the gate says. */
+  reason?: string
+}
+
+/**
+ * Why the newest Preparation of order is not deployed: the gate its Serving
+ * holds it at or, under Manual, that nobody promoted it yet and whether its
+ * upstream stages would hold it. latest is that Preparation, orders the
+ * Orders of its Product. Undefined when the Order deploys its newest
+ * Preparation or has none.
+ */
+export function pendingUpdate(
+  order: Order,
+  latest: Preparation | undefined,
+  orders: Order[] | null,
+  servings: Serving[] | null,
+): PendingUpdate | undefined {
+  const name = order.latestRevision
+  if (!name || name === order.activePreparation) return undefined
+
+  const serving = servingOf(order, servings)
+  if (order.mode === 'Manual' && serving?.desiredPreparation !== name) {
+    const verdict = latest ? upstreamVerdict(latest, order, orders, servings) : null
+    return verdict && !verdict.passes
+      ? { preparation: name, kind: 'unpromoted', waitingFor: 'upstream stages', reason: verdict.text }
+      : { preparation: name, kind: 'unpromoted' }
+  }
+  const held = serving && heldBy(serving, name)
+  return { preparation: name, kind: order.mode === 'Manual' ? 'queued' : 'waiting', waitingFor: held?.waitingFor, reason: held?.message }
+}
+
+/** A pending update in a few words that fit a card, e.g. "Queued · approvals". */
+export function pendingLabel(pending: PendingUpdate): string {
+  if (pending.kind === 'unpromoted') return 'Not promoted'
+  if (!pending.waitingFor) return 'Deploying'
+  const gate = pending.waitingFor === 'upstream stages' ? 'upstream' : pending.waitingFor
+  return pending.kind === 'queued' ? `Queued · ${gate}` : `Waits for ${gate}`
+}
+
+/** A pending update in a sentence, e.g. "Its latest Preparation waits for approvals: 0 of 1 required approvals." */
+export function pendingText(pending: PendingUpdate): string {
+  const reason = pending.reason?.replace(/\.$/, '')
+  switch (pending.kind) {
+    case 'unpromoted':
+      return reason
+        ? `Its latest Preparation is not promoted. Promoted, it waits for upstream stages: ${reason}.`
+        : 'Its latest Preparation is not promoted yet.'
+    case 'queued':
+      return pending.waitingFor
+        ? `Its latest Preparation is promoted and waits for ${pending.waitingFor}: ${reason}.`
+        : 'Its latest Preparation is promoted and deploying.'
+    case 'waiting':
+      return pending.waitingFor ? `Its latest Preparation waits for ${pending.waitingFor}: ${reason}.` : 'Its latest Preparation is deploying.'
+  }
 }
 
 /** What a person still has to do before a Preparation can be deployed. */

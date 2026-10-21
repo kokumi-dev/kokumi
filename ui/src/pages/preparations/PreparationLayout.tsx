@@ -15,6 +15,7 @@ import QueuedPromotion from '../../components/preparation/QueuedPromotion'
 import { paths } from '../../routes/paths'
 import { promoteLabel } from '../../utils/preparations'
 import { allowsPatches, productOf } from '../../utils/products'
+import { stateTone } from '../../utils/state'
 import type { PreparationContext } from './preparationContext'
 import layout from '../../components/layout/layout.module.css'
 
@@ -67,7 +68,7 @@ export default function PreparationLayout() {
         title={prep.name}
         badge={
           <>
-            <Badge state={prep.state} />
+            <Badge state={prep.state} tone={stateTone(prep)} />
             {prep.isActive && <span className={layout.label}>Active</span>}
           </>
         }

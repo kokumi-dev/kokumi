@@ -17,5 +17,6 @@
 
 .success .dot { color: var(--color-success); }
 .warning .dot { color: var(--color-warning); }
-.error .dot   { color: var(--color-danger); }
+.danger .dot  { color: var(--color-danger); }
+.accent .dot  { color: var(--color-accent); }
 .neutral .dot { color: var(--color-status-neutral); }

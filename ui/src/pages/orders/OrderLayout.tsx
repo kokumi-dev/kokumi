@@ -14,6 +14,7 @@ import ConfirmDialog from '../../components/shared/ConfirmDialog'
 import { paths } from '../../routes/paths'
 import { preparationsOf, sortByChain } from '../../utils/preparations'
 import { allowsPatches, productOf } from '../../utils/products'
+import { stateTone } from '../../utils/state'
 import type { OrderContext } from './orderContext'
 import layout from '../../components/layout/layout.module.css'
 
@@ -64,7 +65,7 @@ export default function OrderLayout() {
       <PageHeader
         breadcrumbs={[{ label: 'Orders', to: paths.orders() }, { label: order.namespace }]}
         title={order.name}
-        badge={<Badge state={order.state} />}
+        badge={<Badge state={order.state} tone={stateTone(order)} />}
         subtitle={
           <>
             Variant of{' '}

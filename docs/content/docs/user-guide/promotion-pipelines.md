@@ -170,8 +170,12 @@ cosign verify-attestation --key kokumi.pub --insecure-ignore-tlog=true \
 - **Order overview:** the Pipeline section lists the stages of the pipeline,
   what each deploys, its revision and since when it is healthy, and what holds
   the Order's newest Preparation.
-- **Product Orders graph:** each Order follows the Orders it runs after, and
-  stages that run the current Product revision are marked.
+- **Product Orders graph:** each Order follows the Orders it runs after, also
+  past the stages between them, and stages that run the current Product
+  revision are marked. A stage whose newest Preparation is not deployed says
+  what holds it: "Waits for approvals", "Queued · upstream" for a promotion
+  that waits, or "Not promoted"; its tooltip says why. The Products list shows
+  the same.
 - **Promote dialog and Preparation overview:** one line per gate, including
   the upstream stages and when a soak ends. While a gate holds, the dialog
   queues the promotion.

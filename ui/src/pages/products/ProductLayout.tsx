@@ -13,6 +13,7 @@ import { Button, ButtonLink, EditIcon, PlusIcon, TabNav, TrashIcon } from '../..
 import { paths } from '../../routes/paths'
 import { plural } from '../../utils/format'
 import { productDeletingReason, productSourceLabel } from '../../utils/products'
+import { stateTone } from '../../utils/state'
 import layout from '../../components/layout/layout.module.css'
 
 export default function ProductLayout() {
@@ -43,7 +44,7 @@ export default function ProductLayout() {
       <PageHeader
         breadcrumbs={[{ label: 'Products', to: paths.products() }, { label: product.namespace }]}
         title={product.name}
-        badge={<Badge state={product.state ?? ''} />}
+        badge={<Badge state={product.state ?? ''} tone={stateTone(product)} />}
         subtitle={<span className={layout.mono}>{productSourceLabel(product)}</span>}
         actions={
           <>

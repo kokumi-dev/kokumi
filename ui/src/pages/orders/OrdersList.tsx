@@ -13,6 +13,7 @@ import StatusIndicator from '../../components/shared/StatusIndicator'
 import RelativeTime from '../../components/shared/RelativeTime'
 import { ButtonLink, PlusIcon } from '../../components/ui'
 import { paths } from '../../routes/paths'
+import { stateTone } from '../../utils/state'
 import layout from '../../components/layout/layout.module.css'
 
 export default function OrdersList() {
@@ -55,7 +56,7 @@ export default function OrdersList() {
                 width: '20%',
                 cell: (o) => <NameCell to={paths.order(o.namespace, o.name)} name={o.name} secondary={o.namespace} />,
               },
-              { header: 'Status', width: '130px', cell: (o) => <StatusIndicator state={o.state} /> },
+              { header: 'Status', width: '130px', cell: (o) => <StatusIndicator state={o.state} tone={stateTone(o)} /> },
               {
                 header: 'Product',
                 truncate: true,

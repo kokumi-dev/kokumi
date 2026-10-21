@@ -1,4 +1,5 @@
 import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from 'react'
+import type { Tone } from '../shared/tone'
 import styles from './parts.module.css'
 
 /** The colour of an icon tile. */
@@ -15,38 +16,51 @@ export function NodeIcon({ tone, size = 'md', children }: { tone: IconTone; size
   )
 }
 
-export type Tone = 'ok' | 'neutral' | 'bad'
+/** The mark of a status: by default a check for success, a cross for danger and a dot otherwise. */
+export type StatusIcon = 'check' | 'cross' | 'dot' | 'clock' | 'arrow' | 'revision'
 
 export interface Status {
   tone: Tone
   label: string
+  /** Overrides the mark of the tone. */
+  icon?: StatusIcon
+  /** Explains the status on hover. */
+  title?: string
+}
+
+const defaultIcons: Record<Tone, StatusIcon> = { success: 'check', danger: 'cross', warning: 'dot', accent: 'dot', neutral: 'dot' }
+
+/** The paths of the marks, on a 16×16 grid. */
+const iconPaths: Record<StatusIcon, ReactNode> = {
+  check: <path d="m4 8.5 2.75 2.75L12 5.5" />,
+  cross: <path d="m5 5 6 6M11 5l-6 6" />,
+  dot: <circle cx="8" cy="8" r="2" fill="currentColor" stroke="none" />,
+  clock: <path d="M8 2.75a5.25 5.25 0 1 0 0 10.5 5.25 5.25 0 0 0 0-10.5ZM8 5v3l2 1.25" />,
+  arrow: <path d="M8 12.5v-9M4.5 7 8 3.5 11.5 7" />,
+  revision: <path d="M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5ZM2 8h3.5M10.5 8H14" />,
 }
 
 /** A status: a small mark and a few words. */
 export function StatusMark({ status, quiet }: { status: Status; quiet?: boolean }) {
   return (
-    <span className={`${styles.status} ${styles[`status_${status.tone}`]} ${quiet ? styles.statusQuiet : ''}`}>
+    <span className={`${styles.status} ${styles[`status_${status.tone}`]} ${quiet ? styles.statusQuiet : ''}`} title={status.title}>
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-        {status.tone === 'ok' && <path d="m4 8.5 2.75 2.75L12 5.5" />}
-        {status.tone === 'bad' && <path d="m5 5 6 6M11 5l-6 6" />}
-        {status.tone === 'neutral' && <circle cx="8" cy="8" r="2" fill="currentColor" stroke="none" />}
+        {iconPaths[status.icon ?? defaultIcons[status.tone]]}
       </svg>
       <span className={styles.statusLabel}>{status.label}</span>
     </span>
   )
 }
 
-/** The icon, title and status of a node, the status below the title and extra after the status. */
-export function NodeSummary({ icon, title, status, extra }: { icon: ReactNode; title: ReactNode; status: Status; extra?: ReactNode }) {
+/** The icon, title and status of a node: the status below the title, and a second status on a line of its own below that. */
+export function NodeSummary({ icon, title, status, detail }: { icon: ReactNode; title: ReactNode; status: Status; detail?: Status }) {
   return (
     <>
       {icon}
       <span className={styles.summaryText}>
         <span className={styles.summaryTitle}>{title}</span>
-        <span className={styles.summaryLine}>
-          <StatusMark status={status} quiet />
-          {extra}
-        </span>
+        <StatusMark status={status} quiet />
+        {detail && <StatusMark status={detail} quiet />}
       </span>
     </>
   )

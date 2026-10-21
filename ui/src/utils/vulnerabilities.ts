@@ -9,7 +9,7 @@ import type {
   VulnerabilityCheck,
   VulnerabilitySummary,
 } from '../api/types'
-import type { BadgeTone } from '../components/shared/Badge'
+import type { Tone } from '../components/shared/tone'
 import { formatDuration, plural, shortDigest } from './format'
 import { imageShortName } from './images'
 
@@ -55,7 +55,7 @@ export function severityRank(severity: string): number {
 }
 
 /** The badge colour of a severity: Critical is danger, High a warning, the rest neutral. */
-export function severityTone(severity: string): BadgeTone {
+export function severityTone(severity: string): Tone {
   switch (severity) {
     case 'Critical':
       return 'danger'
@@ -164,7 +164,7 @@ function listNames(names: string[], max = 3): string {
 
 /** Whether a Preparation passes its vulnerability check, as one line. */
 export interface Verdict {
-  tone: BadgeTone
+  tone: Tone
   text: string
   /** False while the check holds the Preparation back. */
   passes: boolean

@@ -103,8 +103,9 @@ tr:last-child > .lead::before {
   color: var(--color-text-muted-light);
 }
 
-/* A newer Preparation waits for promotion. */
-.update {
+/* Nobody promoted the latest Preparation of a Manual Order yet. */
+.update,
+.waiting {
   flex-shrink: 0;
   padding: 0 7px;
   border-radius: 20px;
@@ -113,6 +114,12 @@ tr:last-child > .lead::before {
   font-size: 0.72rem;
   font-weight: 600;
   line-height: 20px;
+}
+
+/* A gate holds the latest Preparation, or it deploys. */
+.waiting {
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
 }
 
 tr.addRow > td {

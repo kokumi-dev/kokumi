@@ -92,7 +92,7 @@ export function ArtifactIcon({ kind, size = 'md', muted }: { kind: IconKind; siz
 export function ArtifactSummary({ node }: { node: ArtifactNode }) {
   const kind = kindOf(node)
   const status = statusOf(node)
-  return <NodeSummary icon={<ArtifactIcon kind={kind.icon} muted={status.tone !== 'ok'} />} title={kind.label} status={status} />
+  return <NodeSummary icon={<ArtifactIcon kind={kind.icon} muted={status.tone !== 'success'} />} title={kind.label} status={status} />
 }
 
 const signerIconPaths: Record<SignerIconKind, ReactNode> = {

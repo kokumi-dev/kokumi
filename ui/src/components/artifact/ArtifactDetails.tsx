@@ -74,7 +74,7 @@ export default function ArtifactDetails({ graph, node, parent, keySource, onClos
   return (
     <Inspector
       label={`${kind.label} details`}
-      icon={<ArtifactIcon kind={kind.icon} size="lg" muted={status.tone !== 'ok'} />}
+      icon={<ArtifactIcon kind={kind.icon} size="lg" muted={status.tone !== 'success'} />}
       title={kind.label}
       status={status}
       onClose={onClose}

@@ -46,7 +46,7 @@ export default function ProductArtifact() {
   const copied = new Set(vendored?.root ? flatten(vendored.root).map((n) => n.digest) : [])
   const notCopied = vendored?.root && source?.root ? flatten(source.root).filter((n) => !copied.has(n.digest)).length : 0
   const vendoredNotes: Note[] = []
-  if (sameDigest) vendoredNotes.push({ tone: 'ok', text: 'Same digest as the source: the copy holds the same bytes.' })
+  if (sameDigest) vendoredNotes.push({ tone: 'success', text: 'Same digest as the source: the copy holds the same bytes.' })
   else if (source?.root) vendoredNotes.push({ tone: 'warning', text: 'The digest differs from the source.' })
   if (notCopied > 0) {
     vendoredNotes.push({

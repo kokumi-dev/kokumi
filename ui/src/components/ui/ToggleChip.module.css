@@ -52,4 +52,5 @@
 .success { background: var(--color-success); }
 .warning { background: var(--color-warning); }
 .danger  { background: var(--color-danger); }
+.accent  { background: var(--color-accent); }
 .neutral { background: var(--color-status-neutral); }
