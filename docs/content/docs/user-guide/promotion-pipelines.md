@@ -18,40 +18,32 @@ promoted once the environments before it run that dry commit healthily.
 
 ## Define the stages
 
-Name the upstream stages in `spec.promotion.after` of each Order. Every entry
-must hold:
+Name the upstream stages in `spec.promotion.after` of each Order. The
+promotion-pipeline example runs one Product in three stages: `podinfo-dev`
+deploys every change, `podinfo-staging` deploys what dev runs healthily, and
+`podinfo-prod` deploys what you promote once staging ran it healthily for a
+minute.
 
-```yaml
-apiVersion: delivery.kokumi.dev/v1alpha1
-kind: Order
-metadata:
-  name: podinfo-staging
-  namespace: shop
-spec:
-  productRef:
-    name: podinfo
-  promotion:
-    mode: Automatic
-    after:
-    - order: podinfo-dev
----
-apiVersion: delivery.kokumi.dev/v1alpha1
-kind: Order
-metadata:
-  name: podinfo-prod
-  namespace: shop
-spec:
-  productRef:
-    name: podinfo
-  promotion:
-    mode: Manual
-    after:
-    - order: podinfo-staging
-      soakSeconds: 86400            # staging must run it healthily for a day
-    approvals:
-      requiredApprovals: 2
-      allowedGroups: [release-approvers]
-```
+{{< tabs >}}
+{{< tab name="order-staging.yaml" >}}
+{{< example file="promotion-pipeline/order-staging.yaml" >}}
+{{< /tab >}}
+{{< tab name="order-prod.yaml" >}}
+{{< example file="promotion-pipeline/order-prod.yaml" >}}
+{{< /tab >}}
+{{< tab name="order-dev.yaml" >}}
+{{< example file="promotion-pipeline/order-dev.yaml" >}}
+{{< /tab >}}
+{{< tab name="product.yaml" >}}
+{{< example file="promotion-pipeline/product.yaml" >}}
+{{< /tab >}}
+{{< /tabs >}}
+
+Apply it:
+
+{{< apply-example name="promotion-pipeline" >}}
+
+Every entry of `after` holds:
 
 - **`order`** names an Order in the same namespace. It must be a variant of
   the same Product.
@@ -60,11 +52,9 @@ spec:
   stage qualifies as soon as Argo CD reports it synced and healthy.
 - An Order lists at most 8 upstream stages and cannot run after itself.
 - Like approvals, the stages are part of the intent: they are copied into
-  each Preparation, and changing them renders a new Preparation.
-
-The `podinfo` samples in `config/samples` form this pipeline: `podinfo-staging`
-runs after `podinfo-dev`, and `podinfo-prod` after `podinfo-staging` with a
-five-minute soak.
+  each Preparation, and changing them renders a new Preparation. Add
+  `spec.promotion.approvals` to a stage to also require reviews; see the
+  approvals example in [Approvals](../../architecture/#approvals).
 
 ## What a Product change is: the Product revision
 

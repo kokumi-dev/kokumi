@@ -1,0 +1,13 @@
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Registry
+metadata:
+  name: my-org
+spec:
+  # The part of the registry the credentials are for. Products and Orders that
+  # list this Registry in registryRefs connect through it to every location
+  # below this URL.
+  url: oci://ghcr.io/my-org
+  # A kubernetes.io/dockerconfigjson Secret in the same namespace. Only who
+  # may read the Secret may name it here.
+  secretRef:
+    name: my-org-credentials

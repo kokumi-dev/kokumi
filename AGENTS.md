@@ -11,7 +11,10 @@ internal/controller/*          Reconciliation logic
 internal/webhook/*             Validation/defaulting (if present)
 config/crd/bases/*             Generated CRDs (DO NOT EDIT)
 config/rbac/role.yaml          Generated RBAC (DO NOT EDIT)
-config/samples/*               Example CRs (edit these)
+config/samples/*               One minimal CR per kind users create (edit these)
+examples/<feature>/*           Runnable scenarios: shown in the docs, applied by the e2e tests
+test/e2e/*                     E2E specs per feature; see test/e2e/README.md
+test/examples/*                Checks examples against the CRDs, and that docs and e2e use them
 Makefile                       Build/test/deploy commands
 PROJECT                        Kubebuilder metadata Auto-generated (DO NOT EDIT)
 ```
@@ -145,8 +148,15 @@ kubebuilder create webhook \
 
 ```bash
 make test              # Run unit tests (uses envtest: real K8s API + etcd)
+make test-e2e          # Run e2e tests on a Kind cluster of their own; E2E_LABELS=promotion runs one feature
+make test-e2e-plan     # List the e2e specs without a cluster
 make run               # Run locally (uses current kubeconfig context)
 ```
+
+A user-facing feature gets an example in `examples/<feature>/`, which a docs
+page shows with `{{< example file="<feature>/<file>" >}}` and an e2e spec
+applies with `framework.ApplyExample(ns, "<feature>")`. `make test` fails for
+an example that misses either.
 
 Tests use **Ginkgo + Gomega** (BDD style). Check `suite_test.go` for setup.
 
@@ -162,7 +172,8 @@ make docker-build docker-push IMG=$IMG  # Or: kind load docker-image $IMG --name
 make deploy IMG=$IMG
 
 # 3. Test
-kubectl apply -k config/samples/
+kubectl apply -k config/samples/                       # or a scenario:
+kubectl apply -n <namespace> -k examples/getting-started
 
 # 4. Debug
 kubectl logs -n <project> deployment/<project>-controller-manager -c manager -f

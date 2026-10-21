@@ -44,17 +44,12 @@ Key-based signatures are verified offline, without a transparency log.
 Name the identity that signed the release, for example the GitHub Actions
 workflow that published it. Both fields are RE2 regular expressions and are not
 anchored, so anchor them with `^` and `$`. One matching identity suffices.
+The source-verification example requires the signature that podinfo's release
+workflow puts on every chart it publishes:
 
-```yaml
-spec:
-  source:
-    url: oci://ghcr.io/stefanprodan/charts/podinfo
-    version: "6.10.2"
-    verify:
-      matchOIDCIdentity:
-      - issuer: ^https://token\.actions\.githubusercontent\.com$
-        subject: ^https://github\.com/stefanprodan/podinfo/\.github/workflows/release\.yml@refs/tags/.*$
-```
+{{< example file="source-verification/product.yaml" >}}
+
+{{< apply-example name="source-verification" >}}
 
 Keyless signatures are verified against the Sigstore public-good instance:
 the controller fetches its trusted root through TUF, which needs network

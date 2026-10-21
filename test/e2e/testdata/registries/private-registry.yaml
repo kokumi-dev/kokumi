@@ -1,0 +1,90 @@
+# A registry that requires the user e2e with the password e2e-password, over
+# plain HTTP, in a namespace of its own: the private registry the
+# private-registry example connects to. It runs the image of the bundled
+# registry.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: e2e-private-registry
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: private-registry
+  namespace: e2e-private-registry
+stringData:
+  # htpasswd of e2e:e2e-password
+  htpasswd: e2e:$2a$10$iLDr9ZXzDNlt.iyOPNDgq.5YlrPf9cPPdEZbsC/x1xNyO.LCLBVGu
+  config.yml: |
+    version: 0.1
+    http:
+      addr: :5000
+    storage:
+      filesystem:
+        rootdirectory: /var/lib/registry
+    auth:
+      htpasswd:
+        realm: e2e
+        path: /etc/distribution/htpasswd
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: private-registry
+  namespace: e2e-private-registry
+spec:
+  selector:
+    matchLabels:
+      app: private-registry
+  template:
+    metadata:
+      labels:
+        app: private-registry
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: registry
+        image: ghcr.io/kokumi-dev/distribution:3.2.0-kokumi.1@sha256:ad2977e04c260aa6cf169e183be4f14e0ef6afd1f2dc931b15ee7114a37b39d8
+        ports:
+        - containerPort: 5000
+          name: http
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+          readOnlyRootFilesystem: true
+        readinessProbe:
+          tcpSocket:
+            port: 5000
+        volumeMounts:
+        - name: config
+          mountPath: /etc/distribution
+          readOnly: true
+        - name: storage
+          mountPath: /var/lib/registry
+      volumes:
+      - name: config
+        secret:
+          secretName: private-registry
+      - name: storage
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: private-registry
+  namespace: e2e-private-registry
+spec:
+  selector:
+    app: private-registry
+  ports:
+  - name: http
+    port: 5000
+    targetPort: http

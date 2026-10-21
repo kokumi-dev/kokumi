@@ -22,6 +22,22 @@ Add it with the `-s` flag:
 git commit -s -m "your commit message"
 ```
 
+## Tests
+
+```bash
+make test           # unit and envtest tests, and the checks of the examples
+make test-e2e       # e2e tests on a Kind cluster of their own; E2E_LABELS=<feature> runs one feature
+make test-e2e-plan  # list every e2e spec, without a cluster
+```
+
+A user-facing feature comes with an example in
+[`examples/`](https://github.com/kokumi-dev/kokumi/tree/main/examples), which
+the docs show and an e2e spec applies, as users would. `make test` fails for an
+example that the API refuses, or that no docs page shows or no e2e spec
+applies. The e2e
+[README](https://github.com/kokumi-dev/kokumi/tree/main/test/e2e) explains how
+the specs are laid out and written.
+
 ## Community
 
 Feel free to ask questions, share ideas, or discuss topics in the

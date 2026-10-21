@@ -13,15 +13,14 @@ guide. This page covers what an installation needs for it.
 
 Scanning is off until the Kitchen has `spec.scanning`. In the UI, turn it on
 under Settings → Scanning, which edits the fields below. On the Kitchen, the
-empty object enables it with the defaults:
+empty object enables it with the defaults, as the vulnerability-scanning
+example's patch does:
 
-```yaml
-apiVersion: delivery.kokumi.dev/v1alpha1
-kind: Kitchen
-metadata:
-  name: default
-spec:
-  scanning: {}
+{{< example file="vulnerability-scanning/kitchen-patch.yaml" >}}
+
+```bash
+kubectl patch kitchen default -n kokumi --type=merge \
+    --patch-file examples/vulnerability-scanning/kitchen-patch.yaml
 ```
 
 | Field | Default | Meaning |

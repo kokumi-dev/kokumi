@@ -34,6 +34,10 @@
                 {
                     "type": "generic",
                     "path": "docs/content/docs/getting-started.md"
+                },
+                {
+                    "type": "generic",
+                    "path": "docs/hugo.toml"
                 }
             ]
         }

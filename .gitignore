@@ -13,6 +13,9 @@ Dockerfile.cross
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 
+# JUnit reports and diagnostics of the e2e tests
+_artifacts/
+
 # Go workspace file
 go.work
 

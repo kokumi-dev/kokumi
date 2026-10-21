@@ -1,0 +1,16 @@
+# A Product of a chart in a private registry, which Kokumi pulls with the
+# credentials of a Registry, an Order that pushes its Preparations there too,
+# and a Repository that adds the chart to the catalog of the UI. Replace oci://ghcr.io/my-org with your registry, and
+# store its credentials in the Secret my-org-credentials first:
+#
+#   kubectl create secret docker-registry my-org-credentials -n <namespace> \
+#     --docker-server=ghcr.io --docker-username=<user> --docker-password=<token>
+#
+#   kubectl apply -n <namespace> -k examples/private-registry
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- registry.yaml
+- repository.yaml
+- product.yaml
+- order.yaml

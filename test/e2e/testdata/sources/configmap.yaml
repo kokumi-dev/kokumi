@@ -1,0 +1,7 @@
+# The smallest source: a manifest bundle of one ConfigMap.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: e2e
+data:
+  key: value

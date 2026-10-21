@@ -1,0 +1,18 @@
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Order
+metadata:
+  name: podinfo
+spec:
+  productRef:
+    name: podinfo
+
+  # Deep-merged over the Product's values; the Order's win.
+  values:
+    ui:
+      message: "Hello from Kokumi"
+    replicaCount: 2
+
+  # Every change renders a new Preparation, an immutable OCI artifact in the
+  # bundled registry. Nothing deploys until you promote a Preparation.
+  promotion:
+    mode: Manual

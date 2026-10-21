@@ -783,16 +783,12 @@ then the promotion is queued, and the Serving keeps what it deploys.
 ### Approvals
 
 An Order can require reviews before any of its Preparations is served,
-similar to required reviews on a pull request:
+similar to required reviews on a pull request. The approvals example deploys
+each Preparation once two members of `release-approvers` approved it:
 
-```yaml
-spec:
-  promotion:
-    mode: Manual            # or Automatic
-    approvals:
-      requiredApprovals: 2
-      allowedGroups: [release-approvers]
-```
+{{< example file="approvals/order.yaml" >}}
+
+{{< apply-example name="approvals" >}}
 
 - The policy is **copied into each Preparation**
   (`spec.promotion.approvals`) and recorded in the intent of its OCI artifact.

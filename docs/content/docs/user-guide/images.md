@@ -115,14 +115,12 @@ them; see [Container Images](../../operator-guide/images/) in the operator guide
 `Vendor` requires the Product to vendor its source (`spec.vendor`). Every
 image is copied into a repository of its own below the vendored source,
 named after the image's full name, and tagged with the tag its reference
-names. All Orders of the Product share these repositories:
+names. All Orders of the Product share these repositories. The
+image-vendoring example vendors the podinfo chart's image:
 
-```yaml
-spec:
-  vendor: {}                 # <registry>/shop/vendor/podinfo; or url: oci://…
-  images:
-    policy: Vendor
-```
+{{< example file="image-vendoring/product.yaml" >}}
+
+{{< apply-example name="image-vendoring" >}}
 
 | In the source manifests | Pulled from after vendoring (vendor `<registry>/shop/vendor/podinfo`) |
 |---|---|

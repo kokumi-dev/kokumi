@@ -1,0 +1,19 @@
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Order
+metadata:
+  name: podinfo-staging
+spec:
+  productRef:
+    name: podinfo-pipeline
+
+  values:
+    ui:
+      message: "Hello from staging"
+    replicaCount: 2
+
+  # A Product change deploys here on its own, once podinfo-dev runs its own
+  # Preparation of the change and Argo CD reports it healthy.
+  promotion:
+    mode: Automatic
+    after:
+    - order: podinfo-dev

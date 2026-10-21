@@ -1,0 +1,37 @@
+# A Product of a source whose Pod runs an image with known Critical
+# vulnerabilities, which it vendors, and two Orders of it: one without and one
+# with a vulnerability check.
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Product
+metadata:
+  name: vulnerable
+spec:
+  source:
+    url: oci://${REGISTRY}/e2e/${NAMESPACE}/source
+    version: "1.0.0"
+  vendor: {}
+  images:
+    policy: Vendor
+---
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Order
+metadata:
+  name: unchecked
+spec:
+  productRef:
+    name: vulnerable
+  promotion:
+    mode: Manual
+---
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Order
+metadata:
+  name: checked
+spec:
+  productRef:
+    name: vulnerable
+  promotion:
+    mode: Automatic
+    checks:
+      vulnerabilities:
+        maxSeverity: High

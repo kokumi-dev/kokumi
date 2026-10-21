@@ -1,0 +1,15 @@
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Order
+metadata:
+  name: external-dns
+spec:
+  productRef:
+    name: external-dns
+
+  # With several files, a patch applies in the file that holds its target.
+  patches:
+  - target:
+      kind: Deployment
+      name: external-dns
+    set:
+      .spec.replicas: "2"

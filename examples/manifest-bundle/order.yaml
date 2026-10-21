@@ -1,0 +1,15 @@
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Order
+metadata:
+  name: external-secrets
+spec:
+  productRef:
+    name: external-secrets
+
+  # Patches set fields of the rendered manifests, by path. Values are strings.
+  patches:
+  - target:
+      kind: Deployment
+      name: external-secrets-webhook
+    set:
+      .spec.replicas: "2"

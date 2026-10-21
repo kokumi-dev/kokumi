@@ -1,0 +1,18 @@
+{{- /*
+Show a file of an example from examples/ in the repository, which hugo.toml
+mounts at assets/examples. The build fails if the file does not exist.
+
+@param {string} file The file, relative to examples/.
+
+@example {{< example file="getting-started/order.yaml" >}}
+*/ -}}
+
+{{- $file := .Get "file" -}}
+{{- with resources.Get (printf "examples/%s" $file) -}}
+  {{- $lang := strings.TrimPrefix "." (path.Ext $file) -}}
+  {{- $source := urls.JoinPath site.Params.repository "blob/main" -}}
+  {{- $fence := printf "```%s {filename=%q base_url=%q}\n%s\n```" $lang (printf "examples/%s" $file) $source (strings.TrimRight "\n" .Content) -}}
+  {{- $.Page.RenderString $fence -}}
+{{- else -}}
+  {{- errorf "The example file %q does not exist in examples/: %s" $file $.Position -}}
+{{- end -}}

@@ -1,0 +1,21 @@
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Product
+metadata:
+  name: external-dns
+spec:
+  # An OCI artifact with namespace.yaml and one file per resource of the
+  # external-dns chart at its root.
+  source:
+    url: oci://ghcr.io/kokumi-dev/testdata/external-dns
+    version: "0.1.0"
+
+  # Keep the files apart in every Preparation instead of merging them into a
+  # single manifest.yaml.
+  render:
+    manifest:
+      layout: Multi
+
+  # Orders of this Product may patch anything.
+  overrides:
+    patches:
+      policy: All
