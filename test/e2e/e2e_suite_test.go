@@ -69,11 +69,7 @@ var _ = BeforeSuite(func() {
 
 	if framework.RealArgoCD() {
 		By("installing Argo CD")
-		_, err = utils.Run(exec.Command("make", "argocd"))
-		Expect(err).NotTo(HaveOccurred(), "Failed to install Argo CD")
-		_, err = framework.Kubectl("rollout", "status", "statefulset/argocd-application-controller",
-			"-n", framework.ArgoCDNamespace, "--timeout=5m")
-		Expect(err).NotTo(HaveOccurred(), "Argo CD did not become ready")
+		framework.InstallArgoCD()
 	} else {
 		By("installing only the Argo CD Application CRD; specs simulate Argo CD")
 		_, err = framework.Kubectl("apply", "--server-side", "-f", framework.ArgoCDApplicationCRD)
