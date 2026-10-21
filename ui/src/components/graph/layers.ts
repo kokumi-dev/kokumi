@@ -29,6 +29,15 @@ export interface Layers {
 /** A key that tells slots of both kinds apart. */
 const keyOf = (slot: Slot) => `${slot.kind}:${slot.id}`
 
+export interface LayerOptions {
+  /**
+   * The rank of each node, instead of one after the furthest node with a
+   * link to it, e.g. a column per group. The nodes of a rank then keep the
+   * order of ids, and only the lanes are ordered, after them.
+   */
+  rank?: (id: string) => number
+}
+
 /** How often the ranks are reordered, alternately from the left and from the right. */
 const SWEEPS = 4
 
@@ -37,8 +46,9 @@ const SWEEPS = 4
  * steps of Sugiyama's method:
  *
  * 1. A node without incoming links goes into the first rank, any other one
- *    rank after the furthest node with a link to it. A link that closes a
- *    cycle, or names a node that is not in ids, is ignored.
+ *    rank after the furthest node with a link to it, unless options.rank
+ *    places it. A link that closes a cycle, or names a node that is not in
+ *    ids, is ignored.
  * 2. A link that spans several ranks gets a lane in each rank it crosses,
  *    so that its edge runs beside the nodes there instead of through them.
  * 3. Each rank is ordered by the barycenter of its neighbours in the rank
@@ -46,8 +56,9 @@ const SWEEPS = 4
  *    edges run straight and seldom cross. Ties keep the order of ids, and
  *    lanes come after the nodes.
  */
-export function layers(ids: string[], links: Link[]): Layers {
+export function layers(ids: string[], links: Link[], options: LayerOptions = {}): Layers {
   const known = new Set(ids)
+  const index = new Map(ids.map((id, i) => [id, i]))
   const valid = (l: Link) => known.has(l.from) && known.has(l.to) && l.from !== l.to
   const incoming = new Map<string, string[]>()
   for (const l of links) {
@@ -56,18 +67,19 @@ export function layers(ids: string[], links: Link[]): Layers {
 
   const rankOf = new Map<string, number>()
   const visiting = new Set<string>()
-  const rank = (id: string): number => {
+  const furthest = (id: string): number => {
     const cached = rankOf.get(id)
     if (cached !== undefined) return cached
     visiting.add(id)
     let r = 0
     for (const from of incoming.get(id) ?? []) {
-      if (!visiting.has(from)) r = Math.max(r, rank(from) + 1)
+      if (!visiting.has(from)) r = Math.max(r, furthest(from) + 1)
     }
     visiting.delete(id)
     rankOf.set(id, r)
     return r
   }
+  const rank = options.rank ?? furthest
 
   const ranks: Slot[][] = []
   for (const id of ids) (ranks[rank(id)] ??= []).push({ kind: 'node', id })
@@ -113,7 +125,11 @@ export function layers(ids: string[], links: Link[]): Layers {
         }),
       )
       const isLane = (slot: Slot) => Number(slot.kind === 'lane')
-      filled[r] = [...filled[r]].sort((a, b) => barycenter.get(a)! - barycenter.get(b)! || isLane(a) - isLane(b))
+      filled[r] = [...filled[r]].sort((a, b) =>
+        options.rank
+          ? isLane(a) - isLane(b) || (a.kind === 'lane' ? barycenter.get(a)! - barycenter.get(b)! : index.get(a.id)! - index.get(b.id)!)
+          : barycenter.get(a)! - barycenter.get(b)! || isLane(a) - isLane(b),
+      )
     }
   }
 

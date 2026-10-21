@@ -17,14 +17,20 @@ export interface GraphEdge extends Link {
 interface Props {
   nodes: GraphNode[]
   edges: GraphEdge[]
+  /** Places each node in this rank instead of after the nodes with an edge to it; see LayerOptions. */
+  rank?: (id: string) => number
+  /** A title above each rank, e.g. the group it shows; empty for none. */
+  titles?: string[]
   /** Names the graph for assistive technology. */
   label?: string
 }
 
 /** Space between ranks; edges turn in the middle of it. */
-const GAP = 56
+const GAP = 36
 /** Space between the cards and lanes of a rank. */
 const ROW_GAP = 12
+/** Space above the ranks for their titles. */
+const TITLE_SPACE = 30
 /** Radius of the corners of an edge, as of the elbows of a tree. */
 const RADIUS = 8
 /** Length and half the width of an arrowhead. */
@@ -96,10 +102,11 @@ function rankStyle(slots: Slot[]): CSSProperties {
  * runs through a lane of its own in each rank it crosses. The cards and
  * lanes are laid out by CSS; the edges follow them as they are measured.
  */
-export default function LayeredGraph({ nodes, edges, label }: Props) {
+export default function LayeredGraph({ nodes, edges, rank, titles, label }: Props) {
   const ref = useRef<HTMLDivElement>(null)
   const [drawn, setDrawn] = useState<DrawnEdge[]>([])
-  const { ranks, paths } = layers(nodes.map((n) => n.id), edges)
+  const { ranks, paths } = layers(nodes.map((n) => n.id), edges, { rank })
+  const titled = !!titles?.some(Boolean)
   const cards = new Map(nodes.map((n) => [n.id, n.card]))
 
   useLayoutEffect(() => {
@@ -129,7 +136,7 @@ export default function LayeredGraph({ nodes, edges, label }: Props) {
   }, [nodes, edges, paths])
 
   return (
-    <div ref={ref} className={styles.graph} style={{ columnGap: GAP }} role="group" aria-label={label}>
+    <div ref={ref} className={styles.graph} style={{ columnGap: GAP, paddingTop: titled ? TITLE_SPACE : undefined }} role="group" aria-label={label}>
       <svg className={styles.edges} aria-hidden>
         {drawn.map((e) => (
           <g key={e.key} className={styles[e.style]}>
@@ -139,15 +146,18 @@ export default function LayeredGraph({ nodes, edges, label }: Props) {
         ))}
       </svg>
       {ranks.map((slots, i) => (
-        <ul key={i} className={styles.rank} style={rankStyle(slots)}>
-          {slots.map((slot) =>
-            slot.kind === 'lane' ? (
-              <li key={`lane:${slot.id}`} className={styles.lane} data-layer-lane={slot.id} aria-hidden />
-            ) : (
-              <li key={slot.id} className={styles.node} data-layer-node={slot.id}>{cards.get(slot.id)}</li>
-            ),
-          )}
-        </ul>
+        <div key={i} className={styles.column}>
+          {titles?.[i] && <span className={styles.title}>{titles[i]}</span>}
+          <ul className={styles.rank} style={rankStyle(slots)}>
+            {slots.map((slot) =>
+              slot.kind === 'lane' ? (
+                <li key={`lane:${slot.id}`} className={styles.lane} data-layer-lane={slot.id} aria-hidden />
+              ) : (
+                <li key={slot.id} className={styles.node} data-layer-node={slot.id}>{cards.get(slot.id)}</li>
+              ),
+            )}
+          </ul>
+        </div>
       ))}
     </div>
   )

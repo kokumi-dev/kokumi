@@ -10,6 +10,7 @@ import RegistryRefsEditor from '../shared/RegistryRefsEditor'
 import HelmValuesEditor from '../shared/HelmValuesEditor'
 import PatchesEditor from '../shared/PatchesEditor'
 import DiffTab from './DiffTab'
+import EnvironmentField from './EnvironmentField'
 import UpstreamStagesEditor from './UpstreamStagesEditor'
 import type {
   Order,
@@ -163,7 +164,7 @@ interface ParseContext {
   rendersWithHelm: (product: string) => boolean | undefined
 }
 
-function yamlToPartialForm(text: string, ctx: ParseContext): Omit<OrderFormData, 'name' | 'namespace' | 'edits'> {
+function yamlToPartialForm(text: string, ctx: ParseContext): Omit<OrderFormData, 'name' | 'namespace' | 'environment' | 'edits'> {
   const doc = load(text) as Record<string, unknown>
   if (!doc || typeof doc !== 'object') throw new Error('YAML must be a mapping')
   assertKnownKeys(doc, ['productRef', 'values', 'destination', 'registryRefs', 'patches', 'promotion'], '')
@@ -263,6 +264,7 @@ export default function OrderForm({ order, initialProduct, products, onCancel, o
 
   const [initialYaml] = useState(() => formToYaml(formData, helmFor(formData)))
   const [initialIdentity] = useState(() => `${formData.namespace}/${formData.name}`)
+  const [initialEnvironment] = useState(() => formData.environment)
 
   /**
    * The data as sent: values are dropped only for a Product known not to
@@ -342,8 +344,9 @@ export default function OrderForm({ order, initialProduct, products, onCancel, o
   } else {
     isDirty = formToYaml(formData, helmFor(formData)) !== initialYaml
   }
-  // Name/namespace are not part of the YAML view but still count as changes.
+  // Name, namespace and environment are not part of the YAML view of the spec but still count as changes.
   if (`${formData.namespace}/${formData.name}` !== initialIdentity) isDirty = true
+  if (formData.environment !== initialEnvironment) isDirty = true
 
   useEffect(() => {
     onDirtyChange?.(isDirty)
@@ -581,7 +584,16 @@ function FormView({ formData, isEdit, product, products, deletingReason, onField
         Automatic promotion — promote new Preparations as soon as they are ready and pass their gates
       </label>
 
-      {/* Upstream stages */}
+      {/* Environment and upstream stages */}
+      {formData.productRef.name && (
+        <EnvironmentField
+          namespace={formData.namespace}
+          product={formData.productRef.name}
+          self={formData.name}
+          value={formData.environment}
+          onChange={(environment) => onFieldChange('environment', environment)}
+        />
+      )}
       <UpstreamStagesEditor
         namespace={formData.namespace}
         product={formData.productRef.name}

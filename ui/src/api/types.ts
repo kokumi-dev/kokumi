@@ -104,6 +104,8 @@ export interface Order {
   name: string
   namespace: string
   labels?: Record<string, string>
+  /** The environment of the pipeline the Order belongs to, from its delivery.kokumi.dev/environment label. */
+  environment?: string
   productRef: ProductRef
   /** Helm values; only valid when the Product renders with Helm. */
   values?: Record<string, unknown>
@@ -730,6 +732,8 @@ export interface OrderFormData {
   name: string
   namespace: string
   productRef: ProductRef
+  /** The environment of the pipeline it belongs to; empty for none. Always sent on update: an update without it removes it. */
+  environment: string
   /** Helm values; only sent when the Product renders with Helm. */
   values: Record<string, unknown>
   destination: OCIDestination
@@ -748,6 +752,7 @@ export const emptyOrderForm = (product?: { namespace: string; name: string }): O
   name: '',
   namespace: product?.namespace ?? 'kokumi',
   productRef: { name: product?.name ?? '' },
+  environment: '',
   values: {},
   destination: {},
   registryRefs: [],
@@ -766,6 +771,7 @@ export const orderToFormData = (r: Order): OrderFormData => ({
   name: r.name,
   namespace: r.namespace,
   productRef: { name: r.productRef.name },
+  environment: r.environment ?? '',
   values: r.values ?? {},
   destination: r.destination ? { ...r.destination } : {},
   registryRefs: copyRegistryRefs(r.registryRefs),
