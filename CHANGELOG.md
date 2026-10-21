@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.18.0](https://github.com/kokumi-dev/kokumi/compare/0.17.0...0.18.0) (2026-10-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* render each preview once and join files the same way everywhere ([#457](https://github.com/kokumi-dev/kokumi/issues/457))
+* sign artifacts and verify sources ([#447](https://github.com/kokumi-dev/kokumi/issues/447))
+* replace Menu with Product and make Orders its variants ([#445](https://github.com/kokumi-dev/kokumi/issues/445))
+* add provenance and intent handling for preparations ([#439](https://github.com/kokumi-dev/kokumi/issues/439))
+
+### Features
+
+* add promotion pipelines with upstream stages, soak times and signed records ([#470](https://github.com/kokumi-dev/kokumi/issues/470)) ([1b6a462](https://github.com/kokumi-dev/kokumi/commit/1b6a462cd3758986218255027e6487068ce61d49))
+* add provenance and intent handling for preparations ([#439](https://github.com/kokumi-dev/kokumi/issues/439)) ([0e653b0](https://github.com/kokumi-dev/kokumi/commit/0e653b06fd9c233ce5b7fa958da46121cd1f5220))
+* align the order graph with artifact ([#452](https://github.com/kokumi-dev/kokumi/issues/452)) ([b3ee431](https://github.com/kokumi-dev/kokumi/commit/b3ee4311aa286846d3c7b6dfae0aacb9bbd40684))
+* draw OCI artifacts and verify every signature of a source ([#451](https://github.com/kokumi-dev/kokumi/issues/451)) ([58433e4](https://github.com/kokumi-dev/kokumi/commit/58433e448b389eef7a7e9020a62d6be7dcf55d61))
+* group registries and repositories in a registry sidebar section ([#460](https://github.com/kokumi-dev/kokumi/issues/460)) ([2e54477](https://github.com/kokumi-dev/kokumi/commit/2e544771be6dcd2dd7a263cc0f9ee393c6b7ee65))
+* group the stages of a pipeline into environments ([#476](https://github.com/kokumi-dev/kokumi/issues/476)) ([4126144](https://github.com/kokumi-dev/kokumi/commit/41261444e649daed823c0fa4de8b2c1277af6a28))
+* let an order own its serving ([#466](https://github.com/kokumi-dev/kokumi/issues/466)) ([9b51904](https://github.com/kokumi-dev/kokumi/commit/9b5190448c569799cf68d534d91de157be2733b3))
+* raise memory limits and set gomemlimit on server ([#455](https://github.com/kokumi-dev/kokumi/issues/455)) ([ee3a482](https://github.com/kokumi-dev/kokumi/commit/ee3a48208be9762ebafaf72ab31870fa108d9056))
+* record, pin or vendor the images every preparation runs ([#453](https://github.com/kokumi-dev/kokumi/issues/453)) ([befd20f](https://github.com/kokumi-dev/kokumi/commit/befd20f19b878920442ee87976efc48596059fb7))
+* refactor user capabilities management ([#444](https://github.com/kokumi-dev/kokumi/issues/444)) ([0acd1ce](https://github.com/kokumi-dev/kokumi/commit/0acd1ce818723e77fec99c64fb6c3871f7a46e95))
+* replace Menu with Product and make Orders its variants ([#445](https://github.com/kokumi-dev/kokumi/issues/445)) ([c76042a](https://github.com/kokumi-dev/kokumi/commit/c76042a4f173208adcb69abadb53e71a3b4d7ff6))
+* scan vendored images for vulnerabilities and gate promotion on findings ([#468](https://github.com/kokumi-dev/kokumi/issues/468)) ([20c0b0b](https://github.com/kokumi-dev/kokumi/commit/20c0b0bdc8f657f482eb200de0cf1cfcd4d6142d))
+* sign artifacts and verify sources ([#447](https://github.com/kokumi-dev/kokumi/issues/447)) ([517ab45](https://github.com/kokumi-dev/kokumi/commit/517ab45ac345726b222403019c3a05625345c772))
+* update OCI client to support referrers API and index management ([#434](https://github.com/kokumi-dev/kokumi/issues/434)) ([37f31f1](https://github.com/kokumi-dev/kokumi/commit/37f31f1aa62cbb4483191640d97d41dd240d2ba3))
+* use distribution fork with OCI referrers API ([#432](https://github.com/kokumi-dev/kokumi/issues/432)) ([f4db64f](https://github.com/kokumi-dev/kokumi/commit/f4db64f873fb1252ed27b13a3ed104a8e5c36008))
+* vendor each image into its own repository ([#458](https://github.com/kokumi-dev/kokumi/issues/458)) ([e831d26](https://github.com/kokumi-dev/kokumi/commit/e831d261938d58561d473958bc6b7c4e43120c26))
+
+
+### Bug Fixes
+
+* prevent argo cd opt in app deletion ([#465](https://github.com/kokumi-dev/kokumi/issues/465)) ([08da581](https://github.com/kokumi-dev/kokumi/commit/08da581acce44faec57cd76fb58c158d5c799395))
+* render each preview once and join files the same way everywhere ([#457](https://github.com/kokumi-dev/kokumi/issues/457)) ([dcdb3a3](https://github.com/kokumi-dev/kokumi/commit/dcdb3a35781d20f0334040aee9473c01dcc034e0))
+* render helm charts whose provenance layer comes first ([#472](https://github.com/kokumi-dev/kokumi/issues/472)) ([ac9e6f5](https://github.com/kokumi-dev/kokumi/commit/ac9e6f536a45cec58bf567441d9e8d23ba7374ac))
+* show every pipeline dependency and what holds each stage in the order graph ([#475](https://github.com/kokumi-dev/kokumi/issues/475)) ([0686acd](https://github.com/kokumi-dev/kokumi/commit/0686acdd847cda576a6d0126ecf7c626724761a3))
+* show the kokumi icon instead of hextras defaults ([#454](https://github.com/kokumi-dev/kokumi/issues/454)) ([df30434](https://github.com/kokumi-dev/kokumi/commit/df3043482e831e62c224d31945c23c75e88c6250))
+* stop serving status loop and list flickering in the UI ([#446](https://github.com/kokumi-dev/kokumi/issues/446)) ([a7a780e](https://github.com/kokumi-dev/kokumi/commit/a7a780e907e4f539eadd73e6df40a760b3998277))
+
 ## [0.17.0](https://github.com/kokumi-dev/kokumi/compare/0.16.0...0.17.0) (2026-10-11)
 
 

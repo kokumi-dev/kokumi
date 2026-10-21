@@ -20,7 +20,7 @@ enableGitInfo = true
 
 [params]
   # The release the docs install, and apply the examples from.
-  kokumiVersion = "0.17.0" # x-release-please-version
+  kokumiVersion = "0.18.0" # x-release-please-version
   repository = "https://github.com/kokumi-dev/kokumi"
   description = "Kokumi is a Kubernetes operator for OCI-native, immutable release management. Keep Git traceability, gain OCI portability, and ship anywhere without compromise."
   images = ["/images/kokumi.png"]
