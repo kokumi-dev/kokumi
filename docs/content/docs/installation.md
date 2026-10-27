@@ -38,6 +38,9 @@ This installs:
   the Kitchen enables [vulnerability scanning](../operator-guide/scanning/)
 - RBAC roles and bindings
 
+`kubectl get kokumi -A` lists every Kokumi object: all its kinds are in the
+category `kokumi`.
+
 > **Model:** a `Product` defines an application completely, and each `Order`
 > is a variant of one Product (for example one environment) that renders
 > `Preparation` artifacts. A `Serving` activates one Preparation per Order.

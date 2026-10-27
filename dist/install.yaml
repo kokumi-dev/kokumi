@@ -16,6 +16,8 @@ metadata:
 spec:
   group: delivery.kokumi.dev
   names:
+    categories:
+    - kokumi
     kind: Approval
     listKind: ApprovalList
     plural: approvals
@@ -258,6 +260,8 @@ metadata:
 spec:
   group: delivery.kokumi.dev
   names:
+    categories:
+    - kokumi
     kind: Kitchen
     listKind: KitchenList
     plural: kitchens
@@ -760,6 +764,8 @@ metadata:
 spec:
   group: delivery.kokumi.dev
   names:
+    categories:
+    - kokumi
     kind: Order
     listKind: OrderList
     plural: orders
@@ -1248,6 +1254,8 @@ metadata:
 spec:
   group: delivery.kokumi.dev
   names:
+    categories:
+    - kokumi
     kind: Preparation
     listKind: PreparationList
     plural: preparations
@@ -1851,6 +1859,8 @@ metadata:
 spec:
   group: delivery.kokumi.dev
   names:
+    categories:
+    - kokumi
     kind: Product
     listKind: ProductList
     plural: products
@@ -2771,6 +2781,8 @@ metadata:
 spec:
   group: delivery.kokumi.dev
   names:
+    categories:
+    - kokumi
     kind: Recipe
     listKind: RecipeList
     plural: recipes
@@ -2897,6 +2909,8 @@ metadata:
 spec:
   group: delivery.kokumi.dev
   names:
+    categories:
+    - kokumi
     kind: Registry
     listKind: RegistryList
     plural: registries
@@ -3102,6 +3116,8 @@ metadata:
 spec:
   group: delivery.kokumi.dev
   names:
+    categories:
+    - kokumi
     kind: Repository
     listKind: RepositoryList
     plural: repositories
@@ -3268,6 +3284,8 @@ metadata:
 spec:
   group: delivery.kokumi.dev
   names:
+    categories:
+    - kokumi
     kind: Serving
     listKind: ServingList
     plural: servings

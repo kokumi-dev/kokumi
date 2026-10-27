@@ -139,7 +139,7 @@ type ApprovalStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:shortName=appr
+// +kubebuilder:resource:shortName=appr,categories=kokumi
 // +kubebuilder:selectablefield:JSONPath=`.spec.orderName`
 // +kubebuilder:selectablefield:JSONPath=`.spec.preparationRef.name`
 // +kubebuilder:printcolumn:name="Order",type=string,JSONPath=`.spec.orderName`,priority=1

@@ -236,3 +236,44 @@ const (
 	// cycle.
 	ReasonInvalidPipeline = "InvalidPipeline"
 )
+
+// Condition reasons used by Registries.
+const (
+	// ReasonRegistryConnected reports on a Registry that the registry
+	// accepted its credentials and TLS settings.
+	ReasonRegistryConnected = "Connected"
+	// ReasonSecretNotFound reports on a Registry that a Secret it names
+	// does not exist.
+	ReasonSecretNotFound = "SecretNotFound"
+	// ReasonSecretInvalid reports on a Registry that its credentials Secret
+	// is not a kubernetes.io/dockerconfigjson Secret with an entry for its
+	// url.
+	ReasonSecretInvalid = "SecretInvalid"
+	// ReasonCertificateInvalid reports on a Registry that its TLS Secret
+	// holds no usable certificate.
+	ReasonCertificateInvalid = "CertificateInvalid"
+	// ReasonUnauthorized reports on a Registry that the registry rejected
+	// its credentials, or that it requires credentials the Registry lacks.
+	ReasonUnauthorized = "Unauthorized"
+	// ReasonUnreachable reports on a Registry that the registry could not
+	// be reached, for example because of DNS, TLS or a timeout.
+	ReasonUnreachable = "Unreachable"
+	// ReasonCredentialsRequired reports on a Product or an Order that
+	// content read with credentials would be copied to a location Kokumi
+	// accesses without credentials, where anyone could read it.
+	ReasonCredentialsRequired = "CredentialsRequired"
+)
+
+// Condition reasons used by Repositories, and by Products and Orders for
+// the Registries they list.
+const (
+	// ReasonRegistryNotFound reports that a Registry named in registryRef
+	// or registryRefs does not exist.
+	ReasonRegistryNotFound = "RegistryNotFound"
+	// ReasonRegistryNotCovered reports on a Repository that its registryRef
+	// names a Registry whose url does not cover the repository.
+	ReasonRegistryNotCovered = "NotCovered"
+	// ReasonRepositoryListed reports on a Repository that it is ready to be
+	// browsed.
+	ReasonRepositoryListed = "Listed"
+)

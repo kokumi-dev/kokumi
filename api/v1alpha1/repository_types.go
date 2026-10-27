@@ -42,20 +42,6 @@ type RepositorySpec struct {
 	Description string `json:"description,omitempty"`
 }
 
-// Condition reasons used by Repositories, and by Products and Orders for
-// the Registries they list.
-const (
-	// ReasonRegistryNotFound reports that a Registry named in registryRef
-	// or registryRefs does not exist.
-	ReasonRegistryNotFound = "RegistryNotFound"
-	// ReasonRegistryNotCovered reports on a Repository that its registryRef
-	// names a Registry whose url does not cover the repository.
-	ReasonRegistryNotCovered = "NotCovered"
-	// ReasonRepositoryListed reports on a Repository that it is ready to be
-	// browsed.
-	ReasonRepositoryListed = "Listed"
-)
-
 // RepositoryStatus defines the observed state of Repository.
 type RepositoryStatus struct {
 	// observedGeneration is the most recent generation observed by the
@@ -73,6 +59,7 @@ type RepositoryStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:categories=kokumi
 // +kubebuilder:printcolumn:name="URL",type=string,JSONPath=`.spec.url`
 // +kubebuilder:printcolumn:name="Registry",type=string,JSONPath=`.spec.registryRef.name`
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
