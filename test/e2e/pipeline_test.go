@@ -53,16 +53,16 @@ var _ = Describe("Promotion pipelines", Label("promotion"), func() {
 		})
 
 		It("deploys dev right away", func() {
-			framework.WaitForDeployment("podinfo-dev", dev.Spec.Artifact.Digest)
+			framework.WaitForDeployment(ns, "podinfo-dev", dev.Spec.Artifact.Digest)
 		})
 
 		It("holds staging until dev runs the change healthily", func() {
 			Eventually(framework.Serving(ns, "podinfo-staging")).Should(framework.HaveConditionReason(
 				deliveryv1alpha1.ConditionTypeUpstreamDeployed, deliveryv1alpha1.ReasonNotDeployedUpstream))
-			framework.ExpectNoApplication("podinfo-staging")
+			framework.ExpectNoApplication(ns, "podinfo-staging")
 
-			framework.SyncHealthy("podinfo-dev", dev.Spec.Artifact.Digest)
-			framework.WaitForDeployment("podinfo-staging", staging.Spec.Artifact.Digest)
+			framework.SyncHealthy(ns, "podinfo-dev", dev.Spec.Artifact.Digest)
+			framework.WaitForDeployment(ns, "podinfo-staging", staging.Spec.Artifact.Digest)
 		})
 
 		It("queues a promotion to prod until staging ran the change healthily for 60s", func() {
@@ -70,20 +70,20 @@ var _ = Describe("Promotion pipelines", Label("promotion"), func() {
 			Eventually(framework.Serving(ns, "podinfo-prod")).Should(framework.HaveConditionReason(
 				deliveryv1alpha1.ConditionTypeUpstreamDeployed, deliveryv1alpha1.ReasonNotDeployedUpstream))
 
-			framework.SyncHealthy("podinfo-staging", staging.Spec.Artifact.Digest)
+			framework.SyncHealthy(ns, "podinfo-staging", staging.Spec.Artifact.Digest)
 			Eventually(framework.Serving(ns, "podinfo-prod")).Should(framework.HaveConditionReason(
 				deliveryv1alpha1.ConditionTypeUpstreamDeployed, deliveryv1alpha1.ReasonSoaking))
-			framework.ExpectNoApplication("podinfo-prod")
+			framework.ExpectNoApplication(ns, "podinfo-prod")
 		})
 
 		It("deploys prod once the soak ends", func() {
-			framework.WaitForDeployment("podinfo-prod", prod.Spec.Artifact.Digest)
+			framework.WaitForDeployment(ns, "podinfo-prod", prod.Spec.Artifact.Digest)
 			Expect(framework.Serving(ns, "podinfo-prod")()).To(framework.HaveConditionReason(
 				deliveryv1alpha1.ConditionTypeUpstreamDeployed, deliveryv1alpha1.ReasonSatisfied))
 		})
 
 		It("records each healthy deployment in the Serving's history", func() {
-			framework.SyncHealthy("podinfo-prod", prod.Spec.Artifact.Digest)
+			framework.SyncHealthy(ns, "podinfo-prod", prod.Spec.Artifact.Digest)
 			Eventually(framework.Serving(ns, "podinfo-prod"), time.Minute).Should(
 				HaveField("Status.History", HaveExactElements(SatisfyAll(
 					HaveField("PreparationName", prod.Name),

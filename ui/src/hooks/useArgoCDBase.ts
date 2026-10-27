@@ -21,6 +21,7 @@ export function useArgoCDBase(): string {
   }
 }
 
-export function argoAppURL(base: string, servingName: string): string | null {
-  return base ? `${base}/applications/argocd/${encodeURIComponent(servingName)}` : null
+/** The page of the Argo CD Application applicationName, as the server names it. */
+export function argoAppURL(base: string, applicationName: string): string | null {
+  return base ? `${base}/applications/argocd/${encodeURIComponent(applicationName)}` : null
 }

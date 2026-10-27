@@ -38,7 +38,7 @@ var _ = Describe("Order deletion", Label("lifecycle"), func() {
 			framework.ApplyExample(ns, "getting-started")
 			preparation := framework.LatestPreparation(ns, "podinfo")
 			framework.Promote(ns, "podinfo", preparation.Name)
-			framework.WaitForDeployment("podinfo", preparation.Spec.Artifact.Digest)
+			framework.WaitForDeployment(ns, "podinfo", preparation.Spec.Artifact.Digest)
 		})
 
 		It("deletes the Preparations and the Serving the Order owns", func() {
@@ -54,21 +54,22 @@ var _ = Describe("Order deletion", Label("lifecycle"), func() {
 
 		It("deletes the Argo CD Application of the Serving", func() {
 			Eventually(func() error {
-				_, err := framework.Application("podinfo")()
+				_, err := framework.Application(ns, "podinfo")()
 				return err
 			}).Should(Satisfy(apierrors.IsNotFound))
 		})
 	})
 
-	Context("of an Order named like an Argo CD Application kokumi did not create", Ordered, func() {
+	Context("of an Order whose Application someone else created by hand", Ordered, func() {
 		var ns string
 
 		BeforeAll(func() {
 			ns = framework.CreateNamespace("foreign-app")
+			name := framework.ApplicationKey(ns, "podinfo").Name
 			framework.ApplyTestdata(framework.ArgoCDNamespace, "lifecycle/foreign-application.yaml",
-				map[string]string{"NAMESPACE": ns})
+				map[string]string{"NAMESPACE": ns, "NAME": name})
 			DeferCleanup(func() {
-				_, _ = framework.Kubectl("delete", "applications.argoproj.io", "podinfo",
+				_, _ = framework.Kubectl("delete", "applications.argoproj.io", name,
 					"-n", framework.ArgoCDNamespace, "--ignore-not-found")
 			})
 
@@ -79,7 +80,7 @@ var _ = Describe("Order deletion", Label("lifecycle"), func() {
 		It("refuses to take the Application over", func() {
 			Eventually(framework.Serving(ns, "podinfo")).Should(
 				framework.HaveConditionReason(deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonDeploymentFailed))
-			Expect(framework.Application("podinfo")()).To(HaveField("Object", HaveKeyWithValue("spec",
+			Expect(framework.Application(ns, "podinfo")()).To(HaveField("Object", HaveKeyWithValue("spec",
 				HaveKeyWithValue("source", HaveKeyWithValue("repoURL", "https://github.com/stefanprodan/podinfo.git")))))
 		})
 
@@ -91,7 +92,7 @@ var _ = Describe("Order deletion", Label("lifecycle"), func() {
 				return err
 			}).Should(Satisfy(apierrors.IsNotFound))
 
-			Consistently(framework.Application("podinfo"), 10*time.Second).Should(Not(BeNil()), "the Application survives")
+			Consistently(framework.Application(ns, "podinfo"), 10*time.Second).Should(Not(BeNil()), "the Application survives")
 		})
 	})
 })

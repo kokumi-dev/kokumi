@@ -13,7 +13,9 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/argocd"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
+	"github.com/kokumi-dev/kokumi/internal/cluster"
 	"github.com/kokumi-dev/kokumi/internal/resolve"
 	"github.com/kokumi-dev/kokumi/internal/scmlink"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -696,6 +698,7 @@ func servingToDTO(s deliveryv1alpha1.Serving) ServingDTO {
 		Order:              s.Spec.OrderName,
 		DesiredPreparation: s.Spec.PreparationName,
 		TargetPreparation:  s.Status.TargetPreparationName,
+		ApplicationName:    argocd.Key(&s, cluster.InCluster).Name,
 		State:              stateFromConditions(s.Status.Conditions),
 		Conditions:         conditionsToDTO(s.Status.Conditions),
 	}

@@ -422,9 +422,12 @@ type ServingDTO struct {
 	// DeployedVulnerabilities sums the latest scans of the deployed
 	// Preparation's images.
 	DeployedVulnerabilities *VulnerabilitySummaryDTO `json:"deployedVulnerabilities,omitempty"`
-	State                   string                   `json:"state"`
-	Conditions              []ConditionDTO           `json:"conditions,omitempty"`
-	CreatedAt               *time.Time               `json:"createdAt,omitempty"`
+	// ApplicationName is the Argo CD Application that deploys the Order, so
+	// that the naming rule lives only in internal/argocd.
+	ApplicationName string         `json:"applicationName"`
+	State           string         `json:"state"`
+	Conditions      []ConditionDTO `json:"conditions,omitempty"`
+	CreatedAt       *time.Time     `json:"createdAt,omitempty"`
 }
 
 // DeploymentEntryDTO is the data-transfer representation of a

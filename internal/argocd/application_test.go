@@ -1,14 +1,17 @@
 package argocd
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/cluster"
 )
 
 const (
@@ -17,6 +20,8 @@ const (
 	testNamespace   = "my-namespace"
 	testDigest      = "sha256:0000000000000000000000000000000000000000000000000000000000000001"
 	statusField     = "status"
+	// testOptIn is the opt-in annotation value for the test Order.
+	testOptIn = testNamespace + "/" + testOrderName
 )
 
 // withStatus returns an Application with the status the Argo CD
@@ -41,6 +46,28 @@ func testServing() *deliveryv1alpha1.Serving {
 	}
 }
 
+// servingIn returns the Serving of the Order order in namespace.
+func servingIn(namespace, order string) *deliveryv1alpha1.Serving {
+	return &deliveryv1alpha1.Serving{Name: order, Namespace: namespace, Spec: deliveryv1alpha1.ServingSpec{OrderName: order}}
+}
+
+func TestKey(t *testing.T) {
+	key := Key(testServing(), cluster.InCluster)
+	assert.Equal(t, Namespace, key.Namespace)
+	assert.Regexp(t, `^kokumi-my-namespace-my-order-[0-9a-f]{8}$`, key.Name)
+	assert.Equal(t, key, Key(testServing(), cluster.InCluster), "the name is stable")
+
+	assert.NotEqual(t, Key(servingIn("a-b", "c"), cluster.InCluster), Key(servingIn("a", "b-c"), cluster.InCluster),
+		"Orders that hyphens would join get names of their own")
+	assert.NotEqual(t, Key(servingIn("shop", "podinfo"), cluster.InCluster), Key(servingIn("team-b", "podinfo"), cluster.InCluster),
+		"Orders of one name in two namespaces get an Application each")
+
+	long := Key(servingIn(strings.Repeat("n", 63), strings.Repeat("o.", 126)+"o"), cluster.InCluster)
+	assert.LessOrEqual(t, len(long.Name), 63)
+	assert.Empty(t, validation.IsValidLabelValue(long.Name), "Argo CD writes the name into a label")
+	assert.Empty(t, validation.IsDNS1123Subdomain(long.Name))
+}
+
 const testOCIRef = "oci://registry.example/order/app@" + testDigest
 
 func TestApplication(t *testing.T) {
@@ -48,8 +75,8 @@ func TestApplication(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, GroupVersionKind, app.GroupVersionKind())
-	assert.Equal(t, types.NamespacedName{Namespace: Namespace, Name: testServingName}, types.NamespacedName{Namespace: app.GetNamespace(), Name: app.GetName()})
-	assert.Equal(t, testOrderName, app.GetAnnotations()[deliveryv1alpha1.AnnotationAllowedOrder], "an Application Kokumi creates is opted in")
+	assert.Equal(t, Key(testServing(), cluster.InCluster), types.NamespacedName{Namespace: app.GetNamespace(), Name: app.GetName()})
+	assert.Equal(t, testOptIn, app.GetAnnotations()[deliveryv1alpha1.AnnotationAllowedOrder], "an Application Kokumi creates is opted in")
 	serving, ok := ServingOf(app.GetLabels())
 	assert.True(t, ok)
 	assert.Equal(t, types.NamespacedName{Namespace: testNamespace, Name: testServingName}, serving)
@@ -80,7 +107,7 @@ func TestMatches(t *testing.T) {
 	assert.False(t, Matches(relabeled, desired))
 
 	annotated := desired.DeepCopy()
-	annotated.SetAnnotations(map[string]string{deliveryv1alpha1.AnnotationAllowedOrder: testOrderName, "extra": "x"})
+	annotated.SetAnnotations(map[string]string{deliveryv1alpha1.AnnotationAllowedOrder: testOptIn, "extra": "x"})
 	assert.False(t, Matches(annotated, desired))
 
 	assert.False(t, Matches(New(), desired), "an Application without spec")
@@ -116,15 +143,21 @@ func TestOptedIn(t *testing.T) {
 		annotations map[string]string
 		wantErr     bool
 	}{
-		{name: "matching annotation", annotations: map[string]string{deliveryv1alpha1.AnnotationAllowedOrder: testOrderName}},
+		{name: "matching annotation", annotations: map[string]string{deliveryv1alpha1.AnnotationAllowedOrder: testOptIn}},
 		{name: "missing annotation", wantErr: true},
-		{name: "annotation of another Order", annotations: map[string]string{deliveryv1alpha1.AnnotationAllowedOrder: "other-order"}, wantErr: true},
+		{name: "the bare Order name", annotations: map[string]string{deliveryv1alpha1.AnnotationAllowedOrder: testOrderName}, wantErr: true},
+		{name: "the Order of another namespace", annotations: map[string]string{
+			deliveryv1alpha1.AnnotationAllowedOrder: "other/" + testOrderName,
+		}, wantErr: true},
+		{name: "annotation of another Order", annotations: map[string]string{
+			deliveryv1alpha1.AnnotationAllowedOrder: testNamespace + "/other-order",
+		}, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			app := New()
 			app.SetAnnotations(tt.annotations)
-			err := OptedIn(app, testOrderName)
+			err := OptedIn(app, testNamespace, testOrderName)
 			if !tt.wantErr {
 				assert.NoError(t, err)
 				return
@@ -163,7 +196,7 @@ func TestChanged(t *testing.T) {
 		app.SetAnnotations(annotations)
 		return app
 	}
-	optIn := map[string]string{deliveryv1alpha1.AnnotationAllowedOrder: testOrderName}
+	optIn := map[string]string{deliveryv1alpha1.AnnotationAllowedOrder: testOptIn}
 
 	tests := []struct {
 		name     string

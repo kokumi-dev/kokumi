@@ -1,10 +1,11 @@
-# An Argo CD Application someone created by hand, named like the Serving of
-# the getting-started Order. It lacks the delivery.kokumi.dev/allowed-order
-# annotation, so kokumi must neither take it over nor delete it.
+# An Argo CD Application someone created by hand, named as Kokumi names the
+# Application of the getting-started Order. It lacks the
+# delivery.kokumi.dev/allowed-order annotation, so kokumi must neither take it
+# over nor delete it.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: podinfo
+  name: ${NAME}
 spec:
   project: default
   source:

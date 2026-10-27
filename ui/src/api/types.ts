@@ -395,6 +395,8 @@ export interface Serving {
   history?: DeploymentEntry[]
   /** The latest scans of the deployed Preparation's images, summed; changes as vulnerabilities are published. */
   deployedVulnerabilities?: VulnerabilitySummary
+  /** The Argo CD Application that deploys the Order. */
+  applicationName: string
   state: string
   conditions?: Condition[]
   createdAt?: string

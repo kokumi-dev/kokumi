@@ -717,10 +717,13 @@ Preparation it converges to, then deploys the promoted one.
    gate it passed. The time goes into the status first and the record into
    the registry in the next pass, so a retry pushes the same bytes.
 7. Creates or updates the Argo CD `Application` in the `argocd` namespace,
-   pointing `spec.source.repoURL` at the deployed Preparation's OCI artifact
-   and `spec.source.targetRevision` at its exact digest. A pre-existing
-   Application without the opt-in annotation is never modified, and
-   deleting the Serving keeps it.
+   named `kokumi-<namespace>-<order>-<hash>`, where the hash covers the
+   namespace, the Order and the cluster, so that Orders of one name in two
+   namespaces never share one. It points `spec.source.repoURL` at the
+   deployed Preparation's OCI artifact and `spec.source.targetRevision` at
+   its exact digest. A pre-existing Application without the opt-in
+   annotation `delivery.kokumi.dev/allowed-order: <namespace>/<order>` is
+   never modified, and deleting the Serving keeps it.
 8. Derives the `Ready` condition from the Application: `Deploying` until the
    Application reports `Healthy` and is synced to the deployed digest, then
    `Deployed`. An Application that is degraded at the deployed digest

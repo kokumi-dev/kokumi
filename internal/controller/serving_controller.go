@@ -44,6 +44,7 @@ import (
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/approval"
 	"github.com/kokumi-dev/kokumi/internal/argocd"
+	"github.com/kokumi-dev/kokumi/internal/cluster"
 	"github.com/kokumi-dev/kokumi/internal/conditions"
 	"github.com/kokumi-dev/kokumi/internal/evidence"
 	"github.com/kokumi-dev/kokumi/internal/oci"
@@ -848,7 +849,7 @@ func (r *ServingReconciler) applyApplication(
 	}
 
 	existing := argocd.New()
-	if err := r.Get(ctx, argocd.Key(serving), existing); err != nil {
+	if err := r.Get(ctx, argocd.Key(serving, cluster.InCluster), existing); err != nil {
 		if !apierrors.IsNotFound(err) {
 			return nil, fmt.Errorf("failed to get Application: %w", err)
 		}
@@ -859,7 +860,7 @@ func (r *ServingReconciler) applyApplication(
 		return desired, nil
 	}
 
-	if err := argocd.OptedIn(existing, serving.Spec.OrderName); err != nil {
+	if err := argocd.OptedIn(existing, serving.Namespace, serving.Spec.OrderName); err != nil {
 		return nil, err
 	}
 	if argocd.Matches(existing, desired) {
@@ -910,7 +911,7 @@ func (r *ServingReconciler) removeApplication(ctx context.Context, serving *deli
 	logger := log.FromContext(ctx)
 
 	app := argocd.New()
-	if err := r.Get(ctx, argocd.Key(serving), app); err != nil {
+	if err := r.Get(ctx, argocd.Key(serving, cluster.InCluster), app); err != nil {
 		if apierrors.IsNotFound(err) {
 			logger.Info("Argo CD Application already deleted", "name", serving.Name)
 			return nil
@@ -918,7 +919,7 @@ func (r *ServingReconciler) removeApplication(ctx context.Context, serving *deli
 		return fmt.Errorf("failed to get Application: %w", err)
 	}
 
-	if err := argocd.OptedIn(app, serving.Spec.OrderName); err != nil {
+	if err := argocd.OptedIn(app, serving.Namespace, serving.Spec.OrderName); err != nil {
 		logger.Info("Keeping Argo CD Application that is not opted in for the Order", "name", app.GetName(), "error", err.Error())
 		return nil
 	}

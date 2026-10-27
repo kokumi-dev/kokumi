@@ -29,7 +29,7 @@ export default function ServingLayout() {
     )
   }
 
-  const argoURL = argoAppURL(argoBase, serving.name)
+  const argoURL = argoAppURL(argoBase, serving.applicationName)
   const ctx: ServingContext = { serving }
 
   return (

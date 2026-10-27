@@ -57,7 +57,7 @@ var _ = Describe("Approvals", Label("approvals"), Serial, func() {
 		It("holds the Preparation until it is approved", func() {
 			Eventually(framework.Serving(ns, "podinfo-approvals")).Should(framework.HaveConditionReason(
 				deliveryv1alpha1.ConditionTypeApproved, deliveryv1alpha1.ReasonAwaitingApprovals))
-			framework.ExpectNoApplication("podinfo-approvals")
+			framework.ExpectNoApplication(ns, "podinfo-approvals")
 		})
 
 		It("refuses an approval by the shared admin account, which identifies no person", func() {
@@ -71,14 +71,14 @@ var _ = Describe("Approvals", Label("approvals"), Serial, func() {
 
 			Consistently(framework.Serving(ns, "podinfo-approvals"), 10*time.Second).Should(framework.HaveConditionReason(
 				deliveryv1alpha1.ConditionTypeApproved, deliveryv1alpha1.ReasonAwaitingApprovals))
-			framework.ExpectNoApplication("podinfo-approvals")
+			framework.ExpectNoApplication(ns, "podinfo-approvals")
 		})
 
 		It("deploys the Preparation once a second release approver approves it", func() {
 			status, body := approve(server.LoginOIDC("approver2@kokumi.dev", "password"))
 			Expect(status).To(Equal(http.StatusCreated), body)
 
-			framework.WaitForDeployment("podinfo-approvals", preparation.Spec.Artifact.Digest)
+			framework.WaitForDeployment(ns, "podinfo-approvals", preparation.Spec.Artifact.Digest)
 			Expect(framework.Serving(ns, "podinfo-approvals")()).To(framework.HaveConditionReason(
 				deliveryv1alpha1.ConditionTypeApproved, deliveryv1alpha1.ReasonApproved))
 		})

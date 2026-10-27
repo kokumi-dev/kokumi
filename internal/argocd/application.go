@@ -5,16 +5,20 @@
 package argocd
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"maps"
 	"reflect"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/cluster"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 )
 
@@ -24,6 +28,10 @@ const Namespace = "argocd"
 // InClusterServer is the API server Applications deploy to: the cluster
 // Kokumi runs in.
 const InClusterServer = "https://kubernetes.default.svc"
+
+// maxNameLength is the limit of an Application name: Argo CD's label-based
+// resource tracking writes it into a label value.
+const maxNameLength = 63
 
 // GroupVersionKind is the kind of Argo CD Applications.
 var GroupVersionKind = schema.GroupVersionKind{Group: "argoproj.io", Version: "v1alpha1", Kind: "Application"}
@@ -68,9 +76,33 @@ func New() *unstructured.Unstructured {
 	return app
 }
 
-// Key returns the key of the Application of serving.
-func Key(serving *deliveryv1alpha1.Serving) types.NamespacedName {
-	return types.NamespacedName{Namespace: Namespace, Name: serving.Name}
+// Key returns the key of the Application that deploys the Order of serving
+// to the cluster clusterName: kokumi-<namespace>-<order>-<hash>, where the
+// hash is the first 8 hex digits of the SHA-256 of
+// <namespace>/<order>/<cluster>. The hash keeps names apart that hyphens
+// would join, such as a-b/c and a/b-c, and <namespace>-<order> is cut to fit
+// 63 characters.
+func Key(serving *deliveryv1alpha1.Serving, clusterName string) types.NamespacedName {
+	order := serving.Spec.OrderName
+	return types.NamespacedName{
+		Namespace: Namespace,
+		Name:      hashedName("kokumi-"+serving.Namespace+"-"+order, serving.Namespace+"/"+order+"/"+clusterName, maxNameLength),
+	}
+}
+
+// hashedName returns base, cut to fit limit, followed by a hyphen and the
+// first 8 hex digits of the SHA-256 of unique.
+func hashedName(base, unique string, limit int) string {
+	sum := sha256.Sum256([]byte(unique))
+	hash := hex.EncodeToString(sum[:4])
+	base = base[:min(len(base), limit-len(hash)-1)]
+	return strings.TrimRight(base, "-.") + "-" + hash
+}
+
+// allowedOrder is the value of the opt-in annotation for the Order name in
+// namespace.
+func allowedOrder(namespace, order string) string {
+	return namespace + "/" + order
 }
 
 // Application returns the Application that deploys the artifact at ociRef,
@@ -82,7 +114,7 @@ func Application(serving *deliveryv1alpha1.Serving, ociRef string) (*unstructure
 		return nil, fmt.Errorf("failed to parse OCI Ref: %w", err)
 	}
 
-	key := Key(serving)
+	key := Key(serving, cluster.InCluster)
 	app := &unstructured.Unstructured{Object: map[string]any{
 		"metadata": map[string]any{
 			"name":      key.Name,
@@ -93,7 +125,7 @@ func Application(serving *deliveryv1alpha1.Serving, ociRef string) (*unstructure
 				deliveryv1alpha1.LabelServingNamespace: serving.Namespace,
 			},
 			"annotations": map[string]any{
-				deliveryv1alpha1.AnnotationAllowedOrder: serving.Spec.OrderName,
+				deliveryv1alpha1.AnnotationAllowedOrder: allowedOrder(serving.Namespace, serving.Spec.OrderName),
 			},
 		},
 		"spec": map[string]any{
@@ -123,14 +155,15 @@ func Application(serving *deliveryv1alpha1.Serving, ociRef string) (*unstructure
 }
 
 // OptedIn returns an error wrapping ErrOptInRequired unless app carries the
-// allowed-order annotation for order.
-func OptedIn(app *unstructured.Unstructured, order string) error {
+// allowed-order annotation for the Order name in namespace.
+func OptedIn(app *unstructured.Unstructured, namespace, order string) error {
 	actual := app.GetAnnotations()[deliveryv1alpha1.AnnotationAllowedOrder]
-	if actual == order {
+	expected := allowedOrder(namespace, order)
+	if actual == expected {
 		return nil
 	}
 	return fmt.Errorf("%w: Argo CD Application %q must be annotated with %q=%q (current value: %q)",
-		ErrOptInRequired, app.GetName(), deliveryv1alpha1.AnnotationAllowedOrder, order, actual)
+		ErrOptInRequired, app.GetName(), deliveryv1alpha1.AnnotationAllowedOrder, expected, actual)
 }
 
 // Matches reports whether existing already has the spec, labels and

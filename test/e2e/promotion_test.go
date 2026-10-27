@@ -42,14 +42,14 @@ var _ = Describe("Promotion", Label("promotion"), func() {
 		It("deploys nothing until a Preparation is promoted", func() {
 			_, err := framework.Serving(ns, "podinfo")()
 			Expect(apierrors.IsNotFound(err)).To(BeTrue(), "the Order has no Serving before its first promotion")
-			framework.ExpectNoApplication("podinfo")
+			framework.ExpectNoApplication(ns, "podinfo")
 		})
 
 		It("deploys a promoted Preparation through an Argo CD Application of its digest", func() {
 			framework.Promote(ns, "podinfo", first.Name)
-			framework.WaitForDeployment("podinfo", first.Spec.Artifact.Digest)
+			framework.WaitForDeployment(ns, "podinfo", first.Spec.Artifact.Digest)
 
-			app, err := framework.Application("podinfo")()
+			app, err := framework.Application(ns, "podinfo")()
 			Expect(err).NotTo(HaveOccurred())
 			Expect(app.Object["spec"]).To(SatisfyAll(
 				HaveKeyWithValue("source", HaveKeyWithValue("repoURL",
@@ -57,7 +57,7 @@ var _ = Describe("Promotion", Label("promotion"), func() {
 				HaveKeyWithValue("destination", HaveKeyWithValue("namespace", ns)),
 			), "Argo CD pulls the Preparation from the registry and applies it to the Order's namespace")
 
-			framework.SyncHealthy("podinfo", first.Spec.Artifact.Digest)
+			framework.SyncHealthy(ns, "podinfo", first.Spec.Artifact.Digest)
 			Eventually(framework.Serving(ns, "podinfo")).Should(
 				framework.HaveConditionReason(deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonDeployed))
 		})
@@ -69,8 +69,8 @@ var _ = Describe("Promotion", Label("promotion"), func() {
 			second = framework.LatestPreparation(ns, "podinfo", first.Name)
 
 			framework.Promote(ns, "podinfo", second.Name)
-			framework.WaitForDeployment("podinfo", second.Spec.Artifact.Digest)
-			framework.SyncHealthy("podinfo", second.Spec.Artifact.Digest)
+			framework.WaitForDeployment(ns, "podinfo", second.Spec.Artifact.Digest)
+			framework.SyncHealthy(ns, "podinfo", second.Spec.Artifact.Digest)
 
 			Eventually(framework.Serving(ns, "podinfo")).Should(HaveField("Status.History", HaveExactElements(
 				healthy(second),
@@ -80,8 +80,8 @@ var _ = Describe("Promotion", Label("promotion"), func() {
 
 		It("rolls back by promoting the earlier Preparation again, without rendering it again", func() {
 			framework.Promote(ns, "podinfo", first.Name)
-			framework.WaitForDeployment("podinfo", first.Spec.Artifact.Digest)
-			framework.SyncHealthy("podinfo", first.Spec.Artifact.Digest)
+			framework.WaitForDeployment(ns, "podinfo", first.Spec.Artifact.Digest)
+			framework.SyncHealthy(ns, "podinfo", first.Spec.Artifact.Digest)
 
 			Eventually(framework.Serving(ns, "podinfo")).Should(HaveField("Status.History", HaveExactElements(
 				healthy(first),
