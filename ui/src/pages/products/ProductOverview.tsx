@@ -98,8 +98,13 @@ export default function ProductOverview() {
         <PropertyList
           items={[
             { label: 'Renderer', value: helm ? 'Helm' : 'Manifest' },
+            {
+              label: 'Target namespace',
+              value: product.targetNamespace
+                ? <span className={layout.mono}>{product.targetNamespace}</span>
+                : <span className={layout.muted}>Each Order&apos;s namespace, unless the Order sets one</span>,
+            },
             { label: 'Release name', value: helm?.releaseName, show: !!helm?.releaseName },
-            { label: 'Helm namespace', value: helm?.namespace, show: !!helm?.namespace },
             { label: 'Include CRDs', value: helm?.includeCRDs ? 'Yes' : 'No', show: !!helm },
             { label: 'Base values', value: <pre className={layout.code}>{baseValues}</pre>, show: !!baseValues },
             { label: 'File layout', value: render?.manifest?.layout ?? 'Single', show: !helm },

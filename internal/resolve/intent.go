@@ -26,6 +26,9 @@ type Intent struct {
 	ProductRevision string `json:"productRevision"`
 	// Destination is the resolved OCI URL the artifact is pushed to.
 	Destination string `json:"destination"`
+	// TargetNamespace is the namespace the artifact is rendered for and
+	// deploys into.
+	TargetNamespace string `json:"targetNamespace"`
 	// Render is the render configuration after merging the Order over its
 	// Product.
 	Render *deliveryv1alpha1.Render `json:"render,omitempty"`
@@ -70,6 +73,7 @@ func NewIntent(order *deliveryv1alpha1.Order, effective *EffectiveSpec, destinat
 		Source:          IntentSource{OCI: effective.Source.URL, Version: effective.Source.Version, Digest: effective.SourceDigest},
 		ProductRevision: effective.ProductRevision,
 		Destination:     destination,
+		TargetNamespace: effective.TargetNamespace,
 		Render:          effective.Render,
 		Patches:         effective.Patches,
 		Edits:           effective.Edits,

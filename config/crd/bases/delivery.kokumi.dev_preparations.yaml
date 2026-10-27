@@ -365,6 +365,13 @@ spec:
                 - baseDigest
                 - url
                 type: object
+              targetNamespace:
+                description: |-
+                  targetNamespace is the namespace the Preparation was rendered for: it
+                  deploys there, wherever it is promoted.
+                maxLength: 63
+                minLength: 1
+                type: string
             required:
             - artifact
             - configHash
@@ -372,6 +379,7 @@ spec:
             - productRevision
             - renderer
             - source
+            - targetNamespace
             type: object
             x-kubernetes-validations:
             - message: Preparation spec is immutable

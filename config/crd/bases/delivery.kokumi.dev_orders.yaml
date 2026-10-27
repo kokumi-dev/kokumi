@@ -326,6 +326,15 @@ spec:
                 x-kubernetes-list-map-keys:
                 - name
                 x-kubernetes-list-type: map
+              targetNamespace:
+                description: |-
+                  targetNamespace is the namespace the Order deploys into, overriding
+                  the Product's. When neither sets it, it is the Order's namespace. It
+                  is part of what is rendered: Helm renders into it, and resources
+                  without a namespace are deployed there.
+                maxLength: 63
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                type: string
               values:
                 description: |-
                   values holds Helm values deep-merged over the Product's

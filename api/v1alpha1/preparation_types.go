@@ -137,6 +137,13 @@ type PreparationSpec struct {
 	// +required
 	Renderer Renderer `json:"renderer"`
 
+	// targetNamespace is the namespace the Preparation was rendered for: it
+	// deploys there, wherever it is promoted.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	TargetNamespace string `json:"targetNamespace"`
+
 	// configHash is the SHA256 hash of the canonicalized order configuration
 	// +required
 	// +kubebuilder:validation:MaxLength=71

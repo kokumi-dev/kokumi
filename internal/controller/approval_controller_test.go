@@ -82,8 +82,9 @@ var _ = Describe("Approval Controller", func() {
 				Namespace: testNamespace,
 				UID:       "00000000-0000-0000-0000-000000000000",
 				Spec: deliveryv1alpha1.PreparationSpec{
-					OrderName: "missing-order",
-					Artifact:  deliveryv1alpha1.Artifact{Digest: "sha256:3333333333333333333333333333333333333333333333333333333333333333"},
+					TargetNamespace: testNamespace,
+					OrderName:       "missing-order",
+					Artifact:        deliveryv1alpha1.Artifact{Digest: "sha256:3333333333333333333333333333333333333333333333333333333333333333"},
 				},
 			}, "alice", release, deliveryv1alpha1.ApprovalDecisionApprove)
 			DeferCleanup(func() { _ = k8sClient.Delete(ctx, a) })
@@ -138,7 +139,7 @@ var _ = Describe("Approval Controller", func() {
 		It("ignores votes cast for a different artifact", func() {
 			forged := createTestApproval(ctx, &deliveryv1alpha1.Preparation{
 				ObjectMeta: prep.ObjectMeta,
-				Spec:       deliveryv1alpha1.PreparationSpec{OrderName: orderName, Artifact: deliveryv1alpha1.Artifact{Digest: other}},
+				Spec:       deliveryv1alpha1.PreparationSpec{TargetNamespace: testNamespace, OrderName: orderName, Artifact: deliveryv1alpha1.Artifact{Digest: other}},
 			}, "alice", release, deliveryv1alpha1.ApprovalDecisionApprove)
 
 			Expect(reconcileApproval(forged).Reason).To(Equal(deliveryv1alpha1.ReasonDigestMismatch))

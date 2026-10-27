@@ -126,11 +126,6 @@ type HelmRender struct {
 	// +optional
 	ReleaseName string `json:"releaseName,omitempty"`
 
-	// namespace is the target namespace passed to helm template --namespace.
-	// Defaults to the Order's metadata.namespace when omitted.
-	// +optional
-	Namespace string `json:"namespace,omitempty"`
-
 	// includeCRDs controls whether CRDs are included in the rendered output.
 	// Equivalent to helm template --include-crds.
 	// +optional
@@ -280,6 +275,15 @@ type OrderSpec struct {
 	// promotion configures how new Preparations become active Servings.
 	// +optional
 	Promotion *PromotionSpec `json:"promotion,omitempty"`
+
+	// targetNamespace is the namespace the Order deploys into, overriding
+	// the Product's. When neither sets it, it is the Order's namespace. It
+	// is part of what is rendered: Helm renders into it, and resources
+	// without a namespace are deployed there.
+	// +optional
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	TargetNamespace string `json:"targetNamespace,omitempty"`
 }
 
 // PromotionSpec defines how new Preparations are promoted to active Servings.

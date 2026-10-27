@@ -322,11 +322,6 @@ spec:
                           includeCRDs controls whether CRDs are included in the rendered output.
                           Equivalent to helm template --include-crds.
                         type: boolean
-                      namespace:
-                        description: |-
-                          namespace is the target namespace passed to helm template --namespace.
-                          Defaults to the Order's metadata.namespace when omitted.
-                        type: string
                       releaseName:
                         description: |-
                           releaseName is the Helm release name passed to helm template.
@@ -470,6 +465,14 @@ spec:
                 - url
                 - version
                 type: object
+              targetNamespace:
+                description: |-
+                  targetNamespace is the namespace Orders of the Product deploy into,
+                  unless an Order sets its own. When neither sets it, it is the Order's
+                  namespace.
+                maxLength: 63
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                type: string
               vendor:
                 description: |-
                   vendor optionally copies the source artifact to another OCI

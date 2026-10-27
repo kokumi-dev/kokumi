@@ -201,6 +201,7 @@ var _ = Describe("Scan Controller", func() {
 			Name:      scanPreparationName,
 			Namespace: scanNamespace,
 			Spec: deliveryv1alpha1.PreparationSpec{
+				TargetNamespace: testNamespace,
 				OrderName:       scanOrderName,
 				Source:          deliveryv1alpha1.OrderSource{URL: "oci://ghcr.io/org/app", BaseDigest: oci.FakeDigest},
 				Renderer:        deliveryv1alpha1.Renderer{Type: deliveryv1alpha1.RenderTypeManifest, Version: testRendererVersion, Builder: testBuilderID},

@@ -18,7 +18,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
-	"github.com/kokumi-dev/kokumi/internal/cluster"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 )
 
@@ -28,6 +27,10 @@ const Namespace = "argocd"
 // InClusterServer is the API server Applications deploy to: the cluster
 // Kokumi runs in.
 const InClusterServer = "https://kubernetes.default.svc"
+
+// DefaultProject is Argo CD's own AppProject, which Applications deploy
+// through.
+const DefaultProject = "default"
 
 // maxNameLength is the limit of an Application name: Argo CD's label-based
 // resource tracking writes it into a label value.
@@ -69,6 +72,19 @@ type State struct {
 	Message string
 }
 
+// Target is a cluster and namespace an Application deploys to.
+type Target struct {
+	// Cluster names the cluster.
+	Cluster string
+	// Server is the URL of the cluster's API server.
+	Server string
+	// Namespace is the namespace on the cluster the Preparation deploys
+	// into: its target namespace.
+	Namespace string
+	// Project is the AppProject of the Application.
+	Project string
+}
+
 // New returns an empty Application, to read or watch Applications into.
 func New() *unstructured.Unstructured {
 	app := &unstructured.Unstructured{}
@@ -77,16 +93,15 @@ func New() *unstructured.Unstructured {
 }
 
 // Key returns the key of the Application that deploys the Order of serving
-// to the cluster clusterName: kokumi-<namespace>-<order>-<hash>, where the
-// hash is the first 8 hex digits of the SHA-256 of
-// <namespace>/<order>/<cluster>. The hash keeps names apart that hyphens
-// would join, such as a-b/c and a/b-c, and <namespace>-<order> is cut to fit
-// 63 characters.
-func Key(serving *deliveryv1alpha1.Serving, clusterName string) types.NamespacedName {
+// to cluster: kokumi-<namespace>-<order>-<hash>, where the hash is the first
+// 8 hex digits of the SHA-256 of <namespace>/<order>/<cluster>. The hash
+// keeps names apart that hyphens would join, such as a-b/c and a/b-c, and
+// <namespace>-<order> is cut to fit 63 characters.
+func Key(serving *deliveryv1alpha1.Serving, cluster string) types.NamespacedName {
 	order := serving.Spec.OrderName
 	return types.NamespacedName{
 		Namespace: Namespace,
-		Name:      hashedName("kokumi-"+serving.Namespace+"-"+order, serving.Namespace+"/"+order+"/"+clusterName, maxNameLength),
+		Name:      hashedName("kokumi-"+serving.Namespace+"-"+order, serving.Namespace+"/"+order+"/"+cluster, maxNameLength),
 	}
 }
 
@@ -106,15 +121,16 @@ func allowedOrder(namespace, order string) string {
 }
 
 // Application returns the Application that deploys the artifact at ociRef,
-// with its digest, for serving. It is opted in for the Serving's Order and
-// labeled with the Serving, so that its events map back to it.
-func Application(serving *deliveryv1alpha1.Serving, ociRef string) (*unstructured.Unstructured, error) {
+// with its digest, for serving to target, into the target's namespace. It
+// is opted in for the Serving's Order and labeled with the Serving, so that
+// its events map back to it.
+func Application(serving *deliveryv1alpha1.Serving, ociRef string, target Target) (*unstructured.Unstructured, error) {
 	ref, err := oci.Parse(ociRef)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse OCI Ref: %w", err)
 	}
 
-	key := Key(serving, cluster.InCluster)
+	key := Key(serving, target.Cluster)
 	app := &unstructured.Unstructured{Object: map[string]any{
 		"metadata": map[string]any{
 			"name":      key.Name,
@@ -129,15 +145,15 @@ func Application(serving *deliveryv1alpha1.Serving, ociRef string) (*unstructure
 			},
 		},
 		"spec": map[string]any{
-			"project": "default",
+			"project": target.Project,
 			"source": map[string]any{
 				"repoURL":        ref.OCIRepositoryReference(),
 				"targetRevision": ref.Digest,
 				"path":           ".",
 			},
 			"destination": map[string]any{
-				"server":    InClusterServer,
-				"namespace": serving.Namespace,
+				"server":    target.Server,
+				"namespace": target.Namespace,
 			},
 			"syncPolicy": map[string]any{
 				"automated": map[string]any{
@@ -146,6 +162,8 @@ func Application(serving *deliveryv1alpha1.Serving, ociRef string) (*unstructure
 				},
 				"syncOptions": []any{
 					"ServerSideApply=true",
+					// The target namespace need not exist on the cluster.
+					"CreateNamespace=true",
 				},
 			},
 		},

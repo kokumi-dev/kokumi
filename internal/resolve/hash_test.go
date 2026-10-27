@@ -327,7 +327,6 @@ func TestIntent_golden(t *testing.T) {
 	product := resolvedProduct(&deliveryv1alpha1.Render{
 		Helm: &deliveryv1alpha1.HelmRender{
 			ReleaseName: name,
-			Namespace:   namespace,
 			IncludeCRDs: true,
 			Values:      &apiextensionsv1.JSON{Raw: []byte(`{"replicaCount": 1, "image": {"tag": "1.0.0"}, "args": "a && <b>"}`)},
 		},
@@ -341,6 +340,7 @@ func TestIntent_golden(t *testing.T) {
 		FieldSpecs: []deliveryv1alpha1.ImageFieldSpec{{Group: "monitoring.coreos.com", Kind: prometheusKind, Path: prometheusImagePath}},
 	}
 	product.Spec.RegistryRefs = []corev1.LocalObjectReference{{Name: "registry-credentials"}}
+	product.Spec.TargetNamespace = namespace
 
 	order := orderOf(deliveryv1alpha1.OrderSpec{
 		Values: &apiextensionsv1.JSON{Raw: []byte(`{"replicaCount": 2, "id": 9007199254740993}`)},

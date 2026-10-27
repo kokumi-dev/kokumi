@@ -20,25 +20,27 @@ import (
 // It mirrors CreateOrderRequest but omits promotion, commit message and
 // destination since no artifact is pushed.
 type PreviewOrderRequest struct {
-	Namespace  string          `json:"namespace"`
-	Name       string          `json:"name"`
-	ProductRef ProductRefDTO   `json:"productRef"`
-	Values     json.RawMessage `json:"values,omitempty"`
-	Patches    []PatchDTO      `json:"patches,omitempty"`
-	Edits      []PatchDTO      `json:"edits,omitempty"`
+	Namespace       string          `json:"namespace"`
+	Name            string          `json:"name"`
+	ProductRef      ProductRefDTO   `json:"productRef"`
+	TargetNamespace string          `json:"targetNamespace,omitempty"`
+	Values          json.RawMessage `json:"values,omitempty"`
+	Patches         []PatchDTO      `json:"patches,omitempty"`
+	Edits           []PatchDTO      `json:"edits,omitempty"`
 }
 
 // PreviewProductRequest is the body for POST /api/v1/products/preview.
 // It renders a Product spec, saved or not, without any Order on top.
 type PreviewProductRequest struct {
-	Namespace    string             `json:"namespace"`
-	Name         string             `json:"name"`
-	Source       OCISourceDTO       `json:"source"`
-	Vendor       *OCIDestinationDTO `json:"vendor,omitempty"`
-	Render       *RenderDTO         `json:"render,omitempty"`
-	Patches      []PatchDTO         `json:"patches,omitempty"`
-	Images       ProductImagesDTO   `json:"images"`
-	RegistryRefs []RegistryRefDTO   `json:"registryRefs,omitempty"`
+	Namespace       string             `json:"namespace"`
+	Name            string             `json:"name"`
+	Source          OCISourceDTO       `json:"source"`
+	Vendor          *OCIDestinationDTO `json:"vendor,omitempty"`
+	Render          *RenderDTO         `json:"render,omitempty"`
+	TargetNamespace string             `json:"targetNamespace,omitempty"`
+	Patches         []PatchDTO         `json:"patches,omitempty"`
+	Images          ProductImagesDTO   `json:"images"`
+	RegistryRefs    []RegistryRefDTO   `json:"registryRefs,omitempty"`
 }
 
 // preview is a resolved preview request, ready to render.
@@ -131,7 +133,7 @@ func (p *preview) request() (artifact.PreviewRequest, error) {
 		Edits:     converted.Edits,
 		Images:    imageOpts,
 		Name:      p.name,
-		Namespace: p.namespace,
+		Namespace: p.spec.TargetNamespace,
 	}, nil
 }
 
@@ -153,10 +155,11 @@ func resolveOrderPreview(deps *apiDeps, w http.ResponseWriter, r *http.Request) 
 		Name:      req.Name,
 		Namespace: ns,
 		Spec: deliveryv1alpha1.OrderSpec{
-			ProductRef: deliveryv1alpha1.ProductRef{Name: req.ProductRef.Name},
-			Values:     valuesFromDTO(req.Values),
-			Patches:    patchesFromDTO(req.Patches),
-			Edits:      patchesFromDTO(req.Edits),
+			ProductRef:      deliveryv1alpha1.ProductRef{Name: req.ProductRef.Name},
+			TargetNamespace: req.TargetNamespace,
+			Values:          valuesFromDTO(req.Values),
+			Patches:         patchesFromDTO(req.Patches),
+			Edits:           patchesFromDTO(req.Edits),
 		},
 	}
 
@@ -240,6 +243,11 @@ func resolveProductPreview(deps *apiDeps, w http.ResponseWriter, r *http.Request
 		Patches:      patchesFromDTO(req.Patches),
 		Images:       productImagesFromDTO(req.Images),
 		RegistryRefs: registryRefsFromDTO(req.RegistryRefs),
+		// Without an Order, the Product deploys into its own namespace,
+		// unless it sets one.
+		TargetNamespace: resolve.TargetNamespace(
+			&deliveryv1alpha1.Product{Spec: deliveryv1alpha1.ProductSpec{TargetNamespace: req.TargetNamespace}},
+			&deliveryv1alpha1.Order{Namespace: ns}),
 	}
 	if spec.Images.EffectivePolicy() == deliveryv1alpha1.ImagePolicyVendor {
 		spec.ImagesVendorURL = artifact.DefaultVendorDestination(ns, req.Name)

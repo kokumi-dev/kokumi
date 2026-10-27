@@ -35,7 +35,7 @@
       }
     }
   ],
-  "productRevision": "sha256:a1dd582184cfb17cdec7105579a02a712b69bd60fb45cb9f6d3dea38141a4f67",
+  "productRevision": "sha256:765540f4b38046122010545a55ce82cbc5de0213cf1c5241517dce111ae591ec",
   "promotion": {
     "after": [
       {
@@ -64,7 +64,6 @@
   "render": {
     "helm": {
       "includeCRDs": true,
-      "namespace": "shop",
       "releaseName": "podinfo",
       "values": {
         "args": "a && <b>",
@@ -80,5 +79,6 @@
     "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
     "oci": "oci://ghcr.io/org/charts/app",
     "version": "1.0.0"
-  }
+  },
+  "targetNamespace": "shop"
 }

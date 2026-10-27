@@ -71,7 +71,6 @@ export interface Patch {
 
 export interface HelmRender {
   releaseName?: string
-  namespace?: string
   includeCRDs?: boolean
   values?: Record<string, unknown>
 }
@@ -99,6 +98,9 @@ export interface ProductRef {
   name: string
 }
 
+/** What sets the namespace an Order deploys into: the Order, its Product, or neither, and it is the Order's own. */
+export type TargetNamespaceSource = 'order' | 'product' | 'namespace'
+
 /** A variant of exactly one Product; only holds what differs from it. */
 export interface Order {
   name: string
@@ -106,6 +108,11 @@ export interface Order {
   labels?: Record<string, string>
   /** The environment of the pipeline the Order belongs to, from its delivery.kokumi.dev/environment label. */
   environment?: string
+  /** The namespace it deploys into; absent: the Product's, else its own. */
+  targetNamespace?: string
+  /** The namespace it deploys into, resolved by the server, and what sets it. */
+  effectiveTargetNamespace: string
+  targetNamespaceSource: TargetNamespaceSource
   productRef: ProductRef
   /** Helm values; only valid when the Product renders with Helm. */
   values?: Record<string, unknown>
@@ -642,6 +649,8 @@ export interface Product {
    */
   vendor?: OCIDestination
   render?: Render
+  /** The namespace its Orders deploy into, unless an Order sets its own; absent: each Order's namespace. */
+  targetNamespace?: string
   patches?: Patch[]
   overrides: Overrides
   images: ProductImages
@@ -736,6 +745,8 @@ export interface OrderFormData {
   productRef: ProductRef
   /** The environment of the pipeline it belongs to; empty for none. Always sent on update: an update without it removes it. */
   environment: string
+  /** Empty: the Product's target namespace, else the Order's namespace. */
+  targetNamespace: string
   /** Helm values; only sent when the Product renders with Helm. */
   values: Record<string, unknown>
   destination: OCIDestination
@@ -755,6 +766,7 @@ export const emptyOrderForm = (product?: { namespace: string; name: string }): O
   namespace: product?.namespace ?? 'kokumi',
   productRef: { name: product?.name ?? '' },
   environment: '',
+  targetNamespace: '',
   values: {},
   destination: {},
   registryRefs: [],
@@ -774,6 +786,7 @@ export const orderToFormData = (r: Order): OrderFormData => ({
   namespace: r.namespace,
   productRef: { name: r.productRef.name },
   environment: r.environment ?? '',
+  targetNamespace: r.targetNamespace ?? '',
   values: r.values ?? {},
   destination: r.destination ? { ...r.destination } : {},
   registryRefs: copyRegistryRefs(r.registryRefs),
@@ -794,6 +807,8 @@ export interface ProductFormData {
   /** Absent: no vendoring; {} vendors into the in-cluster registry. */
   vendor?: OCIDestination
   render?: Render
+  /** Empty: each Order's namespace, unless the Order sets its own. */
+  targetNamespace: string
   patches: Patch[]
   /** Lists are only set with policy Listed. */
   overrides: Overrides
@@ -805,6 +820,7 @@ export const emptyProductForm = (): ProductFormData => ({
   name: '',
   namespace: 'kokumi',
   source: { url: '', version: '' },
+  targetNamespace: '',
   patches: [],
   overrides: { values: { policy: 'None' }, patches: { policy: 'None' } },
   images: { policy: 'Record' },
@@ -851,6 +867,7 @@ export const productToFormData = (p: Product): ProductFormData => ({
     : p.render?.manifest
       ? { manifest: { ...p.render.manifest } }
       : undefined,
+  targetNamespace: p.targetNamespace ?? '',
   patches: copyPatches(p.patches),
   overrides: copyOverrides(p.overrides),
   images: copyImages(p.images),
@@ -864,6 +881,8 @@ export interface OrderPreviewRequest {
   namespace: string
   name: string
   productRef: ProductRef
+  /** The namespace the Order would deploy into; Helm renders into it. */
+  targetNamespace?: string
   values?: Record<string, unknown>
   patches?: Patch[]
   edits?: Patch[]
@@ -877,6 +896,8 @@ export interface ProductPreviewRequest {
   /** Where vendored images would be pulled from. */
   vendor?: OCIDestination
   render?: Render
+  /** The namespace the Product's Orders would deploy into; Helm renders into it. */
+  targetNamespace?: string
   patches?: Patch[]
   images?: ProductImages
   registryRefs?: RegistryRef[]

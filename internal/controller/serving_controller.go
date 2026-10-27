@@ -292,7 +292,16 @@ func (r *ServingReconciler) deploy(ctx context.Context, serving *deliveryv1alpha
 		}
 	}()
 
-	app, err := r.applyApplication(ctx, serving, deployed)
+	// The Preparation deploys into the namespace it was rendered for.
+	preparation := &deliveryv1alpha1.Preparation{}
+	if err := r.Get(ctx, client.ObjectKey{Namespace: serving.Namespace, Name: deployed.Preparation}, preparation); err != nil {
+		return 0, fmt.Errorf("failed to get Preparation %q: %w", deployed.Preparation, err)
+	}
+	target := argocd.Target{
+		Cluster: cluster.InCluster, Server: argocd.InClusterServer,
+		Namespace: preparation.Spec.TargetNamespace, Project: argocd.DefaultProject,
+	}
+	app, err := r.applyApplication(ctx, serving, deployed, target)
 	if err != nil {
 		if meta.IsNoMatchError(err) {
 			// The Application watch reconciles every Serving once the CRD
@@ -755,8 +764,17 @@ func (r *ServingReconciler) recordDeployments(ctx context.Context, serving *deli
 	if err != nil {
 		return fmt.Errorf("waiting for the signing key to record the deployment: %w", err)
 	}
-	targets := []promotion.Target{{Server: argocd.InClusterServer, Namespace: serving.Namespace}}
 	for _, e := range unrecorded {
+		// The Preparation deploys into its target namespace. A Preparation
+		// that is gone leaves nothing to attach the record to.
+		preparation := &deliveryv1alpha1.Preparation{}
+		if err := r.Get(ctx, client.ObjectKey{Namespace: serving.Namespace, Name: e.Preparation}, preparation); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return fmt.Errorf("failed to get Preparation %q: %w", e.Preparation, err)
+		}
+		targets := []promotion.Target{{Server: argocd.InClusterServer, Namespace: preparation.Spec.TargetNamespace}}
 		registryClient, err := r.connect(ctx, serving.Namespace, serving.Spec.OrderName, registryRef(e.Registry), e.OCIRef)
 		if err != nil {
 			return err
@@ -843,24 +861,24 @@ func (r *ServingReconciler) clock() time.Time {
 	return time.Now()
 }
 
-// applyApplication points the Serving's Argo CD Application at the artifact
-// of the deployed entry, creating it when it is missing, and returns it as
-// it is now. An Application that already points there is left untouched,
+// applyApplication points the Serving's Argo CD Application of target at
+// the artifact of the deployed entry, creating it when it is missing, and
+// returns it as it is now. An Application that already points there is left untouched,
 // and drift is reverted. A pre-existing Application that is not opted in for
 // the Serving's Order is never changed: the error wraps
 // argocd.ErrOptInRequired.
 func (r *ServingReconciler) applyApplication(
-	ctx context.Context, serving *deliveryv1alpha1.Serving, deployed *promotion.Entry,
+	ctx context.Context, serving *deliveryv1alpha1.Serving, deployed *promotion.Entry, target argocd.Target,
 ) (*unstructured.Unstructured, error) {
 	logger := log.FromContext(ctx)
 
-	desired, err := argocd.Application(serving, deployed.OCIRef)
+	desired, err := argocd.Application(serving, deployed.OCIRef, target)
 	if err != nil {
 		return nil, err
 	}
 
 	existing := argocd.New()
-	if err := r.Get(ctx, argocd.Key(serving, cluster.InCluster), existing); err != nil {
+	if err := r.Get(ctx, client.ObjectKeyFromObject(desired), existing); err != nil {
 		if !apierrors.IsNotFound(err) {
 			return nil, fmt.Errorf("failed to get Application: %w", err)
 		}

@@ -987,6 +987,7 @@ var _ = Describe("Order Controller", func() {
 			prep := &deliveryv1alpha1.Preparation{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: order.Status.LatestPreparationName}, prep)).To(Succeed())
 			Expect(prep.Spec.CommitMessage).To(Equal("Raise the replicas"))
+			Expect(prep.Spec.TargetNamespace).To(Equal(testNamespace), "without a targetNamespace, the Order's namespace")
 		})
 	})
 
@@ -1491,8 +1492,9 @@ var _ = Describe("Image schema", func() {
 			Name:      "images-sha512",
 			Namespace: testNamespace,
 			Spec: deliveryv1alpha1.PreparationSpec{
-				OrderName: "images-sha512",
-				Source:    deliveryv1alpha1.OrderSource{URL: testOCIRef, BaseDigest: digest},
+				TargetNamespace: testNamespace,
+				OrderName:       "images-sha512",
+				Source:          deliveryv1alpha1.OrderSource{URL: testOCIRef, BaseDigest: digest},
 				Renderer: deliveryv1alpha1.Renderer{
 					Type:    deliveryv1alpha1.RenderTypeManifest,
 					Version: testRendererVersion,

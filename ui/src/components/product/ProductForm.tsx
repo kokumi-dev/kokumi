@@ -30,7 +30,7 @@ import { getChartInfo, listOCITags, previewProduct } from '../../api/client'
 import { cleanTags } from '../../api/ociTags'
 import { assertKnownKeys, patchesFromYaml, patchesToYaml, registryRefsFromYaml } from '../../utils/yaml'
 import { registryRefNames } from '../../utils/registries'
-import { describeImagePolicy, describePatchesPolicy, describeValuesPolicy } from '../../utils/products'
+import { describeImagePolicy, describePatchesPolicy, describeValuesPolicy, targetNamespaceProblem } from '../../utils/products'
 import styles from '../shared/Form.module.css'
 
 interface Props {
@@ -116,13 +116,13 @@ function formToYaml(data: ProductFormData): string {
     const h = data.render.helm
     const helmDoc: Record<string, unknown> = {}
     if (h.releaseName) helmDoc.releaseName = h.releaseName
-    if (h.namespace) helmDoc.namespace = h.namespace
     if (h.includeCRDs) helmDoc.includeCRDs = true
     if (h.values && Object.keys(h.values).length > 0) helmDoc.values = h.values
     doc.render = { helm: helmDoc }
   } else if (data.render?.manifest) {
     doc.render = { manifest: { layout: data.render.manifest.layout ?? 'Single' } }
   }
+  if (data.targetNamespace) doc.targetNamespace = data.targetNamespace
   if (data.patches.length > 0) doc.patches = patchesToYaml(data.patches)
   doc.overrides = overridesToYaml(data.overrides)
   const images = imagesToYaml(data.images)
@@ -266,7 +266,7 @@ function overridesError(o: Overrides): string | null {
 function yamlToPartialForm(text: string): Omit<ProductFormData, 'name' | 'namespace'> {
   const doc = load(text) as Record<string, unknown>
   if (!isMapping(doc)) throw new Error('YAML must be a mapping')
-  assertKnownKeys(doc, ['source', 'vendor', 'render', 'patches', 'overrides', 'images', 'registryRefs'], '')
+  assertKnownKeys(doc, ['source', 'vendor', 'render', 'targetNamespace', 'patches', 'overrides', 'images', 'registryRefs'], '')
 
   const src = isMapping(doc.source) ? doc.source : {}
   assertKnownKeys(src, ['url', 'version', 'verify'], 'source')
@@ -285,11 +285,10 @@ function yamlToPartialForm(text: string): Omit<ProductFormData, 'name' | 'namesp
   let render: Render | undefined
   if (rawRender?.helm) {
     const h = isMapping(rawRender.helm) ? rawRender.helm : {}
-    assertKnownKeys(h, ['releaseName', 'namespace', 'includeCRDs', 'values'], 'render.helm')
+    assertKnownKeys(h, ['releaseName', 'includeCRDs', 'values'], 'render.helm')
     render = {
       helm: {
         releaseName: (h.releaseName as string) ?? '',
-        namespace: (h.namespace as string) ?? '',
         includeCRDs: Boolean(h.includeCRDs),
         values: isMapping(h.values) ? h.values : {},
       },
@@ -300,6 +299,9 @@ function yamlToPartialForm(text: string): Omit<ProductFormData, 'name' | 'namesp
     render = { manifest: { layout: m.layout === 'Multi' ? 'Multi' : 'Single' } }
   }
 
+  const targetNamespace = doc.targetNamespace ?? ''
+  if (typeof targetNamespace !== 'string') throw new Error('targetNamespace must name a namespace')
+
   // Overrides — absent policies are None, as on the server
   const overrides = overridesFromYaml(doc.overrides)
 
@@ -307,6 +309,7 @@ function yamlToPartialForm(text: string): Omit<ProductFormData, 'name' | 'namesp
     source,
     vendor,
     render,
+    targetNamespace,
     patches: patchesFromYaml(doc.patches),
     overrides,
     images: imagesFromYaml(doc.images),
@@ -322,6 +325,7 @@ function previewRequest(data: ProductFormData): ProductPreviewRequest | null {
     source: data.source,
     vendor: data.vendor,
     render: data.render,
+    targetNamespace: data.targetNamespace || undefined,
     patches: data.patches,
     images: data.images,
     registryRefs: data.registryRefs,
@@ -378,7 +382,12 @@ export default function ProductForm({ product, initial, onCancel, onSubmit, onDi
         return
       }
     }
-    const invalid = overridesError(data.overrides) ?? verifyError(data.source.verify) ?? imagesError(data.images, data.vendor)
+    const namespaceProblem = targetNamespaceProblem(data.targetNamespace)
+    const invalid =
+      overridesError(data.overrides) ??
+      verifyError(data.source.verify) ??
+      imagesError(data.images, data.vendor) ??
+      (namespaceProblem && `Fix the target namespace: ${namespaceProblem}`)
     if (invalid) {
       setSubmitError(invalid)
       return
@@ -483,7 +492,7 @@ interface FormViewProps {
   onChange: (update: (prev: ProductFormData) => Partial<ProductFormData>) => void
 }
 
-const emptyHelm = (): HelmRender => ({ releaseName: '', namespace: '', includeCRDs: false, values: {} })
+const emptyHelm = (): HelmRender => ({ releaseName: '', includeCRDs: false, values: {} })
 
 function FormView({ formData, isEdit, onChange }: FormViewProps) {
   const [isVendorOpen, setIsVendorOpen] = useState(!!formData.vendor)
@@ -600,6 +609,7 @@ function FormView({ formData, isEdit, onChange }: FormViewProps) {
   const vendorSummary = formData.vendor && (formData.vendor.url || 'in-cluster registry')
   const registriesSummary = formData.registryRefs.length > 0 ? formData.registryRefs.map((r) => r.name).join(', ') : 'anonymous'
   const [isRegistriesOpen, setIsRegistriesOpen] = useState(formData.registryRefs.length > 0)
+  const namespaceProblem = targetNamespaceProblem(formData.targetNamespace)
 
   return (
     <div className={styles.formGrid}>
@@ -700,6 +710,27 @@ function FormView({ formData, isEdit, onChange }: FormViewProps) {
               <option value="Multi">Keep separate files</option>
             </select>
           </div>
+        )}
+      </div>
+
+      {/* Target namespace */}
+      <div className={styles.fieldGroup}>
+        <label className={styles.label} htmlFor="product-target-namespace">Target namespace (optional)</label>
+        <input
+          id="product-target-namespace"
+          className={styles.input}
+          value={formData.targetNamespace}
+          onChange={(e) => setField('targetNamespace', e.target.value.trim())}
+          placeholder="Each Order's namespace"
+          aria-invalid={!!namespaceProblem}
+        />
+        {namespaceProblem ? (
+          <span className={styles.fieldError}>{namespaceProblem}.</span>
+        ) : (
+          <span className={styles.hint}>
+            The namespace the Orders deploy into, unless an Order sets its own. Helm renders into it, and resources
+            without a namespace are deployed there.
+          </span>
         )}
       </div>
 
@@ -1000,25 +1031,15 @@ interface HelmEditorProps {
 function HelmEditor({ helm, onUpdate, chartInfo, chartInfoLoading }: HelmEditorProps) {
   return (
     <div className={styles.helmCard}>
-      <div className={styles.row2}>
-        <div className={styles.fieldGroup}>
-          <label className={styles.label}>Release Name</label>
-          <input
-            className={styles.input}
-            value={helm.releaseName ?? ''}
-            onChange={(e) => onUpdate({ ...helm, releaseName: e.target.value })}
-            placeholder="defaults to Order name"
-          />
-        </div>
-        <div className={styles.fieldGroup}>
-          <label className={styles.label}>Namespace</label>
-          <input
-            className={styles.input}
-            value={helm.namespace ?? ''}
-            onChange={(e) => onUpdate({ ...helm, namespace: e.target.value })}
-            placeholder="defaults to Order namespace"
-          />
-        </div>
+      <div className={styles.fieldGroup}>
+        <label className={styles.label}>Release Name</label>
+        <input
+          className={styles.input}
+          value={helm.releaseName ?? ''}
+          onChange={(e) => onUpdate({ ...helm, releaseName: e.target.value })}
+          placeholder="defaults to Order name"
+        />
+        <span className={styles.hint}>The chart renders into the target namespace of each Order.</span>
       </div>
 
       <label className={styles.checkRow}>

@@ -214,7 +214,7 @@ func startK8sWatcher(
 			{eventProducts, productsToDTO(productList.Items)},
 			{eventPreparations, enrichPreparations(prepList.Items, servingList.Items)},
 			{eventServings, servingsToDTO(servingList.Items)},
-			{eventOrders, enrichOrders(orderList.Items, servingList.Items)},
+			{eventOrders, enrichOrders(orderList.Items, servingList.Items, productList.Items)},
 			{eventCounts, Counts{
 				Orders:       len(orderList.Items),
 				Preparations: len(prepList.Items),

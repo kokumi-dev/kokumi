@@ -34,6 +34,8 @@ import {
   describeValuesPolicy,
   patchesPolicy,
   productSourceLabel,
+  defaultTargetNamespace,
+  targetNamespaceProblem,
   valuesPolicy,
 } from '../../utils/products'
 import { paths } from '../../routes/paths'
@@ -145,6 +147,7 @@ function formToYaml(data: OrderFormData, helm: boolean | undefined): string {
   const doc: Record<string, unknown> = {
     productRef: { name: data.productRef.name },
   }
+  if (data.targetNamespace) doc.targetNamespace = data.targetNamespace
   if (helm !== false && hasValues(data.values)) doc.values = data.values
   if (data.patches.length > 0) doc.patches = patchesToYaml(data.patches)
   if (data.destination?.url) doc.destination = { url: data.destination.url }
@@ -167,7 +170,11 @@ interface ParseContext {
 function yamlToPartialForm(text: string, ctx: ParseContext): Omit<OrderFormData, 'name' | 'namespace' | 'environment' | 'edits'> {
   const doc = load(text) as Record<string, unknown>
   if (!doc || typeof doc !== 'object') throw new Error('YAML must be a mapping')
-  assertKnownKeys(doc, ['productRef', 'values', 'destination', 'registryRefs', 'patches', 'promotion'], '')
+  assertKnownKeys(
+    doc,
+    ['productRef', 'targetNamespace', 'values', 'destination', 'registryRefs', 'patches', 'promotion'],
+    '',
+  )
 
   const rawProductRef = doc.productRef as Record<string, unknown> | undefined
   assertKnownKeys(rawProductRef, ['name'], 'productRef')
@@ -175,6 +182,9 @@ function yamlToPartialForm(text: string, ctx: ParseContext): Omit<OrderFormData,
   if (ctx.lockedProduct !== undefined && product !== ctx.lockedProduct) {
     throw new Error(`productRef cannot be changed: this Order is a variant of ${ctx.lockedProduct}`)
   }
+
+  const targetNamespace = doc.targetNamespace ?? ''
+  if (typeof targetNamespace !== 'string') throw new Error('targetNamespace must name a namespace')
 
   const rawValues = doc.values
   if (rawValues !== undefined && rawValues !== null) {
@@ -208,6 +218,8 @@ function yamlToPartialForm(text: string, ctx: ParseContext): Omit<OrderFormData,
 
   return {
     productRef: { name: product },
+    // Always set, so that a removed target namespace replaces the form's.
+    targetNamespace,
     values: (rawValues as Record<string, unknown> | null | undefined) ?? {},
     destination,
     registryRefs: registryRefsFromYaml(doc.registryRefs),
@@ -281,6 +293,7 @@ export default function OrderForm({ order, initialProduct, products, onCancel, o
       namespace: sent.namespace,
       name: sent.name,
       productRef: sent.productRef,
+      targetNamespace: sent.targetNamespace || undefined,
       values: hasValues(sent.values) ? sent.values : undefined,
       patches: sent.patches,
       edits: sent.edits,
@@ -323,6 +336,8 @@ export default function OrderForm({ order, initialProduct, products, onCancel, o
       }
     }
     if (!data.productRef.name) throw new Error('Pick the Product this Order is a variant of')
+    const namespaceProblem = targetNamespaceProblem(data.targetNamespace)
+    if (namespaceProblem) throw new Error(`Fix the target namespace: ${namespaceProblem}`)
     if (data.after.some((s) => s.order === data.name)) throw new Error('An Order cannot run after itself')
     const scanAge = data.checks?.vulnerabilities?.maxAgeSeconds
     if (scanAge !== undefined && scanAge < minScanAgeSeconds) throw new Error('The max scan age must be at least 1 hour')
@@ -427,6 +442,7 @@ function FormView({ formData, isEdit, product, products, deletingReason, onField
   const [groupsText, setGroupsText] = useState(formData.approvals?.allowedGroups.join(', ') ?? '')
   const [maxAgeText, setMaxAgeText] = useState(scanAgeText(formData.checks?.vulnerabilities?.maxAgeSeconds))
   const check = formData.checks?.vulnerabilities
+  const namespaceProblem = targetNamespaceProblem(formData.targetNamespace)
   const maxAgeInvalid = check?.maxAgeSeconds !== undefined && check.maxAgeSeconds < minScanAgeSeconds
   const productPolicy = product && imagePolicy(product.images?.policy)
 
@@ -513,6 +529,27 @@ function FormView({ formData, isEdit, product, products, deletingReason, onField
           <span className={styles.hint}>This Product was not found; the Order cannot render until it exists.</span>
         ) : (
           <span className={styles.hint}>The Order is a variant of this Product and only holds what differs.</span>
+        )}
+      </div>
+
+      {/* Target namespace — the namespace the Order deploys into */}
+      <div className={styles.fieldGroup}>
+        <label className={styles.label} htmlFor="order-target-namespace">Target namespace (optional)</label>
+        <input
+          id="order-target-namespace"
+          className={styles.input}
+          value={formData.targetNamespace}
+          onChange={(e) => onFieldChange('targetNamespace', e.target.value.trim())}
+          placeholder={defaultTargetNamespace(product, formData.namespace || 'kokumi')}
+          aria-invalid={!!namespaceProblem}
+        />
+        {namespaceProblem ? (
+          <span className={styles.fieldError}>{namespaceProblem}.</span>
+        ) : (
+          <span className={styles.hint}>
+            The namespace the Order deploys into
+            {product?.targetNamespace ? "; by default the Product's" : "; by default the Order's own"}.
+          </span>
         )}
       </div>
 

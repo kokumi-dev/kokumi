@@ -102,7 +102,6 @@ type ConditionDTO struct {
 // HelmRenderDTO is the data-transfer representation of a HelmRender.
 type HelmRenderDTO struct {
 	ReleaseName string          `json:"releaseName,omitempty"`
-	Namespace   string          `json:"namespace,omitempty"`
 	IncludeCRDs bool            `json:"includeCRDs,omitempty"`
 	Values      json.RawMessage `json:"values,omitempty"`
 }
@@ -126,27 +125,33 @@ type ProductRefDTO struct {
 // OrderDTO is the enriched view of a Order served to the UI.
 // ActivePreparation is derived from the linked Serving's status.observedPreparation.
 type OrderDTO struct {
-	Name                 string              `json:"name"`
-	Namespace            string              `json:"namespace"`
-	Labels               map[string]string   `json:"labels,omitempty"`
-	Environment          string              `json:"environment,omitempty"`
-	ProductRef           ProductRefDTO       `json:"productRef"`
-	Values               json.RawMessage     `json:"values,omitempty"`
-	Destination          OCIDestinationDTO   `json:"destination"`
-	EffectiveDestination string              `json:"effectiveDestination,omitempty"`
-	RegistryRefs         []RegistryRefDTO    `json:"registryRefs,omitempty"`
-	RegistryAccess       []RegistryAccessDTO `json:"registryAccess,omitempty"`
-	Patches              []PatchDTO          `json:"patches,omitempty"`
-	Edits                []PatchDTO          `json:"edits,omitempty"`
-	Mode                 string              `json:"mode"`
-	Approvals            *ApprovalPolicyDTO  `json:"approvals,omitempty"`
-	After                []UpstreamStageDTO  `json:"after,omitempty"`
-	Checks               *PromotionChecksDTO `json:"checks,omitempty"`
-	State                string              `json:"state"`
-	LatestRevision       string              `json:"latestRevision,omitempty"`
-	ActivePreparation    string              `json:"activePreparation,omitempty"`
-	Conditions           []ConditionDTO      `json:"conditions,omitempty"`
-	CreatedAt            *time.Time          `json:"createdAt,omitempty"`
+	Name            string            `json:"name"`
+	Namespace       string            `json:"namespace"`
+	Labels          map[string]string `json:"labels,omitempty"`
+	Environment     string            `json:"environment,omitempty"`
+	TargetNamespace string            `json:"targetNamespace,omitempty"`
+	// EffectiveTargetNamespace is the namespace the Order deploys into, and
+	// TargetNamespaceSource what sets it: order, product, or namespace, the
+	// Order's own.
+	EffectiveTargetNamespace string              `json:"effectiveTargetNamespace"`
+	TargetNamespaceSource    string              `json:"targetNamespaceSource"`
+	ProductRef               ProductRefDTO       `json:"productRef"`
+	Values                   json.RawMessage     `json:"values,omitempty"`
+	Destination              OCIDestinationDTO   `json:"destination"`
+	EffectiveDestination     string              `json:"effectiveDestination,omitempty"`
+	RegistryRefs             []RegistryRefDTO    `json:"registryRefs,omitempty"`
+	RegistryAccess           []RegistryAccessDTO `json:"registryAccess,omitempty"`
+	Patches                  []PatchDTO          `json:"patches,omitempty"`
+	Edits                    []PatchDTO          `json:"edits,omitempty"`
+	Mode                     string              `json:"mode"`
+	Approvals                *ApprovalPolicyDTO  `json:"approvals,omitempty"`
+	After                    []UpstreamStageDTO  `json:"after,omitempty"`
+	Checks                   *PromotionChecksDTO `json:"checks,omitempty"`
+	State                    string              `json:"state"`
+	LatestRevision           string              `json:"latestRevision,omitempty"`
+	ActivePreparation        string              `json:"activePreparation,omitempty"`
+	Conditions               []ConditionDTO      `json:"conditions,omitempty"`
+	CreatedAt                *time.Time          `json:"createdAt,omitempty"`
 }
 
 // ApprovalPolicyDTO is the data-transfer representation of an ApprovalPolicy.
@@ -369,36 +374,38 @@ type ProductSourceArtifactDTO struct {
 
 // CreateOrderRequest is the body for POST /api/v1/orders.
 type CreateOrderRequest struct {
-	Namespace     string              `json:"namespace"`
-	Name          string              `json:"name"`
-	ProductRef    ProductRefDTO       `json:"productRef"`
-	Environment   string              `json:"environment,omitempty"`
-	Values        json.RawMessage     `json:"values,omitempty"`
-	Destination   *OCIDestinationDTO  `json:"destination,omitempty"`
-	RegistryRefs  []RegistryRefDTO    `json:"registryRefs,omitempty"`
-	Patches       []PatchDTO          `json:"patches,omitempty"`
-	Edits         []PatchDTO          `json:"edits,omitempty"`
-	Mode          string              `json:"mode"`
-	Approvals     *ApprovalPolicyDTO  `json:"approvals,omitempty"`
-	After         []UpstreamStageDTO  `json:"after,omitempty"`
-	Checks        *PromotionChecksDTO `json:"checks,omitempty"`
-	CommitMessage *string             `json:"commitMessage,omitempty"`
+	Namespace       string              `json:"namespace"`
+	Name            string              `json:"name"`
+	ProductRef      ProductRefDTO       `json:"productRef"`
+	Environment     string              `json:"environment,omitempty"`
+	TargetNamespace string              `json:"targetNamespace,omitempty"`
+	Values          json.RawMessage     `json:"values,omitempty"`
+	Destination     *OCIDestinationDTO  `json:"destination,omitempty"`
+	RegistryRefs    []RegistryRefDTO    `json:"registryRefs,omitempty"`
+	Patches         []PatchDTO          `json:"patches,omitempty"`
+	Edits           []PatchDTO          `json:"edits,omitempty"`
+	Mode            string              `json:"mode"`
+	Approvals       *ApprovalPolicyDTO  `json:"approvals,omitempty"`
+	After           []UpstreamStageDTO  `json:"after,omitempty"`
+	Checks          *PromotionChecksDTO `json:"checks,omitempty"`
+	CommitMessage   *string             `json:"commitMessage,omitempty"`
 }
 
 // UpdateOrderRequest is the body for PUT /api/v1/orders/{namespace}/{name}.
 // The Product of an Order cannot be changed.
 type UpdateOrderRequest struct {
-	Environment   string              `json:"environment,omitempty"`
-	Values        json.RawMessage     `json:"values,omitempty"`
-	Destination   *OCIDestinationDTO  `json:"destination,omitempty"`
-	RegistryRefs  []RegistryRefDTO    `json:"registryRefs,omitempty"`
-	Patches       []PatchDTO          `json:"patches,omitempty"`
-	Edits         []PatchDTO          `json:"edits,omitempty"`
-	Mode          string              `json:"mode"`
-	Approvals     *ApprovalPolicyDTO  `json:"approvals,omitempty"`
-	After         []UpstreamStageDTO  `json:"after,omitempty"`
-	Checks        *PromotionChecksDTO `json:"checks,omitempty"`
-	CommitMessage *string             `json:"commitMessage,omitempty"`
+	Environment     string              `json:"environment,omitempty"`
+	TargetNamespace string              `json:"targetNamespace,omitempty"`
+	Values          json.RawMessage     `json:"values,omitempty"`
+	Destination     *OCIDestinationDTO  `json:"destination,omitempty"`
+	RegistryRefs    []RegistryRefDTO    `json:"registryRefs,omitempty"`
+	Patches         []PatchDTO          `json:"patches,omitempty"`
+	Edits           []PatchDTO          `json:"edits,omitempty"`
+	Mode            string              `json:"mode"`
+	Approvals       *ApprovalPolicyDTO  `json:"approvals,omitempty"`
+	After           []UpstreamStageDTO  `json:"after,omitempty"`
+	Checks          *PromotionChecksDTO `json:"checks,omitempty"`
+	CommitMessage   *string             `json:"commitMessage,omitempty"`
 }
 
 // PromoteRequest is the body for POST /api/v1/orders/{namespace}/{name}/promote.
@@ -498,13 +505,14 @@ type ProductImagesDTO struct {
 
 // ProductSpecDTO is the data-transfer representation of a ProductSpec.
 type ProductSpecDTO struct {
-	Source       OCISourceDTO       `json:"source"`
-	Vendor       *OCIDestinationDTO `json:"vendor,omitempty"`
-	Render       *RenderDTO         `json:"render,omitempty"`
-	Patches      []PatchDTO         `json:"patches,omitempty"`
-	Overrides    OverridesDTO       `json:"overrides"`
-	Images       ProductImagesDTO   `json:"images"`
-	RegistryRefs []RegistryRefDTO   `json:"registryRefs,omitempty"`
+	Source          OCISourceDTO       `json:"source"`
+	Vendor          *OCIDestinationDTO `json:"vendor,omitempty"`
+	Render          *RenderDTO         `json:"render,omitempty"`
+	TargetNamespace string             `json:"targetNamespace,omitempty"`
+	Patches         []PatchDTO         `json:"patches,omitempty"`
+	Overrides       OverridesDTO       `json:"overrides"`
+	Images          ProductImagesDTO   `json:"images"`
+	RegistryRefs    []RegistryRefDTO   `json:"registryRefs,omitempty"`
 }
 
 // ProductDTO is the view of a Product served to the UI.

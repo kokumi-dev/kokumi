@@ -71,7 +71,7 @@ func TestPipeline_Render(t *testing.T) {
 
 		req := baseRenderRequest()
 		req.Render = &artifact.RenderSpec{
-			Helm: &artifact.HelmSpec{ReleaseName: testReleaseName, Namespace: testNamespaceName},
+			Helm: &artifact.HelmSpec{ReleaseName: testReleaseName},
 		}
 
 		_, err := p.Render(context.Background(), req)
