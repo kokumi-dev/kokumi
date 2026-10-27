@@ -37,8 +37,6 @@ const (
 type HelmSpec struct {
 	// ReleaseName defaults to Name (of the owning resource) when empty.
 	ReleaseName string
-	// Namespace defaults to Namespace (of the owning resource) when empty.
-	Namespace string
 	// IncludeCRDs controls whether CRDs are included in the rendered output.
 	IncludeCRDs bool
 	// Values holds inline Helm values, merged last (highest priority).

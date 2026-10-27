@@ -122,8 +122,9 @@ func TestPipeline_Render_HelmChart(t *testing.T) {
 		req := baseRenderRequest()
 		req.Source.OCI = testChartsAppOCI
 		req.Destination.OCI = testDestOCI
+		req.Namespace = testNamespaceName
 		req.Render = &artifact.RenderSpec{
-			Helm: &artifact.HelmSpec{ReleaseName: testAppName, Namespace: testNamespaceName},
+			Helm: &artifact.HelmSpec{ReleaseName: testAppName},
 		}
 
 		result, err := p.Render(context.Background(), req)
@@ -141,8 +142,9 @@ func TestPipeline_Render_HelmChart(t *testing.T) {
 		req.Source.OCI = testChartsAppOCI
 		req.Destination.OCI = testDestOCI
 		// A release name that Helm rejects triggers a render error.
+		req.Namespace = testNamespaceName
 		req.Render = &artifact.RenderSpec{
-			Helm: &artifact.HelmSpec{ReleaseName: "INVALID..Name", Namespace: testNamespaceName},
+			Helm: &artifact.HelmSpec{ReleaseName: "INVALID..Name"},
 		}
 
 		_, err := p.Render(context.Background(), req)
@@ -204,7 +206,7 @@ func TestPipeline_Preview_Files(t *testing.T) {
 				Version: testVersion,
 			},
 			Render: &artifact.RenderSpec{
-				Helm: &artifact.HelmSpec{ReleaseName: testAppName, Namespace: testNamespaceName},
+				Helm: &artifact.HelmSpec{ReleaseName: testAppName},
 			},
 			Name:      "app",
 			Namespace: testNamespaceName,

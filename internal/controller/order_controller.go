@@ -395,7 +395,7 @@ func (r *OrderReconciler) render(
 		Edits:        spec.Edits,
 		Images:       imageOpts,
 		Name:         order.Name,
-		Namespace:    order.Namespace,
+		Namespace:    effective.TargetNamespace,
 		Description:  commitMessage,
 		ParentDigest: parentDigest,
 		ArtifactType: oci.PreparationArtifactType,
@@ -421,6 +421,7 @@ func (r *OrderReconciler) render(
 		Renderer:        renderer,
 		ConfigHash:      specHash,
 		ProductRevision: effective.ProductRevision,
+		TargetNamespace: effective.TargetNamespace,
 		CommitMessage:   commitMessage,
 		ParentDigest:    parentDigest,
 	})

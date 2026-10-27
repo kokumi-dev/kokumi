@@ -11,7 +11,7 @@ import RegistryAccessList from '../../components/shared/RegistryAccessList'
 import { Button, Counter } from '../../components/ui'
 import { paths } from '../../routes/paths'
 import { formatDate, formatDuration } from '../../utils/format'
-import { orderDestinationLabel } from '../../utils/products'
+import { orderDestinationLabel, targetNamespaceSource } from '../../utils/products'
 import { describeVulnerabilityCheck } from '../../utils/vulnerabilities'
 import { objectToYaml } from '../../utils/yaml'
 import { useOrderContext } from './orderContext'
@@ -78,6 +78,15 @@ export default function OrderOverview() {
               label: 'Latest change',
               value: latest?.commitMessage?.trim() || <span className={layout.muted}>—</span>,
               show: !!latest,
+            },
+            {
+              label: 'Target namespace',
+              value: (
+                <>
+                  <span className={layout.mono}>{order.effectiveTargetNamespace}</span>
+                  <span className={layout.muted}>, {targetNamespaceSource(order.targetNamespaceSource)}</span>
+                </>
+              ),
             },
             { label: 'Promotion', value: order.mode },
             {

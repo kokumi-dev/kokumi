@@ -1,4 +1,4 @@
-import type { AllowedPatchTarget, ImageFieldSpec, ImagePolicy, Order, OverridePolicy, Product } from '../api/types'
+import type { AllowedPatchTarget, ImageFieldSpec, ImagePolicy, Order, OverridePolicy, Product, TargetNamespaceSource } from '../api/types'
 import { overridePolicy } from '../api/types'
 import { stripOCIScheme } from './format'
 
@@ -10,6 +10,37 @@ export function productOf(products: Product[] | null, order: Order): Product | u
 /** Where an Order pushes its Preparations: its destination URL or the default registry. */
 export function orderDestinationLabel(order: Order): string {
   return order.destination?.url || `${order.effectiveDestination ?? ''} (default)`
+}
+
+/**
+ * The namespace a new Order deploys into, as long as it sets none of its
+ * own: its Product's, else the Order's namespace. It mirrors
+ * resolve.TargetNamespace on the server, which resolves it for every saved
+ * Order (Order.effectiveTargetNamespace).
+ */
+export function defaultTargetNamespace(product: Product | undefined, namespace: string): string {
+  return product?.targetNamespace || namespace
+}
+
+/** A namespace name: a DNS label. */
+const namespacePattern = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/
+
+/** Why a target namespace as typed is not valid; undefined for a valid or empty one. */
+export function targetNamespaceProblem(namespace: string): string | undefined {
+  if (!namespace || (namespace.length <= 63 && namespacePattern.test(namespace))) return undefined
+  return 'A namespace has at most 63 lowercase letters, digits and -, and starts and ends with a letter or digit'
+}
+
+/** What sets the target namespace of an Order, in words. */
+export function targetNamespaceSource(source: TargetNamespaceSource): string {
+  switch (source) {
+    case 'order':
+      return 'set by the Order'
+    case 'product':
+      return 'from the Product'
+    default:
+      return "the Order's own namespace"
+  }
 }
 
 /** Key that groups Orders under their Product. */

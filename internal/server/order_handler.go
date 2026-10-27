@@ -39,7 +39,10 @@ func handleListOrders(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		respondJSON(w, http.StatusOK, enrichOrders(orderList.Items, servingList.Items))
+		productList := &deliveryv1alpha1.ProductList{}
+		_ = uc.list(r.Context(), productList) // only resolves the target namespaces
+
+		respondJSON(w, http.StatusOK, enrichOrders(orderList.Items, servingList.Items, productList.Items))
 	}
 }
 
@@ -77,7 +80,7 @@ func handleGetOrder(deps *apiDeps) http.HandlerFunc {
 		}
 
 		active := activePreparationFor(namespace, name, servingList.Items)
-		respondJSON(w, http.StatusOK, orderToDTO(*order, active))
+		respondJSON(w, http.StatusOK, orderToDTO(*order, active, productOfOrder(r, uc, order)))
 	}
 }
 
@@ -111,11 +114,12 @@ func handleCreateOrder(deps *apiDeps) http.HandlerFunc {
 			Name:      req.Name,
 			Namespace: req.Namespace,
 			Spec: deliveryv1alpha1.OrderSpec{
-				ProductRef:  deliveryv1alpha1.ProductRef{Name: req.ProductRef.Name},
-				Values:      valuesFromDTO(req.Values),
-				Destination: destinationFromDTO(req.Destination),
-				Patches:     patchesFromDTO(req.Patches),
-				Edits:       patchesFromDTO(req.Edits),
+				ProductRef:      deliveryv1alpha1.ProductRef{Name: req.ProductRef.Name},
+				TargetNamespace: req.TargetNamespace,
+				Values:          valuesFromDTO(req.Values),
+				Destination:     destinationFromDTO(req.Destination),
+				Patches:         patchesFromDTO(req.Patches),
+				Edits:           patchesFromDTO(req.Edits),
 				Promotion: &deliveryv1alpha1.PromotionSpec{
 					Mode:      deliveryv1alpha1.PromotionMode(req.Mode),
 					Approvals: approvalPolicyFromDTO(req.Approvals),
@@ -148,7 +152,7 @@ func handleCreateOrder(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		respondJSON(w, http.StatusCreated, orderToDTO(*order, ""))
+		respondJSON(w, http.StatusCreated, orderToDTO(*order, "", productOfOrder(r, uc, order)))
 	}
 }
 
@@ -189,6 +193,7 @@ func handleUpdateOrder(deps *apiDeps) http.HandlerFunc {
 			respondError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		order.Spec.TargetNamespace = req.TargetNamespace
 		order.Spec.Values = valuesFromDTO(req.Values)
 		order.Spec.Destination = destinationFromDTO(req.Destination)
 		order.Spec.Patches = patchesFromDTO(req.Patches)
@@ -213,7 +218,7 @@ func handleUpdateOrder(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		respondJSON(w, http.StatusOK, orderToDTO(*order, ""))
+		respondJSON(w, http.StatusOK, orderToDTO(*order, "", productOfOrder(r, uc, order)))
 	}
 }
 
@@ -289,7 +294,7 @@ func handleUpdateOrderEdits(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		respondJSON(w, http.StatusOK, orderToDTO(*order, ""))
+		respondJSON(w, http.StatusOK, orderToDTO(*order, "", productOfOrder(r, uc, order)))
 	}
 }
 
@@ -328,4 +333,14 @@ func handleDeleteOrder(deps *apiDeps) http.HandlerFunc {
 
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+// productOfOrder reads the Product of order as uc, nil when it cannot be
+// read: it only resolves the Order's target namespace.
+func productOfOrder(r *http.Request, uc *userClient, order *deliveryv1alpha1.Order) *deliveryv1alpha1.Product {
+	product := &deliveryv1alpha1.Product{}
+	if err := uc.get(r.Context(), types.NamespacedName{Namespace: order.Namespace, Name: order.Spec.ProductRef.Name}, product); err != nil {
+		return nil
+	}
+	return product
 }

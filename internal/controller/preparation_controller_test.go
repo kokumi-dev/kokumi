@@ -58,6 +58,7 @@ var _ = Describe("Preparation Controller", func() {
 					Name:      resourceName,
 					Namespace: testNamespace,
 					Spec: deliveryv1alpha1.PreparationSpec{
+						TargetNamespace: testNamespace,
 						OrderName:       "order",
 						ConfigHash:      "sha256:448093f1b28dc7147740d8e400946e9b228650aa31a54b0ed734ca9ab0ae5b6b",
 						ProductRevision: testProductRevision,
@@ -455,7 +456,8 @@ func createTestPreparation(ctx context.Context, name, orderName, digest string, 
 		Name:      name,
 		Namespace: testNamespace,
 		Spec: deliveryv1alpha1.PreparationSpec{
-			OrderName: orderName,
+			TargetNamespace: testNamespace,
+			OrderName:       orderName,
 			Source: deliveryv1alpha1.OrderSource{
 				URL:        testOCIRef,
 				BaseDigest: digest,

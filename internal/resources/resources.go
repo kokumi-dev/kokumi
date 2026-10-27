@@ -39,6 +39,8 @@ type Rendered struct {
 	ConfigHash string
 	// ProductRevision is the Product revision the artifact renders.
 	ProductRevision string
+	// TargetNamespace is the namespace the artifact was rendered for.
+	TargetNamespace string
 	CommitMessage   string
 	// ParentDigest is the digest of the artifact the Order rendered before,
 	// "" for its first.
@@ -63,6 +65,7 @@ func Preparation(order *deliveryv1alpha1.Order, rendered Rendered) *deliveryv1al
 				BaseDigest: rendered.Source.Digest,
 			},
 			Renderer:        rendered.Renderer,
+			TargetNamespace: rendered.TargetNamespace,
 			ConfigHash:      rendered.ConfigHash,
 			ProductRevision: rendered.ProductRevision,
 			Artifact: deliveryv1alpha1.Artifact{

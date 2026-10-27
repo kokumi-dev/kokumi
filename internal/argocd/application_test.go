@@ -29,7 +29,7 @@ const (
 // the status the Argo CD Application controller writes for the given health
 // and sync status after comparing its current source.
 func withStatus(health, sync, revision string) *unstructured.Unstructured {
-	app, err := Application(testServing(), "oci://registry.example/order/app@"+revision)
+	app, err := Application(testServing(), "oci://registry.example/order/app@"+revision, testTarget)
 	if err != nil {
 		app = New()
 	}
@@ -74,8 +74,12 @@ func TestKey(t *testing.T) {
 
 const testOCIRef = "oci://registry.example/order/app@" + testDigest
 
+// testTarget is the cluster Kokumi runs in, with a target namespace of its
+// own.
+var testTarget = Target{Cluster: cluster.InCluster, Server: InClusterServer, Namespace: "webshop", Project: DefaultProject}
+
 func TestApplication(t *testing.T) {
-	app, err := Application(testServing(), testOCIRef)
+	app, err := Application(testServing(), testOCIRef, testTarget)
 	require.NoError(t, err)
 
 	assert.Equal(t, GroupVersionKind, app.GroupVersionKind())
@@ -85,17 +89,22 @@ func TestApplication(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, types.NamespacedName{Namespace: testNamespace, Name: testServingName}, serving)
 
-	repoURL, _, _ := unstructured.NestedString(app.Object, "spec", "source", "repoURL")
-	revision, _, _ := unstructured.NestedString(app.Object, "spec", "source", "targetRevision")
-	assert.Equal(t, "oci://registry.example/order/app", repoURL)
-	assert.Equal(t, testDigest, revision)
+	field := func(path ...string) string {
+		value, _, _ := unstructured.NestedString(app.Object, path...)
+		return value
+	}
+	assert.Equal(t, "oci://registry.example/order/app", field("spec", "source", "repoURL"))
+	assert.Equal(t, testDigest, field("spec", "source", "targetRevision"))
+	assert.Equal(t, DefaultProject, field("spec", "project"))
+	assert.Equal(t, InClusterServer, field("spec", "destination", "server"))
+	assert.Equal(t, "webshop", field("spec", "destination", "namespace"), "the Preparation runs in its target namespace")
 
-	_, err = Application(testServing(), "")
+	_, err = Application(testServing(), "", testTarget)
 	assert.Error(t, err)
 }
 
 func TestMatches(t *testing.T) {
-	desired, err := Application(testServing(), testOCIRef)
+	desired, err := Application(testServing(), testOCIRef, testTarget)
 	require.NoError(t, err)
 
 	same := desired.DeepCopy()

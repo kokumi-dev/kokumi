@@ -65,7 +65,6 @@ func toRenderSpec(render *deliveryv1alpha1.Render) (*artifact.RenderSpec, error)
 
 		spec.Helm = &artifact.HelmSpec{
 			ReleaseName: render.Helm.ReleaseName,
-			Namespace:   render.Helm.Namespace,
 			IncludeCRDs: render.Helm.IncludeCRDs,
 			Values:      vals,
 		}

@@ -107,7 +107,8 @@ var _ = Describe("Serving Controller", func() {
 					Name:      preparationName,
 					Namespace: testNamespace,
 					Spec: deliveryv1alpha1.PreparationSpec{
-						OrderName: orderName,
+						TargetNamespace: testNamespace,
+						OrderName:       orderName,
 						Source: deliveryv1alpha1.OrderSource{
 							URL:        testOCIRef,
 							BaseDigest: fakeDigest,
@@ -308,7 +309,8 @@ var _ = Describe("Serving Controller", func() {
 					Name:      preparationName + "-v2",
 					Namespace: testNamespace,
 					Spec: deliveryv1alpha1.PreparationSpec{
-						OrderName: orderName,
+						TargetNamespace: testNamespace,
+						OrderName:       orderName,
 						Source: deliveryv1alpha1.OrderSource{
 							URL:        testOCIRef,
 							BaseDigest: fakeDigest,
@@ -924,6 +926,7 @@ var _ = Describe("Serving vulnerability checks", func() {
 			Name:      preparationName,
 			Namespace: testNamespace,
 			Spec: deliveryv1alpha1.PreparationSpec{
+				TargetNamespace: testNamespace,
 				OrderName:       orderName,
 				Source:          deliveryv1alpha1.OrderSource{URL: testOCIRef, BaseDigest: oci.FakeDigest},
 				Renderer:        deliveryv1alpha1.Renderer{Type: deliveryv1alpha1.RenderTypeManifest, Version: testRendererVersion, Builder: testBuilderID},
@@ -1456,6 +1459,8 @@ var _ = Describe("Serving Applications", func() {
 				p = &deliveryv1alpha1.Preparation{Name: prep, Namespace: ns, Spec: template.Spec}
 				p.Spec.Artifact.Digest = "sha256:7878787878787878787878787878787878787878787878787878787878787878"
 				p.Spec.Artifact.OCIRef = "oci://registry.kokumi.svc.cluster.local:5000/" + ns + "/" + order + "@" + p.Spec.Artifact.Digest
+				// Rendered for a namespace other than its Order's.
+				p.Spec.TargetNamespace = "srv-webshop"
 				Expect(k8sClient.Create(ctx, p)).To(Succeed())
 			}
 			markPreparationReady(ctx, registry, client.ObjectKeyFromObject(p))
@@ -1494,6 +1499,10 @@ var _ = Describe("Serving Applications", func() {
 			app := argocd.New()
 			Expect(k8sClient.Get(ctx, keys[ns], app)).To(Succeed())
 			Expect(app.GetAnnotations()).To(HaveKeyWithValue(deliveryv1alpha1.AnnotationAllowedOrder, ns+"/"+order))
+			p := &deliveryv1alpha1.Preparation{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: prep}, p)).To(Succeed())
+			Expect(app.Object).To(HaveKeyWithValue("spec", HaveKeyWithValue("destination", HaveKeyWithValue("namespace", p.Spec.TargetNamespace))),
+				"a Preparation deploys into the namespace it was rendered for")
 		}
 		Expect(keys[namespaces[0]]).NotTo(Equal(keys[namespaces[1]]))
 

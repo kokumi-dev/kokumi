@@ -4,6 +4,7 @@
 package resolve
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strings"
@@ -45,6 +46,9 @@ type EffectiveSpec struct {
 	// ProductRevision is the Product revision the spec renders (see
 	// ProductRevision).
 	ProductRevision string
+	// TargetNamespace is the namespace the Order deploys into (see
+	// TargetNamespace).
+	TargetNamespace string
 }
 
 // ProductIdentity identifies the Product an EffectiveSpec was merged from.
@@ -109,11 +113,18 @@ func ForProduct(product *deliveryv1alpha1.Product, order *deliveryv1alpha1.Order
 		RegistryRefs:    slices.Clone(product.Spec.RegistryRefs),
 		Product:         ProductIdentity{Name: product.Name, ConfigHash: product.Status.ConfigHash},
 		ProductRevision: revision,
+		TargetNamespace: TargetNamespace(product, order),
 	}
 	if effective.Images.EffectivePolicy() == deliveryv1alpha1.ImagePolicyVendor {
 		effective.ImagesVendorURL = product.Status.Source.URL
 	}
 	return effective, nil
+}
+
+// TargetNamespace returns the namespace order deploys into: its own
+// targetNamespace, else its Product's, else the Order's namespace.
+func TargetNamespace(product *deliveryv1alpha1.Product, order *deliveryv1alpha1.Order) string {
+	return cmp.Or(order.Spec.TargetNamespace, product.Spec.TargetNamespace, order.Namespace)
 }
 
 // LockedImages returns the images of preparation, whose digests Pin and

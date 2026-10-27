@@ -382,6 +382,13 @@ spec:
   pushed through in `spec.artifact.registryRef`.
 - **Upstream stages** (`promotion.after`) order the Orders of a Product into
   a pipeline. See [Promotion pipelines](#promotion-pipelines).
+- The **target namespace** is where the workload lands: the Order's
+  `targetNamespace`, else its Product's, else the Order's namespace. It is
+  part of the intent: Helm renders into it, and Argo CD deploys resources
+  without a namespace there, creating the namespace when it is missing. A
+  Preparation records it in `spec.targetNamespace` and deploys there wherever
+  it is promoted. Changing it renders a new Preparation, and deploying that
+  moves the workload: Argo CD deletes it in the old namespace.
 
 Every change to an Order or to its Product (a new source version, other values
 or patches) triggers a new reconciliation and, if the intent changed, a new
@@ -509,7 +516,7 @@ fetching a blob.
   "destination": { "oci": "oci://kokumi-registry.kokumi.svc.cluster.local:5000/shop/podinfo-prod" },
   "product": { "namespace": "shop", "name": "podinfo", "configHash": "sha256:77e0…" },
   "renderer": { "type": "Helm", "version": "v4.3.0", "builder": "ghcr.io/kokumi-dev/kokumi@sha256:bb…" },
-  "intent": { "source": {}, "productRevision": "sha256:5e1f…", "destination": "", "render": {}, "patches": [], "edits": [], "images": {}, "promotion": {} },
+  "intent": { "source": {}, "productRevision": "sha256:5e1f…", "destination": "", "targetNamespace": "shop", "render": {}, "patches": [], "edits": [], "images": {}, "promotion": {} },
   "images": [
     {
       "ref": "ghcr.io/stefanprodan/podinfo:6.10.2", "name": "ghcr.io/stefanprodan/podinfo",
@@ -554,6 +561,8 @@ of the `intent` value as it stands in the blob.
   defaults (`Record`, no field specs), and under `Vendor` so is the location
   the images are copied below. The digests images resolve to are not: they
   are an outcome of the render, so a moved upstream tag renders nothing new.
+- The target namespace is part of the intent, always, also when it is the
+  Order's own namespace: Helm's output depends on it.
 - The Registries a Product or Order connects through, their Secrets, and the
   Kitchen's mirrors are not part of the intent: a new token renders nothing.
 
@@ -720,8 +729,9 @@ Preparation it converges to, then deploys the promoted one.
    named `kokumi-<namespace>-<order>-<hash>`, where the hash covers the
    namespace, the Order and the cluster, so that Orders of one name in two
    namespaces never share one. It points `spec.source.repoURL` at the
-   deployed Preparation's OCI artifact and `spec.source.targetRevision` at
-   its exact digest. A pre-existing Application without the opt-in
+   deployed Preparation's OCI artifact, `spec.source.targetRevision` at its
+   exact digest, and `spec.destination.namespace` at the Preparation's target
+   namespace. A pre-existing Application without the opt-in
    annotation `delivery.kokumi.dev/allowed-order: <namespace>/<order>` is
    never modified, and deleting the Serving keeps it.
 8. Derives the `Ready` condition from the Application: `Deploying` until the
@@ -985,9 +995,9 @@ spec:
   source:
     url: oci://ghcr.io/stefanprodan/charts/podinfo
     version: "6.14.1"
+  targetNamespace: podinfo   # Helm renders into it; default: the Order's namespace
   render:
     helm:
-      namespace: default
       values:
         ui:
           color: "#EF6461"
@@ -999,7 +1009,6 @@ Available `render.helm` fields on the Product:
 | Field | Description | Default |
 |---|---|---|
 | `releaseName` | Helm release name passed to `helm template` | Order name |
-| `namespace` | Target namespace (`--namespace`) | Order namespace |
 | `includeCRDs` | Include CRDs in the rendered output (`--include-crds`) | `false` |
 | `values` | Base Helm values; each Order's `spec.values` are deep-merged over them | — |
 

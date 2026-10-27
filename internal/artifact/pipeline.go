@@ -57,9 +57,9 @@ type RenderRequest struct {
 	Edits []PatchSpec
 	// Images configures the image stage, which runs after the edits.
 	Images ImageOptions
-	// Name and Namespace are used as Helm releaseName/namespace fallbacks
-	// when the Render spec does not set them explicitly.
-	Name      string
+	// Name is the Helm release name when the Render spec sets none.
+	Name string
+	// Namespace is the target namespace: Helm renders into it.
 	Namespace string
 	// Description is attached as org.opencontainers.image.description.
 	Description string
@@ -210,8 +210,9 @@ type PreviewRequest struct {
 	// images but copies none, and leaves the references it cannot resolve
 	// as written.
 	Images ImageOptions
-	// Name and Namespace are used as Helm releaseName/namespace fallbacks.
-	Name      string
+	// Name is the Helm release name when the Render spec sets none.
+	Name string
+	// Namespace is the target namespace: Helm renders into it.
 	Namespace string
 }
 
@@ -314,17 +315,12 @@ func (p *Pipeline) renderToDir(ctx context.Context, dir string, render *RenderSp
 		if releaseName == "" {
 			releaseName = name
 		}
-		helmNamespace := render.Helm.Namespace
-		if helmNamespace == "" {
-			helmNamespace = namespace
-		}
-
 		chartTgz, err := afero.ReadFile(p.store.fs, filepath.Join(dir, "chart.tgz"))
 		if err != nil {
 			return fmt.Errorf("failed to read Helm chart: %w", err)
 		}
 
-		manifest, err := renderer.RenderChart(ctx, chartTgz, releaseName, helmNamespace, render.Helm.IncludeCRDs, render.Helm.Values)
+		manifest, err := renderer.RenderChart(ctx, chartTgz, releaseName, namespace, render.Helm.IncludeCRDs, render.Helm.Values)
 		if err != nil {
 			return fmt.Errorf("failed to render Helm chart: %w", err)
 		}

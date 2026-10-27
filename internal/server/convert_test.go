@@ -174,7 +174,7 @@ func TestListConverters_sortByNamespaceAndName(t *testing.T) {
 			repositories = append(repositories, deliveryv1alpha1.Repository{ObjectMeta: m})
 		}
 
-		assert.Equal(t, sortedKeys, keysOf(enrichOrders(orders, nil), func(d OrderDTO) [2]string { return [2]string{d.Namespace, d.Name} }))
+		assert.Equal(t, sortedKeys, keysOf(enrichOrders(orders, nil, nil), func(d OrderDTO) [2]string { return [2]string{d.Namespace, d.Name} }))
 		assert.Equal(t, sortedKeys, keysOf(servingsToDTO(servings), func(d ServingDTO) [2]string { return [2]string{d.Namespace, d.Name} }))
 		assert.Equal(t, sortedKeys, keysOf(productsToDTO(products), func(d ProductDTO) [2]string { return [2]string{d.Namespace, d.Name} }))
 		assert.Equal(t, sortedKeys, keysOf(registriesToDTO(registries), func(d RegistryDTO) [2]string { return [2]string{d.Namespace, d.Name} }))
@@ -247,7 +247,7 @@ func TestOrderToDTO_upstreamStages(t *testing.T) {
 	stages := []deliveryv1alpha1.UpstreamStage{{Order: testStage, SoakSeconds: 3600}}
 	order := deliveryv1alpha1.Order{Spec: deliveryv1alpha1.OrderSpec{Promotion: &deliveryv1alpha1.PromotionSpec{After: stages}}}
 
-	dto := orderToDTO(order, "")
+	dto := orderToDTO(order, "", nil)
 	require.Equal(t, []UpstreamStageDTO{{Order: testStage, SoakSeconds: 3600}}, dto.After)
 	require.Equal(t, stages, upstreamStagesFromDTO(dto.After))
 	require.Nil(t, upstreamStagesFromDTO(nil))
@@ -268,4 +268,22 @@ func TestPreparationToDTO_gates(t *testing.T) {
 	assert.Equal(t, []UpstreamStageDTO{{Order: testStage}}, dto.After)
 	assert.Equal(t, "High", dto.Checks.Vulnerabilities.MaxSeverity)
 	assert.Nil(t, dto.Approval, "no approval policy applies")
+}
+
+func TestEffectiveTargetNamespace(t *testing.T) {
+	const (
+		orderNamespace   = "store"
+		productNamespace = "storefront"
+		orderOverride    = "checkout"
+	)
+	order := &deliveryv1alpha1.Order{Name: orderOverride, Namespace: orderNamespace}
+	product := &deliveryv1alpha1.Product{Spec: deliveryv1alpha1.ProductSpec{TargetNamespace: productNamespace}}
+
+	namespace, source := effectiveTargetNamespace(order, nil)
+	assert.Equal(t, [2]string{orderNamespace, targetNamespaceFromNamespace}, [2]string{namespace, source}, "without a Product, the Order's own")
+	namespace, source = effectiveTargetNamespace(order, product)
+	assert.Equal(t, [2]string{productNamespace, targetNamespaceFromProduct}, [2]string{namespace, source})
+	order.Spec.TargetNamespace = orderOverride
+	namespace, source = effectiveTargetNamespace(order, product)
+	assert.Equal(t, [2]string{orderOverride, targetNamespaceFromOrder}, [2]string{namespace, source})
 }

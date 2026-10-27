@@ -95,15 +95,20 @@ func stateFromConditions(conditions []metav1.Condition) string {
 	return "Unknown"
 }
 
-// orderToDTO converts a Order CRD object and the name of its currently active
-// Preparation (from the linked Serving) into a OrderDTO.
-func orderToDTO(r deliveryv1alpha1.Order, activePreparation string) OrderDTO {
+// orderToDTO converts a Order CRD object, the name of its currently active
+// Preparation (from the linked Serving) and its Product, nil when it cannot
+// be read, into a OrderDTO.
+func orderToDTO(r deliveryv1alpha1.Order, activePreparation string, product *deliveryv1alpha1.Product) OrderDTO {
+	targetNamespace, targetNamespaceSource := effectiveTargetNamespace(&r, product)
 	dto := OrderDTO{
-		Name:        r.Name,
-		Namespace:   r.Namespace,
-		Labels:      r.Labels,
-		Environment: r.Labels[deliveryv1alpha1.LabelEnvironment],
-		ProductRef:  ProductRefDTO{Name: r.Spec.ProductRef.Name},
+		Name:                     r.Name,
+		Namespace:                r.Namespace,
+		Labels:                   r.Labels,
+		Environment:              r.Labels[deliveryv1alpha1.LabelEnvironment],
+		TargetNamespace:          r.Spec.TargetNamespace,
+		EffectiveTargetNamespace: targetNamespace,
+		TargetNamespaceSource:    targetNamespaceSource,
+		ProductRef:               ProductRefDTO{Name: r.Spec.ProductRef.Name},
 		Destination: func() OCIDestinationDTO {
 			if d := destinationToDTO(r.Spec.Destination); d != nil {
 				return *d
@@ -156,7 +161,6 @@ func renderToDTO(r *deliveryv1alpha1.Render) *RenderDTO {
 		}
 		dto.Helm = &HelmRenderDTO{
 			ReleaseName: h.ReleaseName,
-			Namespace:   h.Namespace,
 			IncludeCRDs: h.IncludeCRDs,
 			Values:      vals,
 		}
@@ -191,7 +195,6 @@ func renderFromDTO(dto *RenderDTO) *deliveryv1alpha1.Render {
 		}
 		r.Helm = &deliveryv1alpha1.HelmRender{
 			ReleaseName: h.ReleaseName,
-			Namespace:   h.Namespace,
 			IncludeCRDs: h.IncludeCRDs,
 			Values:      vals,
 		}
@@ -642,14 +645,44 @@ func activePreparationFor(namespace, orderName string, servings []deliveryv1alph
 	return ""
 }
 
-// enrichOrders joins a slice of Orders with a slice of Servings to build
-// OrderDTOs with ActivePreparation populated.
-func enrichOrders(orders []deliveryv1alpha1.Order, servings []deliveryv1alpha1.Serving) []OrderDTO {
+// Sources of an Order's target namespace, as OrderDTO reports them.
+const (
+	targetNamespaceFromOrder     = "order"
+	targetNamespaceFromProduct   = "product"
+	targetNamespaceFromNamespace = "namespace"
+)
+
+// effectiveTargetNamespace returns the namespace order deploys into, as
+// resolve.TargetNamespace resolves it, and what sets it. product is nil when
+// it cannot be read.
+func effectiveTargetNamespace(order *deliveryv1alpha1.Order, product *deliveryv1alpha1.Product) (string, string) {
+	if product == nil {
+		product = &deliveryv1alpha1.Product{}
+	}
+	namespace := resolve.TargetNamespace(product, order)
+	switch {
+	case order.Spec.TargetNamespace != "":
+		return namespace, targetNamespaceFromOrder
+	case product.Spec.TargetNamespace != "":
+		return namespace, targetNamespaceFromProduct
+	default:
+		return namespace, targetNamespaceFromNamespace
+	}
+}
+
+// enrichOrders joins a slice of Orders with slices of Servings and Products
+// to build OrderDTOs with ActivePreparation and the effective target
+// namespace populated.
+func enrichOrders(orders []deliveryv1alpha1.Order, servings []deliveryv1alpha1.Serving, products []deliveryv1alpha1.Product) []OrderDTO {
 	// serving key: "<namespace>/<spec.order>" → serving
 	servingMap := make(map[string]*deliveryv1alpha1.Serving, len(servings))
 	for i := range servings {
 		s := &servings[i]
 		servingMap[s.Namespace+"/"+s.Spec.OrderName] = s
+	}
+	productMap := make(map[string]*deliveryv1alpha1.Product, len(products))
+	for i := range products {
+		productMap[products[i].Namespace+"/"+products[i].Name] = &products[i]
 	}
 
 	out := make([]OrderDTO, len(orders))
@@ -658,7 +691,7 @@ func enrichOrders(orders []deliveryv1alpha1.Order, servings []deliveryv1alpha1.S
 		if s, ok := servingMap[r.Namespace+"/"+r.Name]; ok {
 			activePrep = s.DeployedPreparationName()
 		}
-		out[i] = orderToDTO(r, activePrep)
+		out[i] = orderToDTO(r, activePrep, productMap[r.Namespace+"/"+r.Spec.ProductRef.Name])
 	}
 	slices.SortFunc(out, func(a, b OrderDTO) int { return compareKeys(a.Namespace, a.Name, b.Namespace, b.Name) })
 	return out
@@ -754,16 +787,17 @@ func servingsToDTO(servings []deliveryv1alpha1.Serving) []ServingDTO {
 // productToDTO converts a Product CRD object into a ProductDTO.
 func productToDTO(p deliveryv1alpha1.Product) ProductDTO {
 	dto := ProductDTO{
-		Name:       p.Name,
-		Namespace:  p.Namespace,
-		Source:     sourceToDTO(p.Spec.Source),
-		Vendor:     destinationToDTO(p.Spec.Vendor),
-		Render:     renderToDTO(p.Spec.Render),
-		Patches:    patchesToDTO(p.Spec.Patches),
-		Overrides:  overridesToDTO(p.Spec.Overrides),
-		Images:     productImagesToDTO(p.Spec.Images),
-		State:      stateFromConditions(p.Status.Conditions),
-		Conditions: conditionsToDTO(p.Status.Conditions),
+		Name:            p.Name,
+		Namespace:       p.Namespace,
+		Source:          sourceToDTO(p.Spec.Source),
+		Vendor:          destinationToDTO(p.Spec.Vendor),
+		Render:          renderToDTO(p.Spec.Render),
+		TargetNamespace: p.Spec.TargetNamespace,
+		Patches:         patchesToDTO(p.Spec.Patches),
+		Overrides:       overridesToDTO(p.Spec.Overrides),
+		Images:          productImagesToDTO(p.Spec.Images),
+		State:           stateFromConditions(p.Status.Conditions),
+		Conditions:      conditionsToDTO(p.Status.Conditions),
 
 		RegistryRefs:    registryRefsToDTO(p.Spec.RegistryRefs),
 		RegistryAccess:  registryAccessToDTO(p.Status.RegistryAccess),
@@ -803,12 +837,13 @@ func productsToDTO(products []deliveryv1alpha1.Product) []ProductDTO {
 // productSpecFromDTO builds a ProductSpec from a create or update request.
 func productSpecFromDTO(dto ProductSpecDTO) deliveryv1alpha1.ProductSpec {
 	spec := deliveryv1alpha1.ProductSpec{
-		Source:       sourceFromDTO(dto.Source),
-		Render:       renderFromDTO(dto.Render),
-		Patches:      patchesFromDTO(dto.Patches),
-		Overrides:    overridesFromDTO(dto.Overrides),
-		Images:       productImagesFromDTO(dto.Images),
-		RegistryRefs: registryRefsFromDTO(dto.RegistryRefs),
+		Source:          sourceFromDTO(dto.Source),
+		Render:          renderFromDTO(dto.Render),
+		TargetNamespace: dto.TargetNamespace,
+		Patches:         patchesFromDTO(dto.Patches),
+		Overrides:       overridesFromDTO(dto.Overrides),
+		Images:          productImagesFromDTO(dto.Images),
+		RegistryRefs:    registryRefsFromDTO(dto.RegistryRefs),
 	}
 	// An empty vendor destination is valid: the controller vendors to the
 	// in-cluster registry.

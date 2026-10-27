@@ -14,6 +14,7 @@ export default function ProductPreview() {
           name: product.name,
           source: product.source,
           render: product.render,
+          targetNamespace: product.targetNamespace,
           patches: product.patches,
           images: product.images,
         }}
