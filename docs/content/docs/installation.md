@@ -11,10 +11,12 @@ description: Deploy Kokumi to any Kubernetes cluster.
 | Kubernetes | ≥ 1.26 |
 | Argo CD | ≥ 3.3 |
 
-Argo CD must be installed **before** Kokumi is deployed. The Serving controller
-creates and updates Argo CD `Application` resources to point at the immutable
-OCI artifacts produced by Preparations. Without Argo CD, Servings will fail
-and no workloads will be deployed.
+Kokumi deploys through Argo CD: the Serving controller creates and updates
+Argo CD `Application` resources that point at the immutable OCI artifacts
+produced by Preparations. Argo CD may be installed before or after Kokumi.
+Until its `Application` CRD exists, Kokumi renders, signs and scans as usual,
+and Servings deploy nothing and report `ArgoCDNotInstalled`; they deploy
+once Argo CD is installed, without a restart.
 
 See [Getting Started — Argo CD registry credentials](../getting-started/#argo-cd-registry-credentials)
 for the required repo-creds secret to let Argo CD reach the in-cluster registry.

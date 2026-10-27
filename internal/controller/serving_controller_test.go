@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -63,6 +64,14 @@ var argoAppGVK = schema.GroupVersionKind{
 
 // argoNamespace is the namespace the Serving controller places Applications in.
 const argoNamespace = argocd.Namespace
+
+// comparedCurrentSource records on app that Argo CD compared its current
+// source, as its Application controller does before it reports a sync
+// status.
+func comparedCurrentSource(app *unstructured.Unstructured) {
+	source, _, _ := unstructured.NestedMap(app.Object, "spec", "source")
+	Expect(unstructured.SetNestedMap(app.Object, source, statusField, "sync", "comparedTo", "source")).To(Succeed())
+}
 
 // appKey returns the key of the Application of the Order order of
 // testNamespace.
@@ -196,6 +205,9 @@ var _ = Describe("Serving Controller", func() {
 				status["health"] = health
 			}
 			updated.Object["status"] = status
+			if syncStatus != "" {
+				comparedCurrentSource(updated)
+			}
 			Expect(k8sClient.Status().Update(ctx, updated)).To(Succeed())
 		}
 
@@ -875,6 +887,7 @@ var _ = Describe("Serving vulnerability checks", func() {
 		Expect(unstructured.SetNestedField(app.Object, "Synced", "status", "sync", "status")).To(Succeed())
 		Expect(unstructured.SetNestedField(app.Object, artifactDigest, "status", "sync", "revision")).To(Succeed())
 		Expect(unstructured.SetNestedField(app.Object, "Healthy", "status", "health", "status")).To(Succeed())
+		comparedCurrentSource(app)
 		Expect(k8sClient.Status().Update(ctx, app)).To(Succeed())
 	}
 
@@ -1207,6 +1220,7 @@ var _ = Describe("Serving promotion pipelines", func() {
 			"sync":   map[string]any{statusField: "Synced", "revision": appRevision(name)},
 			"health": map[string]any{statusField: health},
 		}
+		comparedCurrentSource(app)
 		Expect(k8sClient.Status().Update(ctx, app)).To(Succeed())
 	}
 
@@ -1491,5 +1505,86 @@ var _ = Describe("Serving Applications", func() {
 
 		Expect(errors.IsNotFound(k8sClient.Get(ctx, keys[namespaces[1]], argocd.New()))).To(BeTrue())
 		Expect(k8sClient.Get(ctx, keys[namespaces[0]], argocd.New())).To(Succeed(), "the other namespace's Application stays")
+	})
+
+	It("deploys nothing while Argo CD is not installed, and says so", func() {
+		r := newServingReconciler(registry)
+		missing := &atomic.Bool{}
+		missing.Store(true)
+		r.Client = withoutArgoCD{Client: k8sClient, missing: missing}
+		key := types.NamespacedName{Namespace: testNamespace, Name: order}
+		_, err := settleServing(ctx, r, key)
+		Expect(err).NotTo(HaveOccurred())
+
+		s := &deliveryv1alpha1.Serving{}
+		Expect(k8sClient.Get(ctx, key, s)).To(Succeed())
+		Expect(apimeta.FindStatusCondition(s.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)).To(
+			HaveField("Reason", deliveryv1alpha1.ReasonArgoCDNotInstalled))
+		Expect(apimeta.FindStatusCondition(s.Status.Conditions, deliveryv1alpha1.ConditionTypeVerified)).To(
+			HaveField("Status", metav1.ConditionTrue), "the gates still run")
+		Expect(errors.IsNotFound(k8sClient.Get(ctx, appKey(order), argocd.New()))).To(BeTrue())
+
+		By("deploying once Argo CD is installed")
+		missing.Store(false)
+		_, err = settleServing(ctx, r, key)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(k8sClient.Get(ctx, appKey(order), argocd.New())).To(Succeed())
+	})
+
+	It("lets a Serving go while Argo CD is not installed", func() {
+		r := newServingReconciler(registry)
+		missing := &atomic.Bool{}
+		missing.Store(true)
+		r.Client = withoutArgoCD{Client: k8sClient, missing: missing}
+		key := types.NamespacedName{Namespace: testNamespace, Name: order}
+		_, err := settleServing(ctx, r, key)
+		Expect(err).NotTo(HaveOccurred())
+
+		s := &deliveryv1alpha1.Serving{}
+		Expect(k8sClient.Get(ctx, key, s)).To(Succeed())
+		Expect(k8sClient.Delete(ctx, s)).To(Succeed())
+		_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(errors.IsNotFound(k8sClient.Get(ctx, key, s))).To(BeTrue(), "without Argo CD there is no Application to delete")
+	})
+})
+
+// withoutArgoCD reads Argo CD's kinds as the API server does while their
+// CRDs are not installed, as long as missing is set.
+type withoutArgoCD struct {
+	client.Client
+	missing *atomic.Bool
+}
+
+func (c withoutArgoCD) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if _, ok := obj.(*unstructured.Unstructured); ok && c.missing.Load() {
+		return &apimeta.NoKindMatchError{GroupKind: argocd.GroupVersionKind.GroupKind()}
+	}
+	return c.Client.Get(ctx, key, obj, opts...)
+}
+
+func (c withoutArgoCD) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	if _, ok := list.(*unstructured.UnstructuredList); ok && c.missing.Load() {
+		return &apimeta.NoKindMatchError{GroupKind: argocd.GroupVersionKind.GroupKind()}
+	}
+	return c.Client.List(ctx, list, opts...)
+}
+
+var _ = Describe("Optional watches", func() {
+	It("start once the CRD of their kind is installed, and say so", func() {
+		mapper := apimeta.NewDefaultRESTMapper(nil)
+		w := &optionalWatch{obj: argocd.New(), gvk: argocd.GroupVersionKind, mapper: mapper,
+			interval: 10 * time.Millisecond, started: make(chan event.GenericEvent, 1)}
+		var watching atomic.Bool
+		done := make(chan error, 1)
+		watchCtx, stop := context.WithCancel(context.Background())
+		DeferCleanup(stop)
+		go func() { done <- w.wait(watchCtx, func() error { watching.Store(true); return nil }) }()
+
+		Consistently(watching.Load, 50*time.Millisecond).Should(BeFalse(), "no watch without the CRD")
+		mapper.Add(argocd.GroupVersionKind, apimeta.RESTScopeNamespace)
+		Eventually(w.Started()).Should(Receive())
+		Expect(watching.Load()).To(BeTrue())
+		Eventually(done).Should(Receive(BeNil()))
 	})
 })

@@ -24,6 +24,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/test/e2e/framework"
@@ -93,6 +94,42 @@ var _ = Describe("Order deletion", Label("lifecycle"), func() {
 			}).Should(Satisfy(apierrors.IsNotFound))
 
 			Consistently(framework.Application(ns, "podinfo"), 10*time.Second).Should(Not(BeNil()), "the Application survives")
+		})
+	})
+})
+
+var _ = Describe("Manager restart", Label("lifecycle"), Serial, func() {
+	Context("of a manager whose Servings deploy", Ordered, func() {
+		var ns string
+		var uid types.UID
+
+		BeforeAll(func() {
+			ns = framework.CreateNamespace("restart")
+			framework.ApplyExample(ns, "getting-started")
+			preparation := framework.LatestPreparation(ns, "podinfo")
+			framework.Promote(ns, "podinfo", preparation.Name)
+			framework.WaitForDeployment(ns, "podinfo", preparation.Spec.Artifact.Digest)
+			app, err := framework.Application(ns, "podinfo")()
+			Expect(err).NotTo(HaveOccurred())
+			uid = app.GetUID()
+		})
+
+		It("keeps the Applications, while its watches of Argo CD's kinds start again", func() {
+			const manager = "deployment/kokumi-controller-manager"
+			_, err := framework.Kubectl("rollout", "restart", manager, "-n", framework.InstallNamespace)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = framework.Kubectl("rollout", "status", manager, "-n", framework.InstallNamespace, "--timeout=3m")
+			Expect(err).NotTo(HaveOccurred())
+
+			Consistently(func() (types.UID, error) {
+				app, err := framework.Application(ns, "podinfo")()
+				if err != nil {
+					return "", err
+				}
+				return app.GetUID(), nil
+			}, 45*time.Second, time.Second).Should(Equal(uid), "the Application is neither deleted nor replaced")
+			Expect(framework.Serving(ns, "podinfo")()).NotTo(
+				framework.HaveConditionReason(deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonArgoCDNotInstalled))
 		})
 	})
 })

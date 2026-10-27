@@ -30,10 +30,12 @@ import (
 
 	"github.com/spf13/afero"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -42,6 +44,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/argocd"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/controller"
 	"github.com/kokumi-dev/kokumi/internal/namespace"
@@ -180,6 +183,10 @@ func main() {
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "14664b9d.kokumi.dev",
+		// Argo CD's Applications are read as unstructured objects; they are
+		// read from the cache, as every other kind.
+		Client: client.Options{Cache: &client.CacheOptions{Unstructured: true}},
+		Cache:  cache.Options{DefaultTransform: cacheTransform},
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
 		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly
@@ -343,4 +350,13 @@ func main() {
 		setupLog.Error(err, "Failed to run manager")
 		os.Exit(1)
 	}
+}
+
+// cacheTransform strips what Kokumi never reads from the objects it caches:
+// their managed fields, and most of the status of Argo CD Applications.
+func cacheTransform(obj any) (any, error) {
+	if app, ok := obj.(*unstructured.Unstructured); ok && app.GroupVersionKind() == argocd.GroupVersionKind {
+		argocd.TrimStatus(app)
+	}
+	return cache.TransformStripManagedFields()(obj)
 }

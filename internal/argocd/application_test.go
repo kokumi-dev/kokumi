@@ -20,19 +20,23 @@ const (
 	testNamespace   = "my-namespace"
 	testDigest      = "sha256:0000000000000000000000000000000000000000000000000000000000000001"
 	statusField     = "status"
+	keyRevision     = "revision"
 	// testOptIn is the opt-in annotation value for the test Order.
 	testOptIn = testNamespace + "/" + testOrderName
 )
 
-// withStatus returns an Application with the status the Argo CD
-// Application controller writes for the given health and sync status at
-// revision.
+// withStatus returns the Application of the test Serving at revision, with
+// the status the Argo CD Application controller writes for the given health
+// and sync status after comparing its current source.
 func withStatus(health, sync, revision string) *unstructured.Unstructured {
-	app := New()
-	app.SetNamespace(Namespace)
-	app.SetName(testServingName)
+	app, err := Application(testServing(), "oci://registry.example/order/app@"+revision)
+	if err != nil {
+		app = New()
+	}
 	app.Object[statusField] = map[string]any{
-		"sync":   map[string]any{statusField: sync, "revision": revision},
+		"sync": map[string]any{statusField: sync, keyRevision: revision, "comparedTo": map[string]any{
+			"source": map[string]any{"repoURL": "oci://registry.example/order/app", "targetRevision": revision, "path": "."},
+		}},
 		"health": map[string]any{statusField: health, "message": "health message"},
 	}
 	return app
@@ -114,6 +118,21 @@ func TestMatches(t *testing.T) {
 }
 
 func TestStateOf(t *testing.T) {
+	stale := withStatus("Healthy", "Synced", testDigest)
+	require.NoError(t, unstructured.SetNestedField(stale.Object, "sha256:old", "status", "sync", "comparedTo", "source", "targetRevision"))
+	uncompared := withStatus("Healthy", "Synced", testDigest)
+	unstructured.RemoveNestedField(uncompared.Object, "status", "sync", "comparedTo")
+	syncing := withStatus("Healthy", "Synced", testDigest)
+	require.NoError(t, unstructured.SetNestedField(syncing.Object, "Running", "status", "operationState", "phase"))
+	synced := withStatus("Healthy", "Synced", testDigest)
+	require.NoError(t, unstructured.SetNestedMap(synced.Object, map[string]any{
+		"phase": "Succeeded", "syncResult": map[string]any{"revision": testDigest},
+	}, "status", "operationState"))
+	earlierSync := withStatus("Healthy", "Synced", testDigest)
+	require.NoError(t, unstructured.SetNestedMap(earlierSync.Object, map[string]any{
+		"phase": "Succeeded", "syncResult": map[string]any{"revision": "sha256:old"},
+	}, "status", "operationState"))
+
 	tests := []struct {
 		name string
 		app  *unstructured.Unstructured
@@ -121,9 +140,14 @@ func TestStateOf(t *testing.T) {
 	}{
 		{name: "missing", want: PhaseMissing},
 		{name: "synced and healthy", app: withStatus("Healthy", "Synced", testDigest), want: PhaseHealthy},
+		{name: "synced and healthy after a sync at the revision", app: synced, want: PhaseHealthy},
 		{name: "healthy but out of sync", app: withStatus("Healthy", "OutOfSync", testDigest), want: PhaseProgressing},
 		{name: "degraded", app: withStatus("Degraded", "Synced", testDigest), want: PhaseDegraded},
 		{name: "progressing", app: withStatus("Progressing", "Synced", testDigest), want: PhaseProgressing},
+		{name: "healthy on a comparison of an earlier source", app: stale, want: PhaseProgressing},
+		{name: "healthy without a comparison", app: uncompared, want: PhaseProgressing},
+		{name: "healthy while a sync runs", app: syncing, want: PhaseProgressing},
+		{name: "healthy after a sync of an earlier revision", app: earlierSync, want: PhaseProgressing},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -196,6 +220,10 @@ func TestChanged(t *testing.T) {
 		app.SetAnnotations(annotations)
 		return app
 	}
+	with := func(app *unstructured.Unstructured, value string, path ...string) *unstructured.Unstructured {
+		require.NoError(t, unstructured.SetNestedField(app.Object, value, path...))
+		return app
+	}
 	optIn := map[string]string{deliveryv1alpha1.AnnotationAllowedOrder: testOptIn}
 
 	tests := []struct {
@@ -205,15 +233,21 @@ func TestChanged(t *testing.T) {
 	}{
 		{name: "synced revision", old: withStatus("Healthy", "Synced", "sha256:old"), new: withStatus("Healthy", "Synced", "sha256:new"), want: true},
 		{name: "health", old: withStatus("Progressing", "Synced", testDigest), new: withStatus("Healthy", "Synced", testDigest), want: true},
-		{name: "opt-in added", old: withStatus("Healthy", "Synced", testDigest),
+		{name: "compared source", old: with(withStatus("Healthy", "Synced", testDigest), "sha256:old", "status", "sync", "comparedTo", "source", "targetRevision"),
+			new: withStatus("Healthy", "Synced", testDigest), want: true},
+		{name: "operation finished", old: with(withStatus("Healthy", "Synced", testDigest), "Running", "status", "operationState", "phase"),
+			new: with(withStatus("Healthy", "Synced", testDigest), "Succeeded", "status", "operationState", "phase"), want: true},
+		{name: "opt-in added", old: annotated(withStatus("Healthy", "Synced", testDigest), nil),
 			new: annotated(withStatus("Healthy", "Synced", testDigest), optIn), want: true},
 		{name: "opt-in for another Order", old: annotated(withStatus("Healthy", "Synced", testDigest),
-			map[string]string{deliveryv1alpha1.AnnotationAllowedOrder: "other-order"}),
+			map[string]string{deliveryv1alpha1.AnnotationAllowedOrder: "other/other-order"}),
 			new: annotated(withStatus("Healthy", "Synced", testDigest), optIn), want: true},
 		{name: "opt-in removed", old: annotated(withStatus("Healthy", "Synced", testDigest), optIn),
-			new: withStatus("Healthy", "Synced", testDigest), want: true},
-		{name: "unrelated annotation", old: withStatus("Healthy", "Synced", testDigest),
-			new: annotated(withStatus("Healthy", "Synced", testDigest), map[string]string{"argocd.argoproj.io/refresh": "normal"})},
+			new: annotated(withStatus("Healthy", "Synced", testDigest), nil), want: true},
+		{name: "unrelated annotation", old: annotated(withStatus("Healthy", "Synced", testDigest), optIn),
+			new: annotated(withStatus("Healthy", "Synced", testDigest), map[string]string{
+				deliveryv1alpha1.AnnotationAllowedOrder: testOptIn, "argocd.argoproj.io/refresh": "normal",
+			})},
 		{name: "nothing relevant", old: withStatus("Healthy", "Synced", testDigest), new: withStatus("Healthy", "Synced", testDigest)},
 	}
 	for _, tt := range tests {
@@ -221,4 +255,18 @@ func TestChanged(t *testing.T) {
 			assert.Equal(t, tt.want, Changed(tt.old, tt.new))
 		})
 	}
+}
+
+func TestTrimStatus(t *testing.T) {
+	app := withStatus("Healthy", "Synced", testDigest)
+	status := app.Object[statusField].(map[string]any)
+	status["resources"] = []any{map[string]any{"kind": "Deployment"}}
+	status["history"] = []any{map[string]any{"id": int64(1)}}
+	before := StateOf(app)
+
+	TrimStatus(app)
+
+	assert.Equal(t, before, StateOf(app), "what Kokumi reads stays")
+	assert.NotContains(t, app.Object[statusField], "resources")
+	assert.NotContains(t, app.Object[statusField], "history")
 }
