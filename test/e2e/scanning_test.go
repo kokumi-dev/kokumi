@@ -158,7 +158,7 @@ var _ = Describe("Vulnerability scanning", Label("scanning", "slow"), Serial, Or
 					deliveryv1alpha1.ConditionTypeChecksPassed, deliveryv1alpha1.ReasonVulnerabilitiesFound),
 				HaveField("Status.History", BeEmpty()),
 			))
-			framework.ExpectNoApplication("checked")
+			framework.ExpectNoApplication(ns, "checked")
 		})
 	})
 

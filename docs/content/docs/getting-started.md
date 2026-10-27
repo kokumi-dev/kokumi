@@ -190,19 +190,25 @@ its promotion checks, and its approvals. To require reviews, add
 `spec.promotion.approvals` to the Order. Reviewers vote in the UI; see
 [Approvals](../architecture/#approvals).
 
-Once activated, Kokumi creates a matching Argo CD `Application` in the `argocd`
-namespace and Argo CD syncs the manifests into the cluster.
+Once activated, Kokumi creates an Argo CD `Application` in the `argocd`
+namespace and Argo CD syncs the manifests into the cluster. The Application
+is named `kokumi-<namespace>-<order>-<hash>`, where the hash tells apart
+Orders whose names hyphens would join. To find it from the command line:
 
-> **Opt-in update protection.** Kokumi will only update an Argo CD
+```bash
+kubectl -n argocd get applications \
+  -l delivery.kokumi.dev/serving-namespace=<namespace>,delivery.kokumi.dev/serving=<order>
+```
+
+> **Opt-in update protection.** Kokumi will only update or delete an Argo CD
 > `Application` it did not create if the `Application` is annotated with
-> `delivery.kokumi.dev/allowed-order: "<order-name>"` matching the Order
-> that owns the Serving. When Kokumi creates the `Application` itself, this
-> annotation is added automatically. If a pre-existing `Application` is
-> missing the annotation (or has a different value), Kokumi refuses to
-> modify it and surfaces the failure on the Serving's status condition with
-> the message `Cannot update Argo CD Application, opt-in annotation must
-> exist`. Deleting the Serving deletes its `Application` only if it carries
-> the matching annotation; any other `Application` is kept.
+> `delivery.kokumi.dev/allowed-order: "<namespace>/<order-name>"` matching the
+> Order that owns the Serving. When Kokumi creates the `Application` itself,
+> this annotation is added automatically. If a pre-existing `Application` of
+> that name is missing the annotation (or has a different value), Kokumi
+> refuses to modify it and surfaces the failure on the Serving's status
+> condition. Deleting the Serving deletes its `Application` only if it
+> carries the matching annotation; any other `Application` is kept.
 
 ```bash
 kubectl get servings -n shop

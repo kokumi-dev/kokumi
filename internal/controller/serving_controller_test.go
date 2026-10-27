@@ -46,6 +46,7 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/argocd"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/attestation"
+	"github.com/kokumi-dev/kokumi/internal/cluster"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/promotion"
 	"github.com/kokumi-dev/kokumi/internal/provenance"
@@ -62,6 +63,12 @@ var argoAppGVK = schema.GroupVersionKind{
 
 // argoNamespace is the namespace the Serving controller places Applications in.
 const argoNamespace = argocd.Namespace
+
+// appKey returns the key of the Application of the Order order of
+// testNamespace.
+func appKey(order string) client.ObjectKey {
+	return argocd.Key(&deliveryv1alpha1.Serving{Namespace: testNamespace, Spec: deliveryv1alpha1.ServingSpec{OrderName: order}}, cluster.InCluster)
+}
 
 var _ = Describe("Serving Controller", func() {
 	Context("When reconciling a resource", func() {
@@ -156,7 +163,7 @@ var _ = Describe("Serving Controller", func() {
 			app := &unstructured.Unstructured{}
 			app.SetGroupVersionKind(argoAppGVK)
 			app.SetNamespace(argoNamespace)
-			app.SetName(resourceName)
+			app.SetName(appKey(orderName).Name)
 			_ = k8sClient.Delete(ctx, app)
 		})
 
@@ -169,7 +176,7 @@ var _ = Describe("Serving Controller", func() {
 		setAppStatus := func(syncStatus, revision, healthStatus, healthMessage string) {
 			app := &unstructured.Unstructured{}
 			app.SetGroupVersionKind(argoAppGVK)
-			Expect(k8sClient.Get(ctx, client.ObjectKey{Namespace: argoNamespace, Name: resourceName}, app)).To(Succeed())
+			Expect(k8sClient.Get(ctx, appKey(orderName), app)).To(Succeed())
 
 			updated := app.DeepCopy()
 			status := map[string]any{}
@@ -195,7 +202,7 @@ var _ = Describe("Serving Controller", func() {
 		getApp := func() *unstructured.Unstructured {
 			app := &unstructured.Unstructured{}
 			app.SetGroupVersionKind(argoAppGVK)
-			Expect(k8sClient.Get(ctx, client.ObjectKey{Namespace: argoNamespace, Name: resourceName}, app)).To(Succeed())
+			Expect(k8sClient.Get(ctx, appKey(orderName), app)).To(Succeed())
 			return app
 		}
 
@@ -209,7 +216,7 @@ var _ = Describe("Serving Controller", func() {
 		// Application named like the Serving, as if created out-of-band.
 		buildArgoAppMap := func(repoURL, targetRevision string, annotations map[string]any) map[string]any {
 			meta := map[string]any{
-				"name":      resourceName,
+				"name":      appKey(orderName).Name,
 				"namespace": argoNamespace,
 			}
 			if len(annotations) > 0 {
@@ -234,12 +241,12 @@ var _ = Describe("Serving Controller", func() {
 			}
 		}
 
-		It("creates an Argo CD Application with the allowed-order annotation set to the Order name", func() {
+		It("creates an Argo CD Application with the allowed-order annotation set to the Order's namespace and name", func() {
 			_, err := settleServing(ctx, newReconciler(), typeNamespacedName)
 			Expect(err).NotTo(HaveOccurred())
 
 			app := getApp()
-			Expect(app.GetAnnotations()).To(HaveKeyWithValue(deliveryv1alpha1.AnnotationAllowedOrder, orderName))
+			Expect(app.GetAnnotations()).To(HaveKeyWithValue(deliveryv1alpha1.AnnotationAllowedOrder, testNamespace+"/"+orderName))
 			Expect(app.GetLabels()).To(HaveKeyWithValue(deliveryv1alpha1.LabelOrder, orderName))
 			Expect(app.GetLabels()).To(HaveKeyWithValue(deliveryv1alpha1.LabelServing, resourceName))
 			Expect(app.GetLabels()).To(HaveKeyWithValue(deliveryv1alpha1.LabelServingNamespace, testNamespace))
@@ -428,7 +435,7 @@ var _ = Describe("Serving Controller", func() {
 			Expect(cond.Reason).To(Equal(deliveryv1alpha1.ReasonSigningKeyNotReady))
 			app := &unstructured.Unstructured{}
 			app.SetGroupVersionKind(argoAppGVK)
-			Expect(errors.IsNotFound(k8sClient.Get(ctx, client.ObjectKey{Namespace: argoNamespace, Name: resourceName}, app))).To(BeTrue())
+			Expect(errors.IsNotFound(k8sClient.Get(ctx, appKey(orderName), app))).To(BeTrue())
 		})
 
 		It("marks the Serving as failed when the Application reports Degraded", func() {
@@ -571,11 +578,11 @@ var _ = Describe("Serving Controller", func() {
 			Expect(cond.Message).To(ContainSubstring("some-other-order"))
 		})
 
-		It("updates an Application whose allowed-order annotation matches the Order name", func() {
+		It("updates an Application whose allowed-order annotation matches the Order's namespace and name", func() {
 			By("creating an Argo CD Application annotated with the matching opt-in")
 			preExisting := &unstructured.Unstructured{
 				Object: buildArgoAppMap("oci://example.com/stale", "sha256:stale", map[string]any{
-					deliveryv1alpha1.AnnotationAllowedOrder: orderName,
+					deliveryv1alpha1.AnnotationAllowedOrder: testNamespace + "/" + orderName,
 				}),
 			}
 			Expect(k8sClient.Create(ctx, preExisting)).To(Succeed())
@@ -587,7 +594,7 @@ var _ = Describe("Serving Controller", func() {
 			spec, _, _ := unstructured.NestedMap(app.Object, "spec")
 			source, _ := spec["source"].(map[string]any)
 			Expect(source["targetRevision"]).To(Equal(fakeDigest))
-			Expect(app.GetAnnotations()).To(HaveKeyWithValue(deliveryv1alpha1.AnnotationAllowedOrder, orderName))
+			Expect(app.GetAnnotations()).To(HaveKeyWithValue(deliveryv1alpha1.AnnotationAllowedOrder, testNamespace+"/"+orderName))
 
 			By("completing the rollout")
 			setAppStatus("Synced", fakeDigest, "Healthy", "")
@@ -617,7 +624,7 @@ var _ = Describe("Serving Controller", func() {
 
 			app := &unstructured.Unstructured{}
 			app.SetGroupVersionKind(argoAppGVK)
-			Expect(errors.IsNotFound(k8sClient.Get(ctx, client.ObjectKey{Namespace: argoNamespace, Name: resourceName}, app))).To(BeTrue())
+			Expect(errors.IsNotFound(k8sClient.Get(ctx, appKey(orderName), app))).To(BeTrue())
 		})
 
 		It("keeps an Application that is not opted in when the Serving is deleted", func() {
@@ -671,7 +678,7 @@ var _ = Describe("Serving Controller", func() {
 		appExists := func() bool {
 			app := &unstructured.Unstructured{}
 			app.SetGroupVersionKind(argoAppGVK)
-			return k8sClient.Get(ctx, client.ObjectKey{Namespace: argoNamespace, Name: orderName}, app) == nil
+			return k8sClient.Get(ctx, appKey(orderName), app) == nil
 		}
 		readyPreparation := func(name, digest string) *deliveryv1alpha1.Preparation {
 			p := createTestPreparation(ctx, name, orderName, digest, policy)
@@ -720,7 +727,7 @@ var _ = Describe("Serving Controller", func() {
 				app := &unstructured.Unstructured{}
 				app.SetGroupVersionKind(argoAppGVK)
 				app.SetNamespace(argoNamespace)
-				app.SetName(orderName)
+				app.SetName(appKey(orderName).Name)
 				_ = k8sClient.Delete(ctx, app)
 			})
 		})
@@ -859,12 +866,12 @@ var _ = Describe("Serving vulnerability checks", func() {
 	appExists := func() bool {
 		app := &unstructured.Unstructured{}
 		app.SetGroupVersionKind(argoAppGVK)
-		return k8sClient.Get(ctx, client.ObjectKey{Namespace: argoNamespace, Name: orderName}, app) == nil
+		return k8sClient.Get(ctx, appKey(orderName), app) == nil
 	}
 	setAppHealthy := func() {
 		app := &unstructured.Unstructured{}
 		app.SetGroupVersionKind(argoAppGVK)
-		Expect(k8sClient.Get(ctx, client.ObjectKey{Namespace: argoNamespace, Name: orderName}, app)).To(Succeed())
+		Expect(k8sClient.Get(ctx, appKey(orderName), app)).To(Succeed())
 		Expect(unstructured.SetNestedField(app.Object, "Synced", "status", "sync", "status")).To(Succeed())
 		Expect(unstructured.SetNestedField(app.Object, artifactDigest, "status", "sync", "revision")).To(Succeed())
 		Expect(unstructured.SetNestedField(app.Object, "Healthy", "status", "health", "status")).To(Succeed())
@@ -942,7 +949,7 @@ var _ = Describe("Serving vulnerability checks", func() {
 			app := &unstructured.Unstructured{}
 			app.SetGroupVersionKind(argoAppGVK)
 			app.SetNamespace(argoNamespace)
-			app.SetName(orderName)
+			app.SetName(appKey(orderName).Name)
 			_ = k8sClient.Delete(ctx, app)
 		})
 	})
@@ -1146,7 +1153,7 @@ var _ = Describe("Serving promotion pipelines", func() {
 			}
 			app := argocd.New()
 			app.SetNamespace(argoNamespace)
-			app.SetName(name)
+			app.SetName(appKey(name).Name)
 			_ = k8sClient.Delete(ctx, app)
 		})
 	}
@@ -1185,7 +1192,7 @@ var _ = Describe("Serving promotion pipelines", func() {
 
 	appRevision := func(name string) string {
 		app := argocd.New()
-		if err := k8sClient.Get(ctx, client.ObjectKey{Namespace: argoNamespace, Name: name}, app); err != nil {
+		if err := k8sClient.Get(ctx, appKey(name), app); err != nil {
 			return ""
 		}
 		revision, _, _ := unstructured.NestedString(app.Object, "spec", "source", "targetRevision")
@@ -1195,7 +1202,7 @@ var _ = Describe("Serving promotion pipelines", func() {
 	// report sets what Argo CD reports on the Application of stage name.
 	report := func(name, health string) {
 		app := argocd.New()
-		Expect(k8sClient.Get(ctx, client.ObjectKey{Namespace: argoNamespace, Name: name}, app)).To(Succeed())
+		Expect(k8sClient.Get(ctx, appKey(name), app)).To(Succeed())
 		app.Object[statusField] = map[string]any{
 			"sync":   map[string]any{statusField: "Synced", "revision": appRevision(name)},
 			"health": map[string]any{statusField: health},
@@ -1398,5 +1405,91 @@ var _ = Describe("Serving promotion pipelines", func() {
 		reconcileStage("pipeline-mixed")
 		Expect(upstreamDeployed("pipeline-mixed").Reason).To(Equal(deliveryv1alpha1.ReasonInvalidPipeline))
 		Expect(appRevision("pipeline-mixed")).To(BeEmpty())
+	})
+})
+
+var _ = Describe("Serving Applications", func() {
+	const (
+		order  = "podinfo"
+		prep   = "podinfo-p1"
+		digest = "sha256:7676767676767676767676767676767676767676767676767676767676767676"
+	)
+	ctx := context.Background()
+	namespaces := []string{testNamespace, "srv-tenant-b"}
+	var registry *oci.FakeClient
+
+	BeforeEach(func() {
+		registry = oci.NewFakeClient(nil)
+		createArgoNamespace(ctx)
+		for _, ns := range namespaces {
+			if ns != testNamespace {
+				_ = k8sClient.Create(ctx, &corev1.Namespace{Name: ns})
+			}
+			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Order{
+				Name: order, Namespace: ns,
+				Spec: deliveryv1alpha1.OrderSpec{
+					ProductRef: deliveryv1alpha1.ProductRef{Name: testProductName},
+					Promotion:  &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
+				},
+			})).To(Succeed())
+			var p *deliveryv1alpha1.Preparation
+			if ns == testNamespace {
+				p = createTestPreparation(ctx, prep, order, digest, nil)
+			} else {
+				template := &deliveryv1alpha1.Preparation{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: prep}, template)).To(Succeed())
+				// An artifact of its own: its provenance names its own Order.
+				p = &deliveryv1alpha1.Preparation{Name: prep, Namespace: ns, Spec: template.Spec}
+				p.Spec.Artifact.Digest = "sha256:7878787878787878787878787878787878787878787878787878787878787878"
+				p.Spec.Artifact.OCIRef = "oci://registry.kokumi.svc.cluster.local:5000/" + ns + "/" + order + "@" + p.Spec.Artifact.Digest
+				Expect(k8sClient.Create(ctx, p)).To(Succeed())
+			}
+			markPreparationReady(ctx, registry, client.ObjectKeyFromObject(p))
+			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Serving{
+				Name: order, Namespace: ns,
+				Spec: deliveryv1alpha1.ServingSpec{OrderName: order, PreparationName: prep},
+			})).To(Succeed())
+		}
+	})
+
+	AfterEach(func() {
+		for _, ns := range namespaces {
+			s := &deliveryv1alpha1.Serving{}
+			if k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: order}, s) == nil {
+				s.SetFinalizers(nil)
+				_ = k8sClient.Update(ctx, s)
+				_ = k8sClient.Delete(ctx, s)
+			}
+			_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Preparation{Name: prep, Namespace: ns})
+			_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Order{Name: order, Namespace: ns})
+			_ = k8sClient.DeleteAllOf(ctx, argocd.New(), client.InNamespace(argoNamespace),
+				client.MatchingLabels{deliveryv1alpha1.LabelServingNamespace: ns})
+		}
+	})
+
+	It("gives Orders of one name in two namespaces an Application each, and deletes only its own", func() {
+		r := newServingReconciler(registry)
+		keys := map[string]client.ObjectKey{}
+		for _, ns := range namespaces {
+			key := types.NamespacedName{Namespace: ns, Name: order}
+			_, err := settleServing(ctx, r, key)
+			Expect(err).NotTo(HaveOccurred())
+			s := &deliveryv1alpha1.Serving{}
+			Expect(k8sClient.Get(ctx, key, s)).To(Succeed())
+			keys[ns] = argocd.Key(s, cluster.InCluster)
+			app := argocd.New()
+			Expect(k8sClient.Get(ctx, keys[ns], app)).To(Succeed())
+			Expect(app.GetAnnotations()).To(HaveKeyWithValue(deliveryv1alpha1.AnnotationAllowedOrder, ns+"/"+order))
+		}
+		Expect(keys[namespaces[0]]).NotTo(Equal(keys[namespaces[1]]))
+
+		s := &deliveryv1alpha1.Serving{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: namespaces[1], Name: order}, s)).To(Succeed())
+		Expect(k8sClient.Delete(ctx, s)).To(Succeed())
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(s)})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(errors.IsNotFound(k8sClient.Get(ctx, keys[namespaces[1]], argocd.New()))).To(BeTrue())
+		Expect(k8sClient.Get(ctx, keys[namespaces[0]], argocd.New())).To(Succeed(), "the other namespace's Application stays")
 	})
 })

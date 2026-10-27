@@ -31,6 +31,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/argocd"
+	"github.com/kokumi-dev/kokumi/internal/cluster"
 	"github.com/kokumi-dev/kokumi/test/utils"
 )
 
@@ -81,57 +84,66 @@ func InstallArgoCD() {
 	}
 }
 
+// ApplicationKey returns the key of the Argo CD Application through which
+// the Order order in namespace deploys, as Kokumi names it.
+func ApplicationKey(namespace, order string) client.ObjectKey {
+	serving := &deliveryv1alpha1.Serving{Namespace: namespace, Spec: deliveryv1alpha1.ServingSpec{OrderName: order}}
+	return argocd.Key(serving, cluster.InCluster)
+}
+
 // Application returns a function for Eventually that fetches the Argo CD
-// Application of the Serving name.
-func Application(name string) func() (*unstructured.Unstructured, error) {
+// Application through which the Order order in namespace deploys.
+func Application(namespace, order string) func() (*unstructured.Unstructured, error) {
 	return func() (*unstructured.Unstructured, error) {
 		app := &unstructured.Unstructured{}
 		app.SetGroupVersionKind(schema.GroupVersionKind{Group: "argoproj.io", Version: "v1alpha1", Kind: "Application"})
-		err := Client.Get(context.Background(), client.ObjectKey{Namespace: ArgoCDNamespace, Name: name}, app)
+		err := Client.Get(context.Background(), ApplicationKey(namespace, order), app)
 		return app, err
 	}
 }
 
-// WaitForDeployment waits until the Argo CD Application of the Serving name
-// deploys digest, a Preparation's.
-func WaitForDeployment(name, digest string) {
-	Eventually(Application(name), 2*time.Minute).Should(
+// WaitForDeployment waits until the Order order in namespace deploys
+// digest, a Preparation's, through Argo CD.
+func WaitForDeployment(namespace, order, digest string) {
+	Eventually(Application(namespace, order), 2*time.Minute).Should(
 		HaveField("Object", HaveKeyWithValue("spec", HaveKeyWithValue("source", HaveKeyWithValue("targetRevision", digest)))),
-		"The Serving %s does not deploy %s through Argo CD", name, digest)
+		"The Order %s/%s does not deploy %s through Argo CD", namespace, order, digest)
 }
 
-// ExpectNoApplication fails if the Serving name deploys anything through
-// Argo CD.
-func ExpectNoApplication(name string) {
-	_, err := Application(name)()
-	Expect(apierrors.IsNotFound(err)).To(BeTrue(), "The Serving %s deploys through Argo CD: %v", name, err)
+// ExpectNoApplication fails if the Order order in namespace deploys
+// anything through Argo CD.
+func ExpectNoApplication(namespace, order string) {
+	_, err := Application(namespace, order)()
+	Expect(apierrors.IsNotFound(err)).To(BeTrue(), "The Order %s/%s deploys through Argo CD: %v", namespace, order, err)
 }
 
-// simulateHealthy reports the Argo CD Application of the Serving name synced
-// to revision and healthy, as Argo CD's application controller would. The
-// Application CRD has no status subresource, so a patch writes the status.
-func simulateHealthy(name, revision string) {
-	_, err := Kubectl("patch", "applications.argoproj.io", name, "-n", ArgoCDNamespace, "--type=merge", "-p",
+// simulateHealthy reports the Argo CD Application app synced to revision
+// and healthy, as Argo CD's application controller would. The Application
+// CRD has no status subresource, so a patch writes the status.
+func simulateHealthy(app client.ObjectKey, revision string) {
+	_, err := Kubectl("patch", "applications.argoproj.io", app.Name, "-n", app.Namespace, "--type=merge", "-p",
 		fmt.Sprintf(`{"status":{"sync":{"status":"Synced","revision":%q},"health":{"status":"Healthy"}}}`, revision))
-	Expect(err).NotTo(HaveOccurred(), "Failed to simulate Argo CD reporting %s healthy", name)
+	Expect(err).NotTo(HaveOccurred(), "Failed to simulate Argo CD reporting %s healthy", app.Name)
 }
 
-// SyncHealthy has Argo CD report the Application of the Serving name synced
-// to revision and healthy. The suite simulates the report by default; with
-// E2E_ARGOCD=real it waits for Argo CD to deploy the revision for real.
-func SyncHealthy(name, revision string) {
+// SyncHealthy has Argo CD report the Application through which the Order
+// order in namespace deploys synced to revision and healthy. The suite
+// simulates the report by default; with E2E_ARGOCD=real it waits for Argo
+// CD to deploy the revision for real.
+func SyncHealthy(namespace, order, revision string) {
+	key := ApplicationKey(namespace, order)
 	if !RealArgoCD() {
-		By("simulating Argo CD reporting " + name + " synced and healthy")
-		simulateHealthy(name, revision)
+		By("simulating Argo CD reporting " + key.Name + " synced and healthy")
+		simulateHealthy(key, revision)
 		return
 	}
-	By("waiting for Argo CD to report " + name + " synced and healthy")
+	By("waiting for Argo CD to report " + key.Name + " synced and healthy")
 	Eventually(func(g Gomega) {
-		app, err := Application(name)()
+		app, err := Application(namespace, order)()
 		g.Expect(err).NotTo(HaveOccurred())
 		sync, _, _ := unstructured.NestedString(app.Object, "status", "sync", "status")
 		synced, _, _ := unstructured.NestedString(app.Object, "status", "sync", "revision")
 		health, _, _ := unstructured.NestedString(app.Object, "status", "health", "status")
 		g.Expect([]string{sync, synced, health}).To(Equal([]string{"Synced", revision, "Healthy"}))
-	}, 5*time.Minute, 2*time.Second).Should(Succeed(), "Argo CD did not deploy %s healthily", name)
+	}, 5*time.Minute, 2*time.Second).Should(Succeed(), "Argo CD did not deploy %s healthily", key.Name)
 }

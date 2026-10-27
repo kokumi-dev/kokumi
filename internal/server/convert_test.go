@@ -11,6 +11,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/argocd"
+	"github.com/kokumi-dev/kokumi/internal/cluster"
 	"github.com/kokumi-dev/kokumi/internal/resolve"
 )
 
@@ -234,6 +236,8 @@ func TestServingToDTO_history(t *testing.T) {
 		Preparation: "prod-1", Digest: digest("1"), ProductRevision: digest("7"), StartedAt: started.Time,
 		HealthyAt: &healthy.Time, PromotionRecord: digest("a"), DeploymentRecord: digest("b"),
 	}, dto.History[1])
+
+	assert.Equal(t, argocd.Key(&serving, cluster.InCluster).Name, dto.ApplicationName, "the UI links the Application Kokumi named")
 
 	assert.Equal(t, "prod-1", activePreparationFor("shop", "prod", []deliveryv1alpha1.Serving{serving}))
 	assert.Empty(t, servingToDTO(deliveryv1alpha1.Serving{}).DeployedPreparation)
