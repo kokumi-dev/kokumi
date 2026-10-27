@@ -18,7 +18,7 @@ package framework
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"strings"
@@ -118,11 +118,24 @@ func ExpectNoApplication(namespace, order string) {
 }
 
 // simulateHealthy reports the Argo CD Application app synced to revision
-// and healthy, as Argo CD's application controller would. The Application
-// CRD has no status subresource, so a patch writes the status.
+// and healthy, as Argo CD's application controller would after comparing
+// its current source. The Application CRD has no status subresource, so a
+// patch writes the status.
 func simulateHealthy(app client.ObjectKey, revision string) {
-	_, err := Kubectl("patch", "applications.argoproj.io", app.Name, "-n", app.Namespace, "--type=merge", "-p",
-		fmt.Sprintf(`{"status":{"sync":{"status":"Synced","revision":%q},"health":{"status":"Healthy"}}}`, revision))
+	current := &unstructured.Unstructured{}
+	current.SetGroupVersionKind(schema.GroupVersionKind{Group: "argoproj.io", Version: "v1alpha1", Kind: "Application"})
+	Expect(Client.Get(context.Background(), app, current)).To(Succeed())
+	source, _, _ := unstructured.NestedMap(current.Object, "spec", "source")
+	destination, _, _ := unstructured.NestedMap(current.Object, "spec", "destination")
+	comparedTo := map[string]any{"source": source, "destination": destination}
+	const status = "status"
+	patch, err := json.Marshal(map[string]any{status: map[string]any{
+		"sync":   map[string]any{status: "Synced", "revision": revision, "comparedTo": comparedTo},
+		"health": map[string]any{status: "Healthy"},
+	}})
+	Expect(err).NotTo(HaveOccurred())
+	_, err = Kubectl("patch", "applications.argoproj.io", app.Name, "-n", app.Namespace,
+		"--type=merge", "-p", string(patch))
 	Expect(err).NotTo(HaveOccurred(), "Failed to simulate Argo CD reporting %s healthy", app.Name)
 }
 

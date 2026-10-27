@@ -30,14 +30,18 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
@@ -290,6 +294,13 @@ func (r *ServingReconciler) deploy(ctx context.Context, serving *deliveryv1alpha
 
 	app, err := r.applyApplication(ctx, serving, deployed)
 	if err != nil {
+		if meta.IsNoMatchError(err) {
+			// The Application watch reconciles every Serving once the CRD
+			// is installed.
+			conditions.MarkFalse(serving, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonArgoCDNotInstalled,
+				"Argo CD's Application CRD is not installed; install Argo CD to deploy")
+			return 0, nil
+		}
 		if errors.Is(err, argocd.ErrOptInRequired) {
 			// Holds for this generation: the Application watch reports a
 			// change to the opt-in, and a spec change reports itself.
@@ -903,8 +914,8 @@ func (r *ServingReconciler) reconcileDelete(ctx context.Context, serving *delive
 }
 
 // removeApplication deletes the Serving's Argo CD Application. One that is
-// gone already counts as removed, and one that is not opted in for the
-// Serving's Order is kept. The delete is conditional on the UID and
+// gone already counts as removed, as does any without Argo CD's CRD, and
+// one that is not opted in for the Serving's Order is kept. The delete is conditional on the UID and
 // resource version that passed the opt-in check, so an Application replaced
 // or changed in between is never deleted.
 func (r *ServingReconciler) removeApplication(ctx context.Context, serving *deliveryv1alpha1.Serving) error {
@@ -912,7 +923,7 @@ func (r *ServingReconciler) removeApplication(ctx context.Context, serving *deli
 
 	app := argocd.New()
 	if err := r.Get(ctx, argocd.Key(serving, cluster.InCluster), app); err != nil {
-		if apierrors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
 			logger.Info("Argo CD Application already deleted", "name", serving.Name)
 			return nil
 		}
@@ -1273,9 +1284,91 @@ func (r *ServingReconciler) signingChanges() <-chan event.GenericEvent {
 	return ch
 }
 
-// SetupWithManager sets up the controller with the Manager.
+// crdCheckInterval is how often an optional watch checks whether the CRD of
+// its kind is installed.
+const crdCheckInterval = 30 * time.Second
+
+// optionalWatch adds the watch of a kind from another project, such as Argo
+// CD's Application, to a controller once its CRD is installed and serves
+// the version Kokumi reads, so that the manager starts and every controller
+// runs without it. It checks at start and then every crdCheckInterval, and
+// once the watch runs it sends an event on Started, so that the reconciles
+// that found the kind missing run again. Reconciles never ask it whether the
+// kind is installed: reads of a kind without its CRD fail with a no-match
+// error, which tells them.
+type optionalWatch struct {
+	obj      client.Object
+	gvk      schema.GroupVersionKind
+	mapper   meta.RESTMapper
+	interval time.Duration
+	started  chan event.GenericEvent
+}
+
+// newOptionalWatch returns the optional watch of the kind of obj: a type of
+// the manager's scheme, or an unstructured object with its kind set.
+func newOptionalWatch(mgr ctrl.Manager, obj client.Object) (*optionalWatch, error) {
+	gvk, err := apiutil.GVKForObject(obj, mgr.GetScheme())
+	if err != nil {
+		return nil, err
+	}
+	return &optionalWatch{obj: obj, gvk: gvk, mapper: mgr.GetRESTMapper(), interval: crdCheckInterval, started: make(chan event.GenericEvent, 1)}, nil
+}
+
+// Started returns the channel that receives an event once the watch runs.
+func (w *optionalWatch) Started() <-chan event.GenericEvent {
+	return w.started
+}
+
+// Add adds the runnable to mgr that starts the watch on c, with h and
+// predicates, once the CRD is installed.
+func (w *optionalWatch) Add(mgr ctrl.Manager, c controller.Controller, h handler.EventHandler, predicates ...predicate.Predicate) error {
+	return mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		return w.wait(ctx, func() error {
+			return c.Watch(source.Kind[client.Object](mgr.GetCache(), w.obj, h, predicates...))
+		})
+	}))
+}
+
+// wait calls start once the CRD of the kind is installed, then sends an
+// event on Started. It returns when the watch started or ctx is done.
+func (w *optionalWatch) wait(ctx context.Context, start func() error) error {
+	logger := log.FromContext(ctx).WithValues("kind", w.gvk.Kind, "group", w.gvk.Group)
+	ticker := time.NewTicker(w.interval)
+	defer ticker.Stop()
+	for logged := false; ; {
+		_, err := w.mapper.RESTMapping(w.gvk.GroupKind(), w.gvk.Version)
+		switch {
+		case err == nil:
+			if err := start(); err != nil {
+				return fmt.Errorf("failed to watch %s: %w", w.gvk.Kind, err)
+			}
+			w.started <- event.GenericEvent{Object: w.obj}
+			logger.Info("Watching optional kind, its CRD is installed")
+			return nil
+		case !meta.IsNoMatchError(err):
+			logger.Error(err, "Failed to check whether the CRD of an optional kind is installed")
+		case !logged:
+			logger.Info("CRD of optional kind not installed, or not serving the version, checking again",
+				"version", w.gvk.Version, "interval", w.interval)
+			logged = true
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+		}
+	}
+}
+
+// SetupWithManager sets up the controller with the Manager. The Application
+// watch starts once Argo CD's Application CRD is installed, so that the
+// manager runs without Argo CD.
 func (r *ServingReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
+	applications, err := newOptionalWatch(mgr, argocd.New())
+	if err != nil {
+		return err
+	}
+	c, err := ctrl.NewControllerManagedBy(mgr).
 		// Status writes of the controller itself need no reconcile.
 		For(&deliveryv1alpha1.Serving{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&deliveryv1alpha1.Serving{},
@@ -1285,13 +1378,15 @@ func (r *ServingReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&deliveryv1alpha1.Order{},
 			handler.EnqueueRequestsFromMapFunc(enqueueServingForOrderName),
 			builder.WithPredicates(predicate.GenerationChangedPredicate{})).
-		Watches(argocd.New(),
-			handler.EnqueueRequestsFromMapFunc(servingOfApplication),
-			builder.WithPredicates(applicationChanged)).
 		Watches(&deliveryv1alpha1.Product{},
 			handler.EnqueueRequestsFromMapFunc(r.enqueueServingsOfProduct),
 			builder.WithPredicates(productScansChanged)).
 		WatchesRawSource(source.Channel(r.signingChanges(), handler.EnqueueRequestsFromMapFunc(r.enqueueAllServings))).
+		WatchesRawSource(source.Channel(applications.Started(), handler.EnqueueRequestsFromMapFunc(r.enqueueAllServings))).
 		Named("serving").
-		Complete(r)
+		Build(r)
+	if err != nil {
+		return err
+	}
+	return applications.Add(mgr, c, handler.EnqueueRequestsFromMapFunc(servingOfApplication), applicationChanged)
 }

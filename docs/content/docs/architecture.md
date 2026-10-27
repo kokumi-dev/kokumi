@@ -80,8 +80,8 @@ an Argo CD `Application` resource that points to the immutable OCI artifact of
 the selected Preparation. Argo CD then syncs that artifact into the cluster.
 
 > **Kokumi does not apply manifests directly.** All runtime deployment is
-> delegated to Argo CD. Without a running Argo CD instance, Servings will
-> remain in a `Failed` state and no workloads will be deployed.
+> delegated to Argo CD. Without Argo CD, no workloads are deployed; without
+> its CRDs, Servings report `ArgoCDNotInstalled`.
 
 ## Resource model
 
@@ -726,7 +726,8 @@ Preparation it converges to, then deploys the promoted one.
    never modified, and deleting the Serving keeps it.
 8. Derives the `Ready` condition from the Application: `Deploying` until the
    Application reports `Healthy` and is synced to the deployed digest, then
-   `Deployed`. An Application that is degraded at the deployed digest
+   `Deployed`. A report counts only when Argo CD compared the Application's
+   current source and finished its sync at that digest. An Application that is degraded at the deployed digest
    surfaces as `DeploymentFailed`; the health of an older revision is not
    reported for the new Preparation. `Ready` describes what runs; while a
    newer Preparation waits for a gate, its message says what holds it.
@@ -744,8 +745,10 @@ promotion record; the history keeps the 16 most recent deployments.
 
 The status is written only when it changes, and the next reconcile is
 triggered by a change to the Serving spec, its Order or Preparations, the
-Application's health or sync state, the history of an upstream stage, or a
-soak that ends.
+Application's health, sync state or sync operation, the history of an
+upstream stage, or a soak that ends. Without Argo CD's Application CRD,
+Servings deploy nothing and report `ArgoCDNotInstalled`; the controller
+starts watching Applications once the CRD is installed.
 
 Rollback is promoting any previous Preparation. No re-rendering required.
 

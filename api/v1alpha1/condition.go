@@ -237,6 +237,13 @@ const (
 	ReasonInvalidPipeline = "InvalidPipeline"
 )
 
+// Condition reasons used by Servings for where they deploy.
+const (
+	// ReasonArgoCDNotInstalled reports on a Serving that Argo CD's
+	// Application CRD is not installed, so that nothing can be deployed.
+	ReasonArgoCDNotInstalled = "ArgoCDNotInstalled"
+)
+
 // Condition reasons used by Registries.
 const (
 	// ReasonRegistryConnected reports on a Registry that the registry
