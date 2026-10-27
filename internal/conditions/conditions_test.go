@@ -1,8 +1,10 @@
 package conditions
 
 import (
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -99,5 +101,30 @@ func TestHasReason(t *testing.T) {
 	}
 	if HasReason(order, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonReady) {
 		t.Error("HasReason matched another reason")
+	}
+}
+
+func TestList(t *testing.T) {
+	items := []string{"a", "b", "c", "d"}
+	for _, tt := range []struct {
+		limit int
+		want  string
+	}{
+		{limit: 4, want: "a, b, c, d"},
+		{limit: 2, want: "a, b, and 2 more"},
+	} {
+		if got := List(items, ", ", tt.limit); got != tt.want {
+			t.Errorf("List(limit %d) = %q, want %q", tt.limit, got, tt.want)
+		}
+	}
+}
+
+func TestSetCutsLongMessages(t *testing.T) {
+	order := &deliveryv1alpha1.Order{}
+	MarkTrue(order, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonReady, strings.Repeat("é", maxMessageLength))
+
+	msg := order.Status.Conditions[0].Message
+	if len(msg) > maxMessageLength || !utf8.ValidString(msg) || !strings.HasSuffix(msg, "…") {
+		t.Errorf("message of %d bytes, valid UTF-8 %t, not cut with an ellipsis", len(msg), utf8.ValidString(msg))
 	}
 }

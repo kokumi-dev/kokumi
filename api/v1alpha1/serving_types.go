@@ -151,6 +151,7 @@ type DeploymentEntry struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:categories=kokumi
 // +kubebuilder:printcolumn:name="Order",type=string,JSONPath=`.spec.orderName`
 // +kubebuilder:printcolumn:name="Preparation",type=string,JSONPath=`.spec.preparationName`,priority=1
 // +kubebuilder:printcolumn:name="Target",type=string,JSONPath=`.status.targetPreparationName`

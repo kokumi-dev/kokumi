@@ -5,9 +5,17 @@
 package conditions
 
 import (
+	"strconv"
+	"strings"
+	"unicode/utf8"
+
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// maxMessageLength is the most a condition message may hold, as the API
+// validates it.
+const maxMessageLength = 32768
 
 // Setter is an object with status conditions.
 type Setter interface {
@@ -32,14 +40,15 @@ func MarkUnknown(obj Setter, conditionType, reason, message string) {
 }
 
 // Set sets the condition of conditionType on obj to status, observed at the
-// generation of obj. Its lastTransitionTime changes only with its status.
+// generation of obj. Its lastTransitionTime changes only with its status. A
+// message longer than the API accepts is cut.
 func Set(obj Setter, conditionType string, status metav1.ConditionStatus, reason, message string) {
 	conditions := obj.GetConditions()
 	meta.SetStatusCondition(&conditions, metav1.Condition{
 		Type:               conditionType,
 		Status:             status,
 		Reason:             reason,
-		Message:            message,
+		Message:            Truncate(message, maxMessageLength),
 		ObservedGeneration: obj.GetGeneration(),
 	})
 	obj.SetConditions(conditions)
@@ -57,4 +66,27 @@ func Remove(obj Setter, conditionType string) {
 func HasReason(obj Setter, conditionType, reason string) bool {
 	condition := meta.FindStatusCondition(obj.GetConditions(), conditionType)
 	return condition != nil && condition.Reason == reason
+}
+
+// List lists items for a message, separated by sep: all of them when there
+// are at most limit, else the first limit and how many more there are.
+func List(items []string, sep string, limit int) string {
+	if len(items) <= limit {
+		return strings.Join(items, sep)
+	}
+	return strings.Join(items[:limit], sep) + sep + "and " + strconv.Itoa(len(items)-limit) + " more"
+}
+
+// Truncate cuts s to at most limit bytes, on a rune boundary, and marks the
+// cut with an ellipsis.
+func Truncate(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	const ellipsis = "…"
+	cut := limit - len(ellipsis)
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + ellipsis
 }

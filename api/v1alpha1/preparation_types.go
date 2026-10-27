@@ -398,7 +398,7 @@ type PreparationStatus struct {
 // +kubebuilder:printcolumn:name="Digest",type=string,JSONPath=`.spec.artifact.digest`,priority=1
 // +kubebuilder:printcolumn:name="Signed",type=string,JSONPath=`.status.conditions[?(@.type=='Signed')].status`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
-// +kubebuilder:resource:shortName=prep
+// +kubebuilder:resource:shortName=prep,categories=kokumi
 // +kubebuilder:selectablefield:JSONPath=`.spec.orderName`
 // +kubebuilder:selectablefield:JSONPath=`.spec.productRevision`
 

@@ -61,6 +61,7 @@ type RecipeStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:categories=kokumi
 
 // Recipe is the Schema for the recipes API
 type Recipe struct {

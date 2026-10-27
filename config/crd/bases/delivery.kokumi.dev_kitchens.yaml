@@ -8,6 +8,8 @@ metadata:
 spec:
   group: delivery.kokumi.dev
   names:
+    categories:
+    - kokumi
     kind: Kitchen
     listKind: KitchenList
     plural: kitchens
