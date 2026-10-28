@@ -191,6 +191,11 @@ argocd: ## Installs Argo CD in the cluster
 	"$(KUBECTL)" create namespace argocd --dry-run=client -o yaml | "$(KUBECTL)" apply -f -
 	"$(KUBECTL)" apply -n argocd --server-side --force-conflicts -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.1/manifests/install.yaml
 	"$(KUBECTL)" patch svc argocd-server -n argocd -p '{"spec": {"type": "NodePort", "ports": [{"port": 80,"targetPort": 8080,"nodePort": 30052}]}}'
+	@# For local development only: let the Environments of every namespace use
+	@# the default project, as the e2e suite's simulated Argo CD does.
+	"$(KUBECTL)" wait --for=condition=Established crd/appprojects.argoproj.io --timeout=60s
+	"$(KUBECTL)" -n argocd wait --for=create appproject/default --timeout=180s
+	"$(KUBECTL)" -n argocd patch appproject default --type=merge -p '{"spec":{"sourceNamespaces":["*"]}}'
 	"$(KUBECTL)" -n argocd create secret generic manifests-registry-creds \
 		--from-literal=type=oci \
 		--from-literal=url=oci://kokumi-registry.kokumi.svc.cluster.local:5000 \

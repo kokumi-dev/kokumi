@@ -1,0 +1,13 @@
+# The cluster Kokumi runs in, as a Cluster of this namespace: it needs no
+# kubeconfig, since Argo CD deploys to its own cluster. The Environment local
+# selects it by the label delivery.kokumi.dev/in-cluster, which Kokumi sets
+# only on the Cluster it keeps in its own namespace.
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Cluster
+metadata:
+  name: in-cluster
+  labels:
+    delivery.kokumi.dev/in-cluster: "true"
+spec:
+  description: The cluster Kokumi runs in
+  connection: InCluster

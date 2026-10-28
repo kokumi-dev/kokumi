@@ -19,6 +19,10 @@ const (
 	// cluster.
 	InCluster = "in-cluster"
 
+	// LocalEnvironment is the name of the Environment Kokumi ensures in its
+	// own namespace, which selects the Cluster InCluster.
+	LocalEnvironment = "local"
+
 	// InClusterServer is the API server of the cluster Kokumi runs in, as
 	// workloads in it reach it.
 	InClusterServer = "https://kubernetes.default.svc"

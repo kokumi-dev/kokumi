@@ -1,0 +1,14 @@
+# An Environment of the cluster Kokumi runs in whose AppProject does not
+# admit its namespace (see projects.yaml).
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Environment
+metadata:
+  name: restricted
+spec:
+  clusterSelector:
+    matchLabels:
+      delivery.kokumi.dev/in-cluster: "true"
+  deployer:
+    type: ArgoCD
+    argoCD:
+      project: ${NAMESPACE}-restricted

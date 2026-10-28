@@ -39,10 +39,11 @@ const (
 	// the pipeline. It is metadata, not intent: changing it renders nothing.
 	LabelEnvironment = "delivery.kokumi.dev/environment"
 
-	// LabelInCluster marks a Cluster that connects in-cluster, so that it
-	// can be selected by label. Kokumi sets it on the Cluster in-cluster it
-	// keeps in its own namespace when it creates it; other Clusters carry it
-	// when their authors set it.
+	// LabelInCluster marks a Cluster that connects in-cluster, so that
+	// Environments, such as local, select the cluster Kokumi runs in by
+	// label. Kokumi sets it on the Cluster in-cluster it keeps in its own
+	// namespace when it creates it; other Clusters carry it when their
+	// authors set it.
 	LabelInCluster = "delivery.kokumi.dev/in-cluster"
 )
 
@@ -83,9 +84,10 @@ const (
 
 // Finalizer names registered on kokumi-managed resources.
 const (
-	// Finalizer is added to Orders, Preparations, Recipes, Servings and
-	// Clusters. The Serving controller deletes the Serving's Argo CD
-	// Application, which lives in another namespace, before it removes it.
+	// Finalizer is added to Orders, Preparations, Recipes, Servings,
+	// Environments and Clusters. The Serving controller deletes the Serving's
+	// Argo CD Application, which lives in another namespace, before it
+	// removes it.
 	Finalizer = "delivery.kokumi.dev/finalizer"
 
 	// FinalizerProductProtection keeps a Product from being deleted while

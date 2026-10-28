@@ -13,4 +13,5 @@ Guides for operators who run and secure Kokumi in a cluster.
   {{< card link="images" title="Container Images" icon="cube-transparent" subtitle="Image mirrors, letting nodes pull vendored images, and registry sizing." >}}
   {{< card link="scanning" title="Vulnerability Scanning" icon="shield-check" subtitle="The scanner component, the vulnerability database in air-gapped clusters, and network isolation." >}}
   {{< card link="clusters" title="Clusters" icon="server" subtitle="Register the clusters Kokumi deploys to, and see whether it reaches them." >}}
+  {{< card link="environments" title="Environments" icon="globe-alt" subtitle="Group clusters, and decide through which Argo CD project Kokumi deploys there." >}}
 {{< /cards >}}

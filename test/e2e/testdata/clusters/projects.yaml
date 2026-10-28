@@ -1,0 +1,17 @@
+# The Argo CD AppProject of the Environment of test/e2e/testdata/clusters/
+# restricted.yaml, named after the scenario's namespace: it admits no
+# namespace of an Environment that uses it. Which destinations a project
+# admits is Argo CD's check, which the simulated Argo CD does not run.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: ${NAMESPACE}-restricted
+  namespace: argocd
+spec:
+  sourceNamespaces:
+  - team-*
+  sourceRepos:
+  - "*"
+  destinations:
+  - server: "*"
+    namespace: "*"

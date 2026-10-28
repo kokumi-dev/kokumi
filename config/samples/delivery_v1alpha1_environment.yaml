@@ -1,0 +1,20 @@
+# An Environment of the cluster Kokumi runs in, as the Environment local
+# Kokumi keeps next to it: it selects the Clusters of the namespace labeled
+# delivery.kokumi.dev/in-cluster: "true", as the Cluster in-cluster Kokumi
+# keeps there is.
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Environment
+metadata:
+  labels:
+    app.kubernetes.io/name: kokumi
+    app.kubernetes.io/managed-by: kustomize
+  name: edge
+spec:
+  description: The cluster Kokumi runs in, through Argo CD's default project
+  clusterSelector:
+    matchLabels:
+      delivery.kokumi.dev/in-cluster: "true"
+  deployer:
+    type: ArgoCD
+    argoCD:
+      project: default

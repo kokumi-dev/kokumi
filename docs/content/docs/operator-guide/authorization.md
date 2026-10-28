@@ -134,8 +134,8 @@ The installation ships three identity ServiceAccounts in the install namespace:
 
 | ServiceAccount | Default binding | Default identity mapping | Purpose |
 | -------------- | ---------------- | ------------------------ | ------- |
-| `kokumi-admin` | `kokumi-server-role` (full CRUD incl. `kitchens` and `clusters`) | `kokumi.dev/identity-groups: "kokumi-admin"` | Full access; also used by the built-in admin login |
-| `kokumi-editor` | `kokumi-server-editor-role` (CRUD, no `kitchens`; reads `clusters`) | `kokumi.dev/identity-groups: "kokumi-editor"` | Editors |
+| `kokumi-admin` | `kokumi-server-role` (full CRUD incl. `kitchens`, `environments` and `clusters`) | `kokumi.dev/identity-groups: "kokumi-admin"` | Full access; also used by the built-in admin login |
+| `kokumi-editor` | `kokumi-server-editor-role` (CRUD, no `kitchens`; reads `environments` and `clusters`) | `kokumi.dev/identity-groups: "kokumi-editor"` | Editors |
 | `kokumi-viewer` | `kokumi-server-viewer-role` (read-only) | `kokumi.dev/identity-groups: "kokumi-viewer"` | Read-only users |
 
 None of the built-in roles grants access to Secrets. They are bound

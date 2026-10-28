@@ -117,7 +117,7 @@ var _ = BeforeSuite(func() {
 	testSigner = signingtest.NewSigner(GinkgoT())
 	testSigning = signingtest.NewProvider(GinkgoT(), testSigner)
 
-	for _, name := range []string{testWorkspace, testKokumiNamespace} {
+	for _, name := range []string{testWorkspace, testKokumiNamespace, argoNamespace} {
 		Expect(k8sClient.Create(ctx, &corev1.Namespace{Name: name})).To(Succeed())
 	}
 })
@@ -130,13 +130,31 @@ var _ = AfterSuite(func() {
 	}, time.Minute, time.Second).Should(Succeed())
 })
 
-// testWorkspace is the namespace of the Clusters of the tests of their
-// controller.
+// testWorkspace is the namespace of the Clusters and Environments of the
+// tests of their controllers.
 const testWorkspace = "workspace"
 
 // testKokumiNamespace is Kokumi's own namespace in the tests, where it keeps
-// the Cluster in-cluster.
+// the Cluster in-cluster and the Environment local.
 const testKokumiNamespace = "kokumi-system"
+
+// testEdge is the value of the label by which the tests put clusters into
+// an Environment.
+const testEdge = "edge"
+
+// testRetired is the value of that label for clusters the tests take out
+// of it.
+const testRetired = "retired"
+
+// testFleet is the label by which the tests of mapping functions select
+// Clusters.
+const testFleet = "fleet"
+
+// Keys of the Argo CD objects the tests write as Argo CD or its users would.
+const (
+	keyServer    = "server"
+	keyNamespace = "namespace"
+)
 
 // fakeProber probes clusters without a network: every cluster has health.
 type fakeProber struct {

@@ -21,12 +21,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
@@ -36,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -329,6 +332,29 @@ func clusterRequests(clusters []deliveryv1alpha1.Cluster) []ctrl.Request {
 		reqs = append(reqs, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&clusters[i])})
 	}
 	return reqs
+}
+
+// clusterChanged passes the Cluster updates that change which Environments
+// select it and what they report about it: its labels, which Environments
+// select it by, its connection, its server, its readiness, and the start of
+// its deletion. The probes that find a cluster as it was pass nothing.
+// Creates and deletes always pass.
+var clusterChanged = predicate.Funcs{
+	UpdateFunc: func(e event.UpdateEvent) bool {
+		before, okOld := e.ObjectOld.(*deliveryv1alpha1.Cluster)
+		after, okNew := e.ObjectNew.(*deliveryv1alpha1.Cluster)
+		if !okOld || !okNew {
+			return false
+		}
+		readyBefore := meta.FindStatusCondition(before.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)
+		readyAfter := meta.FindStatusCondition(after.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)
+		return !maps.Equal(before.Labels, after.Labels) ||
+			before.Spec.Connection != after.Spec.Connection ||
+			before.Status.Server != after.Status.Server ||
+			before.DeletionTimestamp.IsZero() != after.DeletionTimestamp.IsZero() ||
+			(readyBefore == nil) != (readyAfter == nil) ||
+			(readyBefore != nil && (readyBefore.Status != readyAfter.Status || readyBefore.Reason != readyAfter.Reason))
+	},
 }
 
 // enqueueAtStart returns a source that enqueues the object key once, when

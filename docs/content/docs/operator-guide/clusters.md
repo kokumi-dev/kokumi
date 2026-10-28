@@ -6,7 +6,8 @@ description: Register clusters as Clusters with a kubeconfig Secret, and see whe
 
 A **Cluster** describes one cluster for Kokumi to deploy to: how to reach it.
 Kokumi reports whether it reaches the cluster, and the cluster's Kubernetes
-version.
+version. Admins put Clusters into [Environments](../environments/) of the same
+namespace by their labels.
 
 A Cluster reaches its cluster in one of two ways:
 
@@ -17,12 +18,13 @@ A Cluster reaches its cluster in one of two ways:
 
 ## Workspaces
 
-Every reference stays inside one namespace, as all of Kokumi's do: a Cluster
-names a Secret of its namespace. A namespace with Clusters is a workspace:
+Every reference stays inside one namespace, as all of Kokumi's do: an
+Environment selects Clusters of its namespace, and a Cluster names a Secret of
+its namespace. A namespace with Environments and Clusters is a workspace:
 
 - **Kokumi's own namespace**, `kokumi`, where Kokumi keeps the Cluster
-  `in-cluster`.
-- **A platform namespace** with the fleet's Clusters.
+  `in-cluster` and the Environment `local`.
+- **A platform namespace** with the fleet's Clusters and Environments.
 - **Team namespaces** with clusters of their own.
 
 A Cluster's name is at most 63 characters, so that it fits into a label
@@ -75,13 +77,15 @@ well. Another key goes into `spec.kubeconfig.secretRef.key`.
 kubectl create secret generic spoke-kubeconfig -n <namespace> --from-file=value=spoke.kubeconfig
 ```
 
-And create the Cluster:
+And create the Cluster, with the labels Environments select it by:
 
 ```yaml
 apiVersion: delivery.kokumi.dev/v1alpha1
 kind: Cluster
 metadata:
   name: spoke
+  labels:
+    fleet: edge
 spec:
   description: The spoke cluster of the platform team
   connection: Kubeconfig
@@ -154,8 +158,11 @@ namespace. It creates it when it is missing, also after you delete it, and
 does not change it otherwise: label it as you need.
 
 When Kokumi creates the Cluster `in-cluster`, it labels it
-`delivery.kokumi.dev/in-cluster: "true"`. Kokumi sets the label on no other
-Cluster, and never removes it. Another workspace that deploys to the cluster
-Kokumi runs in gets a Cluster of its own with `connection: InCluster`.
+`delivery.kokumi.dev/in-cluster: "true"`, and the Environment `local` selects
+it by that label. Kokumi sets the label on no other Cluster, and never removes
+it. Other workspaces that deploy to the cluster Kokumi runs in get a Cluster of
+their own, with the label, as the example `local` adds one:
+
+{{< example file="local/cluster.yaml" >}}
 
 Kokumi's manager must reach the API server of every cluster.

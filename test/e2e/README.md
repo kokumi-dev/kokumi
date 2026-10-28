@@ -12,6 +12,7 @@ cosign.
 make test-e2e                          # every spec, on the Kind cluster kokumi-test-e2e
 make test-e2e E2E_LABELS=promotion     # the specs of one feature
 make test-e2e E2E_LABELS='!slow'       # all but the slow ones
+make test-e2e E2E_LABELS=environments  # Environments and Clusters
 make test-e2e E2E_ARGOCD=real          # with Argo CD deploying for real, see below
 make test-e2e-plan                     # list the specs and their labels, without a cluster
 ```
@@ -46,7 +47,7 @@ also exports the logs of the Kind nodes, their kubelet and every container to
 | OIDC sign-in | Real Dex from `hack/oidc`, in the approvals and API server specs. |
 | Private registry | A registry fixture that requires a password, in the registries spec. |
 | Sources | Public: `ghcr.io/stefanprodan/charts/podinfo`, `ghcr.io/kokumi-dev/testdata`. Sources only a spec needs, such as an unsigned one, are pushed to the bundled registry. |
-| Argo CD | Simulated by default: only its Application CRD is installed, and `framework.SyncHealthy` reports an Application synced and healthy, as Argo CD would. This keeps the promotion gates deterministic and fast. With `E2E_ARGOCD=real`, `framework.InstallArgoCD` installs Argo CD with `make argocd` and `framework.SyncHealthy` waits for it to deploy for real. Its Redis pulls the same image from Docker Hub instead of ECR Public, which rate-limits the shared IPs of CI runners. |
+| Argo CD | Simulated by default: only its Application and AppProject CRDs and its `default` project are installed, and `framework.SyncHealthy` reports an Application synced and healthy, as Argo CD would. This keeps the promotion gates deterministic and fast. With `E2E_ARGOCD=real`, `framework.InstallArgoCD` installs Argo CD with `make argocd` and `framework.SyncHealthy` waits for it to deploy for real. Its Redis pulls the same image from Docker Hub instead of ECR Public, which rate-limits the shared IPs of CI runners. |
 
 ## Layout
 
@@ -58,7 +59,8 @@ also exports the logs of the Kind nodes, their kubelet and every container to
 | `overrides_test.go` | `overrides`: what a Product lets its Orders change. |
 | `promotion_test.go` | `promotion`: Manual promotion and rollback. |
 | `pipeline_test.go` | `promotion`: stages, soak, signed records. |
-| `clusters_test.go` | `clusters`: the Cluster of the cluster Kokumi runs in, and who may name a Secret in a Cluster. |
+| `clusters_test.go` | `clusters`: the Cluster of the cluster Kokumi runs in. |
+| `environments_test.go` | `environments`: the Environment `local`, the local example, what an Environment's Argo CD project allows, and who may name a Secret in a Cluster. |
 | `approvals_test.go` | `approvals`: required approvals through OIDC sign-in. |
 | `lifecycle_test.go` | `lifecycle`: deleting an Order. |
 | `signing_test.go` | `signing`: signatures and provenance of Preparations. |

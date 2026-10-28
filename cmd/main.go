@@ -183,8 +183,8 @@ func main() {
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "14664b9d.kokumi.dev",
-		// Argo CD's Applications are read as unstructured objects; they are
-		// read from the cache, as every other kind.
+		// Argo CD's Applications and AppProjects are read as unstructured
+		// objects; they are read from the cache, as every other kind.
 		Client: client.Options{Cache: &client.CacheOptions{Unstructured: true}},
 		Cache:  cache.Options{DefaultTransform: cacheTransform},
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
@@ -341,6 +341,14 @@ func main() {
 		LocalConfig: mgr.GetConfig(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "cluster")
+		os.Exit(1)
+	}
+	if err := (&controller.EnvironmentReconciler{
+		Client:    mgr.GetClient(),
+		Scheme:    mgr.GetScheme(),
+		Namespace: installNamespace,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "environment")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

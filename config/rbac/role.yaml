@@ -25,6 +25,14 @@ rules:
   - update
   - watch
 - apiGroups:
+  - argoproj.io
+  resources:
+  - appprojects
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - delivery.kokumi.dev
   resources:
   - approvals
@@ -38,6 +46,7 @@ rules:
   resources:
   - approvals/status
   - clusters/status
+  - environments/status
   - kitchens/status
   - orders/status
   - preparations/status
@@ -54,6 +63,7 @@ rules:
   - delivery.kokumi.dev
   resources:
   - clusters
+  - environments
   - kitchens
   - orders
   - preparations
@@ -71,6 +81,7 @@ rules:
   - delivery.kokumi.dev
   resources:
   - clusters/finalizers
+  - environments/finalizers
   - kitchens/finalizers
   - orders/finalizers
   - preparations/finalizers

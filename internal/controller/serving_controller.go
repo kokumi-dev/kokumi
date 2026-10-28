@@ -30,18 +30,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
-	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
@@ -1300,82 +1296,6 @@ func (r *ServingReconciler) signingChanges() <-chan event.GenericEvent {
 		}
 	})
 	return ch
-}
-
-// crdCheckInterval is how often an optional watch checks whether the CRD of
-// its kind is installed.
-const crdCheckInterval = 30 * time.Second
-
-// optionalWatch adds the watch of a kind from another project, such as Argo
-// CD's Application, to a controller once its CRD is installed and serves
-// the version Kokumi reads, so that the manager starts and every controller
-// runs without it. It checks at start and then every crdCheckInterval, and
-// once the watch runs it sends an event on Started, so that the reconciles
-// that found the kind missing run again. Reconciles never ask it whether the
-// kind is installed: reads of a kind without its CRD fail with a no-match
-// error, which tells them.
-type optionalWatch struct {
-	obj      client.Object
-	gvk      schema.GroupVersionKind
-	mapper   meta.RESTMapper
-	interval time.Duration
-	started  chan event.GenericEvent
-}
-
-// newOptionalWatch returns the optional watch of the kind of obj: a type of
-// the manager's scheme, or an unstructured object with its kind set.
-func newOptionalWatch(mgr ctrl.Manager, obj client.Object) (*optionalWatch, error) {
-	gvk, err := apiutil.GVKForObject(obj, mgr.GetScheme())
-	if err != nil {
-		return nil, err
-	}
-	return &optionalWatch{obj: obj, gvk: gvk, mapper: mgr.GetRESTMapper(), interval: crdCheckInterval, started: make(chan event.GenericEvent, 1)}, nil
-}
-
-// Started returns the channel that receives an event once the watch runs.
-func (w *optionalWatch) Started() <-chan event.GenericEvent {
-	return w.started
-}
-
-// Add adds the runnable to mgr that starts the watch on c, with h and
-// predicates, once the CRD is installed.
-func (w *optionalWatch) Add(mgr ctrl.Manager, c controller.Controller, h handler.EventHandler, predicates ...predicate.Predicate) error {
-	return mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
-		return w.wait(ctx, func() error {
-			return c.Watch(source.Kind[client.Object](mgr.GetCache(), w.obj, h, predicates...))
-		})
-	}))
-}
-
-// wait calls start once the CRD of the kind is installed, then sends an
-// event on Started. It returns when the watch started or ctx is done.
-func (w *optionalWatch) wait(ctx context.Context, start func() error) error {
-	logger := log.FromContext(ctx).WithValues("kind", w.gvk.Kind, "group", w.gvk.Group)
-	ticker := time.NewTicker(w.interval)
-	defer ticker.Stop()
-	for logged := false; ; {
-		_, err := w.mapper.RESTMapping(w.gvk.GroupKind(), w.gvk.Version)
-		switch {
-		case err == nil:
-			if err := start(); err != nil {
-				return fmt.Errorf("failed to watch %s: %w", w.gvk.Kind, err)
-			}
-			w.started <- event.GenericEvent{Object: w.obj}
-			logger.Info("Watching optional kind, its CRD is installed")
-			return nil
-		case !meta.IsNoMatchError(err):
-			logger.Error(err, "Failed to check whether the CRD of an optional kind is installed")
-		case !logged:
-			logger.Info("CRD of optional kind not installed, or not serving the version, checking again",
-				"version", w.gvk.Version, "interval", w.interval)
-			logged = true
-		}
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-ticker.C:
-		}
-	}
 }
 
 // SetupWithManager sets up the controller with the Manager. The Application
