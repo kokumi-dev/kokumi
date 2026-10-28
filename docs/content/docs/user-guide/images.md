@@ -1,6 +1,6 @@
 ---
 title: Container Images
-weight: 5
+weight: 7
 description: Record the images every Preparation runs by digest, pin the manifests to those digests, or vendor each image into a repository of its own below the Product's vendor location.
 ---
 
@@ -122,12 +122,12 @@ image-vendoring example vendors the podinfo chart's image:
 
 {{< apply-example name="image-vendoring" >}}
 
-| In the source manifests | Pulled from after vendoring (vendor `<registry>/shop/vendor/podinfo`) |
+| In the source manifests | Pulled from after vendoring (vendor `<registry>/shop/vendor/podinfo-vendored`) |
 |---|---|
-| `ghcr.io/stefanprodan/podinfo:6.14.1` | `<registry>/shop/vendor/podinfo/images/ghcr.io/stefanprodan/podinfo:6.14.1@sha256:…` |
-| `nginx:1.27` | `<registry>/shop/vendor/podinfo/images/docker.io/library/nginx:1.27@sha256:…` |
-| `nginx` | `<registry>/shop/vendor/podinfo/images/docker.io/library/nginx:latest@sha256:…` |
-| `ghcr.io/example/app@sha256:…` | `<registry>/shop/vendor/podinfo/images/ghcr.io/example/app@sha256:…`, untagged |
+| `ghcr.io/stefanprodan/podinfo:6.14.1` | `<registry>/shop/vendor/podinfo-vendored/images/ghcr.io/stefanprodan/podinfo:6.14.1@sha256:…` |
+| `nginx:1.27` | `<registry>/shop/vendor/podinfo-vendored/images/docker.io/library/nginx:1.27@sha256:…` |
+| `nginx` | `<registry>/shop/vendor/podinfo-vendored/images/docker.io/library/nginx:latest@sha256:…` |
+| `ghcr.io/example/app@sha256:…` | `<registry>/shop/vendor/podinfo-vendored/images/ghcr.io/example/app@sha256:…`, untagged |
 
 The cluster therefore shows which image runs, under its own name and tag; only
 the registry and the prefix change. The node pulls by digest, so the tag only
@@ -140,8 +140,9 @@ names what is pulled.
   registry with immutable tags rejects the move and fails that render.
 - A registry port in the image's name is written as `_<port>`, since a
   repository path cannot hold a colon: `registry.example.com:5000/app` is
-  vendored to `…/images/registry.example.com_5000/app`. A repository path
-  longer than 255 characters fails the render before anything is copied.
+  vendored to `…/images/registry.example.com_5000/app`. A vendored name,
+  registry included, longer than 255 characters fails the render before
+  anything is copied.
 - An image index stays an index, so all platforms are copied.
 - Upstream signatures, SBOMs and attestations come along as OCI referrers.
   Legacy cosign `sha256-<hex>.sig` tags are not copied.
@@ -201,6 +202,7 @@ references after Kokumi has seen them, so:
 - The signed SLSA provenance lists every resolved image under
   `resolvedDependencies`, with its digest, media type and vendored reference.
 - The intent records `images.policy` and `images.fieldSpecs` unless they are
-  the defaults. Changing them renders a new Preparation for every Order of the
-  Product. The pull Secret, the mirrors and the resolved digests are not part
-  of the intent.
+  the defaults, and under `Vendor` the location the images are vendored below
+  as `images.vendor`. Changing any of them renders a new Preparation for every
+  Order of the Product. The Registries, the mirrors and the resolved digests
+  are not part of the intent.

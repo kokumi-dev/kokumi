@@ -1,6 +1,6 @@
 ---
 title: Clusters
-weight: 6
+weight: 7
 description: Register the clusters Kokumi deploys to as Clusters with a kubeconfig Secret, and hand them to Argo CD.
 ---
 
@@ -17,8 +17,8 @@ A Cluster reaches its cluster in one of two ways:
 - **`InCluster`**: the cluster Kokumi runs in, with Kokumi's own connection. It
   needs no Secret.
 
-Kokumi still never applies manifests itself: it registers each Cluster an
-Environment selects with Argo CD, and Argo CD deploys there.
+Kokumi still never applies manifests itself: it registers each `Kubeconfig`
+Cluster an Environment selects with Argo CD, and Argo CD deploys there.
 
 ## Workspaces
 
@@ -33,10 +33,14 @@ Products, Orders, Environments and Clusters is a workspace:
   Orders of the teams that deploy there.
 - **Team namespaces** with clusters of their own.
 
-One physical cluster is one Cluster: Argo CD knows a cluster by its server and
-holds one credential for it. Teams that deploy to the same cluster share the
-workspace that holds it. Of two Clusters for the same server, the first to
-register it holds it and the other waits; see [Conflicts](#conflicts).
+A cluster reached with a kubeconfig is one Cluster: Argo CD knows a cluster by
+its server and holds one credential for it. Teams that deploy to the same
+remote cluster share the workspace that holds it. Of two Clusters for the same
+server, the first to register it holds it and the other waits; see
+[Conflicts](#conflicts). The cluster Kokumi runs in is the exception: Argo CD
+knows it already, so `InCluster` Clusters register nothing, and every
+workspace may keep one of its own; see
+[The cluster Kokumi runs in](#the-cluster-kokumi-runs-in).
 
 A Cluster's name is at most 63 characters: Kokumi puts it into labels of the
 Argo CD Secrets and Applications it writes for the cluster.
@@ -78,11 +82,20 @@ kubectl config --kubeconfig spoke.kubeconfig set-context spoke --cluster spoke -
 kubectl config --kubeconfig spoke.kubeconfig use-context spoke
 ```
 
-The kubeconfig must hold everything itself, as Flux requires too: the server
-and its CA, and a token or a client certificate and key, but no exec plugin,
-no auth provider and no file paths. Store it in a Secret of the workspace,
-under the key `value`, the format of Cluster API that Flux and Sveltos read as
-well. Another key goes into `spec.kubeconfig.secretRef.key`.
+The kubeconfig must hold everything itself, as Flux requires too. Kokumi reads
+the cluster and the user of its current context:
+
+- the server, and a token or a client certificate and key, inline;
+- where the server needs them, its CA (`certificate-authority-data`),
+  `tls-server-name`, `insecure-skip-tls-verify` and `proxy-url`.
+
+It refuses exec plugins, auth providers, basic authentication (`username`,
+`password`), file paths (`certificate-authority`, `client-certificate`,
+`client-key`, `tokenFile`) and extensions.
+
+Store it in a Secret of the workspace, under the key `value`, the format of
+Cluster API that Flux and Sveltos read as well. Another key goes into
+`spec.kubeconfig.secretRef.key`.
 
 ```bash
 kubectl create secret generic spoke-kubeconfig -n <namespace> --from-file=value=spoke.kubeconfig
@@ -187,8 +200,9 @@ the example `local` adds one:
 
 ## Conflicts
 
-One cluster is one Cluster: Argo CD holds one credential per server, so one
-server is one registration. Kokumi keeps it that way:
+Argo CD holds one credential per server, so one server is one registration.
+Kokumi keeps it that way for `Kubeconfig` Clusters; `InCluster` Clusters
+register nothing and conflict only inside one Environment, below:
 
 - **The first Cluster to register a server holds it.** The cluster Secret is
   named after the server, so only one Cluster, of any namespace, can create
@@ -225,8 +239,9 @@ own cluster.
   and `delivery.kokumi.dev/cluster-namespace`, and Argo CD lists the cluster as
   `kokumi-<namespace>-<name>-<hash>`. When the kubeconfig points at another
   server, the registration moves to that server's Secret.
-- **The credential is copied** from the kubeconfig: the token or client
-  certificate, with the CA. Kokumi copies it again when the kubeconfig Secret
+- **The connection is copied** from the kubeconfig: the token or client
+  certificate and key, the CA, the TLS server name, `insecure-skip-tls-verify`
+  and the proxy URL. Kokumi copies it again when the kubeconfig Secret
   changes. Whoever may read Secrets in Argo CD's namespace may read it, as
   with every cluster Argo CD knows.
 - **Kokumi writes Secrets in Argo CD's namespace** with the ClusterRole

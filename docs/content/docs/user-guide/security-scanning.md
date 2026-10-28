@@ -1,6 +1,6 @@
 ---
 title: Vulnerability Scanning
-weight: 6
+weight: 9
 description: Scan the images a Product vendors for known vulnerabilities, read the signed SBOMs and reports, and hold promotions on findings.
 ---
 
@@ -135,6 +135,8 @@ The `Scanned` condition reports the state of the scans. It is not part of
 | `Stale` | An image's last scan is older than twice the interval. |
 | `DatabaseStale` | The vulnerability database is older than the Kitchen allows. The reports are still written, but they miss newer vulnerabilities. |
 | `ScannerUnavailable` | The `kokumi-scanner` component did not answer or was busy. |
+| `SigningKeyNotReady` | The Kitchen's signing key is not loaded yet, so nothing is scanned; the condition is `Unknown`. |
+| `RegistryNotFound`, `SecretNotFound`, `SecretInvalid`, `CertificateInvalid` | A Registry of the Product, or its Secret, cannot be used, so no image is scanned. Kokumi tries again after five minutes. |
 
 A Product lists at most 512 images. When more are in use, it lists the most
 recently scanned and the message says how many are left out.
@@ -155,6 +157,8 @@ without fixable Critical findings:
 {{< /tab >}}
 {{< /tabs >}}
 
+The Order deploys to the Environment `local` of its namespace; see
+[The Environment local](../../operator-guide/environments/#the-environment-local).
 Once a cluster admin has [enabled scanning](../../operator-guide/scanning/#enabling-scanning),
 apply it:
 
@@ -166,7 +170,7 @@ apply it:
 |---|---|
 | `maxSeverity` | `Critical`, `High`, `Medium` or `Low`: findings at or above it block. |
 | `ignoreUnfixed` | Findings that no package version fixes yet do not count. |
-| `maxAgeSeconds` | How old a scan may be; by default twice the Kitchen's interval. |
+| `maxAgeSeconds` | How old a scan may be, at least 3600; by default twice the Kitchen's interval. |
 
 A Preparation passes when every one of its images has a scan that is recent
 enough, and no finding at or above `maxSeverity`. Findings of unknown

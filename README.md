@@ -51,11 +51,11 @@ By keeping these separate and immutable at the artifact layer, your engineers ca
   already exists, no re-render required.
 - **Operate in restricted networks** — the entire pipeline works offline; all
   dependencies are OCI artifacts that can be mirrored in advance.
-- **Detect drift unambiguously** — compare the deployed SHA-256 digest to the
-  desired one; any mismatch is a concrete, actionable signal.
+- **See what runs where** — every cluster runs one Preparation, pinned by its
+  SHA-256 digest, and Argo CD's self-heal keeps it there.
 
-Kokumi supports both **Helm charts** and **pre-rendered manifest bundles** as
-OCI source artifacts, and delegates all runtime deployment to **Argo CD** —
+Kokumi supports **Helm charts**, **pre-rendered manifest bundles** and
+**Kustomize** sources as OCI artifacts, and delegates all runtime deployment to **Argo CD** —
 feeding your existing GitOps workflow rather than replacing it.
 
 <p align="center">
@@ -66,7 +66,7 @@ feeding your existing GitOps workflow rather than replacing it.
 
 > **Kokumi is currently experimental — use with caution in production environments.**
 
-Read the [Installation guide](https://kokumi.dev/docs/installation) and [Getting Started guide](https://kokumi.dev/docs/getting-started) on the docs site for full setup instructions, or explore the [Architecture & Concepts](https://kokumi.dev/docs/architecture) page to understand how the reconciliation model works before diving in.
+Read the [Installation guide](https://kokumi.dev/docs/installation) and [Getting Started guide](https://kokumi.dev/docs/getting-started) on the docs site for full setup instructions, or explore the [Architecture](https://kokumi.dev/docs/architecture) page to understand how the reconciliation model works before diving in.
 
 ## Contributing
 
@@ -74,12 +74,12 @@ Contributions are highly welcome! See the [Contribution Guide](https://kokumi.de
 
 ## Core Concepts
 
-Kokumi models delivery using four Kubernetes primitives.
+Kokumi models delivery with four core resources; the [Architecture](https://kokumi.dev/docs/architecture) page introduces the rest.
 
 ### Product
 
 A Product is the complete definition of an application: the source OCI
-artifact (a Helm chart or manifest bundle), how it is rendered, and its base
+artifact (a Helm chart, manifest bundle or kustomization), how it is rendered, and its base
 values and patches. It describes _what should be built_ — not a running
 system. A Product can optionally mirror its source into another registry and
 restrict what its Orders may change.
@@ -89,8 +89,8 @@ restrict what its Orders may change.
 An Order is a variant of exactly one Product, for example one environment
 such as `podinfo-dev` or `podinfo-prod`. It only declares what differs: Helm
 values, patches, where the rendered artifact is pushed, and how it is
-promoted. Every change to an Order or its Product triggers a new render cycle
-and produces a new Preparation automatically.
+promoted, and the Environment it deploys to. Every change to what an Order
+renders produces a new Preparation automatically.
 
 ### Preparation
 
@@ -103,7 +103,7 @@ is simply a matter of pointing the Serving at a different Preparation.
 ### Serving
 
 The active deployment pointer — exactly one per Order. A Serving references
-one specific Preparation and creates or updates an Argo CD `Application` that
-syncs that artifact into the cluster. Switching versions (upgrading or rolling
+one specific Preparation and creates or updates an Argo CD `Application` per
+cluster of the Order's Environment, which syncs that artifact. Switching versions (upgrading or rolling
 back) means updating which Preparation the Serving references; the artifact
 does not change.

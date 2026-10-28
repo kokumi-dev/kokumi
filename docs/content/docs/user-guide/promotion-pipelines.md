@@ -1,6 +1,6 @@
 ---
 title: Promotion Pipelines
-weight: 7
+weight: 4
 description: Order the variants of a Product into stages that each deploy a Product change only after the stages before them ran it healthily.
 ---
 
@@ -40,7 +40,17 @@ minute.
 {{< /tabs >}}
 
 Each stage deploys to an Environment of its own, which an admin creates
-first in the namespace; see [Group stages into environments](#group-stages-into-environments):
+first in the namespace; see [Group stages into environments](#group-stages-into-environments).
+All three select the Cluster of the namespace labeled
+`delivery.kokumi.dev/in-cluster: "true"`, the cluster Kokumi runs in, and
+deploy through Argo CD's project `default`. Kokumi keeps such a Cluster in its
+own namespace only. In another namespace, an admin first adds one with the
+example `local`, and admits the namespace in the project's `sourceNamespaces`
+(see [Who may deploy where](../../operator-guide/environments/#who-may-deploy-where)):
+
+{{< apply-example name="local" >}}
+
+Then the Environments:
 
 {{< example file="promotion-pipeline/platform/environments.yaml" >}}
 
@@ -61,7 +71,7 @@ Every entry of `after` holds:
 - Like approvals, the stages are part of the intent: they are copied into
   each Preparation, and changing them renders a new Preparation. Add
   `spec.promotion.approvals` to a stage to also require reviews; see the
-  approvals example in [Approvals](../../architecture/#approvals).
+  approvals example in [Approvals](../approvals/).
 
 ## Group stages into environments
 
@@ -83,14 +93,17 @@ environments a stage must run after first. The promotion-pipeline example's
 three Environments all deploy to the cluster Kokumi runs in; prod requires
 every stage that deploys there to run after a stage of staging, for at least
 60 seconds. A stage that skips staging is held: its Serving reports
-`UpstreamDeployed=False` with reason `PipelineRequired`.
+`UpstreamDeployed=False` with reason `PipelineRequired`; see
+[Environments that come first](../../operator-guide/environments/#environments-that-come-first).
 
 The order the stages deploy in still comes from `after`. The Product's Orders
-graph draws each Environment as a column, after the Environments it runs
-after, and stacks its Orders by wave: an Order runs one wave after the
-furthest Order of its Environment it runs after. Only the edges between
-Environments are drawn; the wave number's tooltip names what an Order runs
-after inside its Environment. Environments that run after each
+graph puts each Environment one column after the furthest Environment it
+runs after. Environments that land in the same column share it, and its title
+names them all, such as `dev · qa`. Inside an Environment, an Order
+runs one wave after the furthest Order of its Environment it runs after; an
+Environment of several waves numbers its Orders by wave. Only the edges
+between Environments are drawn; the wave number's tooltip names what an Order
+runs after inside its Environment. Environments that run after each
 other in a circle, such as an `int` stage after a `prod` stage that runs
 after `int`, cannot be columns; the graph then draws the stages alone and
 says why.
@@ -117,12 +130,14 @@ Preparation records it in `spec.productRevision`:
 kubectl get preparations -n shop --field-selector spec.productRevision=sha256:5e1f…
 ```
 
-A change to the Product renders every Order again, also an Order whose own
+A change to any of these renders every Order again, also an Order whose own
 values or patches hide the change, so every stage has a Preparation of every
 revision. The source URL and version, the overrides and the Registries are
-not part of the revision. Neither are the digests images resolve to: two
-stages may run different digests of the same tag when their renders straddle
-a tag move upstream.
+not part of the revision. Neither is the Product's `targetNamespace`:
+changing it renders again only the Orders without a `targetNamespace` of
+their own, and their new Preparations keep the revision. Nor are the digests
+images resolve to: two stages may run different digests of the same tag when
+their renders straddle a tag move upstream.
 
 ## How a stage waits
 
@@ -149,7 +164,10 @@ condition:
 | `Soaking` | An upstream stage runs the revision healthily; the message says when its soak ends. |
 | `NotDeployedUpstream` | An upstream stage has not deployed the revision healthily, has nothing deployed, or does not exist yet. |
 | `InvalidPipeline` | An upstream Order is a variant of another Product. |
+| `PipelineRequired` | The Order's Environment requires a stage of another Environment that the Preparation does not run after, or not with the soak the Environment requires. |
 | `SignatureMissing`, `SignatureInvalid` | The upstream deployment record is missing from the registry, or does not verify against the Kitchen's keys. |
+| `SigningKeyNotReady` | The Kitchen's signing key is not loaded yet, so the upstream deployment record cannot be verified. |
+| `RegistryNotFound`, `SecretNotFound`, `SecretInvalid`, `CertificateInvalid` | The Registry the upstream record is read through, or its Secret, cannot be used. |
 
 While a soak runs, the Serving reconciles again when it ends. Under
 **Automatic**, the Serving waits on its newest Ready Preparation; an older one
@@ -158,7 +176,7 @@ Preparation at any time: it is queued, and the Serving deploys it once its
 upstream stages deployed its revision and its other gates pass. The UI shows
 it as queued, with the gate it waits for, and offers **Withdraw**. Promoting
 another Preparation replaces it (see
-[Queued promotions](../../architecture/#queued-promotions)).
+[Queued promotions](../promotion/#queued-promotions)).
 
 The gates run in this order: upstream stages, promotion checks, approvals,
 then the evidence in the registry. A Preparation becomes the Serving's target,
@@ -228,8 +246,9 @@ cosign verify-attestation --key kokumi.pub --insecure-ignore-tlog=true \
 - **Order overview:** the Pipeline section lists the stages of the pipeline,
   what each deploys, its revision and since when it is healthy, and what holds
   the Order's newest Preparation.
-- **Product Orders graph:** each environment is a column, titled with its
-  name, and its stages are numbered by wave.
+- **Product Orders graph:** a column per step of the pipeline, titled with
+  the environments in it, and the stages of an environment of several waves
+  numbered by wave (see [Group stages into environments](#group-stages-into-environments)).
   Stages that run the current Product revision are marked. A stage whose
   newest Preparation is not deployed says what holds it: "Waits for
   approvals", "Queued · upstream" for a promotion that waits, or "Not

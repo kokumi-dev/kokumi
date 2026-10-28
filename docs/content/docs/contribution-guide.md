@@ -38,6 +38,36 @@ applies. The e2e
 [README](https://github.com/kokumi-dev/kokumi/tree/main/test/e2e) explains how
 the specs are laid out and written.
 
+## Run your build
+
+Kokumi publishes images for releases only. To run `main` or your own change,
+build the image into the local Kind cluster and deploy it:
+
+```bash
+make kind-setup                                   # the Kind cluster "kokumi"
+make argocd                                       # Argo CD; its default project admits every namespace
+make docker-build kind-load-image IMG=kokumi:dev
+make deploy IMG=kokumi:dev
+```
+
+Then register the bundled registry with Argo CD and turn on login, as
+[Installation](../installation/#argo-cd-registry-credentials) describes.
+`make deploy` writes the image into `config/manager`, `config/server` and
+`config/scanner`; do not commit that change.
+
+## Docs
+
+The docs are a [Hugo](https://gohugo.io/) site in `docs/`. `make website-dev`
+serves it at [http://localhost:1313](http://localhost:1313), and every push
+to `main` publishes it at [kokumi.dev](https://kokumi.dev/docs/).
+
+- Each fact lives on one page; other pages link to it.
+- A scenario a user would apply is an example in `examples/`, shown with
+  `{{</* example */>}}` and `{{</* apply-example */>}}`; a snippet that
+  explains a single field may stay inline.
+- The release version comes from `kokumiVersion` in `docs/hugo.toml`; use
+  `{{</* param kokumiVersion */>}}` instead of writing it out.
+
 ## Community
 
 Feel free to ask questions, share ideas, or discuss topics in the

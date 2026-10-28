@@ -1,6 +1,6 @@
 ---
 title: Deploy to Several Clusters
-weight: 8
+weight: 5
 description: Deploy an Order to every cluster of an Environment, into its target namespace, through an Argo CD Application per cluster.
 ---
 
@@ -11,8 +11,10 @@ Application per cluster.
 
 The multi-cluster example deploys podinfo to the Environment `edge` of the
 workspace `platform`. An admin registers the clusters and creates the
-Environment in the namespace first; see
-[Clusters](../../operator-guide/clusters/):
+Environment in the namespace first, and admits the namespace in the
+`sourceNamespaces` of the Environment's Argo CD project; see
+[Clusters](../../operator-guide/clusters/) and
+[Who may deploy where](../../operator-guide/environments/#who-may-deploy-where):
 
 {{< tabs >}}
 {{< tab name="order.yaml" >}}
@@ -32,8 +34,9 @@ Apply it to the same namespace:
 - **`spec.environmentRef.name`** names an Environment of the Order's
   namespace. It is required, set when the Order is created, and cannot be
   changed, so that no Order reaches an Environment without passing what it
-  requires; to deploy to another Environment, create another Order. Kokumi
-  keeps the Environment `local`, the cluster it runs in, in its own namespace.
+  requires; to deploy to another Environment, create another Order. For the
+  cluster Kokumi runs in, see
+  [The Environment local](../../operator-guide/environments/#the-environment-local).
 - The Order deploys to **every cluster** of the Environment. Clusters of
   another region or kind are an Environment of their own.
 - The Environment decides where a Preparation runs, not what it is: it is not
@@ -62,16 +65,18 @@ The target namespace is part of what is rendered: Helm renders into it, and
 resources without a namespace are deployed there. A Preparation records it and
 deploys there wherever it is promoted. Changing it renders a new Preparation,
 and deploying that moves the workload: Argo CD deletes it in the old namespace.
-The Environment's Argo CD project decides which namespaces it may deploy into:
-Argo CD refuses a destination the project does not permit, and the Serving
-holds that cluster with reason `Rejected` and Argo CD's message.
+Argo CD creates the target namespace where it is missing. The Environment's
+Argo CD project decides which target namespaces it permits; see
+[Who may deploy where](../../operator-guide/environments/#who-may-deploy-where).
 
 ## What runs where
 
 The Serving counts the clusters it deploys to by the state of their
 deployment, in `status.clusters`: `selected`, `healthy`, `progressing`,
-`degraded` and `held`. It lists the clusters that do not run the deployed
-Preparation healthily in `status.targets`, with what Argo CD reports on each:
+`degraded` and `held`; `held` counts every cluster Kokumi does not deploy to,
+those whose Cluster is not Ready among them. It lists the clusters that do
+not run the deployed Preparation healthily in `status.targets`, with what
+Argo CD reports on each:
 held clusters first, then degraded, then progressing ones, at most 64. A
 healthy cluster is only counted, so that the status stays small however many
 clusters there are; its Argo CD Application says the rest:
@@ -94,14 +99,18 @@ kubectl -n argocd get applications -l delivery.kokumi.dev/serving=podinfo-edge,d
   Ready again. It does not hold the Serving back: the Serving is healthy
   without it, soaks, and the stages after it proceed. `Ready` names it, as in
   `Deployed Preparation … to a, b; not ready: c`. When no Cluster is Ready,
-  the deployment fails.
+  the deployment fails with `DeploymentFailed`, even while the Environment
+  reports `Ready`.
 - **A degraded cluster** fails the deployment, as on one cluster.
 - **A cluster that joins** the Environment gets an Application right away. **A
-  cluster that leaves** loses its Application, and what runs there keeps
-  running; the Serving records an Event naming it.
-- **Any other cluster Kokumi cannot deploy to** is held, counted in `held`,
-  listed with the reason, and fails the deployment: `Rejected` when Argo CD
-  refuses the Application, `ClusterConflict` when another Cluster of the
+  cluster that leaves** loses its Application, and the Serving records an
+  Event naming it. What runs there keeps running: Kokumi's Applications carry
+  no `resources-finalizer.argocd.argoproj.io`, so Argo CD leaves their
+  resources in place.
+- **Any other cluster Kokumi cannot deploy to** is held as well, listed with
+  the reason, and fails the deployment: `Rejected` when Argo CD refuses the
+  Application, such as a destination the Environment's project does not
+  permit, with Argo CD's message, `ClusterConflict` when another Cluster of the
   Environment connects to the same server (only the first by name deploys),
   `OptInRequired` for an Application Kokumi may not change, or
   `RegistryUnreachable` below.

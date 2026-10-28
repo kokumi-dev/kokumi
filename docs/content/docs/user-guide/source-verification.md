@@ -1,6 +1,6 @@
 ---
 title: Source Verification
-weight: 4
+weight: 8
 description: Require the source of a Product to be signed by its publisher, by key or keyless, before any Order renders it.
 ---
 
@@ -11,7 +11,8 @@ that does not verify.
 
 The settings have the shape of Flux's `OCIRepository.spec.verify`. Kokumi
 verifies with the cosign library, which reads both Sigstore bundles and the
-legacy `sha256-<hex>.sig` signatures.
+legacy `sha256-<hex>.sig` signatures. Legacy signatures are verified only
+against `verify`.
 
 ## By public key
 
@@ -63,7 +64,9 @@ cluster, set
 
 A Product without `verify` still verifies when its source carries a signature
 by a key the Kitchen trusts: a release of this Kokumi installation, or of
-another one whose key a cluster admin added to the trusted keys. Your platform
+another one whose key a cluster admin added to the trusted keys. Only a
+Sigstore bundle counts here; a legacy `sha256-<hex>.sig` signature is not
+checked without `verify`. Your platform
 team may require every source to verify; then a Product without a verifying
 signature is not ready.
 
@@ -84,16 +87,19 @@ or the keyless identity, such as the GitHub repository that released it. See
 
 ```bash
 kubectl -n shop get product podinfo
-# NAME      READY   REASON     SOURCE                                        VERSION   VERIFIED
-# podinfo   True    Resolved   oci://ghcr.io/stefanprodan/charts/podinfo     6.10.2    True
+# NAME      READY   REASON     SOURCE                                 VERSION   VERIFIED
+# podinfo   True    Resolved   oci://ghcr.io/my-org/charts/podinfo    6.10.2    True
 kubectl -n shop get product podinfo -o jsonpath='{.status.source.verified}'
 ```
 
 | `SourceVerified` reason | Meaning |
 |---|---|
 | `Succeeded` | The signature verified; `status.source.verified` names the key ID or the keyless issuer and subject. |
-| `VerificationError` | The source carries no signature that `verify` accepts, or the keys or trusted root could not be read. |
+| `VerificationError` | The source carries no signature that `verify` accepts, its signatures could not be listed, or the keys or trusted root could not be read. |
 | `VerificationRequired` | The Kitchen requires verification, and the source neither sets `verify` nor carries a signature by a trusted key. |
+
+A Product without `verify` whose source carries no signature by a trusted key
+has no `SourceVerified` condition, unless the Kitchen requires verification.
 
 ## Every signature, not only the source's
 
@@ -118,7 +124,7 @@ status:
 | `Verified` | Signed by a key or keyless identity `verify` accepts; `signer` names it. |
 | `UntrustedSigner` | Signed by another key or identity. The signature may be valid; `message` names the signer when it can. |
 | `Invalid` | The signature does not verify, for example because it signs another digest. |
-| `Unsupported` | A format Kokumi does not verify, such as a Notary signature or a cosign attestation stored under a tag. |
+| `Unsupported` | A format Kokumi does not verify, such as a Notary signature or a cosign attestation stored under a tag, and a legacy `sha256-<hex>.sig` signature when the Product sets no `verify`. |
 
 Only a verified signature on the source itself makes it ready. Verdicts on
 attachments are information; they never block the Product.
@@ -132,9 +138,11 @@ key-based signature stays valid as long as its key is trusted, and a keyless
 signature is checked at the time it was made, which its transparency-log
 entry proves.
 
-A source that does not verify is not published, its Product is not ready, and
-its Orders wait with reason `ProductNotReady`. Kokumi verifies it again every
-few minutes, so a source that gets signed later is picked up. When vendoring
+Orders render nothing from a source that does not verify: its Product is not
+ready, and its Orders wait with reason `ProductNotReady`. A source published
+earlier stays in `status.source`, no longer recorded as verified. Kokumi
+verifies it again every few minutes, so a source that gets signed later is
+picked up. When vendoring
 is configured, only a verified source is copied, together with the signatures
 and attestations attached to it as OCI referrers.
 

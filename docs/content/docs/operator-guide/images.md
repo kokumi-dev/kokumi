@@ -1,6 +1,6 @@
 ---
 title: Container Images
-weight: 4
+weight: 5
 description: Mirrors for image resolution, letting nodes pull vendored images, and sizing the registry.
 ---
 
@@ -123,7 +123,10 @@ Vendoring copies every image of every Preparation, with all platforms. Within
 one registry, identical blobs are stored once, so a new Preparation of the
 same images adds only manifests. Still, the registry's `PersistentVolumeClaim`
 grows with every new image version. Size it for the images of all retained
-Preparations; Kokumi does not garbage-collect the registry.
+Preparations; Kokumi does not garbage-collect the registry. The bundled
+registry's claim `kokumi-registry-pvc` requests 1 GiB by default. Raise its
+storage request before you vendor larger images or mirror the
+[vulnerability database](../scanning/#air-gapped-clusters) into it.
 
 Do not run the registry's garbage collection with `--delete-untagged` on
 repositories Kokumi writes to. A tag points at the newest artifact or image
@@ -143,6 +146,11 @@ reports `CredentialsRequired`. The bundled registry has no authentication and
 is reachable on NodePort 30050 of every node, so a Product that vendors
 private images needs a vendor location on a registry with access control and a
 Registry for it.
+
+The bundled registry also accepts pushes on that port from anyone who reaches
+a node, so anyone on the node network can move its tags. Keep what Kokumi
+reads by tag, such as Product sources and a mirrored vulnerability database,
+on a registry with access control.
 
 ## Events
 

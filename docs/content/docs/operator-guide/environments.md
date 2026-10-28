@@ -1,6 +1,6 @@
 ---
 title: Environments
-weight: 7
+weight: 8
 description: Group the Clusters of a namespace into Environments, decide through which Argo CD project Orders deploy there, and which Environments come first.
 ---
 
@@ -30,14 +30,14 @@ labels; `{}` selects every one. A Cluster joins or leaves an Environment when
 its labels change:
 
 ```bash
-kubectl label cluster spoke -n <namespace> fleet=edge
-kubectl label cluster spoke -n <namespace> fleet-
+kubectl label clusters.delivery.kokumi.dev spoke -n <namespace> fleet=edge
+kubectl label clusters.delivery.kokumi.dev spoke -n <namespace> fleet-
 ```
 
-A Cluster that leaves gets no new deployments, and the Argo CD Application of
-each Order there is deleted. What runs there keeps running: Kokumi's
-Applications carry no `resources-finalizer.argocd.argoproj.io`, so Argo CD
-leaves their resources in place. Remove them by hand when you mean to.
+A Cluster that leaves gets no new deployments, and Kokumi leaves what runs
+there in place; see
+[What runs where](../../user-guide/environments/#what-runs-where). Remove it
+by hand when you mean to.
 
 The status counts the Clusters it selects, and those of them that are ready,
 in `status.clusters`; its `Ready` message names the first ten. Each Cluster
@@ -50,13 +50,16 @@ kubectl get environments.delivery.kokumi.dev -n <namespace> -o wide
 kubectl get clusters.delivery.kokumi.dev -n <namespace> -l fleet=edge
 ```
 
-The short name of Environments is `env`. One Cluster does not make the
-Environment unready: its `Ready` condition is False only when no Order could
-deploy there at all.
+The short name of Environments is `env`. Its `Ready` condition says whether
+the Environment is set up so that Orders may deploy there: it selects a
+Cluster, and its engine admits it. It does not follow the readiness of its
+Clusters: an Environment none of whose Clusters is Ready is still `Ready`,
+and only `READY CLUSTERS` shows it. Its Orders then deploy nowhere; see
+[What runs where](../../user-guide/environments/#what-runs-where).
 
 | Reason | Meaning |
 |---|---|
-| `Ready` | Orders deploy to its Clusters. |
+| `Ready` | It selects a Cluster, and its engine admits it. |
 | `NoClusters` | It selects no Cluster of its namespace. |
 | `InvalidSelector` | Its `clusterSelector` is not a valid label selector. |
 | `ProjectNotFound` | Its Argo CD AppProject does not exist. |
@@ -81,9 +84,13 @@ Argo CD's own model for teams:
   control-plane namespace: an Environment in Kokumi's own namespace may use
   any project, one in another namespace only a project that admits its
   namespace; otherwise it and the Servings of its Orders report
-  `ProjectNotPermitted`, and no Application is written. Argo CD's `default`
-  project admits no namespace. Set the list where a project has none, and add
-  to it where it has one:
+  `ProjectNotPermitted`, and no Application is written. Kokumi matches each
+  entry as a glob, with Go's `path.Match`: `*`, `?` and `[…]`, such as
+  `team-*`. It reads no entry as a regular expression (`/…/`) or a negation
+  (`!…`): such an entry admits no namespace for Kokumi, whatever Argo CD makes
+  of it, so list the namespaces as globs. Argo CD's `default` project admits
+  no namespace. Set the list where a project has none, and add to it where it
+  has one:
 
   ```bash
   kubectl -n argocd patch appproject default --type=merge \
@@ -94,26 +101,24 @@ Argo CD's own model for teams:
 
 - **`spec.destinations`** decides which servers and namespaces an Order may
   deploy into. Argo CD checks it: it refuses an Application whose destination
-  the project does not permit, and the Serving holds that cluster with reason
-  `Rejected` and Argo CD's message.
+  the project does not permit; see
+  [What runs where](../../user-guide/environments/#what-runs-where) for how
+  the Serving reports it.
 
 ## The engine
 
 `deployer` names the engine that deploys to the Environment's Clusters.
 Today it is Argo CD: every Order deploys to each Cluster through an Argo CD
-Application of its own, in the project `deployer.argoCD.project`. Every Order
-deploys into its target namespace on every cluster, the `targetNamespace` of
-the Order or of its Product, or the Order's namespace; Argo CD creates it where
-it is missing.
+Application of its own, in the project `deployer.argoCD.project`, into the
+Order's target namespace; see
+[The namespace on the clusters](../../user-guide/environments/#the-namespace-on-the-clusters).
 
 Whenever a Serving deploys, it asks the engine whether the Order may deploy
 there. For Argo CD, its CRDs must be installed, and the AppProject must exist
 and, for an Environment outside Kokumi's namespace, admit the namespace in
 `sourceNamespaces`. A change of the Environment or of the AppProject counts
-at once. When an Order may not deploy at all, its Serving says why on its
-`Ready` condition, with `EnvironmentNotFound` or one of the reasons of the
-Environment above, and deletes its Applications. What runs on the clusters
-keeps running.
+at once. For what the Serving reports when an Order may not deploy at all,
+see [Where an Order deploys](../../user-guide/environments/#where-an-order-deploys).
 
 ## Environments that come first
 
