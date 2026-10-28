@@ -11,8 +11,9 @@ resources:
 - leader_election_role_binding.yaml
 - secret_creator_role.yaml
 - pod_reader_role.yaml
-# Bound per tenant namespace by platform admins; see the file.
+# Bound per tenant namespace by platform admins; see the files.
 - registry_credentials_role.yaml
+- cluster_credentials_role.yaml
 # The following RBAC configurations are used to protect
 # the metrics endpoint with authn/authz. These configurations
 # ensure that only authorized users and service accounts
@@ -26,6 +27,9 @@ resources:
 # default, aiding admins in cluster management. Those roles are
 # not used by the kokumi itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
+- cluster_admin_role.yaml
+- cluster_editor_role.yaml
+- cluster_viewer_role.yaml
 - repository_admin_role.yaml
 - repository_editor_role.yaml
 - repository_viewer_role.yaml

@@ -11,6 +11,7 @@ resources:
 - bases/delivery.kokumi.dev_products.yaml
 - bases/delivery.kokumi.dev_registries.yaml
 - bases/delivery.kokumi.dev_repositories.yaml
+- bases/delivery.kokumi.dev_clusters.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

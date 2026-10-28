@@ -24,10 +24,6 @@ import (
 // Namespace holds the Applications of all Servings.
 const Namespace = "argocd"
 
-// InClusterServer is the API server Applications deploy to: the cluster
-// Kokumi runs in.
-const InClusterServer = "https://kubernetes.default.svc"
-
 // DefaultProject is Argo CD's own AppProject, which Applications deploy
 // through.
 const DefaultProject = "default"

@@ -6,6 +6,8 @@ resources:
 - signing_key_integrity_policy_binding.yaml
 - registry_secret_access_policy.yaml
 - registry_secret_access_policy_binding.yaml
+- cluster_secret_access_policy.yaml
+- cluster_secret_access_policy_binding.yaml
 
 configurations:
 - kustomizeconfig.yaml

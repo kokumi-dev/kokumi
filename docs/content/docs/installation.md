@@ -32,13 +32,17 @@ kubectl apply -f \
 
 This installs:
 - The Kokumi CRDs (`Product`, `Recipe`, `Order`, `Preparation`, `Serving`,
-  `Approval`, `Registry`, `Repository`, `Kitchen`)
+  `Approval`, `Registry`, `Repository`, `Kitchen`, `Cluster`)
+- The namespace `kokumi-signing`, for the signing key
 - The controller manager in the `kokumi` namespace, which creates the
-  `Kitchen` settings and the `Registry` of the bundled registry on start
+  `Kitchen` settings, the `Registry` of the bundled registry, and the
+  `Cluster` `in-cluster` in its namespace on start
 - The API server and web UI in the `kokumi` namespace
 - The `kokumi-scanner` component in the `kokumi` namespace, which idles until
   the Kitchen enables [vulnerability scanning](../operator-guide/scanning/)
 - RBAC roles and bindings
+- Admission policies, named `kokumi-*`, that guard Approvals, statuses, the
+  signing key, and the Secrets that Registries and Clusters name
 
 `kubectl get kokumi -A` lists every Kokumi object: all its kinds are in the
 category `kokumi`.
@@ -148,9 +152,19 @@ kubectl apply -f \
 
 ## Uninstall
 
+Delete Kokumi's CustomResourceDefinitions first, while Kokumi runs: that
+deletes every Kokumi object, and Kokumi releases each of them. Servings remove
+their Argo CD Applications, and what runs on the cluster keeps running. Then
+delete the rest:
+
 <!-- x-release-please-start-version -->
 ```bash
-kubectl delete -f \
+kubectl get crd -o name | grep '\.delivery\.kokumi\.dev$' | xargs kubectl delete
+kubectl delete --ignore-not-found -f \
     https://github.com/kokumi-dev/kokumi/releases/download/0.17.0/install.yaml
 ```
 <!-- x-release-please-end -->
+
+Deleting `install.yaml` alone stops Kokumi together with its objects, and the
+objects whose finalizers Kokumi could not release keep the `kokumi` namespace
+in `Terminating`.
