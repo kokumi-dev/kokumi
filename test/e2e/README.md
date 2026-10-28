@@ -58,6 +58,7 @@ also exports the logs of the Kind nodes, their kubelet and every container to
 | `overrides_test.go` | `overrides`: what a Product lets its Orders change. |
 | `promotion_test.go` | `promotion`: Manual promotion and rollback. |
 | `pipeline_test.go` | `promotion`: stages, soak, signed records. |
+| `clusters_test.go` | `clusters`: the Cluster of the cluster Kokumi runs in, and who may name a Secret in a Cluster. |
 | `approvals_test.go` | `approvals`: required approvals through OIDC sign-in. |
 | `lifecycle_test.go` | `lifecycle`: deleting an Order. |
 | `signing_test.go` | `signing`: signatures and provenance of Preparations. |

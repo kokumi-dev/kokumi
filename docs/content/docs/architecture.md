@@ -833,10 +833,11 @@ each Preparation once two members of `release-approvers` approved it:
   verified login session. The shared built-in admin account cannot vote.
 - Whether a user may vote at all is plain Kubernetes RBAC: the custom verb
   `approve` on `preparations`, checked for the user's mapped ServiceAccount.
-- The `approval-integrity` ValidatingAdmissionPolicy accepts new Approvals
-  only from the `kokumi-server` ServiceAccount, rejects every update, and
-  rejects deletes except by the namespace controller. The `status-integrity`
-  policy lets only the kokumi controller write the status of every Kokumi
+- The `kokumi-approval-integrity` ValidatingAdmissionPolicy accepts new
+  Approvals only from the `kokumi-server` ServiceAccount, rejects every
+  update, and rejects deletes except by the namespace controller. The
+  `kokumi-status-integrity` policy lets only the kokumi controller write the
+  status of every Kokumi
   resource: the Serving's target Preparation triggers sealing, and the
   Product's status decides which source its Orders render.
 - Approvals are kept even when their Preparation or Order is deleted, so the

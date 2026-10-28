@@ -37,6 +37,7 @@ rules:
   - delivery.kokumi.dev
   resources:
   - approvals/status
+  - clusters/status
   - kitchens/status
   - orders/status
   - preparations/status
@@ -52,6 +53,7 @@ rules:
 - apiGroups:
   - delivery.kokumi.dev
   resources:
+  - clusters
   - kitchens
   - orders
   - preparations
@@ -68,6 +70,7 @@ rules:
 - apiGroups:
   - delivery.kokumi.dev
   resources:
+  - clusters/finalizers
   - kitchens/finalizers
   - orders/finalizers
   - preparations/finalizers

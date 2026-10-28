@@ -249,21 +249,24 @@ const (
 	// ReasonRegistryConnected reports on a Registry that the registry
 	// accepted its credentials and TLS settings.
 	ReasonRegistryConnected = "Connected"
-	// ReasonSecretNotFound reports on a Registry that a Secret it names
-	// does not exist.
+	// ReasonSecretNotFound reports on a Registry or a Cluster that a Secret
+	// it names does not exist.
 	ReasonSecretNotFound = "SecretNotFound"
 	// ReasonSecretInvalid reports on a Registry that its credentials Secret
 	// is not a kubernetes.io/dockerconfigjson Secret with an entry for its
-	// url.
+	// url, and on a Cluster that its Secret holds no self-contained
+	// kubeconfig under its key.
 	ReasonSecretInvalid = "SecretInvalid"
 	// ReasonCertificateInvalid reports on a Registry that its TLS Secret
 	// holds no usable certificate.
 	ReasonCertificateInvalid = "CertificateInvalid"
 	// ReasonUnauthorized reports on a Registry that the registry rejected
-	// its credentials, or that it requires credentials the Registry lacks.
+	// its credentials, or that it requires credentials the Registry lacks,
+	// and on a Cluster that its API server rejected the credential.
 	ReasonUnauthorized = "Unauthorized"
-	// ReasonUnreachable reports on a Registry that the registry could not
-	// be reached, for example because of DNS, TLS or a timeout.
+	// ReasonUnreachable reports on a Registry or a Cluster that the
+	// registry or API server could not be reached, for example because of
+	// DNS, TLS or a timeout, or that the API server is not ready.
 	ReasonUnreachable = "Unreachable"
 	// ReasonCredentialsRequired reports on a Product or an Order that
 	// content read with credentials would be copied to a location Kokumi

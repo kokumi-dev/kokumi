@@ -298,7 +298,7 @@ func (r *ServingReconciler) deploy(ctx context.Context, serving *deliveryv1alpha
 		return 0, fmt.Errorf("failed to get Preparation %q: %w", deployed.Preparation, err)
 	}
 	target := argocd.Target{
-		Cluster: cluster.InCluster, Server: argocd.InClusterServer,
+		Cluster: cluster.InCluster, Server: cluster.InClusterServer,
 		Namespace: preparation.Spec.TargetNamespace, Project: argocd.DefaultProject,
 	}
 	app, err := r.applyApplication(ctx, serving, deployed, target)
@@ -774,7 +774,7 @@ func (r *ServingReconciler) recordDeployments(ctx context.Context, serving *deli
 			}
 			return fmt.Errorf("failed to get Preparation %q: %w", e.Preparation, err)
 		}
-		targets := []promotion.Target{{Server: argocd.InClusterServer, Namespace: preparation.Spec.TargetNamespace}}
+		targets := []promotion.Target{{Server: cluster.InClusterServer, Namespace: preparation.Spec.TargetNamespace}}
 		registryClient, err := r.connect(ctx, serving.Namespace, serving.Spec.OrderName, registryRef(e.Registry), e.OCIRef)
 		if err != nil {
 			return err

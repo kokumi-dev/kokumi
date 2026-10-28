@@ -1,7 +1,7 @@
 // Package resources builds the objects the Kokumi controllers create: the
 // Preparation and Serving of an Order, the Secrets of the Kitchen, and the
-// default Kitchen and Registry. It only builds them; the controllers set
-// owner references and write them.
+// default Kitchen, Registry and Cluster. It only builds them; the
+// controllers set owner references and write them.
 package resources
 
 import (
@@ -10,6 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/cluster"
 	"github.com/kokumi-dev/kokumi/internal/images"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/signing"
@@ -134,6 +135,21 @@ func BundledRegistry(namespace, host string) *deliveryv1alpha1.Registry {
 		Spec: deliveryv1alpha1.RegistrySpec{
 			URL:    "oci://" + host,
 			Scheme: deliveryv1alpha1.RegistrySchemeHTTP,
+		},
+	}
+}
+
+// InClusterCluster returns the Cluster of the cluster Kokumi runs in, which
+// Kokumi keeps in its own namespace. It is created with the label
+// LabelInCluster; Kokumi does not set the label again once it exists.
+func InClusterCluster(namespace string) *deliveryv1alpha1.Cluster {
+	return &deliveryv1alpha1.Cluster{
+		Name:      cluster.InCluster,
+		Namespace: namespace,
+		Labels:    map[string]string{deliveryv1alpha1.LabelInCluster: "true"},
+		Spec: deliveryv1alpha1.ClusterSpec{
+			Description: "The cluster Kokumi runs in",
+			Connection:  deliveryv1alpha1.ClusterConnectionInCluster,
 		},
 	}
 }

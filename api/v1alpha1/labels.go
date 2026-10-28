@@ -38,6 +38,12 @@ const (
 	// int or prod. Users set it; the UI draws an environment as one column of
 	// the pipeline. It is metadata, not intent: changing it renders nothing.
 	LabelEnvironment = "delivery.kokumi.dev/environment"
+
+	// LabelInCluster marks a Cluster that connects in-cluster, so that it
+	// can be selected by label. Kokumi sets it on the Cluster in-cluster it
+	// keeps in its own namespace when it creates it; other Clusters carry it
+	// when their authors set it.
+	LabelInCluster = "delivery.kokumi.dev/in-cluster"
 )
 
 // Annotation keys applied to kokumi-managed resources.
@@ -69,13 +75,17 @@ const (
 	// FieldProductRevision selects Preparations by spec.productRevision: the
 	// Preparations every Order of a Product rendered from one Product change.
 	FieldProductRevision = "spec.productRevision"
+
+	// FieldKubeconfigSecretName indexes Clusters by the Secret that holds
+	// their kubeconfig.
+	FieldKubeconfigSecretName = "spec.kubeconfig.secretRef.name"
 )
 
 // Finalizer names registered on kokumi-managed resources.
 const (
-	// Finalizer is added to Orders, Preparations, Recipes and Servings. The
-	// Serving controller deletes the Serving's Argo CD Application, which
-	// lives in another namespace, before it removes it.
+	// Finalizer is added to Orders, Preparations, Recipes, Servings and
+	// Clusters. The Serving controller deletes the Serving's Argo CD
+	// Application, which lives in another namespace, before it removes it.
 	Finalizer = "delivery.kokumi.dev/finalizer"
 
 	// FinalizerProductProtection keeps a Product from being deleted while

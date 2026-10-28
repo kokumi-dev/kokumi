@@ -26,6 +26,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -35,6 +36,7 @@ import (
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
+	"github.com/kokumi-dev/kokumi/internal/cluster"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/registry"
 	"github.com/kokumi-dev/kokumi/internal/signing"
@@ -114,6 +116,10 @@ var _ = BeforeSuite(func() {
 
 	testSigner = signingtest.NewSigner(GinkgoT())
 	testSigning = signingtest.NewProvider(GinkgoT(), testSigner)
+
+	for _, name := range []string{testWorkspace, testKokumiNamespace} {
+		Expect(k8sClient.Create(ctx, &corev1.Namespace{Name: name})).To(Succeed())
+	}
 })
 
 var _ = AfterSuite(func() {
@@ -123,6 +129,23 @@ var _ = AfterSuite(func() {
 		return testEnv.Stop()
 	}, time.Minute, time.Second).Should(Succeed())
 })
+
+// testWorkspace is the namespace of the Clusters of the tests of their
+// controller.
+const testWorkspace = "workspace"
+
+// testKokumiNamespace is Kokumi's own namespace in the tests, where it keeps
+// the Cluster in-cluster.
+const testKokumiNamespace = "kokumi-system"
+
+// fakeProber probes clusters without a network: every cluster has health.
+type fakeProber struct {
+	health cluster.Health
+}
+
+func (f *fakeProber) Probe(context.Context, *rest.Config) cluster.Health {
+	return f.health
+}
 
 // fakeRegistries returns a Resolver that reads Registries with k8sClient
 // and serves every connection with fake.

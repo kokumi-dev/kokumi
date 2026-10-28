@@ -134,15 +134,16 @@ The installation ships three identity ServiceAccounts in the install namespace:
 
 | ServiceAccount | Default binding | Default identity mapping | Purpose |
 | -------------- | ---------------- | ------------------------ | ------- |
-| `kokumi-admin` | `kokumi-server-role` (full CRUD incl. `kitchens`) | `kokumi.dev/identity-groups: "kokumi-admin"` | Full access; also used by the built-in admin login |
-| `kokumi-editor` | `kokumi-server-editor-role` (CRUD, no `kitchens`) | `kokumi.dev/identity-groups: "kokumi-editor"` | Editors |
+| `kokumi-admin` | `kokumi-server-role` (full CRUD incl. `kitchens` and `clusters`) | `kokumi.dev/identity-groups: "kokumi-admin"` | Full access; also used by the built-in admin login |
+| `kokumi-editor` | `kokumi-server-editor-role` (CRUD, no `kitchens`; reads `clusters`) | `kokumi.dev/identity-groups: "kokumi-editor"` | Editors |
 | `kokumi-viewer` | `kokumi-server-viewer-role` (read-only) | `kokumi.dev/identity-groups: "kokumi-viewer"` | Read-only users |
 
 None of the built-in roles grants access to Secrets. They are bound
 cluster-wide, which would include the `kokumi-signing` namespace, and the key
 that signs every Kokumi artifact is a Secret there: an identity that could
 read or replace it could forge trusted signatures. See
-[Registry credentials](#registry-credentials) for granting Secret access per
+[Registry credentials](#registry-credentials) and
+[Cluster credentials](#cluster-credentials) for granting Secret access per
 namespace, and [Signing](../signing/) for how the key is protected.
 
 The built-in admin login always acts as `kokumi-admin`, regardless of the
@@ -166,9 +167,9 @@ its namespace that lists it, and the controller reads them with its own
 identity. Who may name a Secret in a Registry therefore decides who may use
 it. Three things guard that:
 
-- **The admission policy `registry-secret-access`** admits a Registry that
-  names a Secret (`secretRef` or `certSecretRef`) only when its author may
-  `get` that Secret. An update that keeps the `url`, the `scheme` and both
+- **The admission policy `kokumi-registry-secret-access`** admits a Registry
+  that names a Secret (`secretRef` or `certSecretRef`) only when its author
+  may `get` that Secret. An update that keeps the `url`, the `scheme` and both
   references needs no Secret access; changing the `url` or switching to
   `HTTP` does, because either sends the credentials somewhere else.
 - **The UI reads through a Registry with the user's identity.** Browsing a
@@ -213,6 +214,30 @@ may use credentials in the selected namespace, from the namespaced capability
 Everyone who may edit Products or Orders in a namespace can use the
 credentials of its Registries, as with `imagePullSecrets`. Keep credentials
 of different trust levels in different namespaces.
+
+## Cluster credentials
+
+A [Cluster](../clusters/) names the Secret that holds its kubeconfig, and the
+controller reads it with its own identity to connect to the cluster. The
+admission policy `kokumi-cluster-secret-access` therefore admits a Cluster that
+names a kubeconfig Secret only when its author may `get` that Secret. An update
+that keeps the Secret's name and key needs no Secret access; changing either
+does, because another key could hold another credential.
+
+The built-in admin role creates Clusters in every namespace but grants no
+Secret access. Bind the `kokumi-cluster-credentials` ClusterRole (`get`,
+`create` and `patch` on `secrets`) with a RoleBinding in each namespace that
+holds Clusters with a kubeconfig:
+
+```bash
+kubectl -n platform create rolebinding kokumi-cluster-credentials \
+  --clusterrole=kokumi-cluster-credentials \
+  --serviceaccount=kokumi:kokumi-admin
+```
+
+Never bind it with a ClusterRoleBinding, in the `kokumi-signing` namespace, or
+in the install namespace, for the reasons above. The Cluster `in-cluster` that
+Kokumi keeps in the install namespace needs no Secret.
 
 ## UI capabilities
 

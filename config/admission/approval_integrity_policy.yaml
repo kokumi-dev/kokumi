@@ -36,8 +36,8 @@ spec:
 # records the approval gate state of Approvals and Preparations, the
 # promotion target of Servings (which triggers sealing), the source every
 # Order of a Product renders and its verification, the public signing key the
-# Kitchen publishes, and the readiness of Orders, Registries and
-# Repositories.
+# Kitchen publishes, and the readiness of Orders, Registries, Repositories
+# and Clusters.
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -58,6 +58,7 @@ spec:
       - registries/status
       - repositories/status
       - kitchens/status
+      - clusters/status
   validations:
   - expression: "request.userInfo.username == 'system:serviceaccount:kokumi:kokumi-controller-manager'"
     message: "Status of kokumi resources is owned by the kokumi controller"

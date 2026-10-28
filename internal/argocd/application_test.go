@@ -76,7 +76,7 @@ const testOCIRef = "oci://registry.example/order/app@" + testDigest
 
 // testTarget is the cluster Kokumi runs in, with a target namespace of its
 // own.
-var testTarget = Target{Cluster: cluster.InCluster, Server: InClusterServer, Namespace: "webshop", Project: DefaultProject}
+var testTarget = Target{Cluster: cluster.InCluster, Server: cluster.InClusterServer, Namespace: "webshop", Project: DefaultProject}
 
 func TestApplication(t *testing.T) {
 	app, err := Application(testServing(), testOCIRef, testTarget)
@@ -96,7 +96,7 @@ func TestApplication(t *testing.T) {
 	assert.Equal(t, "oci://registry.example/order/app", field("spec", "source", "repoURL"))
 	assert.Equal(t, testDigest, field("spec", "source", "targetRevision"))
 	assert.Equal(t, DefaultProject, field("spec", "project"))
-	assert.Equal(t, InClusterServer, field("spec", "destination", "server"))
+	assert.Equal(t, cluster.InClusterServer, field("spec", "destination", "server"))
 	assert.Equal(t, "webshop", field("spec", "destination", "namespace"), "the Preparation runs in its target namespace")
 
 	_, err = Application(testServing(), "", testTarget)

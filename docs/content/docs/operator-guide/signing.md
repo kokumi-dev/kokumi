@@ -94,7 +94,7 @@ are fixed, so that RBAC and admission can protect it.
 
 Only the controller manager and cluster admins can read or write the key:
 
-- The `signing-key-integrity` ValidatingAdmissionPolicy rejects every
+- The `kokumi-signing-key-integrity` ValidatingAdmissionPolicy rejects every
   create, update and delete of the Secret except by the
   `kokumi-controller-manager` ServiceAccount and cluster admins. A cluster
   admin is whoever may use the custom verb `manage-signing-key` on `kitchens`:
@@ -123,7 +123,7 @@ Only the controller manager and cluster admins can read or write the key:
   and Registry Secrets only as the user. See
   [Authorization](../authorization/#registry-credentials) for granting
   Registry credentials without exposing the key.
-- The `status-integrity` policy lets only the controller write the Kitchen
+- The `kokumi-status-integrity` policy lets only the controller write the Kitchen
   status, which publishes the public key.
 
 Anyone who can read the key can forge signatures that Kokumi trusts. Never
