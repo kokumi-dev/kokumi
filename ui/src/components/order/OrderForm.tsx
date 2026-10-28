@@ -10,9 +10,10 @@ import RegistryRefsEditor from '../shared/RegistryRefsEditor'
 import HelmValuesEditor from '../shared/HelmValuesEditor'
 import PatchesEditor from '../shared/PatchesEditor'
 import DiffTab from './DiffTab'
-import EnvironmentField from './EnvironmentField'
+import EnvironmentPicker from './EnvironmentPicker'
 import UpstreamStagesEditor from './UpstreamStagesEditor'
 import type {
+  EnvironmentRef,
   Order,
   OrderFormData,
   OrderPreviewRequest,
@@ -147,6 +148,7 @@ function formToYaml(data: OrderFormData, helm: boolean | undefined): string {
   const doc: Record<string, unknown> = {
     productRef: { name: data.productRef.name },
   }
+  if (data.environmentRef.name) doc.environmentRef = { name: data.environmentRef.name }
   if (data.targetNamespace) doc.targetNamespace = data.targetNamespace
   if (helm !== false && hasValues(data.values)) doc.values = data.values
   if (data.patches.length > 0) doc.patches = patchesToYaml(data.patches)
@@ -160,19 +162,31 @@ function formToYaml(data: OrderFormData, helm: boolean | undefined): string {
   return dump(doc, { lineWidth: 100 })
 }
 
+/** The environmentRef of a parsed YAML document; empty when it is left out. */
+function environmentRefFromYaml(raw: unknown): EnvironmentRef {
+  if (raw === undefined || raw === null) return { name: '' }
+  if (typeof raw !== 'object' || Array.isArray(raw)) throw new Error('environmentRef must be a mapping')
+  const ref = raw as Record<string, unknown>
+  assertKnownKeys(ref, ['name'], 'environmentRef')
+  if (typeof ref.name !== 'string' || !ref.name) throw new Error('environmentRef.name must name an Environment of the namespace')
+  return { name: ref.name }
+}
+
 interface ParseContext {
   /** The Product of an existing Order, which cannot be changed. */
   lockedProduct?: string
+  /** The Environment of an existing Order, which cannot be changed. */
+  lockedEnvironment?: string
   /** Whether the named Product renders with Helm; undefined when it is unknown. */
   rendersWithHelm: (product: string) => boolean | undefined
 }
 
-function yamlToPartialForm(text: string, ctx: ParseContext): Omit<OrderFormData, 'name' | 'namespace' | 'environment' | 'edits'> {
+function yamlToPartialForm(text: string, ctx: ParseContext): Omit<OrderFormData, 'name' | 'namespace' | 'edits'> {
   const doc = load(text) as Record<string, unknown>
   if (!doc || typeof doc !== 'object') throw new Error('YAML must be a mapping')
   assertKnownKeys(
     doc,
-    ['productRef', 'targetNamespace', 'values', 'destination', 'registryRefs', 'patches', 'promotion'],
+    ['productRef', 'environmentRef', 'targetNamespace', 'values', 'destination', 'registryRefs', 'patches', 'promotion'],
     '',
   )
 
@@ -181,6 +195,13 @@ function yamlToPartialForm(text: string, ctx: ParseContext): Omit<OrderFormData,
   const product = String(rawProductRef?.name ?? '')
   if (ctx.lockedProduct !== undefined && product !== ctx.lockedProduct) {
     throw new Error(`productRef cannot be changed: this Order is a variant of ${ctx.lockedProduct}`)
+  }
+
+  const environmentRef = environmentRefFromYaml(doc.environmentRef)
+  if (ctx.lockedEnvironment !== undefined && environmentRef.name !== ctx.lockedEnvironment) {
+    throw new Error(
+      `environmentRef cannot be changed: this Order deploys to ${ctx.lockedEnvironment}; create a new Order to deploy to another Environment`,
+    )
   }
 
   const targetNamespace = doc.targetNamespace ?? ''
@@ -218,6 +239,7 @@ function yamlToPartialForm(text: string, ctx: ParseContext): Omit<OrderFormData,
 
   return {
     productRef: { name: product },
+    environmentRef,
     // Always set, so that a removed target namespace replaces the form's.
     targetNamespace,
     values: (rawValues as Record<string, unknown> | null | undefined) ?? {},
@@ -268,15 +290,15 @@ export default function OrderForm({ order, initialProduct, products, onCancel, o
 
   const parseContext: ParseContext = {
     lockedProduct: order?.productRef.name,
+    lockedEnvironment: order?.environmentRef.name,
     rendersWithHelm: (name) => helmFor({ ...formData, productRef: { name } }),
   }
 
   const [yamlText, setYamlText] = useState(() => formToYaml(formData, helmFor(formData)))
   const [yamlError, setYamlError] = useState<string | null>(null)
 
-  const [initialYaml] = useState(() => formToYaml(formData, helmFor(formData)))
+  const [initialYaml, setInitialYaml] = useState(() => formToYaml(formData, helmFor(formData)))
   const [initialIdentity] = useState(() => `${formData.namespace}/${formData.name}`)
-  const [initialEnvironment] = useState(() => formData.environment)
 
   /**
    * The data as sent: values are dropped only for a Product known not to
@@ -336,6 +358,7 @@ export default function OrderForm({ order, initialProduct, products, onCancel, o
       }
     }
     if (!data.productRef.name) throw new Error('Pick the Product this Order is a variant of')
+    if (!data.environmentRef.name) throw new Error('Pick the Environment the Order deploys to')
     const namespaceProblem = targetNamespaceProblem(data.targetNamespace)
     if (namespaceProblem) throw new Error(`Fix the target namespace: ${namespaceProblem}`)
     if (data.after.some((s) => s.order === data.name)) throw new Error('An Order cannot run after itself')
@@ -348,26 +371,35 @@ export default function OrderForm({ order, initialProduct, products, onCancel, o
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
+  // The data as the YAML tab has it, when it parses.
+  let current = formData
   let isDirty: boolean
   if (tab === 'yaml') {
     try {
-      const data = { ...formData, ...yamlToPartialForm(yamlText, parseContext) }
-      isDirty = formToYaml(data, helmFor(data)) !== initialYaml
+      current = { ...formData, ...yamlToPartialForm(yamlText, parseContext) }
+      isDirty = formToYaml(current, helmFor(current)) !== initialYaml
     } catch {
       isDirty = true
     }
   } else {
     isDirty = formToYaml(formData, helmFor(formData)) !== initialYaml
   }
-  // Name, namespace and environment are not part of the YAML view of the spec but still count as changes.
+  // Name and namespace are not part of the YAML view of the spec but still count as changes.
   if (`${formData.namespace}/${formData.name}` !== initialIdentity) isDirty = true
-  if (formData.environment !== initialEnvironment) isDirty = true
 
   useEffect(() => {
     onDirtyChange?.(isDirty)
   }, [isDirty, onDirtyChange])
 
-  const blocked = deletingReason(formData)
+  /** Picks the only Environment of the namespace; on an untouched form it is no change to save. */
+  function preselectEnvironment(name: string) {
+    const next = { ...formData, environmentRef: { name } }
+    if (!isDirty) setInitialYaml(formToYaml(next, helmFor(next)))
+    setFormData(next)
+  }
+
+  const blocked =
+    deletingReason(current) ?? (current.environmentRef.name ? undefined : 'Pick the Environment the Order deploys to')
 
   return (
     <>
@@ -389,8 +421,9 @@ export default function OrderForm({ order, initialProduct, products, onCancel, o
             isEdit={isEdit}
             product={productFor(formData)}
             products={products}
-            deletingReason={blocked}
+            deletingReason={deletingReason(formData)}
             onFieldChange={(key, val) => setFormData((prev) => ({ ...prev, [key]: val }))}
+            onPreselectEnvironment={preselectEnvironment}
           />
         )}
         {tab === 'yaml' && (
@@ -434,9 +467,11 @@ interface FormViewProps {
   /** Set when the selected Product is being deleted and the Order is new. */
   deletingReason?: string
   onFieldChange: <K extends keyof OrderFormData>(key: K, val: OrderFormData[K]) => void
+  /** Picks the only Environment of the namespace without counting as a change. */
+  onPreselectEnvironment: (name: string) => void
 }
 
-function FormView({ formData, isEdit, product, products, deletingReason, onFieldChange }: FormViewProps) {
+function FormView({ formData, isEdit, product, products, deletingReason, onFieldChange, onPreselectEnvironment }: FormViewProps) {
   const [isDestOpen, setIsDestOpen] = useState(!!formData.destination?.url || formData.registryRefs.length > 0)
   const [isPatchesOpen, setIsPatchesOpen] = useState(formData.patches.length > 0)
   const [groupsText, setGroupsText] = useState(formData.approvals?.allowedGroups.join(', ') ?? '')
@@ -532,25 +567,34 @@ function FormView({ formData, isEdit, product, products, deletingReason, onField
         )}
       </div>
 
-      {/* Target namespace — the namespace the Order deploys into */}
-      <div className={styles.fieldGroup}>
-        <label className={styles.label} htmlFor="order-target-namespace">Target namespace (optional)</label>
-        <input
-          id="order-target-namespace"
-          className={styles.input}
-          value={formData.targetNamespace}
-          onChange={(e) => onFieldChange('targetNamespace', e.target.value.trim())}
-          placeholder={defaultTargetNamespace(product, formData.namespace || 'kokumi')}
-          aria-invalid={!!namespaceProblem}
+      {/* Environment — required, and picked once, when the Order is created; and the namespace it deploys into */}
+      <div className={styles.row2}>
+        <EnvironmentPicker
+          namespace={formData.namespace}
+          value={formData.environmentRef.name}
+          onChange={(name) => onFieldChange('environmentRef', { name })}
+          onPreselect={onPreselectEnvironment}
+          locked={isEdit}
         />
-        {namespaceProblem ? (
-          <span className={styles.fieldError}>{namespaceProblem}.</span>
-        ) : (
-          <span className={styles.hint}>
-            The namespace the Order deploys into
-            {product?.targetNamespace ? "; by default the Product's" : "; by default the Order's own"}.
-          </span>
-        )}
+        <div className={styles.fieldGroup}>
+          <label className={styles.label} htmlFor="order-target-namespace">Target namespace (optional)</label>
+          <input
+            id="order-target-namespace"
+            className={styles.input}
+            value={formData.targetNamespace}
+            onChange={(e) => onFieldChange('targetNamespace', e.target.value.trim())}
+            placeholder={defaultTargetNamespace(product, formData.namespace || 'kokumi')}
+            aria-invalid={!!namespaceProblem}
+          />
+          {namespaceProblem ? (
+            <span className={styles.fieldError}>{namespaceProblem}.</span>
+          ) : (
+            <span className={styles.hint}>
+              The namespace the Order deploys into on every cluster of its Environment
+              {product?.targetNamespace ? "; by default the Product's" : "; by default the Order's own"}.
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Values — only for Products that render with Helm, or kept for an unknown one */}
@@ -621,16 +665,7 @@ function FormView({ formData, isEdit, product, products, deletingReason, onField
         Automatic promotion — promote new Preparations as soon as they are ready and pass their gates
       </label>
 
-      {/* Environment and upstream stages */}
-      {formData.productRef.name && (
-        <EnvironmentField
-          namespace={formData.namespace}
-          product={formData.productRef.name}
-          self={formData.name}
-          value={formData.environment}
-          onChange={(environment) => onFieldChange('environment', environment)}
-        />
-      )}
+      {/* Upstream stages */}
       <UpstreamStagesEditor
         namespace={formData.namespace}
         product={formData.productRef.name}

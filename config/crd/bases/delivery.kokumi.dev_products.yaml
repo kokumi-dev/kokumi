@@ -467,9 +467,9 @@ spec:
                 type: object
               targetNamespace:
                 description: |-
-                  targetNamespace is the namespace Orders of the Product deploy into,
-                  unless an Order sets its own. When neither sets it, it is the Order's
-                  namespace.
+                  targetNamespace is the namespace Orders of the Product deploy into on
+                  every cluster of their Environment, unless an Order sets its own. When
+                  neither sets it, it is the Order's namespace.
                 maxLength: 63
                 pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                 type: string

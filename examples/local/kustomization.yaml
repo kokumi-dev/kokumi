@@ -1,6 +1,6 @@
-# The Cluster and the Environment of the cluster Kokumi runs in, as Kokumi
-# keeps them in its own namespace, kokumi. An admin applies them to another
-# namespace:
+# The Cluster and the Environment that let the Orders of a namespace deploy
+# to the cluster Kokumi runs in, as Kokumi keeps them in its own namespace,
+# kokumi. An admin applies them to another namespace:
 #
 #   kubectl apply -n <namespace> -k examples/local
 apiVersion: kustomize.config.k8s.io/v1beta1

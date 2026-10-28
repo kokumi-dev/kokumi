@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -45,6 +46,11 @@ var root = filepath.Join("..", "..")
 // kitchenPatch is the file an example holds a patch of the Kitchen in, for
 // a cluster admin to apply; it is not part of the example's kustomization.
 const kitchenPatch = "kitchen-patch.yaml"
+
+// platformDir is the directory an example holds what an admin applies to the
+// namespace in: its Clusters and Environments, with a kustomization of its
+// own. It is not part of the example's kustomization.
+const platformDir = "platform"
 
 // TestExamplesAreAccepted applies every example, and the samples in
 // config/samples, to an API server with kokumi's CRDs as a server-side dry
@@ -97,6 +103,14 @@ func TestExamplesAreAccepted(t *testing.T) {
 				obj.SetNamespace("examples")
 				dryRunApply(ctx, t, c, obj)
 			}
+			for _, obj := range readPlatform(t, filepath.Join(dir, platformDir)) {
+				if obj.GetNamespace() != "" {
+					t.Errorf("%s %s sets a namespace; platform objects apply to the namespace of the example",
+						obj.GetKind(), obj.GetName())
+				}
+				obj.SetNamespace("examples")
+				dryRunApply(ctx, t, c, obj)
+			}
 
 			patch, err := os.ReadFile(filepath.Join(dir, kitchenPatch))
 			if os.IsNotExist(err) {
@@ -132,6 +146,36 @@ func build(t *testing.T, dir string) []*unstructured.Unstructured {
 		objs = append(objs, &unstructured.Unstructured{Object: fields})
 	}
 	return objs
+}
+
+// readPlatform builds the kustomization of the platform directory dir, as
+// kubectl apply -k does; none when dir does not exist. Every YAML file of dir
+// must be part of it.
+func readPlatform(t *testing.T, dir string) []*unstructured.Unstructured {
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "kustomization.yaml"))
+	if err != nil {
+		t.Fatalf("The platform directory has no kustomization.yaml: %v", err)
+	}
+	kustomization := struct {
+		Resources []string `json:"resources"`
+	}{}
+	if err := yaml.Unmarshal(data, &kustomization); err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if name := entry.Name(); filepath.Ext(name) == ".yaml" && name != "kustomization.yaml" &&
+			!slices.Contains(kustomization.Resources, name) {
+			t.Errorf("%s is not a resource of the platform's kustomization.yaml", name)
+		}
+	}
+	return build(t, dir)
 }
 
 // dryRunApply applies obj with a server-side dry run, so that it is validated

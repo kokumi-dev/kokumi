@@ -728,8 +728,8 @@ function FormView({ formData, isEdit, onChange }: FormViewProps) {
           <span className={styles.fieldError}>{namespaceProblem}.</span>
         ) : (
           <span className={styles.hint}>
-            The namespace the Orders deploy into, unless an Order sets its own. Helm renders into it, and resources
-            without a namespace are deployed there.
+            The namespace the Orders deploy into on every cluster of their Environment, unless an Order sets its own.
+            Helm renders into it, and resources without a namespace are deployed there.
           </span>
         )}
       </div>

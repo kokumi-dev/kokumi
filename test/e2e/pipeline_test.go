@@ -35,7 +35,9 @@ var _ = Describe("Promotion pipelines", Label("promotion"), func() {
 
 		BeforeAll(func() {
 			ns = framework.CreateNamespace("pipeline")
+			framework.ApplyPlatform(ns, "promotion-pipeline")
 			framework.ApplyExample(ns, "promotion-pipeline")
+			framework.ApplyTestdata(ns, "pipeline/order-prod-direct.yaml", nil)
 		})
 
 		It("renders a Preparation of the same Product revision per stage, each running the same pinned image", func() {
@@ -50,6 +52,15 @@ var _ = Describe("Promotion pipelines", Label("promotion"), func() {
 			deployment := framework.RenderedObject(framework.PullPreparation(dev), "Deployment", "podinfo-dev")
 			Expect(framework.Field(deployment, "spec", "template", "spec", "containers")).To(
 				ContainElement(HaveKeyWithValue("image", image)), "the manifests run the image by the digest its tag resolved to")
+		})
+
+		It("holds a stage that deploys to prod without running after staging, which the Environment prod requires", func() {
+			Eventually(framework.Serving(ns, "podinfo-prod-direct"), framework.RenderTimeout).Should(SatisfyAll(
+				framework.HaveConditionReason(deliveryv1alpha1.ConditionTypeUpstreamDeployed,
+					deliveryv1alpha1.ReasonPipelineRequired),
+				HaveField("Status.Conditions", ContainElement(HaveField("Message", ContainSubstring("Environment staging")))),
+			))
+			framework.ExpectNoApplication(ns, "podinfo-prod-direct")
 		})
 
 		It("deploys dev right away", func() {

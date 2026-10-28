@@ -41,8 +41,8 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          Cluster is a cluster for Orders to deploy to, and how Kokumi reaches it.
-          Kokumi reports whether it is reachable and accepts the credential.
+          Cluster is a cluster that Orders deploy to. Environments of its namespace
+          select it by its labels. Kokumi reports whether it is reachable.
         properties:
           apiVersion:
             description: |-
@@ -122,8 +122,8 @@ spec:
               conditions:
                 description: |-
                   conditions represent the current state of the Cluster. Ready reports
-                  whether Kokumi reaches it: its kubeconfig is usable, its control plane
-                  is ready, and it accepts the credential.
+                  whether Orders can deploy to it: it is reachable and accepts the
+                  credential.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.

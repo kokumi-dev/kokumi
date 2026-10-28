@@ -27,6 +27,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -35,10 +36,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/argocd"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/cluster"
+	"github.com/kokumi-dev/kokumi/internal/conditions"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/registry"
+	"github.com/kokumi-dev/kokumi/internal/resources"
 	"github.com/kokumi-dev/kokumi/internal/signing"
 	"github.com/kokumi-dev/kokumi/internal/signing/signingtest"
 	// +kubebuilder:scaffold:imports
@@ -120,6 +124,8 @@ var _ = BeforeSuite(func() {
 	for _, name := range []string{testWorkspace, testKokumiNamespace, argoNamespace} {
 		Expect(k8sClient.Create(ctx, &corev1.Namespace{Name: name})).To(Succeed())
 	}
+	createDefaultProject(ctx)
+	createLocalEnvironment(ctx, testNamespace)
 })
 
 var _ = AfterSuite(func() {
@@ -139,7 +145,7 @@ const testWorkspace = "workspace"
 const testKokumiNamespace = "kokumi-system"
 
 // testEdge is the value of the label by which the tests put clusters into
-// an Environment.
+// the Environment they deploy to.
 const testEdge = "edge"
 
 // testRetired is the value of that label for clusters the tests take out
@@ -154,7 +160,39 @@ const testFleet = "fleet"
 const (
 	keyServer    = "server"
 	keyNamespace = "namespace"
+	keyRevision  = "revision"
 )
+
+// createDefaultProject creates Argo CD's AppProject default, which every
+// Argo CD creates, admitting Applications of every namespace, as make argocd
+// and the e2e suite configure it for development.
+func createDefaultProject(ctx context.Context) {
+	p := newAppProject()
+	p.SetNamespace(argoNamespace)
+	p.SetName(argocd.DefaultProject)
+	Expect(unstructured.SetNestedSlice(p.Object, []any{map[string]any{keyServer: "*", keyNamespace: "*"}}, "spec", "destinations")).To(Succeed())
+	Expect(unstructured.SetNestedStringSlice(p.Object, []string{"*"}, "spec", "sourceNamespaces")).To(Succeed())
+	Expect(k8sClient.Create(ctx, p)).To(Succeed())
+}
+
+// createLocalEnvironment creates, in namespace, the Cluster in-cluster,
+// Ready as its controller reports it, and the Environment local that
+// selects it, as Kokumi keeps them in its own namespace: Orders in
+// namespace then deploy to the cluster Kokumi runs in.
+func createLocalEnvironment(ctx context.Context, namespace string) {
+	c := resources.InClusterCluster(namespace)
+	Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, c))).To(Succeed())
+	Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(c), c)).To(Succeed())
+	c.Status.Server = cluster.InClusterServer
+	conditions.MarkTrue(c, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonReady, "The control plane is ready")
+	Expect(k8sClient.Status().Update(ctx, c)).To(Succeed())
+
+	Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, resources.LocalEnvironment(namespace)))).To(Succeed())
+}
+
+// localEnvironment is the reference of an Order to the Environment local of
+// its namespace.
+var localEnvironment = deliveryv1alpha1.EnvironmentRef{Name: cluster.LocalEnvironment}
 
 // fakeProber probes clusters without a network: every cluster has health.
 type fakeProber struct {

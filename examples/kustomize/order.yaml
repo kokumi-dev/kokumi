@@ -5,6 +5,8 @@ metadata:
 spec:
   productRef:
     name: podinfo-kustomize
+  environmentRef:
+    name: local
 
   patches:
   - target:

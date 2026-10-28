@@ -13,7 +13,6 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
-	"github.com/kokumi-dev/kokumi/internal/argocd"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/cluster"
 	"github.com/kokumi-dev/kokumi/internal/resolve"
@@ -69,6 +68,7 @@ const (
 	stateFailed   = "Failed"
 	stateWaiting  = "Waiting"
 	stateDeleting = "Deleting"
+	stateUnknown  = "Unknown"
 )
 
 // waitingReasons are the Ready reasons of an Order that waits for its
@@ -92,7 +92,7 @@ func stateFromConditions(conditions []metav1.Condition) string {
 			return c.Reason
 		}
 	}
-	return "Unknown"
+	return stateUnknown
 }
 
 // orderToDTO converts a Order CRD object, the name of its currently active
@@ -104,7 +104,7 @@ func orderToDTO(r deliveryv1alpha1.Order, activePreparation string, product *del
 		Name:                     r.Name,
 		Namespace:                r.Namespace,
 		Labels:                   r.Labels,
-		Environment:              r.Labels[deliveryv1alpha1.LabelEnvironment],
+		EnvironmentRef:           EnvironmentRefDTO{Name: r.Spec.EnvironmentRef.Name},
 		TargetNamespace:          r.Spec.TargetNamespace,
 		EffectiveTargetNamespace: targetNamespace,
 		TargetNamespaceSource:    targetNamespaceSource,
@@ -731,7 +731,6 @@ func servingToDTO(s deliveryv1alpha1.Serving) ServingDTO {
 		Order:              s.Spec.OrderName,
 		DesiredPreparation: s.Spec.PreparationName,
 		TargetPreparation:  s.Status.TargetPreparationName,
-		ApplicationName:    argocd.Key(&s, cluster.InCluster).Name,
 		State:              stateFromConditions(s.Status.Conditions),
 		Conditions:         conditionsToDTO(s.Status.Conditions),
 	}
@@ -744,6 +743,11 @@ func servingToDTO(s deliveryv1alpha1.Serving) ServingDTO {
 	}
 	if summary := s.Status.DeployedVulnerabilities; summary != nil {
 		dto.DeployedVulnerabilities = new(summaryToDTO(*summary))
+	}
+	if c := s.Status.Clusters; c != nil {
+		dto.Clusters = &DeploymentClustersDTO{
+			Selected: c.Selected, Healthy: c.Healthy, Progressing: c.Progressing, Degraded: c.Degraded, Held: c.Held,
+		}
 	}
 	if !s.CreationTimestamp.IsZero() {
 		t := s.CreationTimestamp.UTC()
@@ -990,5 +994,39 @@ func artifactFilesToDTO(files []artifact.File) []ArtifactFileDTO {
 	for i, f := range files {
 		out[i] = ArtifactFileDTO{Path: f.Path, Content: f.Content}
 	}
+	return out
+}
+
+// --- Environment conversions ---
+
+// environmentToDTO converts an Environment. installNamespace is Kokumi's
+// own namespace, where it keeps the Environment local.
+func environmentToDTO(env deliveryv1alpha1.Environment, installNamespace string) EnvironmentDTO {
+	dto := EnvironmentDTO{
+		Namespace:       env.Namespace,
+		Name:            env.Name,
+		EnvironmentSpec: env.Spec,
+		State:           stateFromConditions(env.Status.Conditions),
+		Conditions:      conditionsToDTO(env.Status.Conditions),
+		Ensured:         env.Namespace == installNamespace && env.Name == cluster.LocalEnvironment,
+	}
+	if c := env.Status.Clusters; c != nil {
+		dto.SelectedClusters, dto.ReadyClusters = c.Selected, c.Ready
+	}
+	if !env.CreationTimestamp.IsZero() {
+		dto.CreatedAt = new(env.CreationTimestamp.UTC())
+	}
+	return dto
+}
+
+// environmentsToDTO converts Environments, sorted by namespace and name.
+func environmentsToDTO(environments []deliveryv1alpha1.Environment, installNamespace string) []EnvironmentDTO {
+	out := make([]EnvironmentDTO, 0, len(environments))
+	for _, env := range environments {
+		out = append(out, environmentToDTO(env, installNamespace))
+	}
+	slices.SortFunc(out, func(a, b EnvironmentDTO) int {
+		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
+	})
 	return out
 }

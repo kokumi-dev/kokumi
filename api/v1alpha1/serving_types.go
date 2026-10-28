@@ -57,6 +57,21 @@ type ServingStatus struct {
 	// +kubebuilder:validation:MaxItems=16
 	History []DeploymentEntry `json:"history,omitempty"`
 
+	// clusters counts the clusters the Serving deploys to by the state of
+	// their deployment.
+	// +optional
+	Clusters *DeploymentClusters `json:"clusters,omitempty"`
+
+	// targets are the clusters that do not run the deployed Preparation
+	// healthily, with what the engine reports on each: held clusters first,
+	// then degraded, then progressing ones, each by name. It lists at most
+	// 64 of them; clusters counts them all.
+	// +optional
+	// +listType=map
+	// +listMapKey=cluster
+	// +kubebuilder:validation:MaxItems=64
+	Targets []DeploymentTarget `json:"targets,omitempty"`
+
 	// deployedVulnerabilities sums the latest scans of the images of the
 	// deployed Preparation. It keeps changing after the deployment, as new
 	// vulnerabilities are published.
@@ -67,6 +82,63 @@ type ServingStatus struct {
 	// +listType=map
 	// +listMapKey=type
 	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+// DeploymentClusters counts the clusters a Serving deploys to by the state of
+// their deployment.
+type DeploymentClusters struct {
+	// selected is how many clusters the Serving deploys to: the Clusters its
+	// Order's Environment selects.
+	// +required
+	// +kubebuilder:validation:Minimum=0
+	Selected int32 `json:"selected"`
+
+	// healthy is how many of them run the deployed Preparation healthily.
+	// +required
+	// +kubebuilder:validation:Minimum=0
+	Healthy int32 `json:"healthy"`
+
+	// progressing is how many are deploying it.
+	// +required
+	// +kubebuilder:validation:Minimum=0
+	Progressing int32 `json:"progressing"`
+
+	// degraded is how many run it degraded.
+	// +required
+	// +kubebuilder:validation:Minimum=0
+	Degraded int32 `json:"degraded"`
+
+	// held is how many Kokumi cannot deploy to; their targets say why.
+	// Clusters that are not Ready are among them, and are left out of the
+	// Serving's health until they are Ready again.
+	// +required
+	// +kubebuilder:validation:Minimum=0
+	Held int32 `json:"held"`
+}
+
+// DeploymentTarget is a cluster a Serving deploys to, with what the engine
+// reports on its deployment there.
+type DeploymentTarget struct {
+	// cluster is the name of the Cluster, in the Serving's namespace.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	Cluster string `json:"cluster"`
+
+	// revision is the artifact digest the engine reports synced to the
+	// cluster.
+	// +optional
+	// +kubebuilder:validation:MaxLength=71
+	Revision string `json:"revision,omitempty"`
+
+	// conditions represent the deployment to the cluster. Ready is True once
+	// the cluster runs the deployed Preparation healthily; its
+	// lastTransitionTime says since when.
+	// +listType=map
+	// +listMapKey=type
+	// +optional
+	// +kubebuilder:validation:MaxItems=8
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
@@ -155,6 +227,8 @@ type DeploymentEntry struct {
 // +kubebuilder:printcolumn:name="Order",type=string,JSONPath=`.spec.orderName`
 // +kubebuilder:printcolumn:name="Preparation",type=string,JSONPath=`.spec.preparationName`,priority=1
 // +kubebuilder:printcolumn:name="Target",type=string,JSONPath=`.status.targetPreparationName`
+// +kubebuilder:printcolumn:name="Clusters",type=integer,JSONPath=`.status.clusters.selected`,priority=1
+// +kubebuilder:printcolumn:name="Healthy",type=integer,JSONPath=`.status.clusters.healthy`,priority=1
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
 // +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].reason`
 // +kubebuilder:printcolumn:name="Approved",type=string,JSONPath=`.status.conditions[?(@.type=='Approved')].reason`

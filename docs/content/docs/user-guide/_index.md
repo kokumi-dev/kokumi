@@ -14,5 +14,6 @@ Step-by-step guides for configuring and using Kokumi features.
   {{< card link="images" title="Container Images" icon="cube-transparent" subtitle="Record, pin, or vendor the images every Preparation runs." >}}
   {{< card link="security-scanning" title="Vulnerability Scanning" icon="shield-check" subtitle="Signed SBOMs and vulnerability reports for vendored images, and promotion checks." >}}
   {{< card link="promotion-pipelines" title="Promotion Pipelines" icon="chevron-double-right" subtitle="Deploy a Product change stage by stage, after soak times, with signed records." >}}
+  {{< card link="environments" title="Deploy to Several Clusters" icon="cloud" subtitle="Deploy an Order to every cluster of an Environment." >}}
   {{< card link="settings" title="Settings" icon="cog" subtitle="System settings stored on the Kitchen resource." >}}
 {{< /cards >}}

@@ -24,7 +24,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -48,6 +47,7 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/attestation"
 	"github.com/kokumi-dev/kokumi/internal/cluster"
+	"github.com/kokumi-dev/kokumi/internal/conditions"
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/promotion"
 	"github.com/kokumi-dev/kokumi/internal/provenance"
@@ -65,18 +65,18 @@ var argoAppGVK = schema.GroupVersionKind{
 // argoNamespace is the namespace the Serving controller places Applications in.
 const argoNamespace = argocd.Namespace
 
+// appKey returns the key of the Argo CD Application of the Order name in
+// testNamespace on the cluster Kokumi runs in.
+func appKey(order string) client.ObjectKey {
+	return argocd.Key(&deliveryv1alpha1.Serving{Namespace: testNamespace, Spec: deliveryv1alpha1.ServingSpec{OrderName: order}}, cluster.InCluster)
+}
+
 // comparedCurrentSource records on app that Argo CD compared its current
 // source, as its Application controller does before it reports a sync
 // status.
 func comparedCurrentSource(app *unstructured.Unstructured) {
 	source, _, _ := unstructured.NestedMap(app.Object, "spec", "source")
 	Expect(unstructured.SetNestedMap(app.Object, source, statusField, "sync", "comparedTo", "source")).To(Succeed())
-}
-
-// appKey returns the key of the Application of the Order order of
-// testNamespace.
-func appKey(order string) client.ObjectKey {
-	return argocd.Key(&deliveryv1alpha1.Serving{Namespace: testNamespace, Spec: deliveryv1alpha1.ServingSpec{OrderName: order}}, cluster.InCluster)
 }
 
 var _ = Describe("Serving Controller", func() {
@@ -130,7 +130,6 @@ var _ = Describe("Serving Controller", func() {
 			markPreparationReady(ctx, registry, preparationKey)
 
 			By("ensuring the argocd namespace exists")
-			createArgoNamespace(ctx)
 
 			By("creating the custom resource for the Kind Serving")
 			err = k8sClient.Get(ctx, typeNamespacedName, serving)
@@ -192,8 +191,8 @@ var _ = Describe("Serving Controller", func() {
 			status := map[string]any{}
 			if syncStatus != "" || revision != "" {
 				status["sync"] = map[string]any{
-					"status":   syncStatus,
-					"revision": revision,
+					"status":    syncStatus,
+					keyRevision: revision,
 				}
 			}
 			if healthStatus != "" || healthMessage != "" {
@@ -229,8 +228,8 @@ var _ = Describe("Serving Controller", func() {
 		// Application named like the Serving, as if created out-of-band.
 		buildArgoAppMap := func(repoURL, targetRevision string, annotations map[string]any) map[string]any {
 			meta := map[string]any{
-				"name":      appKey(orderName).Name,
-				"namespace": argoNamespace,
+				"name":       appKey(orderName).Name,
+				keyNamespace: argoNamespace,
 			}
 			if len(annotations) > 0 {
 				meta["annotations"] = annotations
@@ -247,14 +246,14 @@ var _ = Describe("Serving Controller", func() {
 						"path":           ".",
 					},
 					"destination": map[string]any{
-						"server":    "https://kubernetes.default.svc",
-						"namespace": testNamespace,
+						"server":     "https://kubernetes.default.svc",
+						keyNamespace: testNamespace,
 					},
 				},
 			}
 		}
 
-		It("creates an Argo CD Application with the allowed-order annotation set to the Order's namespace and name", func() {
+		It("creates an Argo CD Application with the allowed-order annotation set to the Order name", func() {
 			_, err := settleServing(ctx, newReconciler(), typeNamespacedName)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -592,7 +591,7 @@ var _ = Describe("Serving Controller", func() {
 			Expect(cond.Message).To(ContainSubstring("some-other-order"))
 		})
 
-		It("updates an Application whose allowed-order annotation matches the Order's namespace and name", func() {
+		It("updates an Application whose allowed-order annotation matches the Order name", func() {
 			By("creating an Argo CD Application annotated with the matching opt-in")
 			preExisting := &unstructured.Unstructured{
 				Object: buildArgoAppMap("oci://example.com/stale", "sha256:stale", map[string]any{
@@ -722,8 +721,6 @@ var _ = Describe("Serving Controller", func() {
 
 		BeforeEach(func() {
 			registry = oci.NewFakeClient(nil)
-
-			createArgoNamespace(ctx)
 
 			createTestOrder(ctx, orderName, deliveryv1alpha1.PromotionModeManual, policy)
 			DeferCleanup(func() {
@@ -918,8 +915,9 @@ var _ = Describe("Serving vulnerability checks", func() {
 			Name:      orderName,
 			Namespace: testNamespace,
 			Spec: deliveryv1alpha1.OrderSpec{
-				ProductRef: deliveryv1alpha1.ProductRef{Name: productName},
-				Promotion:  &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
+				EnvironmentRef: localEnvironment,
+				ProductRef:     deliveryv1alpha1.ProductRef{Name: productName},
+				Promotion:      &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
 			},
 		})).To(Succeed())
 		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Preparation{
@@ -1041,10 +1039,11 @@ var _ = Describe("Serving vulnerability checks", func() {
 // registry against testSigner.
 func newServingReconciler(registry *oci.FakeClient) *ServingReconciler {
 	return &ServingReconciler{
-		Client:     k8sClient,
-		Scheme:     k8sClient.Scheme(),
-		Registries: fakeRegistries(registry),
-		Signing:    testSigning,
+		Client:              k8sClient,
+		Scheme:              k8sClient.Scheme(),
+		Registries:          fakeRegistries(registry),
+		Signing:             testSigning,
+		BundledRegistryHost: artifact.DefaultRegistryHost,
 	}
 }
 
@@ -1086,16 +1085,6 @@ func signTestEvidence(registry *oci.FakeClient, signer *signing.Signer, prep *de
 // statusField is the status of an Argo CD Application, and of its sync and
 // health.
 const statusField = "status"
-
-// createArgoNamespace creates the namespace the Serving controller places
-// Applications in, unless it exists.
-func createArgoNamespace(ctx context.Context) {
-	ns := &corev1.Namespace{}
-	ns.SetName(argoNamespace)
-	if err := k8sClient.Create(ctx, ns); err != nil && !errors.IsAlreadyExists(err) {
-		Expect(err).NotTo(HaveOccurred())
-	}
-}
 
 // settleServing reconciles the Serving of key with r until it no longer
 // asks for the next pass of a record, as the controller does by requeueing,
@@ -1150,8 +1139,9 @@ var _ = Describe("Serving promotion pipelines", func() {
 		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Order{
 			Name: name, Namespace: testNamespace,
 			Spec: deliveryv1alpha1.OrderSpec{
-				ProductRef: deliveryv1alpha1.ProductRef{Name: product},
-				Promotion:  &deliveryv1alpha1.PromotionSpec{Mode: mode, After: upstreams},
+				EnvironmentRef: localEnvironment,
+				ProductRef:     deliveryv1alpha1.ProductRef{Name: product},
+				Promotion:      &deliveryv1alpha1.PromotionSpec{Mode: mode, After: upstreams},
 			},
 		})).To(Succeed())
 		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Serving{
@@ -1220,7 +1210,7 @@ var _ = Describe("Serving promotion pipelines", func() {
 		app := argocd.New()
 		Expect(k8sClient.Get(ctx, appKey(name), app)).To(Succeed())
 		app.Object[statusField] = map[string]any{
-			"sync":   map[string]any{statusField: "Synced", "revision": appRevision(name)},
+			"sync":   map[string]any{statusField: "Synced", keyRevision: appRevision(name)},
 			"health": map[string]any{statusField: health},
 		}
 		comparedCurrentSource(app)
@@ -1252,8 +1242,6 @@ var _ = Describe("Serving promotion pipelines", func() {
 		now = t0
 		r = newServingReconciler(registry)
 		r.now = func() time.Time { return now }
-
-		createArgoNamespace(ctx)
 
 		createStage(dev, testProductName, deliveryv1alpha1.PromotionModeAutomatic)
 		createStage(staging, testProductName, deliveryv1alpha1.PromotionModeAutomatic, deliveryv1alpha1.UpstreamStage{Order: dev})
@@ -1425,6 +1413,360 @@ var _ = Describe("Serving promotion pipelines", func() {
 	})
 })
 
+var _ = Describe("Serving environments", Ordered, func() {
+	const (
+		eu      = "srv-eu"
+		us      = "srv-us"
+		envName = "srv-edge"
+		order   = "srv-edge-order"
+		prep    = "srv-edge-order-p1"
+		fleet   = "srv-fleet"
+		project = "srv-edge"
+		digest  = "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+	)
+	servers := map[string]string{eu: "https://eu.example:6443", us: "https://us.example:6443"}
+	ctx := context.Background()
+	key := types.NamespacedName{Namespace: testNamespace, Name: order}
+	envKey := types.NamespacedName{Namespace: testNamespace, Name: envName}
+	var (
+		registry *oci.FakeClient
+		r        *ServingReconciler
+	)
+
+	reconcileServing := func() {
+		_, err := settleServing(ctx, r, key)
+		Expect(err).NotTo(HaveOccurred())
+	}
+	getServing := func() *deliveryv1alpha1.Serving {
+		s := &deliveryv1alpha1.Serving{}
+		Expect(k8sClient.Get(ctx, key, s)).To(Succeed())
+		return s
+	}
+	ready := func(conds []metav1.Condition) *metav1.Condition {
+		return apimeta.FindStatusCondition(conds, deliveryv1alpha1.ConditionTypeReady)
+	}
+	application := func(clusterName string) (*unstructured.Unstructured, error) {
+		app := argocd.New()
+		err := k8sClient.Get(ctx, argocd.Key(getServing(), clusterName), app)
+		return app, err
+	}
+	// reportHealthy simulates Argo CD reporting the Application of
+	// clusterName synced to the Preparation and healthy.
+	reportHealthy := func(clusterName string) {
+		app, err := application(clusterName)
+		Expect(err).NotTo(HaveOccurred())
+		app.Object[statusField] = map[string]any{
+			"sync":   map[string]any{statusField: "Synced", keyRevision: digest},
+			"health": map[string]any{statusField: "Healthy"},
+		}
+		comparedCurrentSource(app)
+		Expect(k8sClient.Status().Update(ctx, app)).To(Succeed())
+	}
+	// setEnvironmentReady records Ready on the Environment, as its
+	// controller would before a change it has not seen yet.
+	setEnvironmentReady := func() {
+		env := &deliveryv1alpha1.Environment{}
+		Expect(k8sClient.Get(ctx, envKey, env)).To(Succeed())
+		conditions.MarkTrue(env, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonReady, "Deploys to its clusters")
+		Expect(k8sClient.Status().Update(ctx, env)).To(Succeed())
+	}
+	// setClusterStatus records the status the Cluster controller reports.
+	setClusterStatus := func(name, reason string) {
+		c := &deliveryv1alpha1.Cluster{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: name}, c)).To(Succeed())
+		c.Status.Server = servers[name]
+		if reason == deliveryv1alpha1.ReasonReady {
+			conditions.MarkTrue(c, deliveryv1alpha1.ConditionTypeReady, reason, "The control plane is ready")
+		} else {
+			conditions.MarkFalse(c, deliveryv1alpha1.ConditionTypeReady, reason, "The control plane cannot be reached")
+		}
+		Expect(k8sClient.Status().Update(ctx, c)).To(Succeed())
+	}
+	// labelCluster sets the label the Environment selects its Clusters by.
+	labelCluster := func(name, value string) {
+		c := &deliveryv1alpha1.Cluster{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: name}, c)).To(Succeed())
+		c.Labels[fleet] = value
+		Expect(k8sClient.Update(ctx, c)).To(Succeed())
+	}
+	targetReasons := func() []string {
+		targets := getServing().Status.Targets
+		reasons := make([]string, 0, len(targets))
+		for _, t := range targets {
+			reasons = append(reasons, ready(t.Conditions).Reason)
+		}
+		return reasons
+	}
+	targetClusters := func() []string {
+		names := make([]string, 0, len(getServing().Status.Targets))
+		for _, t := range getServing().Status.Targets {
+			names = append(names, t.Cluster)
+		}
+		return names
+	}
+	// admitNamespaces sets the namespaces the AppProject admits Applications
+	// of.
+	admitNamespaces := func(namespaces ...string) {
+		p := newAppProject()
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: argoNamespace, Name: project}, p)).To(Succeed())
+		Expect(unstructured.SetNestedStringSlice(p.Object, namespaces, "spec", "sourceNamespaces")).To(Succeed())
+		Expect(k8sClient.Update(ctx, p)).To(Succeed())
+	}
+
+	BeforeAll(func() {
+		registry = oci.NewFakeClient(nil)
+		r = newServingReconciler(registry)
+
+		for _, name := range []string{eu, us} {
+			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Cluster{
+				Name: name, Namespace: testNamespace, Labels: map[string]string{fleet: testEdge},
+				Spec: deliveryv1alpha1.ClusterSpec{
+					Connection: deliveryv1alpha1.ClusterConnectionKubeconfig,
+					Kubeconfig: &deliveryv1alpha1.ClusterKubeconfig{SecretRef: deliveryv1alpha1.KubeconfigSecretReference{Name: name + "-kubeconfig"}},
+				},
+			})).To(Succeed())
+			setClusterStatus(name, deliveryv1alpha1.ReasonReady)
+		}
+		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Environment{
+			Name: envName, Namespace: testNamespace,
+			Spec: deliveryv1alpha1.EnvironmentSpec{
+				ClusterSelector: metav1.LabelSelector{MatchLabels: map[string]string{fleet: testEdge}},
+				Deployer:        deliveryv1alpha1.Deployer{Type: deliveryv1alpha1.DeployerTypeArgoCD, ArgoCD: &deliveryv1alpha1.ArgoCDDeployer{Project: project}},
+			},
+		})).To(Succeed())
+		appProject := newAppProject()
+		appProject.SetNamespace(argoNamespace)
+		appProject.SetName(project)
+		Expect(unstructured.SetNestedSlice(appProject.Object, []any{map[string]any{keyServer: "*", keyNamespace: "*"}}, "spec", "destinations")).
+			To(Succeed())
+		Expect(unstructured.SetNestedStringSlice(appProject.Object, []string{testNamespace}, "spec", "sourceNamespaces")).To(Succeed())
+		Expect(k8sClient.Create(ctx, appProject)).To(Succeed())
+
+		createTestProduct(ctx, testProductName, deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion})
+		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Order{
+			Name:      order,
+			Namespace: testNamespace,
+			Spec: deliveryv1alpha1.OrderSpec{
+				EnvironmentRef: deliveryv1alpha1.EnvironmentRef{Name: envName},
+				ProductRef:     deliveryv1alpha1.ProductRef{Name: testProductName},
+				Promotion:      &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
+			},
+		})).To(Succeed())
+		p := createTestPreparation(ctx, prep, order, digest, nil)
+		markPreparationReady(ctx, registry, client.ObjectKeyFromObject(p))
+		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Serving{
+			Name:      order,
+			Namespace: testNamespace,
+			Spec:      deliveryv1alpha1.ServingSpec{OrderName: order, PreparationName: prep},
+		})).To(Succeed())
+	})
+
+	AfterAll(func() {
+		s := &deliveryv1alpha1.Serving{}
+		if k8sClient.Get(ctx, key, s) == nil {
+			s.SetFinalizers(nil)
+			_ = k8sClient.Update(ctx, s)
+			_ = k8sClient.Delete(ctx, s)
+		}
+		_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Preparation{Name: prep, Namespace: testNamespace})
+		_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Order{Name: order, Namespace: testNamespace})
+		_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Environment{Name: envName, Namespace: testNamespace})
+		for _, name := range []string{eu, us} {
+			_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Cluster{Name: name, Namespace: testNamespace})
+		}
+		appProject := newAppProject()
+		appProject.SetNamespace(argoNamespace)
+		appProject.SetName(project)
+		_ = k8sClient.Delete(ctx, appProject)
+		_ = k8sClient.DeleteAllOf(ctx, argocd.New(), client.InNamespace(argoNamespace),
+			client.MatchingLabels{deliveryv1alpha1.LabelServing: order})
+	})
+
+	It("deploys to every cluster of its Environment, into the Preparation's target namespace, through an Application each", func() {
+		reconcileServing()
+
+		Expect(targetClusters()).To(Equal([]string{eu, us}))
+		for clusterName, server := range servers {
+			app, err := application(clusterName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(app.GetLabels()).To(HaveKeyWithValue(deliveryv1alpha1.LabelCluster, clusterName))
+			Expect(app.Object).To(HaveKeyWithValue("spec", And(
+				HaveKeyWithValue("project", project),
+				HaveKeyWithValue("destination", map[string]any{keyServer: server, keyNamespace: testNamespace}))))
+		}
+		s := getServing()
+		Expect(ready(s.Status.Conditions)).To(And(HaveField("Reason", deliveryv1alpha1.ReasonDeploying),
+			HaveField("Message", ContainSubstring("to srv-eu, srv-us"))))
+		Expect(s.Status.Clusters).To(Equal(&deliveryv1alpha1.DeploymentClusters{Selected: 2, Progressing: 2}))
+		Expect(ready(s.Status.Targets[0].Conditions)).To(HaveField("Reason", deliveryv1alpha1.ReasonProgressing))
+	})
+
+	It("is deployed once every cluster runs the Preparation healthily", func() {
+		reportHealthy(eu)
+		reconcileServing()
+		s := getServing()
+		Expect(ready(s.Status.Conditions).Reason).To(Equal(deliveryv1alpha1.ReasonDeploying))
+		Expect(s.Status.Clusters).To(Equal(&deliveryv1alpha1.DeploymentClusters{Selected: 2, Healthy: 1, Progressing: 1}))
+		Expect(targetClusters()).To(Equal([]string{us}), "a healthy cluster is counted, not listed")
+		Expect(healthyDigest(s)).To(BeEmpty(), "one cluster does not make the deployment healthy")
+
+		reportHealthy(us)
+		reconcileServing()
+		s = getServing()
+		Expect(ready(s.Status.Conditions)).To(HaveField("Reason", deliveryv1alpha1.ReasonDeployed))
+		Expect(s.Status.Targets).To(BeEmpty())
+		Expect(healthyDigest(s)).To(Equal(digest))
+		Expect(s.Status.History[0].DeploymentRecord).NotTo(BeEmpty())
+	})
+
+	It("stops deploying to a cluster that leaves the Environment, and keeps the others", func() {
+		labelCluster(us, testRetired)
+
+		reconcileServing()
+		Expect(getServing().Status.Clusters).To(HaveField("Selected", BeEquivalentTo(1)))
+		_, err := application(us)
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+		_, err = application(eu)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ready(getServing().Status.Conditions).Reason).To(Equal(deliveryv1alpha1.ReasonDeployed))
+	})
+
+	It("holds a target whose Cluster is not Ready, and stays deployed on the others", func() {
+		labelCluster(us, testEdge)
+		setClusterStatus(us, deliveryv1alpha1.ReasonUnreachable)
+
+		reconcileServing()
+		s := getServing()
+		Expect(s.Status.Clusters).To(HaveField("Held", BeEquivalentTo(1)))
+		Expect(ready(s.Status.Targets[0].Conditions)).To(And(HaveField("Reason", deliveryv1alpha1.ReasonClusterNotReady),
+			HaveField("Message", ContainSubstring("cannot be reached"))))
+		_, err := application(us)
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+		Expect(ready(s.Status.Conditions)).To(And(HaveField("Reason", deliveryv1alpha1.ReasonDeployed),
+			HaveField("Message", ContainSubstring("not ready: "+us))), "a Cluster that is not Ready does not hold the others back")
+
+		setClusterStatus(us, deliveryv1alpha1.ReasonReady)
+		reconcileServing()
+		_, err = application(us)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("deploys once to a server two of its Clusters connect to", func() {
+		c := &deliveryv1alpha1.Cluster{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: us}, c)).To(Succeed())
+		c.Status.Server = servers[eu]
+		Expect(k8sClient.Status().Update(ctx, c)).To(Succeed())
+
+		reconcileServing()
+		Expect(ready(getServing().Status.Targets[0].Conditions)).To(And(HaveField("Reason", deliveryv1alpha1.ReasonClusterConflict),
+			HaveField("Message", ContainSubstring("as Cluster "+eu+" does"))))
+
+		setClusterStatus(us, deliveryv1alpha1.ReasonReady)
+		reconcileServing()
+		Expect(targetReasons()).NotTo(ContainElement(deliveryv1alpha1.ReasonClusterConflict))
+	})
+
+	It("holds a target Argo CD rejects, with Argo CD's message", func() {
+		app, err := application(eu)
+		Expect(err).NotTo(HaveOccurred())
+		app.Object[statusField] = map[string]any{"conditions": []any{map[string]any{
+			"type": "InvalidSpecError", "message": "application destination is not permitted in project",
+		}}}
+		Expect(k8sClient.Status().Update(ctx, app)).To(Succeed())
+
+		reconcileServing()
+		Expect(ready(getServing().Status.Targets[0].Conditions)).To(And(HaveField("Reason", deliveryv1alpha1.ReasonRejected),
+			HaveField("Message", ContainSubstring("is not permitted in project"))))
+
+		reportHealthy(eu)
+		reconcileServing()
+		Expect(targetReasons()).NotTo(ContainElement(deliveryv1alpha1.ReasonRejected))
+	})
+
+	It("does not deploy to a cluster whose kubelet cannot reach the bundled registry", func() {
+		template := &deliveryv1alpha1.Preparation{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: prep}, template)).To(Succeed())
+		vendored := &deliveryv1alpha1.Preparation{Name: prep + "-vendored", Namespace: testNamespace, Spec: template.Spec}
+		vendored.Spec.Images = []deliveryv1alpha1.PreparationImage{{
+			Ref:      "ghcr.io/stefanprodan/podinfo:6.14.1",
+			Name:     "ghcr.io/stefanprodan/podinfo",
+			Vendored: artifact.DefaultRegistryHost + "/default/vendor/images/ghcr.io/stefanprodan/podinfo:6.14.1@" + digest,
+		}}
+		Expect(k8sClient.Create(ctx, vendored)).To(Succeed())
+		markPreparationReady(ctx, registry, client.ObjectKeyFromObject(vendored))
+		s := getServing()
+		s.Spec.PreparationName = vendored.Name
+		Expect(k8sClient.Update(ctx, s)).To(Succeed())
+
+		reconcileServing()
+		s = getServing()
+		Expect(s.Status.Targets).To(HaveLen(2))
+		Expect(ready(s.Status.Targets[0].Conditions)).To(HaveField("Reason", deliveryv1alpha1.ReasonRegistryUnreachable))
+		Expect(ready(s.Status.Conditions)).To(HaveField("Reason", deliveryv1alpha1.ReasonDeploymentFailed))
+
+		s.Spec.PreparationName = prep
+		Expect(k8sClient.Update(ctx, s)).To(Succeed())
+		reconcileServing()
+		Expect(targetReasons()).NotTo(ContainElement(deliveryv1alpha1.ReasonRegistryUnreachable))
+		Expect(k8sClient.Delete(ctx, vendored)).To(Succeed())
+	})
+
+	It("does not deploy through an AppProject that does not admit its namespace, whatever the Environment reports", func() {
+		admitNamespaces("team-*")
+		setEnvironmentReady()
+
+		reconcileServing()
+		s := getServing()
+		Expect(ready(s.Status.Conditions)).To(And(HaveField("Reason", deliveryv1alpha1.ReasonProjectNotPermitted),
+			HaveField("Message", ContainSubstring("does not admit namespace "+testNamespace))))
+		Expect(s.Status.Targets).To(BeEmpty())
+		_, err := application(eu)
+		Expect(errors.IsNotFound(err)).To(BeTrue(), "it stops deploying there")
+
+		admitNamespaces(testNamespace)
+		reconcileServing()
+		_, err = application(eu)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("holds a new Preparation that does not run after the stages its Environment requires", func() {
+		env := &deliveryv1alpha1.Environment{}
+		Expect(k8sClient.Get(ctx, envKey, env)).To(Succeed())
+		env.Spec.Promotion = &deliveryv1alpha1.EnvironmentPromotion{
+			RequireAfter: []deliveryv1alpha1.RequiredEnvironment{{Environment: "pre-edge", MinSoakSeconds: 60}},
+		}
+		Expect(k8sClient.Update(ctx, env)).To(Succeed())
+		next := createTestPreparation(ctx, prep+"-next", order, "sha256:6666666666666666666666666666666666666666666666666666666666666666", nil)
+		markPreparationReady(ctx, registry, client.ObjectKeyFromObject(next))
+		s := getServing()
+		s.Spec.PreparationName = next.Name
+		Expect(k8sClient.Update(ctx, s)).To(Succeed())
+
+		reconcileServing()
+		s = getServing()
+		Expect(apimeta.FindStatusCondition(s.Status.Conditions, deliveryv1alpha1.ConditionTypeUpstreamDeployed)).To(And(
+			HaveField("Reason", deliveryv1alpha1.ReasonPipelineRequired),
+			HaveField("Message", ContainSubstring("an Order of Environment pre-edge with a soak of at least 60s"))))
+		Expect(s.DeployedPreparationName()).To(Equal(prep), "the deployed Preparation keeps running")
+
+		By("letting a rollback to the Preparation it promoted before pass")
+		s.Spec.PreparationName = prep
+		Expect(k8sClient.Update(ctx, s)).To(Succeed())
+		reconcileServing()
+		Expect(apimeta.FindStatusCondition(getServing().Status.Conditions, deliveryv1alpha1.ConditionTypeUpstreamDeployed)).To(BeNil())
+		_ = k8sClient.Delete(ctx, next)
+	})
+
+	It("deletes the Applications of every cluster with the Serving", func() {
+		Expect(k8sClient.Delete(ctx, getServing())).To(Succeed())
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		apps := argocd.NewList()
+		Expect(k8sClient.List(ctx, apps, client.InNamespace(argoNamespace), client.MatchingLabels{deliveryv1alpha1.LabelServing: order})).To(Succeed())
+		Expect(apps.Items).To(BeEmpty())
+	})
+})
+
 var _ = Describe("Serving Applications", func() {
 	const (
 		order  = "podinfo"
@@ -1437,16 +1779,17 @@ var _ = Describe("Serving Applications", func() {
 
 	BeforeEach(func() {
 		registry = oci.NewFakeClient(nil)
-		createArgoNamespace(ctx)
 		for _, ns := range namespaces {
 			if ns != testNamespace {
 				_ = k8sClient.Create(ctx, &corev1.Namespace{Name: ns})
+				createLocalEnvironment(ctx, ns)
 			}
 			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Order{
 				Name: order, Namespace: ns,
 				Spec: deliveryv1alpha1.OrderSpec{
-					ProductRef: deliveryv1alpha1.ProductRef{Name: testProductName},
-					Promotion:  &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
+					EnvironmentRef: localEnvironment,
+					ProductRef:     deliveryv1alpha1.ProductRef{Name: testProductName},
+					Promotion:      &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
 				},
 			})).To(Succeed())
 			var p *deliveryv1alpha1.Preparation
@@ -1459,8 +1802,6 @@ var _ = Describe("Serving Applications", func() {
 				p = &deliveryv1alpha1.Preparation{Name: prep, Namespace: ns, Spec: template.Spec}
 				p.Spec.Artifact.Digest = "sha256:7878787878787878787878787878787878787878787878787878787878787878"
 				p.Spec.Artifact.OCIRef = "oci://registry.kokumi.svc.cluster.local:5000/" + ns + "/" + order + "@" + p.Spec.Artifact.Digest
-				// Rendered for a namespace other than its Order's.
-				p.Spec.TargetNamespace = "srv-webshop"
 				Expect(k8sClient.Create(ctx, p)).To(Succeed())
 			}
 			markPreparationReady(ctx, registry, client.ObjectKeyFromObject(p))
@@ -1499,10 +1840,6 @@ var _ = Describe("Serving Applications", func() {
 			app := argocd.New()
 			Expect(k8sClient.Get(ctx, keys[ns], app)).To(Succeed())
 			Expect(app.GetAnnotations()).To(HaveKeyWithValue(deliveryv1alpha1.AnnotationAllowedOrder, ns+"/"+order))
-			p := &deliveryv1alpha1.Preparation{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: prep}, p)).To(Succeed())
-			Expect(app.Object).To(HaveKeyWithValue("spec", HaveKeyWithValue("destination", HaveKeyWithValue("namespace", p.Spec.TargetNamespace))),
-				"a Preparation deploys into the namespace it was rendered for")
 		}
 		Expect(keys[namespaces[0]]).NotTo(Equal(keys[namespaces[1]]))
 
@@ -1518,9 +1855,8 @@ var _ = Describe("Serving Applications", func() {
 
 	It("deploys nothing while Argo CD is not installed, and says so", func() {
 		r := newServingReconciler(registry)
-		missing := &atomic.Bool{}
-		missing.Store(true)
-		r.Client = withoutArgoCD{Client: k8sClient, missing: missing}
+		engine := &notInstalled{argoCD: &argoCD{Client: k8sClient}, missing: true}
+		r.deployers = map[deliveryv1alpha1.DeployerType]servingDeployer{deliveryv1alpha1.DeployerTypeArgoCD: engine}
 		key := types.NamespacedName{Namespace: testNamespace, Name: order}
 		_, err := settleServing(ctx, r, key)
 		Expect(err).NotTo(HaveOccurred())
@@ -1531,50 +1867,132 @@ var _ = Describe("Serving Applications", func() {
 			HaveField("Reason", deliveryv1alpha1.ReasonArgoCDNotInstalled))
 		Expect(apimeta.FindStatusCondition(s.Status.Conditions, deliveryv1alpha1.ConditionTypeVerified)).To(
 			HaveField("Status", metav1.ConditionTrue), "the gates still run")
-		Expect(errors.IsNotFound(k8sClient.Get(ctx, appKey(order), argocd.New()))).To(BeTrue())
+		Expect(errors.IsNotFound(k8sClient.Get(ctx, argocd.Key(s, cluster.InCluster), argocd.New()))).To(BeTrue())
 
 		By("deploying once Argo CD is installed")
-		missing.Store(false)
+		engine.missing = false
 		_, err = settleServing(ctx, r, key)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(k8sClient.Get(ctx, appKey(order), argocd.New())).To(Succeed())
-	})
-
-	It("lets a Serving go while Argo CD is not installed", func() {
-		r := newServingReconciler(registry)
-		missing := &atomic.Bool{}
-		missing.Store(true)
-		r.Client = withoutArgoCD{Client: k8sClient, missing: missing}
-		key := types.NamespacedName{Namespace: testNamespace, Name: order}
-		_, err := settleServing(ctx, r, key)
-		Expect(err).NotTo(HaveOccurred())
-
-		s := &deliveryv1alpha1.Serving{}
-		Expect(k8sClient.Get(ctx, key, s)).To(Succeed())
-		Expect(k8sClient.Delete(ctx, s)).To(Succeed())
-		_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
-		Expect(err).NotTo(HaveOccurred())
-		Expect(errors.IsNotFound(k8sClient.Get(ctx, key, s))).To(BeTrue(), "without Argo CD there is no Application to delete")
+		Expect(k8sClient.Get(ctx, argocd.Key(s, cluster.InCluster), argocd.New())).To(Succeed())
 	})
 })
 
-// withoutArgoCD reads Argo CD's kinds as the API server does while their
-// CRDs are not installed, as long as missing is set.
-type withoutArgoCD struct {
-	client.Client
-	missing *atomic.Bool
+// notInstalled is Argo CD's engine as it is without its CRDs while missing
+// is set, and as it is otherwise.
+type notInstalled struct {
+	*argoCD
+	missing bool
 }
 
-func (c withoutArgoCD) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-	if _, ok := obj.(*unstructured.Unstructured); ok && c.missing.Load() {
-		return &apimeta.NoKindMatchError{GroupKind: argocd.GroupVersionKind.GroupKind()}
+func (n *notInstalled) Admit(ctx context.Context, env *deliveryv1alpha1.Environment) (admission, error) {
+	if n.missing {
+		return admission{deliveryv1alpha1.ReasonArgoCDNotInstalled, "Argo CD's CRDs are not installed"}, nil
 	}
-	return c.Client.Get(ctx, key, obj, opts...)
+	return n.argoCD.Admit(ctx, env)
 }
 
-func (c withoutArgoCD) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
-	if _, ok := list.(*unstructured.UnstructuredList); ok && c.missing.Load() {
-		return &apimeta.NoKindMatchError{GroupKind: argocd.GroupVersionKind.GroupKind()}
+var _ = Describe("Serving targets", func() {
+	// unready is a cluster whose Cluster is not Ready.
+	const unready = "down"
+	const digest = "sha256:8989898989898989898989898989898989898989898989898989898989898989"
+	deployed := &promotion.Entry{Preparation: "web-p1", Digest: digest}
+	healthy := targetState{health: promotion.HealthHealthy, revision: digest}
+	ready := func(t deliveryv1alpha1.DeploymentTarget) *metav1.Condition {
+		return apimeta.FindStatusCondition(t.Conditions, deliveryv1alpha1.ConditionTypeReady)
 	}
-	return c.Client.List(ctx, list, opts...)
-}
+	readyCluster := func(name, server string) *deliveryv1alpha1.Cluster {
+		c := &deliveryv1alpha1.Cluster{Name: name, Namespace: testWorkspace, Status: deliveryv1alpha1.ClusterStatus{Server: server},
+			Spec: deliveryv1alpha1.ClusterSpec{Connection: deliveryv1alpha1.ClusterConnectionKubeconfig}}
+		conditions.MarkTrue(c, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonReady, "ready")
+		return c
+	}
+
+	It("lists held, then degraded, then progressing targets, at most 64, with short messages, and counts them all", func() {
+		targets := make([]deployTarget, 0, 73)
+		states := map[string]targetState{}
+		for i := range 70 {
+			name := fmt.Sprintf("progressing-%02d", i)
+			targets = append(targets, deployTarget{cluster: name})
+			states[name] = targetState{health: promotion.HealthProgressing, revision: digest}
+		}
+		targets = append(targets,
+			deployTarget{cluster: "healthy"},
+			deployTarget{cluster: "degraded"},
+			deployTarget{cluster: "held", holdReason: deliveryv1alpha1.ReasonClusterNotReady, holdMessage: strings.Repeat("x", 4096)})
+		states["healthy"] = healthy
+		states["degraded"] = targetState{health: promotion.HealthDegraded, revision: digest}
+		serving := &deliveryv1alpha1.Serving{}
+
+		setTargets(serving, deployed, targets, states)
+		Expect(serving.Status.Clusters).To(Equal(&deliveryv1alpha1.DeploymentClusters{
+			Selected: 73, Healthy: 1, Degraded: 1, Held: 1, Progressing: 70,
+		}))
+		Expect(serving.Status.Targets).To(HaveLen(maxListedTargets))
+		Expect(serving.Status.Targets[0].Cluster).To(Equal("held"))
+		Expect(len(ready(serving.Status.Targets[0]).Message)).To(BeNumerically("<=", maxTargetMessageLength))
+		Expect(serving.Status.Targets[1].Cluster).To(Equal("degraded"))
+		Expect(serving.Status.Targets[2].Cluster).To(Equal("progressing-00"))
+	})
+
+	It("is healthy once every target whose Cluster is Ready is, and degraded once one is", func() {
+		targets := []deployTarget{
+			{cluster: "eu"}, {cluster: "us"},
+			{cluster: unready, holdReason: deliveryv1alpha1.ReasonClusterNotReady},
+		}
+		Expect(observationOf(deployed, targets, map[string]targetState{"eu": healthy}).Health).To(Equal(promotion.HealthProgressing))
+		Expect(observationOf(deployed, targets, map[string]targetState{"eu": healthy, "us": healthy})).To(Equal(
+			promotion.Observation{Revision: digest, Health: promotion.HealthHealthy}), "a Cluster that is not Ready does not count")
+		Expect(observationOf(deployed, targets, map[string]targetState{
+			"eu": healthy, "us": {health: promotion.HealthDegraded, revision: digest},
+		}).Health).To(Equal(promotion.HealthDegraded))
+		Expect(observationOf(deployed, targets, map[string]targetState{
+			"eu": healthy, "us": {health: promotion.HealthHealthy, revision: "sha256:other"},
+		}).Health).To(Equal(promotion.HealthProgressing), "the health of another revision says nothing")
+		Expect(observationOf(deployed, targets[2:], nil).Health).To(Equal(promotion.HealthProgressing), "no Cluster is Ready")
+	})
+
+	It("names at most five failures in Ready, and the Clusters that are not Ready", func() {
+		targets := make([]deployTarget, 0, 8)
+		for i := range 7 {
+			targets = append(targets, deployTarget{cluster: fmt.Sprintf("held-%d", i), holdReason: deliveryv1alpha1.ReasonRejected, holdMessage: "refused"})
+		}
+		targets = append(targets, deployTarget{cluster: unready, holdReason: deliveryv1alpha1.ReasonClusterNotReady, holdMessage: "unreachable"})
+		serving := &deliveryv1alpha1.Serving{}
+		setTargets(serving, deployed, targets, nil)
+
+		markDeployment(serving, deployed, targets, observationOf(deployed, targets, nil))
+		condition := apimeta.FindStatusCondition(serving.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)
+		Expect(condition.Reason).To(Equal(deliveryv1alpha1.ReasonDeploymentFailed))
+		Expect(condition.Message).To(SatisfyAll(ContainSubstring("failed on 7 of 8 clusters"), HaveSuffix("; and 2 more")))
+
+		targets = []deployTarget{{cluster: "eu"}, {cluster: unready, holdReason: deliveryv1alpha1.ReasonClusterNotReady}}
+		states := map[string]targetState{"eu": healthy}
+		setTargets(serving, deployed, targets, states)
+		markDeployment(serving, deployed, targets, observationOf(deployed, targets, states))
+		condition = apimeta.FindStatusCondition(serving.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)
+		Expect(condition.Reason).To(Equal(deliveryv1alpha1.ReasonDeployed))
+		Expect(condition.Message).To(Equal("Deployed Preparation web-p1 to eu; not ready: down"))
+
+		targets = targets[1:]
+		setTargets(serving, deployed, targets, nil)
+		markDeployment(serving, deployed, targets, observationOf(deployed, targets, nil))
+		Expect(apimeta.FindStatusCondition(serving.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)).To(And(
+			HaveField("Reason", deliveryv1alpha1.ReasonDeploymentFailed), HaveField("Message", ContainSubstring("no Cluster of the Environment is ready"))))
+	})
+
+	It("holds a Cluster that is not Ready, the second of two for one server, and one whose kubelet cannot pull", func() {
+		servers := map[string]string{}
+		Expect(targetOf(readyCluster("a", "https://one.example/"), "web", "", servers).holdReason).To(BeEmpty())
+		Expect(targetOf(readyCluster("b", "https://one.example"), "web", "", servers).holdReason).To(Equal(deliveryv1alpha1.ReasonClusterConflict))
+
+		unready := readyCluster("c", "https://two.example")
+		conditions.MarkFalse(unready, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonUnauthorized, "rejected")
+		held := targetOf(unready, "web", "", servers)
+		Expect(held.holdReason).To(Equal(deliveryv1alpha1.ReasonClusterNotReady))
+		Expect(held.holdMessage).To(ContainSubstring("rejected"))
+		Expect(targetOf(&deliveryv1alpha1.Cluster{Name: "new"}, "web", "", servers).holdMessage).To(ContainSubstring("not been checked yet"))
+
+		Expect(targetOf(readyCluster("d", "https://three.example"), "web", "registry.kokumi:5000/img", servers).holdReason).
+			To(Equal(deliveryv1alpha1.ReasonRegistryUnreachable))
+	})
+})

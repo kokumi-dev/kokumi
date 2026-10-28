@@ -334,11 +334,11 @@ func clusterRequests(clusters []deliveryv1alpha1.Cluster) []ctrl.Request {
 	return reqs
 }
 
-// clusterChanged passes the Cluster updates that change which Environments
-// select it and what they report about it: its labels, which Environments
-// select it by, its connection, its server, its readiness, and the start of
-// its deletion. The probes that find a cluster as it was pass nothing.
-// Creates and deletes always pass.
+// clusterChanged passes the Cluster updates that change where Orders deploy
+// or whether they can: its labels, which Environments select it by, its
+// connection, its server, its readiness, and the start of its deletion. The
+// probes that find a cluster as it was pass nothing. Creates and deletes
+// always pass.
 var clusterChanged = predicate.Funcs{
 	UpdateFunc: func(e event.UpdateEvent) bool {
 		before, okOld := e.ObjectOld.(*deliveryv1alpha1.Cluster)

@@ -68,7 +68,7 @@ func TestPromotionStatement(t *testing.T) {
 func TestDeploymentStatement(t *testing.T) {
 	healthy := healthyEntry("podinfo-staging-77", revision2, t0.Add(24*time.Hour))
 	healthy.DeploymentRecord = ""
-	targets := []Target{{Server: "https://kubernetes.default.svc", Namespace: "shop"}}
+	targets := []Target{{Cluster: "in-cluster", Server: "https://kubernetes.default.svc", Namespace: "shop"}}
 
 	statement, err := DeploymentStatement(stagingKey, healthy, targets)
 	require.NoError(t, err)

@@ -133,8 +133,11 @@ type DeploymentPredicate struct {
 	Targets []Target `json:"targets"`
 }
 
-// Target is a cluster and namespace a Preparation is deployed to.
+// Target is a cluster and namespace a Preparation is deployed to. The
+// cluster is named by its Cluster, in the Serving's namespace; the server
+// says which cluster that was when the record was made.
 type Target struct {
+	Cluster   string `json:"cluster"`
 	Server    string `json:"server"`
 	Namespace string `json:"namespace"`
 }

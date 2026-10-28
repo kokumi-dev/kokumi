@@ -46,8 +46,8 @@ type EffectiveSpec struct {
 	// ProductRevision is the Product revision the spec renders (see
 	// ProductRevision).
 	ProductRevision string
-	// TargetNamespace is the namespace the Order deploys into (see
-	// TargetNamespace).
+	// TargetNamespace is the namespace the Order deploys into on every
+	// cluster (see TargetNamespace).
 	TargetNamespace string
 }
 
@@ -121,8 +121,9 @@ func ForProduct(product *deliveryv1alpha1.Product, order *deliveryv1alpha1.Order
 	return effective, nil
 }
 
-// TargetNamespace returns the namespace order deploys into: its own
-// targetNamespace, else its Product's, else the Order's namespace.
+// TargetNamespace returns the namespace order deploys into on every cluster
+// of its Environment: its own targetNamespace, else its Product's, else the
+// Order's namespace.
 func TargetNamespace(product *deliveryv1alpha1.Product, order *deliveryv1alpha1.Order) string {
 	return cmp.Or(order.Spec.TargetNamespace, product.Spec.TargetNamespace, order.Namespace)
 }

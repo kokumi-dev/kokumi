@@ -21,6 +21,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -28,7 +31,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -50,6 +52,7 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/promotion"
 	"github.com/kokumi-dev/kokumi/internal/registry"
+	"github.com/kokumi-dev/kokumi/internal/resolve"
 	"github.com/kokumi-dev/kokumi/internal/signing"
 	"github.com/kokumi-dev/kokumi/internal/vulnerability"
 )
@@ -74,11 +77,38 @@ type servingSigning interface {
 	OnChange(notify func())
 }
 
+// servingDeployer deploys Servings through the engine of their Order's
+// Environment. argoCD implements it.
+type servingDeployer interface {
+	// Admit reports whether Orders of env may deploy through the engine.
+	Admit(ctx context.Context, env *deliveryv1alpha1.Environment) (admission, error)
+	// Apply points the deployment of serving on target at deployed, and
+	// returns what the engine reports there.
+	Apply(ctx context.Context, env *deliveryv1alpha1.Environment, serving *deliveryv1alpha1.Serving,
+		deployed *promotion.Entry, target deployTarget) (targetState, error)
+	// Remove deletes the deployments of serving on the clusters keep does
+	// not hold, all of them for nil, and returns those clusters.
+	Remove(ctx context.Context, serving *deliveryv1alpha1.Serving, keep map[string]bool) ([]string, error)
+}
+
+// targetState is what an engine reports on the deployment of a Serving to
+// one cluster.
+type targetState struct {
+	// health is how the deployment stands at revision.
+	health promotion.Health
+	// revision is the artifact digest the engine reports synced there.
+	revision string
+	message  string
+	// held is the reason the engine does not deploy there, "" when it
+	// does; message says why.
+	held string
+}
+
 // ServingReconciler reconciles a Serving object. It promotes the Preparation
-// the Serving converges to once it passes its gates, deploys it through an
-// Argo CD Application, which lives in the argocd namespace and is deleted
-// with the Serving, and records every promotion and every healthy
-// deployment in the Serving's history and, signed, in the registry.
+// the Serving converges to once it passes its gates, deploys it to every
+// cluster of the Order's Environment through the Environment's engine, and
+// records every promotion and every healthy deployment in the Serving's
+// history and, signed, in the registry.
 type ServingReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -92,6 +122,9 @@ type ServingReconciler struct {
 	// InstallNamespace holds the Kitchen, whose scanning interval sets the
 	// default age of the scans a check accepts.
 	InstallNamespace string
+	// BundledRegistryHost is the host of the bundled registry, which only the
+	// cluster Kokumi runs in reaches.
+	BundledRegistryHost string
 
 	// artifacts remembers the Preparations whose evidence verified.
 	artifacts evidence.Verifier
@@ -99,6 +132,10 @@ type ServingReconciler struct {
 	records promotion.RecordVerifier
 	// reports remembers the findings of verified vulnerability reports.
 	reports vulnerability.Reports
+
+	// deployers deploy through the engines of Environments, by deployer
+	// type. Tests set them; Argo CD's by default.
+	deployers map[deliveryv1alpha1.DeployerType]servingDeployer
 
 	// now returns the current time. Tests set it.
 	now func() time.Time
@@ -113,8 +150,11 @@ type ServingReconciler struct {
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=registries,verbs=get;list;watch
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=products,verbs=get;list;watch
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=kitchens,verbs=get;list;watch
+// +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=environments,verbs=get;list;watch
+// +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=clusters,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=argoproj.io,resources=applications,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=argoproj.io,resources=appprojects,verbs=get;list;watch
 // +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
 
 // Reconcile deploys the Preparation the Serving converges to and reports on
@@ -166,7 +206,7 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 		setHistory(serving, historyOf(serving).Drop())
 	}
 
-	next, derr := r.deploy(ctx, serving, held)
+	next, derr := r.deploy(ctx, serving, order, held)
 	if err = errors.Join(err, derr); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -265,18 +305,22 @@ func (r *ServingReconciler) promote(
 	return checks.recheck, "", nil
 }
 
-// deploy keeps the Serving's Argo CD Application pointed at the deployed
-// Preparation and records what Argo CD reports on it: the Ready condition,
-// its health in the history and, once it is healthy, its deployment record
-// and the summary of its scans. Ready describes what runs; held, what holds
-// the Preparation the Serving converges to, is added to its message, and is
-// its message while nothing runs. It returns how soon to reconcile again.
-func (r *ServingReconciler) deploy(ctx context.Context, serving *deliveryv1alpha1.Serving, held string) (time.Duration, error) {
+// deploy keeps the deployment of the deployed Preparation current on each
+// target cluster of the Serving, through the engine of its Environment,
+// and records what the engine reports on each: the targets with their
+// Ready conditions, the Serving's Ready condition, its health in the
+// history and, once it is healthy, its deployment record and the summary
+// of its scans. Ready describes what runs; held, what holds the Preparation
+// the Serving converges to, is added to its message, and is its message
+// while nothing runs. It returns how soon to reconcile again.
+func (r *ServingReconciler) deploy(
+	ctx context.Context, serving *deliveryv1alpha1.Serving, order *deliveryv1alpha1.Order, held string,
+) (time.Duration, error) {
 	logger := log.FromContext(ctx)
 
 	history := historyOf(serving)
 	deployed := history.Deployed()
-	if deployed == nil {
+	if deployed == nil || order == nil {
 		if held != "" {
 			markPending(serving, held)
 		}
@@ -288,42 +332,35 @@ func (r *ServingReconciler) deploy(ctx context.Context, serving *deliveryv1alpha
 		}
 	}()
 
-	// The Preparation deploys into the namespace it was rendered for.
-	preparation := &deliveryv1alpha1.Preparation{}
-	if err := r.Get(ctx, client.ObjectKey{Namespace: serving.Namespace, Name: deployed.Preparation}, preparation); err != nil {
-		return 0, fmt.Errorf("failed to get Preparation %q: %w", deployed.Preparation, err)
-	}
-	target := argocd.Target{
-		Cluster: cluster.InCluster, Server: cluster.InClusterServer,
-		Namespace: preparation.Spec.TargetNamespace, Project: argocd.DefaultProject,
-	}
-	app, err := r.applyApplication(ctx, serving, deployed, target)
+	env, targets, reason, msg, err := r.targets(ctx, serving, order, deployed)
 	if err != nil {
-		if meta.IsNoMatchError(err) {
-			// The Application watch reconciles every Serving once the CRD
-			// is installed.
-			conditions.MarkFalse(serving, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonArgoCDNotInstalled,
-				"Argo CD's Application CRD is not installed; install Argo CD to deploy")
-			return 0, nil
+		return 0, err
+	}
+	if reason != "" {
+		// The Order may not deploy at all: Kokumi stops deploying, and the
+		// Environment, Cluster and AppProject watches reconcile again once
+		// that changes.
+		if err := r.remove(ctx, serving, map[string]bool{}); err != nil {
+			return 0, err
 		}
-		if errors.Is(err, argocd.ErrOptInRequired) {
-			// Holds for this generation: the Application watch reports a
-			// change to the opt-in, and a spec change reports itself.
-			logger.Info("Could not update deployment, opt-in required", "error", err.Error())
-			markDeploymentFailed(serving, err.Error())
-			return 0, nil
-		}
+		setTargets(serving, deployed, nil, nil)
+		conditions.MarkFalse(serving, deliveryv1alpha1.ConditionTypeReady, reason, msg)
+		return 0, nil
+	}
+	deployer := r.deployer(env)
+	states, err := r.applyTargets(ctx, deployer, env, serving, deployed, targets)
+	if err != nil {
 		markDeploymentFailed(serving, "failed to deploy: "+err.Error())
 		return 0, fmt.Errorf("failed to deploy: %w", err)
 	}
-
-	state := argocd.StateOf(app)
-	markDeployment(serving, deployed, state)
+	setTargets(serving, deployed, targets, states)
+	observation := observationOf(deployed, targets, states)
+	markDeployment(serving, deployed, targets, observation)
 
 	// A time goes into the status a pass before the record that contains it
 	// goes into the registry, so that a retry pushes equal bytes.
-	if observed, changed := history.Observe(observationOf(state), r.clock()); changed {
-		logger.Info("Recorded deployment state", "preparation", deployed.Preparation, "phase", state.Phase)
+	if observed, changed := history.Observe(observation, r.clock()); changed {
+		logger.Info("Recorded deployment state", "preparation", deployed.Preparation, "health", observation.Health)
 		if now := observed.Deployed(); deployed.Healthy.IsZero() && !now.Healthy.IsZero() {
 			// The summary described what ran before; the next pass
 			// describes the Preparation that is healthy now.
@@ -333,10 +370,273 @@ func (r *ServingReconciler) deploy(ctx context.Context, serving *deliveryv1alpha
 		return historyPassInterval, nil
 	}
 
-	if err := r.recordDeployments(ctx, serving, history); err != nil {
+	if err := r.recordDeployments(ctx, serving, history, targets, states); err != nil {
 		return 0, err
 	}
 	return 0, r.recordDeployedVulnerabilities(ctx, serving, deployed)
+}
+
+// deployTarget is a cluster a Serving deploys to, or, when holdReason is
+// set, would deploy to and cannot.
+type deployTarget struct {
+	// cluster names the Cluster, in the Serving's namespace.
+	cluster string
+	// server is the URL of the cluster's API server.
+	server string
+	// namespace is the namespace on the cluster the Preparation deploys
+	// into: its target namespace.
+	namespace               string
+	holdReason, holdMessage string
+}
+
+// targets returns the Environment of the Serving's Order and the clusters
+// the Serving deploys the deployed Preparation to: every Cluster the
+// Environment selects, into the Preparation's target namespace. The engine
+// of the Environment admits it each time, so that a change of the
+// Environment or of what the engine allows counts at once. A target that
+// cannot be deployed to is held, with the reason and why. When the Order
+// may not deploy at all, it returns no target, with the reason and why.
+func (r *ServingReconciler) targets(
+	ctx context.Context, serving *deliveryv1alpha1.Serving, order *deliveryv1alpha1.Order, deployed *promotion.Entry,
+) (*deliveryv1alpha1.Environment, []deployTarget, string, string, error) {
+	name := order.Spec.EnvironmentRef.Name
+	env := &deliveryv1alpha1.Environment{}
+	if err := r.Get(ctx, client.ObjectKey{Namespace: serving.Namespace, Name: name}, env); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, nil, deliveryv1alpha1.ReasonEnvironmentNotFound,
+				fmt.Sprintf("Environment %q does not exist in namespace %s", name, serving.Namespace), nil
+		}
+		return nil, nil, "", "", fmt.Errorf("failed to get Environment %q: %w", name, err)
+	}
+	clusters := &deliveryv1alpha1.ClusterList{}
+	if err := r.List(ctx, clusters, client.InNamespace(serving.Namespace), client.UnsafeDisableDeepCopy); err != nil {
+		return nil, nil, "", "", fmt.Errorf("failed to list Clusters: %w", err)
+	}
+	// In the order the Environment reports them: its selector, then its
+	// engine.
+	selected, err := resolve.SelectedClusters(env, clusters.Items)
+	switch {
+	case err != nil:
+		return env, nil, deliveryv1alpha1.ReasonInvalidSelector, fmt.Sprintf("Environment %s: clusterSelector: %v", name, err), nil
+	case len(selected) == 0:
+		return env, nil, deliveryv1alpha1.ReasonNoClusters,
+			fmt.Sprintf("Environment %s selects no Cluster in namespace %s", name, serving.Namespace), nil
+	}
+	admitted, err := r.deployer(env).Admit(ctx, env)
+	if err != nil {
+		return nil, nil, "", "", err
+	}
+	if admitted.reason != "" {
+		return env, nil, admitted.reason, fmt.Sprintf("Environment %s: %s", name, admitted.message), nil
+	}
+
+	preparation := &deliveryv1alpha1.Preparation{}
+	if err := r.Get(ctx, client.ObjectKey{Namespace: serving.Namespace, Name: deployed.Preparation}, preparation); err != nil {
+		return nil, nil, "", "", fmt.Errorf("failed to get Preparation %q: %w", deployed.Preparation, err)
+	}
+	bundled := r.bundledPull(preparation)
+	servers := map[string]string{}
+	targets := make([]deployTarget, 0, len(selected))
+	for _, c := range selected {
+		targets = append(targets, targetOf(c, preparation.Spec.TargetNamespace, bundled, servers))
+	}
+	return env, targets, "", "", nil
+}
+
+// targetOf returns the target of the Cluster c, deploying into namespace.
+// bundled is an image the kubelet would pull from the bundled registry.
+// servers maps the servers of the targets before it, in name order, to
+// their Clusters: of two Clusters for one server, only the first deploys.
+func targetOf(c *deliveryv1alpha1.Cluster, namespace, bundled string, servers map[string]string) deployTarget {
+	inCluster := c.Spec.Connection == deliveryv1alpha1.ClusterConnectionInCluster
+	target := deployTarget{cluster: c.Name, server: c.Status.Server, namespace: namespace}
+	if inCluster {
+		target.server = cluster.InClusterServer
+	}
+
+	ready := meta.FindStatusCondition(c.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)
+	switch first, taken := servers[serverKey(target.server)]; {
+	case ready == nil || ready.Status != metav1.ConditionTrue:
+		msg := "Cluster " + c.Name + " has not been checked yet"
+		if ready != nil {
+			msg = fmt.Sprintf("Cluster %s is not ready: %s", c.Name, ready.Message)
+		}
+		target.holdReason, target.holdMessage = deliveryv1alpha1.ReasonClusterNotReady, msg
+		return target
+	case taken:
+		target.holdReason, target.holdMessage = deliveryv1alpha1.ReasonClusterConflict, fmt.Sprintf(
+			"Cluster %s connects to %s, as Cluster %s does, which deploys there; one cluster is one Cluster", c.Name, target.server, first)
+	case !inCluster && bundled != "":
+		target.holdReason, target.holdMessage = deliveryv1alpha1.ReasonRegistryUnreachable, fmt.Sprintf(
+			"The kubelet would pull %s from the bundled registry, which only the cluster Kokumi runs in reaches; vendor the images to a registry every cluster reaches",
+			bundled)
+	}
+	if _, taken := servers[serverKey(target.server)]; !taken {
+		servers[serverKey(target.server)] = c.Name
+	}
+	return target
+}
+
+// deployer returns the engine of env.
+func (r *ServingReconciler) deployer(env *deliveryv1alpha1.Environment) servingDeployer {
+	if d, ok := r.deployers[env.Spec.Deployer.Type]; ok {
+		return d
+	}
+	return &argoCD{Client: r.Client, namespace: r.InstallNamespace}
+}
+
+// remove stops the Serving's deployments on the clusters keep does not
+// hold, through every engine, all of them for nil, and records an Event for
+// each cluster it stops deploying to while keep is set. What runs there
+// keeps running.
+func (r *ServingReconciler) remove(ctx context.Context, serving *deliveryv1alpha1.Serving, keep map[string]bool) error {
+	deployers := slices.Collect(maps.Values(r.deployers))
+	if len(deployers) == 0 {
+		deployers = []servingDeployer{&argoCD{Client: r.Client, namespace: r.InstallNamespace}}
+	}
+	for _, d := range deployers {
+		removed, err := d.Remove(ctx, serving, keep)
+		if keep != nil && r.Recorder != nil {
+			for _, c := range removed {
+				r.Recorder.Eventf(serving, nil, corev1.EventTypeNormal, "Undeployed", "Undeploy",
+					"Stopped deploying to cluster %s; what runs there keeps running", c)
+			}
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// bundledPull returns an image the kubelet pulls from the bundled registry
+// to run preparation, "" when it pulls none from there.
+func (r *ServingReconciler) bundledPull(preparation *deliveryv1alpha1.Preparation) string {
+	for _, img := range preparation.Spec.Images {
+		pulled := cmp.Or(img.Vendored, img.Name, img.Ref)
+		if r.BundledRegistryHost != "" && strings.HasPrefix(strings.TrimPrefix(pulled, "oci://"), r.BundledRegistryHost+"/") {
+			return pulled
+		}
+	}
+	return ""
+}
+
+// applyTargets keeps the deployment of every target that is not held
+// pointed at the deployed Preparation, and stops deploying to the clusters
+// that are no target any more. It returns what the engine reports on each
+// target, keyed by cluster; a target the engine does not deploy to gets
+// held with the engine's reason.
+func (r *ServingReconciler) applyTargets(
+	ctx context.Context, deployer servingDeployer, env *deliveryv1alpha1.Environment,
+	serving *deliveryv1alpha1.Serving, deployed *promotion.Entry, targets []deployTarget,
+) (map[string]targetState, error) {
+	states := map[string]targetState{}
+	keep := map[string]bool{}
+	for i := range targets {
+		target := &targets[i]
+		keep[target.cluster] = true
+		if target.holdReason != "" {
+			continue
+		}
+		state, err := deployer.Apply(ctx, env, serving, deployed, *target)
+		if err != nil {
+			return nil, err
+		}
+		if state.held != "" {
+			// Holds until the engine reports a change, which its watch
+			// passes on, or the spec changes.
+			target.holdReason, target.holdMessage = state.held, state.message
+			continue
+		}
+		states[target.cluster] = state
+	}
+	return states, r.remove(ctx, serving, keep)
+}
+
+// maxListedFailures is how many failing clusters the Ready message of a
+// Serving describes; it counts the others.
+const maxListedFailures = 5
+
+// maxListedTargets is how many targets that do not run the deployed
+// Preparation healthily a Serving's status lists; it counts them all.
+const maxListedTargets = 64
+
+// maxTargetMessageLength is the most a target's Ready message holds, so that
+// the status of a Serving with many targets stays small.
+const maxTargetMessageLength = 1024
+
+// setTargets counts the targets of the Serving by the state of their
+// deployment of the deployed Preparation, and records each target that does
+// not run it healthily with what the engine reports there, keeping the
+// transition times of the targets it recorded before: held targets first,
+// then degraded, then progressing ones, at most maxListedTargets.
+func setTargets(serving *deliveryv1alpha1.Serving, deployed *promotion.Entry, targets []deployTarget, states map[string]targetState) {
+	previous := map[string]deliveryv1alpha1.DeploymentTarget{}
+	for _, t := range serving.Status.Targets {
+		previous[t.Cluster] = t
+	}
+	counts := &deliveryv1alpha1.DeploymentClusters{Selected: int32(len(targets))}
+	listed := make([]deliveryv1alpha1.DeploymentTarget, 0, len(targets))
+	for _, target := range targets {
+		entry := deliveryv1alpha1.DeploymentTarget{Cluster: target.cluster}
+		entry.Conditions = slices.Clone(previous[target.cluster].Conditions)
+		ready := targetConditions{&entry, serving.Generation}
+		state, applied := states[target.cluster]
+		atTarget := applied && state.revision == deployed.Digest
+		if applied {
+			entry.Revision = state.revision
+		}
+		switch {
+		case target.holdReason != "":
+			counts.Held++
+			conditions.MarkFalse(ready, deliveryv1alpha1.ConditionTypeReady, target.holdReason,
+				conditions.Truncate(target.holdMessage, maxTargetMessageLength))
+		case atTarget && state.health == promotion.HealthDegraded:
+			counts.Degraded++
+			conditions.MarkFalse(ready, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonDegraded,
+				conditions.Truncate(cmp.Or(state.message, "The engine reports the deployment degraded"), maxTargetMessageLength))
+		case atTarget && state.health == promotion.HealthHealthy:
+			counts.Healthy++
+			continue
+		default:
+			counts.Progressing++
+			conditions.MarkUnknown(ready, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonProgressing,
+				"Deploying Preparation "+deployed.Preparation)
+		}
+		listed = append(listed, entry)
+	}
+	slices.SortStableFunc(listed, func(a, b deliveryv1alpha1.DeploymentTarget) int {
+		return cmp.Compare(targetRank(a), targetRank(b))
+	})
+	serving.Status.Clusters = counts
+	serving.Status.Targets = listed[:min(len(listed), maxListedTargets)]
+}
+
+// targetRank orders the targets a Serving lists: held, then degraded, then
+// progressing.
+func targetRank(t deliveryv1alpha1.DeploymentTarget) int {
+	ready := meta.FindStatusCondition(t.Conditions, deliveryv1alpha1.ConditionTypeReady)
+	switch {
+	case ready == nil || ready.Status == metav1.ConditionUnknown:
+		return 2
+	case ready.Reason == deliveryv1alpha1.ReasonDegraded:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// targetConditions sets the conditions of a target of a Serving, observed at
+// the Serving's generation.
+type targetConditions struct {
+	*deliveryv1alpha1.DeploymentTarget
+	generation int64
+}
+
+func (t targetConditions) GetGeneration() int64              { return t.generation }
+func (t targetConditions) GetConditions() []metav1.Condition { return t.Conditions }
+func (t targetConditions) SetConditions(c []metav1.Condition) {
+	t.Conditions = c
 }
 
 // targetPreparation returns the Order of the Serving and the Preparation
@@ -441,17 +741,26 @@ var upstreamReasons = map[promotion.Outcome]string{
 	promotion.OutcomeInvalidPipeline:     deliveryv1alpha1.ReasonInvalidPipeline,
 }
 
-// upstream evaluates the upstream gate of preparation: every upstream stage
-// it names must have deployed its own Preparation of the same Product
-// revision healthily for its soak time, as the stage's Serving records it,
-// and the deployment record that qualifies it must verify in the registry.
+// upstream evaluates the upstream gate of preparation: the stages it names
+// must include an Order of every Environment the Order's Environment
+// requires, every upstream stage must have deployed its own Preparation of
+// the same Product revision healthily for its soak time, as the stage's
+// Serving records it, and the deployment record that qualifies it must
+// verify in the registry. A Preparation the Serving promoted before passes.
 // It records the result in the UpstreamDeployed condition.
 func (r *ServingReconciler) upstream(
 	ctx context.Context, serving *deliveryv1alpha1.Serving, order *deliveryv1alpha1.Order,
 	preparation *deliveryv1alpha1.Preparation, history promotion.History,
 ) (promotion.Result, error) {
 	stages := stagesOf(preparation)
-	if len(stages) == 0 {
+	var requirements []promotion.Requirement
+	if history.PromotedBefore(preparation.Name) == nil {
+		var err error
+		if requirements, err = r.requirements(ctx, order); err != nil {
+			return promotion.Result{}, err
+		}
+	}
+	if len(stages) == 0 && len(requirements) == 0 {
 		conditions.Remove(serving, deliveryv1alpha1.ConditionTypeUpstreamDeployed)
 		return promotion.Result{Outcome: promotion.OutcomeSatisfied}, nil
 	}
@@ -465,6 +774,7 @@ func (r *ServingReconciler) upstream(
 		Upstreams:   map[string]promotion.Upstream{},
 		Now:         r.clock(),
 	}
+	environments := map[string]string{}
 	for _, stage := range stages {
 		upstreamOrder := &deliveryv1alpha1.Order{}
 		if err := r.Get(ctx, client.ObjectKey{Namespace: serving.Namespace, Name: stage.Order}, upstreamOrder); err != nil {
@@ -473,6 +783,7 @@ func (r *ServingReconciler) upstream(
 			}
 			return promotion.Result{}, fmt.Errorf("failed to get upstream Order %q: %w", stage.Order, err)
 		}
+		environments[stage.Order] = upstreamOrder.Spec.EnvironmentRef.Name
 		upstream := promotion.Upstream{Product: upstreamOrder.Spec.ProductRef.Name}
 		upstreamServing := &deliveryv1alpha1.Serving{}
 		switch err := r.Get(ctx, client.ObjectKey{Namespace: serving.Namespace, Name: stage.Order}, upstreamServing); {
@@ -482,6 +793,12 @@ func (r *ServingReconciler) upstream(
 			return promotion.Result{}, fmt.Errorf("failed to get the Serving of upstream Order %q: %w", stage.Order, err)
 		}
 		req.Upstreams[stage.Order] = upstream
+	}
+
+	if msg := promotion.Required(stages, environments, requirements); msg != "" {
+		conditions.MarkFalse(serving, deliveryv1alpha1.ConditionTypeUpstreamDeployed, deliveryv1alpha1.ReasonPipelineRequired,
+			preparation.Name+": "+msg)
+		return promotion.Result{Outcome: promotion.OutcomeInvalidPipeline, Message: msg}, nil
 	}
 
 	result := promotion.Evaluate(req)
@@ -512,6 +829,24 @@ func (r *ServingReconciler) upstream(
 	conditions.MarkTrue(serving, deliveryv1alpha1.ConditionTypeUpstreamDeployed, deliveryv1alpha1.ReasonSatisfied,
 		preparation.Name+": "+result.Message)
 	return result, nil
+}
+
+// requirements returns the Environments the Environment of order requires
+// its stages to run after, none when it does not exist, which deploy
+// reports.
+func (r *ServingReconciler) requirements(ctx context.Context, order *deliveryv1alpha1.Order) ([]promotion.Requirement, error) {
+	env := &deliveryv1alpha1.Environment{}
+	if err := r.Get(ctx, client.ObjectKey{Namespace: order.Namespace, Name: order.Spec.EnvironmentRef.Name}, env); err != nil {
+		return nil, client.IgnoreNotFound(err)
+	}
+	if env.Spec.Promotion == nil {
+		return nil, nil
+	}
+	requirements := make([]promotion.Requirement, 0, len(env.Spec.Promotion.RequireAfter))
+	for _, required := range env.Spec.Promotion.RequireAfter {
+		requirements = append(requirements, promotion.Requirement{Environment: required.Environment, MinSoakSeconds: required.MinSoakSeconds})
+	}
+	return requirements, nil
 }
 
 // verifyDeployment verifies, in the registry, the deployment record of the
@@ -750,8 +1085,10 @@ func (r *ServingReconciler) recordPromotion(
 
 // recordDeployments records every deployment of history that was healthy
 // and is not recorded yet in the registry: a signed statement that it was
-// healthy, attached to its artifact.
-func (r *ServingReconciler) recordDeployments(ctx context.Context, serving *deliveryv1alpha1.Serving, history promotion.History) error {
+// healthy, on the clusters that run it healthily, attached to its artifact.
+func (r *ServingReconciler) recordDeployments(
+	ctx context.Context, serving *deliveryv1alpha1.Serving, history promotion.History, deployedTo []deployTarget, states map[string]targetState,
+) error {
 	unrecorded := history.Unrecorded()
 	if len(unrecorded) == 0 {
 		return nil
@@ -761,8 +1098,8 @@ func (r *ServingReconciler) recordDeployments(ctx context.Context, serving *deli
 		return fmt.Errorf("waiting for the signing key to record the deployment: %w", err)
 	}
 	for _, e := range unrecorded {
-		// The Preparation deploys into its target namespace. A Preparation
-		// that is gone leaves nothing to attach the record to.
+		// Every cluster runs the Preparation in its target namespace. A
+		// Preparation that is gone leaves nothing to attach the record to.
 		preparation := &deliveryv1alpha1.Preparation{}
 		if err := r.Get(ctx, client.ObjectKey{Namespace: serving.Namespace, Name: e.Preparation}, preparation); err != nil {
 			if apierrors.IsNotFound(err) {
@@ -770,7 +1107,12 @@ func (r *ServingReconciler) recordDeployments(ctx context.Context, serving *deli
 			}
 			return fmt.Errorf("failed to get Preparation %q: %w", e.Preparation, err)
 		}
-		targets := []promotion.Target{{Server: cluster.InClusterServer, Namespace: preparation.Spec.TargetNamespace}}
+		targets := make([]promotion.Target, 0, len(deployedTo))
+		for _, t := range deployedTo {
+			if state, ok := states[t.cluster]; ok && t.holdReason == "" && state.revision == e.Digest && state.health == promotion.HealthHealthy {
+				targets = append(targets, promotion.Target{Cluster: t.cluster, Server: t.server, Namespace: preparation.Spec.TargetNamespace})
+			}
+		}
 		registryClient, err := r.connect(ctx, serving.Namespace, serving.Spec.OrderName, registryRef(e.Registry), e.OCIRef)
 		if err != nil {
 			return err
@@ -857,52 +1199,9 @@ func (r *ServingReconciler) clock() time.Time {
 	return time.Now()
 }
 
-// applyApplication points the Serving's Argo CD Application of target at
-// the artifact of the deployed entry, creating it when it is missing, and
-// returns it as it is now. An Application that already points there is left untouched,
-// and drift is reverted. A pre-existing Application that is not opted in for
-// the Serving's Order is never changed: the error wraps
-// argocd.ErrOptInRequired.
-func (r *ServingReconciler) applyApplication(
-	ctx context.Context, serving *deliveryv1alpha1.Serving, deployed *promotion.Entry, target argocd.Target,
-) (*unstructured.Unstructured, error) {
-	logger := log.FromContext(ctx)
-
-	desired, err := argocd.Application(serving, deployed.OCIRef, target)
-	if err != nil {
-		return nil, err
-	}
-
-	existing := argocd.New()
-	if err := r.Get(ctx, client.ObjectKeyFromObject(desired), existing); err != nil {
-		if !apierrors.IsNotFound(err) {
-			return nil, fmt.Errorf("failed to get Application: %w", err)
-		}
-		if err := r.Create(ctx, desired); err != nil {
-			return nil, fmt.Errorf("failed to create Application: %w", err)
-		}
-		logger.Info("Created Argo CD Application", "name", desired.GetName(), "namespace", desired.GetNamespace(), "preparation", deployed.Preparation)
-		return desired, nil
-	}
-
-	if err := argocd.OptedIn(existing, serving.Namespace, serving.Spec.OrderName); err != nil {
-		return nil, err
-	}
-	if argocd.Matches(existing, desired) {
-		return existing, nil
-	}
-
-	desired.SetResourceVersion(existing.GetResourceVersion())
-	if err := r.Update(ctx, desired); err != nil {
-		return nil, fmt.Errorf("failed to update Application: %w", err)
-	}
-	logger.Info("Updated Argo CD Application", "name", desired.GetName(), "namespace", desired.GetNamespace(), "preparation", deployed.Preparation)
-	return desired, nil
-}
-
-// reconcileDelete deletes the Serving's Argo CD Application, which garbage
-// collection cannot reach in the argocd namespace, then removes the
-// finalizer.
+// reconcileDelete stops the Serving's deployments on every cluster, which
+// garbage collection cannot reach in the engines' namespaces, then removes
+// the finalizer. What runs there keeps running.
 func (r *ServingReconciler) reconcileDelete(ctx context.Context, serving *deliveryv1alpha1.Serving) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("Handling deletion of Serving")
@@ -910,7 +1209,7 @@ func (r *ServingReconciler) reconcileDelete(ctx context.Context, serving *delive
 	if controllerutil.ContainsFinalizer(serving, deliveryv1alpha1.Finalizer) {
 		logger.Info("Cleaning up Serving resources")
 
-		if err := r.removeApplication(ctx, serving); err != nil {
+		if err := r.remove(ctx, serving, nil); err != nil {
 			return ctrl.Result{}, err
 		}
 
@@ -925,37 +1224,6 @@ func (r *ServingReconciler) reconcileDelete(ctx context.Context, serving *delive
 	}
 
 	return ctrl.Result{}, nil
-}
-
-// removeApplication deletes the Serving's Argo CD Application. One that is
-// gone already counts as removed, as does any without Argo CD's CRD, and
-// one that is not opted in for the Serving's Order is kept. The delete is conditional on the UID and
-// resource version that passed the opt-in check, so an Application replaced
-// or changed in between is never deleted.
-func (r *ServingReconciler) removeApplication(ctx context.Context, serving *deliveryv1alpha1.Serving) error {
-	logger := log.FromContext(ctx)
-
-	app := argocd.New()
-	if err := r.Get(ctx, argocd.Key(serving, cluster.InCluster), app); err != nil {
-		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
-			logger.Info("Argo CD Application already deleted", "name", serving.Name)
-			return nil
-		}
-		return fmt.Errorf("failed to get Application: %w", err)
-	}
-
-	if err := argocd.OptedIn(app, serving.Namespace, serving.Spec.OrderName); err != nil {
-		logger.Info("Keeping Argo CD Application that is not opted in for the Order", "name", app.GetName(), "error", err.Error())
-		return nil
-	}
-
-	uid, resourceVersion := app.GetUID(), app.GetResourceVersion()
-	if err := r.Delete(ctx, app, client.Preconditions{UID: &uid, ResourceVersion: &resourceVersion}); client.IgnoreNotFound(err) != nil {
-		return fmt.Errorf("failed to delete Application: %w", err)
-	}
-
-	logger.Info("Deleted Argo CD Application", "name", app.GetName())
-	return nil
 }
 
 // connect returns a client for the registry holding the artifact at ociRef,
@@ -1006,24 +1274,62 @@ func (r *ServingReconciler) patchStatus(
 	}
 }
 
-// markDeployment derives the Ready condition of the Serving from the state
-// of its Application. The health of another revision says nothing about the
-// deployed Preparation, so until the Application reaches it the Serving is
-// Deploying. An unchanged state changes nothing, so a Serving that stays
-// degraded or progressing settles until the Application changes.
-func markDeployment(serving *deliveryv1alpha1.Serving, deployed *promotion.Entry, state argocd.State) {
-	atTarget := state.Revision == deployed.Digest
+// markDeployment derives the Ready condition of the Serving from its
+// targets: Deployed once the deployment is healthy, failed when a target is
+// degraded or held for another reason than its Cluster not being Ready, or
+// when no Cluster is Ready, and Deploying until then. Clusters that are not
+// Ready are named, and do not hold the Serving back. The health of another
+// revision says nothing about the deployed Preparation. An unchanged state
+// changes nothing, so a Serving that stays degraded or progressing settles
+// until a deployment changes.
+func markDeployment(serving *deliveryv1alpha1.Serving, deployed *promotion.Entry, targets []deployTarget, observation promotion.Observation) {
+	counts := serving.Status.Clusters
+	where := ""
+	if len(targets) > 1 || (len(targets) == 1 && targets[0].cluster != cluster.InCluster) {
+		names := make([]string, 0, len(targets))
+		for _, t := range targets {
+			if t.holdReason != deliveryv1alpha1.ReasonClusterNotReady {
+				names = append(names, t.cluster)
+			}
+		}
+		where = " to " + conditions.List(names, ", ", maxListedClusters)
+	}
+	var unready []string
+	for _, t := range targets {
+		if t.holdReason == deliveryv1alpha1.ReasonClusterNotReady {
+			unready = append(unready, t.cluster)
+		}
+	}
+	if len(unready) > 0 {
+		where += "; not ready: " + conditions.List(unready, ", ", maxListedClusters)
+	}
+
+	failing := int(counts.Held) - len(unready) + int(counts.Degraded)
 	switch {
-	case atTarget && state.Phase == argocd.PhaseDegraded:
-		msg := "deployment degraded"
-		if state.Message != "" {
-			msg += ": " + state.Message
+	case failing > 0:
+		var failed []string
+		for _, target := range serving.Status.Targets {
+			ready := meta.FindStatusCondition(target.Conditions, deliveryv1alpha1.ConditionTypeReady)
+			if ready != nil && ready.Status == metav1.ConditionFalse && ready.Reason != deliveryv1alpha1.ReasonClusterNotReady {
+				failed = append(failed, target.Cluster+": "+ready.Message)
+			}
+		}
+		listed := failed[:min(len(failed), maxListedFailures)]
+		msg := "deployment of Preparation " + deployed.Preparation + " failed on " + strings.Join(listed, "; ")
+		if counts.Selected > 1 {
+			msg = fmt.Sprintf("deployment of Preparation %s failed on %d of %d clusters: %s",
+				deployed.Preparation, failing, counts.Selected, strings.Join(listed, "; "))
+		}
+		if more := failing - len(listed); more > 0 {
+			msg += fmt.Sprintf("; and %d more", more)
 		}
 		markDeploymentFailed(serving, msg)
-	case atTarget && state.Phase == argocd.PhaseHealthy:
-		conditions.MarkTrue(serving, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonDeployed, "Deployed Preparation "+deployed.Preparation)
+	case len(unready) == len(targets):
+		markDeploymentFailed(serving, "no Cluster of the Environment is ready: "+conditions.List(unready, ", ", maxListedClusters))
+	case observation.Health == promotion.HealthHealthy:
+		conditions.MarkTrue(serving, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonDeployed, "Deployed Preparation "+deployed.Preparation+where)
 	default:
-		conditions.MarkUnknown(serving, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonDeploying, "Deploying Preparation "+deployed.Preparation)
+		conditions.MarkUnknown(serving, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonDeploying, "Deploying Preparation "+deployed.Preparation+where)
 	}
 }
 
@@ -1158,16 +1464,34 @@ func stagesOf(preparation *deliveryv1alpha1.Preparation) []promotion.Stage {
 	return stages
 }
 
-// observationOf maps what Argo CD reports on an Application.
-func observationOf(state argocd.State) promotion.Observation {
-	observation := promotion.Observation{Revision: state.Revision, Health: promotion.HealthProgressing}
-	switch state.Phase {
-	case argocd.PhaseHealthy:
-		observation.Health = promotion.HealthHealthy
-	case argocd.PhaseDegraded:
-		observation.Health = promotion.HealthDegraded
+// observationOf reduces what the engine reports on the targets to one
+// observation of the deployed entry: degraded at its digest once any target
+// runs it degraded, healthy at its digest once every target whose Cluster
+// is Ready runs it healthily, and progressing otherwise. Clusters that are
+// not Ready are left out: nothing deploys there until they are back, and
+// the others, and the stages after them, do not wait for them.
+func observationOf(deployed *promotion.Entry, targets []deployTarget, states map[string]targetState) promotion.Observation {
+	counted, healthy := 0, 0
+	for _, t := range targets {
+		if t.holdReason == deliveryv1alpha1.ReasonClusterNotReady {
+			continue
+		}
+		counted++
+		state, ok := states[t.cluster]
+		if t.holdReason != "" || !ok || state.revision != deployed.Digest {
+			continue
+		}
+		switch state.health {
+		case promotion.HealthDegraded:
+			return promotion.Observation{Revision: deployed.Digest, Health: promotion.HealthDegraded}
+		case promotion.HealthHealthy:
+			healthy++
+		}
 	}
-	return observation
+	if counted > 0 && healthy == counted {
+		return promotion.Observation{Revision: deployed.Digest, Health: promotion.HealthHealthy}
+	}
+	return promotion.Observation{Health: promotion.HealthProgressing}
 }
 
 // enqueueServingForOrderName maps an Order or Preparation to the Order's
@@ -1183,27 +1507,6 @@ func enqueueServingForOrderName(_ context.Context, obj client.Object) []ctrl.Req
 		return nil
 	}
 	return []ctrl.Request{{Namespace: obj.GetNamespace(), Name: orderName}}
-}
-
-// servingOfApplication maps an Argo CD Application to the Serving its labels
-// name.
-func servingOfApplication(_ context.Context, obj client.Object) []ctrl.Request {
-	key, ok := argocd.ServingOf(obj.GetLabels())
-	if !ok {
-		return nil
-	}
-	return []ctrl.Request{{NamespacedName: key}}
-}
-
-// applicationChanged passes the Application updates that change what the
-// Serving status and the opt-in check depend on. Creates and deletes always
-// pass.
-var applicationChanged = predicate.Funcs{
-	UpdateFunc: func(e event.UpdateEvent) bool {
-		oldApp, okOld := e.ObjectOld.(*unstructured.Unstructured)
-		newApp, okNew := e.ObjectNew.(*unstructured.Unstructured)
-		return okOld && okNew && argocd.Changed(oldApp, newApp)
-	},
 }
 
 // enqueueServingsOfProduct maps a Product to the Servings of its Orders,
@@ -1298,11 +1601,80 @@ func (r *ServingReconciler) signingChanges() <-chan event.GenericEvent {
 	return ch
 }
 
+// enqueueServingsOfEnvironment maps an Environment to the Servings of the
+// Orders of its namespace that deploy to it, which carry their Orders'
+// names. It lists Orders by the index the Order controller registers.
+func (r *ServingReconciler) enqueueServingsOfEnvironment(ctx context.Context, obj client.Object) []ctrl.Request {
+	return r.servingsOfEnvironments(ctx, obj.GetNamespace(), obj.GetName())
+}
+
+// enqueueServingsOfCluster maps a Cluster to the Servings that deploy to it:
+// those of the Orders of the Environments of its namespace that select it.
+// An update maps both the old and the new Cluster, so that the Servings of
+// an Environment it left reconcile too.
+func (r *ServingReconciler) enqueueServingsOfCluster(ctx context.Context, obj client.Object) []ctrl.Request {
+	c, ok := obj.(*deliveryv1alpha1.Cluster)
+	if !ok {
+		return nil
+	}
+	environments := &deliveryv1alpha1.EnvironmentList{}
+	if err := r.List(ctx, environments, client.InNamespace(c.Namespace), client.UnsafeDisableDeepCopy); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to list Environments of Cluster", "cluster", c.Name)
+		return nil
+	}
+	var names []string
+	for i := range environments.Items {
+		if selection, err := resolve.ClusterSelectionOf(&environments.Items[i]); err == nil && selection.Matches(c) {
+			names = append(names, environments.Items[i].Name)
+		}
+	}
+	return r.servingsOfEnvironments(ctx, c.Namespace, names...)
+}
+
+// servingsOfProject maps an Argo CD AppProject to the Servings of the Orders
+// of the Environments that deploy through it.
+func (r *ServingReconciler) servingsOfProject(ctx context.Context, obj client.Object) []ctrl.Request {
+	environments := &deliveryv1alpha1.EnvironmentList{}
+	if err := r.List(ctx, environments, client.UnsafeDisableDeepCopy); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to list Environments of AppProject", "project", obj.GetName())
+		return nil
+	}
+	var reqs []ctrl.Request
+	for i := range environments.Items {
+		if env := &environments.Items[i]; env.Spec.Deployer.ArgoCD != nil && env.Spec.Deployer.ArgoCD.Project == obj.GetName() {
+			reqs = append(reqs, r.servingsOfEnvironments(ctx, env.Namespace, env.Name)...)
+		}
+	}
+	return reqs
+}
+
+// servingsOfEnvironments returns the Servings of the Orders of namespace
+// that deploy to the Environments names, which carry their Orders' names.
+// It lists Orders by the index the Order controller registers.
+func (r *ServingReconciler) servingsOfEnvironments(ctx context.Context, namespace string, names ...string) []ctrl.Request {
+	var reqs []ctrl.Request
+	for _, name := range names {
+		orders := &deliveryv1alpha1.OrderList{}
+		if err := r.List(ctx, orders, client.InNamespace(namespace),
+			client.MatchingFields{deliveryv1alpha1.FieldEnvironmentName: name}, client.UnsafeDisableDeepCopy); err != nil {
+			log.FromContext(ctx).Error(err, "Failed to list Orders of Environment", "environment", name)
+			continue
+		}
+		for i := range orders.Items {
+			reqs = append(reqs, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&orders.Items[i])})
+		}
+	}
+	return reqs
+}
+
 // SetupWithManager sets up the controller with the Manager. The Application
-// watch starts once Argo CD's Application CRD is installed, so that the
-// manager runs without Argo CD.
+// and AppProject watches start once Argo CD's CRDs are installed.
 func (r *ServingReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	applications, err := newOptionalWatch(mgr, argocd.New())
+	if err != nil {
+		return err
+	}
+	appProjects, err := newOptionalWatch(mgr, newAppProject())
 	if err != nil {
 		return err
 	}
@@ -1319,11 +1691,23 @@ func (r *ServingReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&deliveryv1alpha1.Product{},
 			handler.EnqueueRequestsFromMapFunc(r.enqueueServingsOfProduct),
 			builder.WithPredicates(productScansChanged)).
+		// The Serving decides from the Environment's spec, not its status.
+		Watches(&deliveryv1alpha1.Environment{},
+			handler.EnqueueRequestsFromMapFunc(r.enqueueServingsOfEnvironment),
+			builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Watches(&deliveryv1alpha1.Cluster{},
+			handler.EnqueueRequestsFromMapFunc(r.enqueueServingsOfCluster),
+			builder.WithPredicates(clusterChanged)).
 		WatchesRawSource(source.Channel(r.signingChanges(), handler.EnqueueRequestsFromMapFunc(r.enqueueAllServings))).
 		WatchesRawSource(source.Channel(applications.Started(), handler.EnqueueRequestsFromMapFunc(r.enqueueAllServings))).
+		WatchesRawSource(source.Channel(appProjects.Started(), handler.EnqueueRequestsFromMapFunc(r.enqueueAllServings))).
 		Named("serving").
 		Build(r)
 	if err != nil {
+		return err
+	}
+	if err := appProjects.Add(mgr, c, handler.EnqueueRequestsFromMapFunc(r.servingsOfProject),
+		predicate.GenerationChangedPredicate{}); err != nil {
 		return err
 	}
 	return applications.Add(mgr, c, handler.EnqueueRequestsFromMapFunc(servingOfApplication), applicationChanged)

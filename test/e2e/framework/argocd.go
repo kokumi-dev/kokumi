@@ -33,9 +33,12 @@ import (
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/argocd"
-	"github.com/kokumi-dev/kokumi/internal/cluster"
 	"github.com/kokumi-dev/kokumi/test/utils"
 )
+
+// InCluster is the Cluster of the cluster Kokumi runs in, as examples/local
+// and Kokumi name it.
+const InCluster = "in-cluster"
 
 // ArgoCDApplicationCRD and ArgoCDAppProjectCRD are the CRDs of the Argo CD
 // release "make argocd" installs that Kokumi uses: the Serving controller
@@ -89,6 +92,13 @@ func InstallArgoCD() {
 	}
 }
 
+// ApplicationKey returns the key of the Argo CD Application through which
+// the Order order in namespace deploys to cluster, as Kokumi names it.
+func ApplicationKey(namespace, order, cluster string) client.ObjectKey {
+	serving := &deliveryv1alpha1.Serving{Namespace: namespace, Spec: deliveryv1alpha1.ServingSpec{OrderName: order}}
+	return argocd.Key(serving, cluster)
+}
+
 // SimulateArgoCD installs what Kokumi uses of Argo CD, without Argo CD: its
 // Application and AppProject CRDs, and its namespace with the project
 // default that every Argo CD creates, as "make argocd" configures it.
@@ -111,37 +121,50 @@ func RemoveSimulatedArgoCD() {
 	}
 }
 
-// ApplicationKey returns the key of the Argo CD Application through which
-// the Order order in namespace deploys, as Kokumi names it.
-func ApplicationKey(namespace, order string) client.ObjectKey {
-	serving := &deliveryv1alpha1.Serving{Namespace: namespace, Spec: deliveryv1alpha1.ServingSpec{OrderName: order}}
-	return argocd.Key(serving, cluster.InCluster)
+// Application returns a function for Eventually that fetches the Argo CD
+// Application through which the Order order in namespace deploys to the
+// cluster Kokumi runs in.
+func Application(namespace, order string) func() (*unstructured.Unstructured, error) {
+	return ApplicationOn(namespace, order, InCluster)
 }
 
-// Application returns a function for Eventually that fetches the Argo CD
-// Application through which the Order order in namespace deploys.
-func Application(namespace, order string) func() (*unstructured.Unstructured, error) {
+// ApplicationOn returns a function for Eventually that fetches the Argo CD
+// Application through which the Order order in namespace deploys to cluster.
+func ApplicationOn(namespace, order, cluster string) func() (*unstructured.Unstructured, error) {
 	return func() (*unstructured.Unstructured, error) {
 		app := &unstructured.Unstructured{}
 		app.SetGroupVersionKind(schema.GroupVersionKind{Group: "argoproj.io", Version: "v1alpha1", Kind: "Application"})
-		err := Client.Get(context.Background(), ApplicationKey(namespace, order), app)
+		err := Client.Get(context.Background(), ApplicationKey(namespace, order, cluster), app)
 		return app, err
 	}
 }
 
 // WaitForDeployment waits until the Order order in namespace deploys
-// digest, a Preparation's, through Argo CD.
+// digest, a Preparation's, to the cluster Kokumi runs in through Argo CD.
 func WaitForDeployment(namespace, order, digest string) {
-	Eventually(Application(namespace, order), 2*time.Minute).Should(
+	WaitForDeploymentOn(namespace, order, InCluster, digest)
+}
+
+// WaitForDeploymentOn waits until the Order order in namespace deploys
+// digest, a Preparation's, to cluster through Argo CD.
+func WaitForDeploymentOn(namespace, order, cluster, digest string) {
+	Eventually(ApplicationOn(namespace, order, cluster), 2*time.Minute).Should(
 		HaveField("Object", HaveKeyWithValue("spec", HaveKeyWithValue("source", HaveKeyWithValue("targetRevision", digest)))),
-		"The Order %s/%s does not deploy %s through Argo CD", namespace, order, digest)
+		"The Order %s/%s does not deploy %s to cluster %s through Argo CD", namespace, order, digest, cluster)
 }
 
 // ExpectNoApplication fails if the Order order in namespace deploys
-// anything through Argo CD.
+// anything to the cluster Kokumi runs in through Argo CD.
 func ExpectNoApplication(namespace, order string) {
-	_, err := Application(namespace, order)()
-	Expect(apierrors.IsNotFound(err)).To(BeTrue(), "The Order %s/%s deploys through Argo CD: %v", namespace, order, err)
+	ExpectNoApplicationOn(namespace, order, InCluster)
+}
+
+// ExpectNoApplicationOn fails if the Order order in namespace deploys
+// anything to cluster through Argo CD.
+func ExpectNoApplicationOn(namespace, order, cluster string) {
+	_, err := ApplicationOn(namespace, order, cluster)()
+	Expect(apierrors.IsNotFound(err)).To(BeTrue(),
+		"The Order %s/%s deploys to cluster %s through Argo CD: %v", namespace, order, cluster, err)
 }
 
 // simulateHealthy reports the Argo CD Application app synced to revision
@@ -167,11 +190,18 @@ func simulateHealthy(app client.ObjectKey, revision string) {
 }
 
 // SyncHealthy has Argo CD report the Application through which the Order
-// order in namespace deploys synced to revision and healthy. The suite
-// simulates the report by default; with E2E_ARGOCD=real it waits for Argo
-// CD to deploy the revision for real.
+// order in namespace deploys to the cluster Kokumi runs in synced to
+// revision and healthy.
 func SyncHealthy(namespace, order, revision string) {
-	key := ApplicationKey(namespace, order)
+	SyncHealthyOn(namespace, order, InCluster, revision)
+}
+
+// SyncHealthyOn has Argo CD report the Application through which the Order
+// order in namespace deploys to cluster synced to revision and healthy. The
+// suite simulates the report by default; with E2E_ARGOCD=real it waits for
+// Argo CD to deploy the revision for real.
+func SyncHealthyOn(namespace, order, cluster, revision string) {
+	key := ApplicationKey(namespace, order, cluster)
 	if !RealArgoCD() {
 		By("simulating Argo CD reporting " + key.Name + " synced and healthy")
 		simulateHealthy(key, revision)
@@ -179,7 +209,7 @@ func SyncHealthy(namespace, order, revision string) {
 	}
 	By("waiting for Argo CD to report " + key.Name + " synced and healthy")
 	Eventually(func(g Gomega) {
-		app, err := Application(namespace, order)()
+		app, err := ApplicationOn(namespace, order, cluster)()
 		g.Expect(err).NotTo(HaveOccurred())
 		sync, _, _ := unstructured.NestedString(app.Object, "status", "sync", "status")
 		synced, _, _ := unstructured.NestedString(app.Object, "status", "sync", "revision")

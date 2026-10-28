@@ -17,6 +17,7 @@ import { objectToYaml } from '../../utils/yaml'
 import { useOrderContext } from './orderContext'
 import OrderPipeline from './OrderPipeline'
 import { servingQueue } from '../../utils/promotion'
+import { targetsSummary, targetsTitle } from '../../utils/clusters'
 import { useDeniedReason } from '../../hooks/useCapability'
 import layout from '../../components/layout/layout.module.css'
 
@@ -80,6 +81,10 @@ export default function OrderOverview() {
               show: !!latest,
             },
             {
+              label: 'Environment',
+              value: order.environmentRef.name,
+            },
+            {
               label: 'Target namespace',
               value: (
                 <>
@@ -87,6 +92,15 @@ export default function OrderOverview() {
                   <span className={layout.muted}>, {targetNamespaceSource(order.targetNamespaceSource)}</span>
                 </>
               ),
+            },
+            {
+              label: 'Clusters',
+              value: serving && (
+                <Link className={layout.inlineLink} to={paths.serving(serving.namespace, serving.name)} title={targetsTitle(serving.clusters)}>
+                  {targetsSummary(serving.clusters)}
+                </Link>
+              ),
+              show: !!serving?.clusters?.selected,
             },
             { label: 'Promotion', value: order.mode },
             {

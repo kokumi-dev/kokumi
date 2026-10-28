@@ -1,0 +1,49 @@
+# The environments of the pipeline, in the namespace of its Orders. All three
+# deploy to the cluster Kokumi runs in, the Cluster of the namespace labeled
+# delivery.kokumi.dev/in-cluster: Kokumi keeps one in its own namespace, and
+# examples/local adds one to any other. With more clusters each would select
+# its own.
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Environment
+metadata:
+  name: dev
+spec:
+  clusterSelector:
+    matchLabels:
+      delivery.kokumi.dev/in-cluster: "true"
+  deployer:
+    type: ArgoCD
+    argoCD:
+      project: default
+---
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Environment
+metadata:
+  name: staging
+spec:
+  clusterSelector:
+    matchLabels:
+      delivery.kokumi.dev/in-cluster: "true"
+  deployer:
+    type: ArgoCD
+    argoCD:
+      project: default
+---
+# Every Order that deploys to prod must run after an Order of staging, with
+# a soak of at least 60 seconds: a stage that skips staging is held.
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Environment
+metadata:
+  name: prod
+spec:
+  clusterSelector:
+    matchLabels:
+      delivery.kokumi.dev/in-cluster: "true"
+  deployer:
+    type: ArgoCD
+    argoCD:
+      project: default
+  promotion:
+    requireAfter:
+    - environment: staging
+      minSoakSeconds: 60

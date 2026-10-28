@@ -70,8 +70,8 @@ type RegistryReconciler struct {
 	// Namespace is the install namespace, where the Registry of the bundled
 	// registry is created.
 	Namespace string
-	// BundledHost is the host of the bundled registry.
-	BundledHost string
+	// BundledRegistryHost is the host of the bundled registry.
+	BundledRegistryHost string
 }
 
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=registries,verbs=get;list;watch;create
@@ -206,7 +206,7 @@ func (r registryReader) Secret(ctx context.Context, namespace, name string) (*co
 // as it is. reader must work before the informer cache has started.
 func (r *RegistryReconciler) ensureBundledRegistry(reader client.Reader) manager.RunnableFunc {
 	return func(ctx context.Context) error {
-		reg := resources.BundledRegistry(r.Namespace, r.BundledHost)
+		reg := resources.BundledRegistry(r.Namespace, r.BundledRegistryHost)
 		if err := reader.Get(ctx, client.ObjectKeyFromObject(reg), &deliveryv1alpha1.Registry{}); !apierrors.IsNotFound(err) {
 			return err
 		}

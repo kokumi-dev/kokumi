@@ -92,7 +92,7 @@ Order ──renders──▶ Preparation (immutable, versioned OCI artifact)
                          ▲
 Serving ──selects────────┘  (mutable pointer to one Preparation)
    │
-   └──creates/updates──▶ Argo CD Application
+   └──creates/updates──▶ Argo CD Application, one per cluster of the Order's Environment
                               │
                               └──syncs──▶ Cluster workloads
 
@@ -725,25 +725,50 @@ Preparation it converges to, then deploys the promoted one.
    promotion record attached to the artifact that names the evidence of every
    gate it passed. The time goes into the status first and the record into
    the registry in the next pass, so a retry pushes the same bytes.
-7. Creates or updates the Argo CD `Application` in the `argocd` namespace,
-   named `kokumi-<namespace>-<order>-<hash>`, where the hash covers the
-   namespace, the Order and the cluster, so that Orders of one name in two
-   namespaces never share one. It points `spec.source.repoURL` at the
-   deployed Preparation's OCI artifact, `spec.source.targetRevision` at its
-   exact digest, and `spec.destination.namespace` at the Preparation's target
-   namespace. A pre-existing Application without the opt-in
-   annotation `delivery.kokumi.dev/allowed-order: <namespace>/<order>` is
-   never modified, and deleting the Serving keeps it.
-8. Derives the `Ready` condition from the Application: `Deploying` until the
-   Application reports `Healthy` and is synced to the deployed digest, then
-   `Deployed`. A report counts only when Argo CD compared the Application's
-   current source and finished its sync at that digest. An Application that is degraded at the deployed digest
-   surfaces as `DeploymentFailed`; the health of an older revision is not
-   reported for the new Preparation. `Ready` describes what runs; while a
-   newer Preparation waits for a gate, its message says what holds it.
-9. Records the deployment in the history: when it was first healthy, and
-   when it ended, `Superseded` by the next promotion or `Degraded`. Once it
-   is healthy, a signed deployment record is attached to the artifact. A
+7. Asks the **engine** of the Order's
+   [Environment](#environments-and-clusters) whether the Order may deploy,
+   each time, without reading the Environment's status: for Argo CD, the
+   AppProject must exist and, for an Environment outside Kokumi's namespace,
+   admit its namespace in `sourceNamespaces`. Then resolves its **targets**:
+   every Cluster of the Environment, in the Order's namespace. When the Order
+   may not deploy at all, `Ready` reports why (`EnvironmentNotFound`,
+   `InvalidSelector`, `NoClusters`, `ProjectNotFound`, `ProjectNotPermitted`,
+   `ArgoCDNotInstalled`) and the Serving deletes its Applications; an error
+   while it checks retries and deletes nothing. A target whose Cluster is not
+   Ready is held with `ClusterNotReady`; of two Ready Clusters for one
+   server, the second by name is held with `ClusterConflict`.
+8. Creates or updates an Argo CD `Application` per target in the `argocd`
+   namespace, named `kokumi-<namespace>-<order>-<hash>` with the cluster in
+   the hash, pointing `spec.source.repoURL` at the deployed Preparation's OCI
+   artifact, `spec.source.targetRevision` at its exact digest, and
+   `spec.destination` at the cluster's API server and the Preparation's
+   target namespace.
+   A pre-existing Application without the opt-in annotation is never
+   modified, and deleting the Serving keeps it. An Application Argo CD
+   refuses, with an `InvalidSpecError` condition such as a destination its
+   AppProject does not permit, holds its target with `Rejected` and Argo CD's
+   message. A held target keeps its Application as it is. The Applications of
+   clusters that are no target any more are deleted.
+9. Derives each target's `Ready` condition from its Application, counts the
+   targets by state in `status.clusters` (`selected`, `healthy`,
+   `progressing`, `degraded`, `held`), and lists in `status.targets` only
+   those that do not run the deployed Preparation healthily, at most 64, so
+   that the status stays small for any fleet. The Serving's `Ready` follows
+   from the targets on Ready Clusters, and its message names the first
+   clusters and counts the others: `Deploying` until each of them, at least
+   one, reports `Healthy`, synced to the deployed digest after comparing its
+   current source, then `Deployed`; the message lists the Clusters that are
+   not Ready after `not ready:`. A target that is degraded at the deployed digest or
+   held for another reason surfaces as `DeploymentFailed`, as does an
+   Environment none of whose Clusters is Ready; the health of an older
+   revision is not reported for the new Preparation.
+   `Ready` describes what runs; while a newer Preparation waits for a gate,
+   its message says what holds it.
+10. Records the deployment in the history: when its targets on Ready
+   Clusters were first healthy, and when it ended, `Superseded` by the next
+   promotion or `Degraded` on any target. Once it is healthy, a signed
+   deployment record that names the targets that run it healthily is
+   attached to the artifact. A
    recovery after `Degraded` opens a new entry. The Serving records the
    findings of what it deploys in `status.deployedVulnerabilities` and emits
    a Warning Event when they increase.
@@ -754,21 +779,22 @@ deployed Preparation is the newest entry of `status.history` with a
 promotion record; the history keeps the 16 most recent deployments.
 
 The status is written only when it changes, and the next reconcile is
-triggered by a change to the Serving spec, its Order or Preparations, the
-Application's health, sync state or sync operation, the history of an
-upstream stage, or a soak that ends. Without Argo CD's Application CRD,
-Servings deploy nothing and report `ArgoCDNotInstalled`; the controller
-starts watching Applications once the CRD is installed.
+triggered by a change to the Serving spec, its Order or Preparations, an
+Application's health, sync state, sync operation or `InvalidSpecError`, the
+spec of its Environment, the Clusters it selects, its AppProject, the history
+of an upstream stage, or a soak that ends. Without Argo CD's CRDs, Servings
+deploy nothing and report `ArgoCDNotInstalled`; the controller starts
+watching Applications and AppProjects once their CRDs are installed.
 
 Rollback is promoting any previous Preparation. No re-rendering required.
 
 The Order controls its Serving in both promotion modes: under Automatic it
 creates it, and under Manual it adopts the Serving the first promote creates.
 Deleting the Order deletes its Preparations and its Serving, and deleting a
-Serving deletes its Argo CD Application, so Kokumi stops delivering. The
-deployed workloads keep running: the Application Kokumi creates has no
-`resources-finalizer.argocd.argoproj.io`, so Argo CD leaves its resources in
-place. A pre-existing Application without the opt-in annotation is kept.
+Serving deletes its Argo CD Applications, so Kokumi stops delivering. The
+deployed workloads keep running: the Applications Kokumi creates have no
+`resources-finalizer.argocd.argoproj.io`, so Argo CD leaves their resources in
+place. The same holds for a cluster that leaves an Order's targets. A pre-existing Application without the opt-in annotation is kept.
 `kubectl delete order <name> --cascade=orphan` keeps the Serving, and a later
 Order of the same name adopts it.
 
@@ -795,6 +821,52 @@ then the promotion is queued, and the Serving keeps what it deploys.
   leaves once only the Serving's own gates, such as soaks and checks, hold it.
 - Promote is refused only for an Automatic Order and for a Preparation that
   is not signed and ready.
+
+### Environments and clusters
+
+Kokumi deploys to **Clusters**: one object per cluster, in the namespace whose
+Orders deploy there, that reaches it with the kubeconfig in a Secret of the
+namespace, or is the cluster Kokumi runs in. Kokumi reports whether each can
+be deployed to and its Kubernetes version. An **Environment** selects Clusters
+of its namespace by label, names its engine and the Environments an Order
+must run after. An
+Order names an Environment of its namespace in `spec.environmentRef`; it is
+activation, not intent, so it renders nothing. Kokumi keeps the Cluster
+`in-cluster` and the Environment `local` in its own namespace. See
+[Clusters](../operator-guide/clusters/) and
+[Environments](../operator-guide/environments/).
+
+Every controller and the API server select an Environment's Clusters with one
+function, from the cache, so they agree on where it deploys. The statuses
+stay small for any fleet: an Environment counts the Clusters it selects and
+those that are ready, and a Serving counts its clusters by the state of their
+deployment and lists only those that do not run its Preparation healthily.
+Changes reach only the objects they concern: a Cluster reconciles the
+Servings of the Environments that select it, an AppProject those of the
+Environments that use it, and a probe that finds a cluster as it was changes
+nothing.
+
+The controllers reach the engine an Environment names in `deployer` through
+small interfaces, one per controller: the Serving's deployer (admit, apply,
+remove) and the Environment's admitter (admit). One Argo CD adapter
+implements both: it reads AppProjects, and writes the Applications. The Environment's status is for people; the
+Serving asks the engine itself whenever it deploys, so a change of the
+Environment or its AppProject counts at once, and a stale status never
+decides where an Order deploys.
+
+Three things are separate: the **workspace**, the namespace of the Order,
+where namespace RBAC decides who edits it; the **Environment** and its
+Clusters, where it deploys, through which Argo CD project; and the **target
+namespace** on the clusters, where the workload lands: the `targetNamespace`
+of the Order or its Product, else the Order's namespace. The target namespace
+is part of the intent, so a Preparation deploys there wherever it is promoted.
+
+```
+Cluster ──selected by labels──▶ Environment ◀── Order.spec.environmentRef
+          (same namespace)          │             (same namespace)
+                                    └── Serving: one Application per cluster,
+                                        into the Preparation's target namespace
+```
 
 ### Approvals
 
@@ -952,7 +1024,7 @@ Key properties:
 - **Idempotent** — each reconcile produces the same output for the same input
 - **Level-triggered** — the controller always acts on observed state, not events
 - **Owner references** — Preparations and the Serving are owned by their Order; clean deletion is automatic
-- **Argo CD delegates deployment** — Kokumi never applies manifests directly; it only manages the Argo CD Application resource
+- **Argo CD delegates deployment** — Kokumi never applies manifests directly; it only manages the Argo CD Applications
 
 ## OCI source formats
 

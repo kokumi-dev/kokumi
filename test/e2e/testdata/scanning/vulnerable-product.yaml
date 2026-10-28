@@ -20,6 +20,8 @@ metadata:
 spec:
   productRef:
     name: vulnerable
+  environmentRef:
+    name: local
   promotion:
     mode: Manual
 ---
@@ -30,6 +32,8 @@ metadata:
 spec:
   productRef:
     name: vulnerable
+  environmentRef:
+    name: local
   promotion:
     mode: Automatic
     checks:

@@ -2,11 +2,12 @@ apiVersion: delivery.kokumi.dev/v1alpha1
 kind: Order
 metadata:
   name: podinfo-prod
-  labels:
-    delivery.kokumi.dev/environment: prod
 spec:
   productRef:
     name: podinfo-pipeline
+
+  environmentRef:
+    name: prod
 
   values:
     ui:

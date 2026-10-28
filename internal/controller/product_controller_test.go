@@ -601,7 +601,7 @@ var _ = Describe("Product Controller", func() {
 		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion}})
 		order := &deliveryv1alpha1.Order{
 			Name: orderName, Namespace: ns,
-			Spec: deliveryv1alpha1.OrderSpec{ProductRef: deliveryv1alpha1.ProductRef{Name: name}},
+			Spec: deliveryv1alpha1.OrderSpec{EnvironmentRef: localEnvironment, ProductRef: deliveryv1alpha1.ProductRef{Name: name}},
 		}
 		Expect(k8sClient.Create(ctx, order)).To(Succeed())
 		DeferCleanup(func() { _ = k8sClient.Delete(ctx, order) })

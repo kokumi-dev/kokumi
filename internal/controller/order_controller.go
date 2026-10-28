@@ -762,6 +762,16 @@ func orderProduct(obj client.Object) []string {
 	return []string{order.Spec.ProductRef.Name}
 }
 
+// orderEnvironment returns the Environment an Order deploys to, for
+// FieldEnvironmentName.
+func orderEnvironment(obj client.Object) []string {
+	order, ok := obj.(*deliveryv1alpha1.Order)
+	if !ok {
+		return nil
+	}
+	return []string{order.Spec.EnvironmentRef.Name}
+}
+
 // orderRegistryNames returns the Registries an Order lists, for
 // orderRegistriesField.
 func orderRegistryNames(obj client.Object) []string {
@@ -923,6 +933,9 @@ func (r *OrderReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return err
 	}
 	if err := indexer.IndexField(context.Background(), &deliveryv1alpha1.Order{}, orderUpstreamsField, orderUpstreamNames); err != nil {
+		return err
+	}
+	if err := indexer.IndexField(context.Background(), &deliveryv1alpha1.Order{}, deliveryv1alpha1.FieldEnvironmentName, orderEnvironment); err != nil {
 		return err
 	}
 

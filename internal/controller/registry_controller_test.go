@@ -151,7 +151,7 @@ var _ = Describe("Registry Controller", func() {
 	})
 
 	It("creates the Registry of the bundled registry once, and keeps changes to it", func() {
-		r := &RegistryReconciler{Client: k8sClient, Namespace: testNamespace, BundledHost: artifact.DefaultRegistryHost}
+		r := &RegistryReconciler{Client: k8sClient, Namespace: testNamespace, BundledRegistryHost: artifact.DefaultRegistryHost}
 		Expect(r.ensureBundledRegistry(k8sClient)(ctx)).To(Succeed())
 
 		reg := &deliveryv1alpha1.Registry{}

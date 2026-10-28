@@ -1,5 +1,5 @@
 import { authHeaders, refresh } from './auth'
-import type { Order, Preparation, OrderFormData, OrderPreviewRequest, Product, ProductFormData, ProductPreviewRequest, Patch, Render, ChartInfo, Registry, RegistryFormData, Repository, RepositoryFormData, ArtifactInfo, ArtifactFile, Approval, ApprovalDecision, ArtifactConfig, ArtifactGraph, ProductSourceArtifact, ProductVulnerabilityReport, PreparationVulnerabilityReport, RegistryRef } from './types'
+import type { Order, Preparation, OrderFormData, OrderPreviewRequest, Product, ProductFormData, ProductPreviewRequest, Patch, Render, ChartInfo, Registry, RegistryFormData, Repository, RepositoryFormData, ArtifactInfo, ArtifactFile, Approval, ApprovalDecision, ArtifactConfig, ArtifactGraph, ProductSourceArtifact, ProductVulnerabilityReport, PreparationVulnerabilityReport, RegistryRef, DeploymentTarget } from './types'
 
 // All API calls are relative so they work both in dev (proxied by Vite) and
 // in production (served from the same Go binary).
@@ -93,7 +93,7 @@ export function createOrder(data: OrderFormData, commitMessage?: string): Promis
       namespace: data.namespace,
       name: data.name,
       productRef: data.productRef,
-      environment: data.environment || undefined,
+      environmentRef: data.environmentRef,
       targetNamespace: data.targetNamespace || undefined,
       values: valuesBody(data.values),
       destination: data.destination,
@@ -109,10 +109,9 @@ export function createOrder(data: OrderFormData, commitMessage?: string): Promis
 }
 
 /**
- * Replaces the spec of an Order, and its environment. Its Product cannot be
+ * Replaces the spec of an Order. Its Product and its Environment cannot be
  * changed. The promotion is replaced as a whole, so stages and checks left
- * out are removed, and an empty environment or target namespace removes the
- * Order's.
+ * out are removed, and an empty target namespace removes the Order's.
  */
 export function updateOrder(
   namespace: string,
@@ -123,7 +122,6 @@ export function updateOrder(
   return request<Order>(`/orders/${namespace}/${name}`, {
     method: 'PUT',
     body: JSON.stringify({
-      environment: data.environment,
       targetNamespace: data.targetNamespace || undefined,
       values: valuesBody(data.values),
       destination: data.destination,
@@ -605,4 +603,9 @@ export interface NamespaceCapabilities {
 
 export function getNamespaceCapabilities(namespace: string): Promise<NamespaceCapabilities> {
   return request<NamespaceCapabilities>(`/namespaces/${encodeURIComponent(namespace)}/capabilities`)
+}
+
+/** Every cluster a Serving deploys to, by name, with how its deployment stands there. */
+export function getServingTargets(namespace: string, name: string): Promise<DeploymentTarget[]> {
+  return request<DeploymentTarget[]>(`/servings/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/targets`)
 }

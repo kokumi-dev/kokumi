@@ -8,3 +8,6 @@ metadata:
 spec:
   productRef:
     name: podinfo
+  # The Environment Kokumi keeps in its own namespace: the cluster it runs in.
+  environmentRef:
+    name: local

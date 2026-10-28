@@ -5,3 +5,5 @@ metadata:
 spec:
   productRef:
     name: podinfo-verified
+  environmentRef:
+    name: local

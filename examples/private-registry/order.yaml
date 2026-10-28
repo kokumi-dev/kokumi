@@ -5,6 +5,8 @@ metadata:
 spec:
   productRef:
     name: podinfo-private
+  environmentRef:
+    name: local
 
   # The render of a private source stays private: Kokumi refuses to push it
   # to the bundled registry, which anyone in the cluster reads without

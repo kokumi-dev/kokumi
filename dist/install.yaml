@@ -293,8 +293,8 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          Cluster is a cluster for Orders to deploy to, and how Kokumi reaches it.
-          Kokumi reports whether it is reachable and accepts the credential.
+          Cluster is a cluster that Orders deploy to. Environments of its namespace
+          select it by its labels. Kokumi reports whether it is reachable.
         properties:
           apiVersion:
             description: |-
@@ -374,8 +374,8 @@ spec:
               conditions:
                 description: |-
                   conditions represent the current state of the Cluster. Ready reports
-                  whether Kokumi reaches it: its kubeconfig is usable, its control plane
-                  is ready, and it accepts the credential.
+                  whether Orders can deploy to it: it is reachable and accepts the
+                  credential.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -509,9 +509,10 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          Environment is a group of clusters for the Orders of its namespace to
-          deploy to. It selects the Clusters of its namespace by their labels, and
-          names the engine that deploys there.
+          Environment is a group of clusters that Orders of its namespace deploy to.
+          It selects the Clusters of its namespace by their labels, decides through
+          which engine Orders deploy there, and which Environments an Order must
+          pass first.
         properties:
           apiVersion:
             description: |-
@@ -617,6 +618,42 @@ spec:
                 description: description says what the Environment is for.
                 maxLength: 1024
                 type: string
+              promotion:
+                description: |-
+                  promotion configures what an Order must pass before it deploys to the
+                  Environment.
+                properties:
+                  requireAfter:
+                    description: |-
+                      requireAfter lists Environments of the same namespace an Order must
+                      run after: every Order that deploys to this Environment must name, in
+                      spec.promotion.after, an Order of each of them, with at least its
+                      minSoakSeconds.
+                    items:
+                      description: RequiredEnvironment is an Environment an Order
+                        must run after.
+                      properties:
+                        environment:
+                          description: environment is the name of the Environment.
+                          maxLength: 253
+                          minLength: 1
+                          type: string
+                        minSoakSeconds:
+                          description: |-
+                            minSoakSeconds is the least soakSeconds the Order must give its
+                            upstream Order of the Environment.
+                          format: int32
+                          minimum: 0
+                          type: integer
+                      required:
+                      - environment
+                      type: object
+                    maxItems: 8
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - environment
+                    x-kubernetes-list-type: map
+                type: object
             required:
             - clusterSelector
             - deployer
@@ -646,8 +683,8 @@ spec:
               conditions:
                 description: |-
                   conditions represent the current state of the Environment. Ready
-                  reports whether it selects any Cluster and its engine admits it; each
-                  Cluster reports its own readiness.
+                  reports whether Orders can deploy to it at all; each Cluster reports
+                  its own readiness.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -1252,6 +1289,9 @@ spec:
     - jsonPath: .spec.productRef.name
       name: Product
       type: string
+    - jsonPath: .spec.environmentRef.name
+      name: Environment
+      type: string
     - jsonPath: .status.latestPreparationName
       name: Latest Preparation
       type: string
@@ -1347,6 +1387,27 @@ spec:
                 maxItems: 128
                 type: array
                 x-kubernetes-list-type: atomic
+              environmentRef:
+                description: |-
+                  environmentRef references the Environment, in the Order's namespace,
+                  the Order deploys to: every cluster it selects. It decides where
+                  Preparations run, not what they are. It cannot be changed after
+                  creation, so that an Order never reaches an Environment without
+                  passing its gates: another Environment is another Order.
+                properties:
+                  name:
+                    description: name is the name of the Environment, in the Order's
+                      namespace.
+                    maxLength: 253
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+                x-kubernetes-validations:
+                - message: 'environmentRef is immutable: create a new Order to deploy
+                    to another Environment'
+                  rule: self == oldSelf
               patches:
                 description: |-
                   patches are merged over the Product's patches, per target, before
@@ -1554,10 +1615,11 @@ spec:
                 x-kubernetes-list-type: map
               targetNamespace:
                 description: |-
-                  targetNamespace is the namespace the Order deploys into, overriding
-                  the Product's. When neither sets it, it is the Order's namespace. It
-                  is part of what is rendered: Helm renders into it, and resources
-                  without a namespace are deployed there.
+                  targetNamespace is the namespace the Order deploys into on every
+                  cluster of its Environment, overriding the Product's. When neither
+                  sets it, it is the Order's namespace. It is part of what is
+                  rendered: Helm renders into it, and resources without a namespace
+                  are deployed there.
                 maxLength: 63
                 pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                 type: string
@@ -1569,6 +1631,7 @@ spec:
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
             required:
+            - environmentRef
             - productRef
             type: object
           status:
@@ -1714,11 +1777,15 @@ spec:
         - spec
         type: object
         x-kubernetes-validations:
+        - message: 'the name of an Order is at most 63 characters: it is a label value
+            of its Preparations and Applications'
+          rule: self.metadata.name.size() <= 63
         - message: an Order cannot run after itself
           rule: '!has(self.spec.promotion) || !has(self.spec.promotion.after) || self.spec.promotion.after.all(s,
             s.order != self.metadata.name)'
     selectableFields:
     - jsonPath: .spec.productRef.name
+    - jsonPath: .spec.environmentRef.name
     served: true
     storage: true
     subresources:
@@ -2092,8 +2159,8 @@ spec:
                 type: object
               targetNamespace:
                 description: |-
-                  targetNamespace is the namespace the Preparation was rendered for: it
-                  deploys there, wherever it is promoted.
+                  targetNamespace is the namespace the Preparation was rendered for:
+                  it deploys there on every cluster, wherever it is promoted.
                 maxLength: 63
                 minLength: 1
                 type: string
@@ -2805,9 +2872,9 @@ spec:
                 type: object
               targetNamespace:
                 description: |-
-                  targetNamespace is the namespace Orders of the Product deploy into,
-                  unless an Order sets its own. When neither sets it, it is the Order's
-                  namespace.
+                  targetNamespace is the namespace Orders of the Product deploy into on
+                  every cluster of their Environment, unless an Order sets its own. When
+                  neither sets it, it is the Order's namespace.
                 maxLength: 63
                 pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                 type: string
@@ -3793,6 +3860,14 @@ spec:
     - jsonPath: .status.targetPreparationName
       name: Target
       type: string
+    - jsonPath: .status.clusters.selected
+      name: Clusters
+      priority: 1
+      type: integer
+    - jsonPath: .status.clusters.healthy
+      name: Healthy
+      priority: 1
+      type: integer
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
       name: Ready
       type: string
@@ -3855,6 +3930,49 @@ spec:
           status:
             description: status defines the observed state of Serving
             properties:
+              clusters:
+                description: |-
+                  clusters counts the clusters the Serving deploys to by the state of
+                  their deployment.
+                properties:
+                  degraded:
+                    description: degraded is how many run it degraded.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  healthy:
+                    description: healthy is how many of them run the deployed Preparation
+                      healthily.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  held:
+                    description: |-
+                      held is how many Kokumi cannot deploy to; their targets say why.
+                      Clusters that are not Ready are among them, and are left out of the
+                      Serving's health until they are Ready again.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  progressing:
+                    description: progressing is how many are deploying it.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  selected:
+                    description: |-
+                      selected is how many clusters the Serving deploys to: the Clusters its
+                      Order's Environment selects.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                required:
+                - degraded
+                - healthy
+                - held
+                - progressing
+                - selected
+                type: object
               conditions:
                 description: conditions represent the current state of the Serving
                   resource.
@@ -4062,6 +4180,102 @@ spec:
                   Automatic promotion, after it passed its upstream stages and checks.
                   Its approvals are sealed when it becomes the target.
                 type: string
+              targets:
+                description: |-
+                  targets are the clusters that do not run the deployed Preparation
+                  healthily, with what the engine reports on each: held clusters first,
+                  then degraded, then progressing ones, each by name. It lists at most
+                  64 of them; clusters counts them all.
+                items:
+                  description: |-
+                    DeploymentTarget is a cluster a Serving deploys to, with what the engine
+                    reports on its deployment there.
+                  properties:
+                    cluster:
+                      description: cluster is the name of the Cluster, in the Serving's
+                        namespace.
+                      maxLength: 253
+                      minLength: 1
+                      type: string
+                    conditions:
+                      description: |-
+                        conditions represent the deployment to the cluster. Ready is True once
+                        the cluster runs the deployed Preparation healthily; its
+                        lastTransitionTime says since when.
+                      items:
+                        description: Condition contains details for one aspect of
+                          the current state of this API Resource.
+                        properties:
+                          lastTransitionTime:
+                            description: |-
+                              lastTransitionTime is the last time the condition transitioned from one status to another.
+                              This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                            format: date-time
+                            type: string
+                          message:
+                            description: |-
+                              message is a human readable message indicating details about the transition.
+                              This may be an empty string.
+                            maxLength: 32768
+                            type: string
+                          observedGeneration:
+                            description: |-
+                              observedGeneration represents the .metadata.generation that the condition was set based upon.
+                              For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                              with respect to the current state of the instance.
+                            format: int64
+                            minimum: 0
+                            type: integer
+                          reason:
+                            description: |-
+                              reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                              Producers of specific condition types may define expected values and meanings for this field,
+                              and whether the values are considered a guaranteed API.
+                              The value should be a CamelCase string.
+                              This field may not be empty.
+                            maxLength: 1024
+                            minLength: 1
+                            pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                            type: string
+                          status:
+                            description: status of the condition, one of True, False,
+                              Unknown.
+                            enum:
+                            - "True"
+                            - "False"
+                            - Unknown
+                            type: string
+                          type:
+                            description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                            maxLength: 316
+                            pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                            type: string
+                        required:
+                        - lastTransitionTime
+                        - message
+                        - reason
+                        - status
+                        - type
+                        type: object
+                      maxItems: 8
+                      type: array
+                      x-kubernetes-list-map-keys:
+                      - type
+                      x-kubernetes-list-type: map
+                    revision:
+                      description: |-
+                        revision is the artifact digest the engine reports synced to the
+                        cluster.
+                      maxLength: 71
+                      type: string
+                  required:
+                  - cluster
+                  type: object
+                maxItems: 64
+                type: array
+                x-kubernetes-list-map-keys:
+                - cluster
+                x-kubernetes-list-type: map
             type: object
         required:
         - spec
@@ -5216,6 +5430,7 @@ rules:
   - registries
   - repositories
   - approvals
+  - environments
   verbs:
   - get
   - list

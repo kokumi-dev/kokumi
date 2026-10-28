@@ -26,6 +26,9 @@ spec:
     - jsonPath: .spec.productRef.name
       name: Product
       type: string
+    - jsonPath: .spec.environmentRef.name
+      name: Environment
+      type: string
     - jsonPath: .status.latestPreparationName
       name: Latest Preparation
       type: string
@@ -121,6 +124,27 @@ spec:
                 maxItems: 128
                 type: array
                 x-kubernetes-list-type: atomic
+              environmentRef:
+                description: |-
+                  environmentRef references the Environment, in the Order's namespace,
+                  the Order deploys to: every cluster it selects. It decides where
+                  Preparations run, not what they are. It cannot be changed after
+                  creation, so that an Order never reaches an Environment without
+                  passing its gates: another Environment is another Order.
+                properties:
+                  name:
+                    description: name is the name of the Environment, in the Order's
+                      namespace.
+                    maxLength: 253
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+                x-kubernetes-validations:
+                - message: 'environmentRef is immutable: create a new Order to deploy
+                    to another Environment'
+                  rule: self == oldSelf
               patches:
                 description: |-
                   patches are merged over the Product's patches, per target, before
@@ -328,10 +352,11 @@ spec:
                 x-kubernetes-list-type: map
               targetNamespace:
                 description: |-
-                  targetNamespace is the namespace the Order deploys into, overriding
-                  the Product's. When neither sets it, it is the Order's namespace. It
-                  is part of what is rendered: Helm renders into it, and resources
-                  without a namespace are deployed there.
+                  targetNamespace is the namespace the Order deploys into on every
+                  cluster of its Environment, overriding the Product's. When neither
+                  sets it, it is the Order's namespace. It is part of what is
+                  rendered: Helm renders into it, and resources without a namespace
+                  are deployed there.
                 maxLength: 63
                 pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                 type: string
@@ -343,6 +368,7 @@ spec:
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
             required:
+            - environmentRef
             - productRef
             type: object
           status:
@@ -488,11 +514,15 @@ spec:
         - spec
         type: object
         x-kubernetes-validations:
+        - message: 'the name of an Order is at most 63 characters: it is a label value
+            of its Preparations and Applications'
+          rule: self.metadata.name.size() <= 63
         - message: an Order cannot run after itself
           rule: '!has(self.spec.promotion) || !has(self.spec.promotion.after) || self.spec.promotion.after.all(s,
             s.order != self.metadata.name)'
     selectableFields:
     - jsonPath: .spec.productRef.name
+    - jsonPath: .spec.environmentRef.name
     served: true
     storage: true
     subresources:

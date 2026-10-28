@@ -2,10 +2,27 @@ import { useCallback, useSyncExternalStore } from 'react'
 import { withAccessToken, refresh, onAuthChange, getToken } from '../api/auth'
 
 /** The SSE event types the server streams on /api/v1/events. */
-export type SSEEventType = 'counts' | 'orders' | 'preparations' | 'servings' | 'products' | 'registries' | 'repositories'
+export type SSEEventType =
+  | 'counts'
+  | 'orders'
+  | 'preparations'
+  | 'servings'
+  | 'products'
+  | 'registries'
+  | 'repositories'
+  | 'environments'
 
 const ENDPOINT = '/api/v1/events'
-const EVENT_TYPES: SSEEventType[] = ['counts', 'orders', 'preparations', 'servings', 'products', 'registries', 'repositories']
+const EVENT_TYPES: SSEEventType[] = [
+  'counts',
+  'orders',
+  'preparations',
+  'servings',
+  'products',
+  'registries',
+  'repositories',
+  'environments',
+]
 
 // Keep the stream open briefly after the last subscriber leaves, so navigating
 // between pages (unmount, then mount) reuses it instead of reconnecting.

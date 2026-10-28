@@ -45,9 +45,10 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          Environment is a group of clusters for the Orders of its namespace to
-          deploy to. It selects the Clusters of its namespace by their labels, and
-          names the engine that deploys there.
+          Environment is a group of clusters that Orders of its namespace deploy to.
+          It selects the Clusters of its namespace by their labels, decides through
+          which engine Orders deploy there, and which Environments an Order must
+          pass first.
         properties:
           apiVersion:
             description: |-
@@ -153,6 +154,42 @@ spec:
                 description: description says what the Environment is for.
                 maxLength: 1024
                 type: string
+              promotion:
+                description: |-
+                  promotion configures what an Order must pass before it deploys to the
+                  Environment.
+                properties:
+                  requireAfter:
+                    description: |-
+                      requireAfter lists Environments of the same namespace an Order must
+                      run after: every Order that deploys to this Environment must name, in
+                      spec.promotion.after, an Order of each of them, with at least its
+                      minSoakSeconds.
+                    items:
+                      description: RequiredEnvironment is an Environment an Order
+                        must run after.
+                      properties:
+                        environment:
+                          description: environment is the name of the Environment.
+                          maxLength: 253
+                          minLength: 1
+                          type: string
+                        minSoakSeconds:
+                          description: |-
+                            minSoakSeconds is the least soakSeconds the Order must give its
+                            upstream Order of the Environment.
+                          format: int32
+                          minimum: 0
+                          type: integer
+                      required:
+                      - environment
+                      type: object
+                    maxItems: 8
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - environment
+                    x-kubernetes-list-type: map
+                type: object
             required:
             - clusterSelector
             - deployer
@@ -182,8 +219,8 @@ spec:
               conditions:
                 description: |-
                   conditions represent the current state of the Environment. Ready
-                  reports whether it selects any Cluster and its engine admits it; each
-                  Cluster reports its own readiness.
+                  reports whether Orders can deploy to it at all; each Cluster reports
+                  its own readiness.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.

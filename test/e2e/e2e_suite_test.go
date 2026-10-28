@@ -99,6 +99,9 @@ var _ = AfterSuite(func() {
 		return
 	}
 
+	By("waiting for Kokumi to release the objects of the scenarios' namespaces")
+	framework.WaitForDeletedNamespaces()
+
 	By("undeploying kokumi")
 	_, _ = utils.Run(exec.Command("make", "undeploy"))
 

@@ -82,6 +82,7 @@ func addRoutes(
 
 	// Promote / rollback a Preparation
 	mux.HandleFunc("POST /api/v1/orders/{namespace}/{name}/promote", handlePromote(deps))
+	mux.HandleFunc("GET /api/v1/servings/{namespace}/{name}/targets", handleServingTargets(deps))
 
 	// Preparation artifact: its graph, intent and rendered files from OCI
 	mux.HandleFunc("GET /api/v1/preparations/{namespace}/{name}/artifact", handleGetPreparationArtifact(deps))

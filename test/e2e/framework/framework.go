@@ -149,6 +149,13 @@ func Preparations(namespace, order string) func() ([]deliveryv1alpha1.Preparatio
 	}
 }
 
+// Keys of the JSON objects specs build or read: the requests of the API
+// server.
+const (
+	KeyName      = "name"
+	KeyNamespace = "namespace"
+)
+
 // Kubectl runs kubectl with args and returns its combined output.
 func Kubectl(args ...string) (string, error) {
 	return utils.Run(exec.Command("kubectl", args...))

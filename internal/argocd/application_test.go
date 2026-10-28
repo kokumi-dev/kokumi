@@ -16,18 +16,26 @@ import (
 
 const (
 	testOrderName   = "my-order"
-	testServingName = "my-serving"
+	testServingName = "my-order"
 	testNamespace   = "my-namespace"
 	testDigest      = "sha256:0000000000000000000000000000000000000000000000000000000000000001"
 	statusField     = "status"
-	keyRevision     = "revision"
-	// testOptIn is the opt-in annotation value for the test Order.
-	testOptIn = testNamespace + "/" + testOrderName
+	testOptIn       = testNamespace + "/" + testOrderName
 )
 
-// withStatus returns the Application of the test Serving at revision, with
-// the status the Argo CD Application controller writes for the given health
-// and sync status after comparing its current source.
+const testOCIRef = "oci://registry.example/order/app@" + testDigest
+
+// testCluster is the cluster the tests deploy to.
+const testCluster = "member"
+
+// keyRevision is the field Argo CD reports the synced revision in.
+const keyRevision = "revision"
+
+var testTarget = Target{Cluster: testCluster, Server: "https://member.example:6443", Namespace: "webshop", Project: "prod"}
+
+// withStatus returns the Application of testServing with the status the
+// Argo CD Application controller writes once it synced revision without an
+// operation in flight and found it in health.
 func withStatus(health, sync, revision string) *unstructured.Unstructured {
 	app, err := Application(testServing(), "oci://registry.example/order/app@"+revision, testTarget)
 	if err != nil {
@@ -50,7 +58,6 @@ func testServing() *deliveryv1alpha1.Serving {
 	}
 }
 
-// servingIn returns the Serving of the Order order in namespace.
 func servingIn(namespace, order string) *deliveryv1alpha1.Serving {
 	return &deliveryv1alpha1.Serving{Name: order, Namespace: namespace, Spec: deliveryv1alpha1.ServingSpec{OrderName: order}}
 }
@@ -63,31 +70,26 @@ func TestKey(t *testing.T) {
 
 	assert.NotEqual(t, Key(servingIn("a-b", "c"), cluster.InCluster), Key(servingIn("a", "b-c"), cluster.InCluster),
 		"Orders that hyphens would join get names of their own")
-	assert.NotEqual(t, Key(servingIn("shop", "podinfo"), cluster.InCluster), Key(servingIn("team-b", "podinfo"), cluster.InCluster),
-		"Orders of one name in two namespaces get an Application each")
+	assert.NotEqual(t, Key(testServing(), cluster.InCluster), Key(testServing(), testCluster),
+		"each cluster gets an Application of its own")
 
-	long := Key(servingIn(strings.Repeat("n", 63), strings.Repeat("o.", 126)+"o"), cluster.InCluster)
+	long := Key(servingIn(strings.Repeat("n", 63), strings.Repeat("o.", 126)+"o"), "member")
 	assert.LessOrEqual(t, len(long.Name), 63)
 	assert.Empty(t, validation.IsValidLabelValue(long.Name), "Argo CD writes the name into a label")
 	assert.Empty(t, validation.IsDNS1123Subdomain(long.Name))
 }
-
-const testOCIRef = "oci://registry.example/order/app@" + testDigest
-
-// testTarget is the cluster Kokumi runs in, with a target namespace of its
-// own.
-var testTarget = Target{Cluster: cluster.InCluster, Server: cluster.InClusterServer, Namespace: "webshop", Project: DefaultProject}
 
 func TestApplication(t *testing.T) {
 	app, err := Application(testServing(), testOCIRef, testTarget)
 	require.NoError(t, err)
 
 	assert.Equal(t, GroupVersionKind, app.GroupVersionKind())
-	assert.Equal(t, Key(testServing(), cluster.InCluster), types.NamespacedName{Namespace: app.GetNamespace(), Name: app.GetName()})
+	assert.Equal(t, Key(testServing(), testCluster), types.NamespacedName{Namespace: app.GetNamespace(), Name: app.GetName()})
 	assert.Equal(t, testOptIn, app.GetAnnotations()[deliveryv1alpha1.AnnotationAllowedOrder], "an Application Kokumi creates is opted in")
 	serving, ok := ServingOf(app.GetLabels())
 	assert.True(t, ok)
 	assert.Equal(t, types.NamespacedName{Namespace: testNamespace, Name: testServingName}, serving)
+	assert.Equal(t, testCluster, ClusterOf(app))
 
 	field := func(path ...string) string {
 		value, _, _ := unstructured.NestedString(app.Object, path...)
@@ -95,9 +97,9 @@ func TestApplication(t *testing.T) {
 	}
 	assert.Equal(t, "oci://registry.example/order/app", field("spec", "source", "repoURL"))
 	assert.Equal(t, testDigest, field("spec", "source", "targetRevision"))
-	assert.Equal(t, DefaultProject, field("spec", "project"))
-	assert.Equal(t, cluster.InClusterServer, field("spec", "destination", "server"))
-	assert.Equal(t, "webshop", field("spec", "destination", "namespace"), "the Preparation runs in its target namespace")
+	assert.Equal(t, "prod", field("spec", "project"))
+	assert.Equal(t, "https://member.example:6443", field("spec", "destination", "server"))
+	assert.Equal(t, "webshop", field("spec", "destination", "namespace"), "every cluster runs the Preparation in its target namespace")
 
 	_, err = Application(testServing(), "", testTarget)
 	assert.Error(t, err)
@@ -148,6 +150,7 @@ func TestStateOf(t *testing.T) {
 		want Phase
 	}{
 		{name: "missing", want: PhaseMissing},
+		{name: "rejected", app: rejected(withStatus("Healthy", "Synced", testDigest)), want: PhaseRejected},
 		{name: "synced and healthy", app: withStatus("Healthy", "Synced", testDigest), want: PhaseHealthy},
 		{name: "synced and healthy after a sync at the revision", app: synced, want: PhaseHealthy},
 		{name: "healthy but out of sync", app: withStatus("Healthy", "OutOfSync", testDigest), want: PhaseProgressing},
@@ -162,12 +165,28 @@ func TestStateOf(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			state := StateOf(tt.app)
 			assert.Equal(t, tt.want, state.Phase)
+			if tt.want == PhaseRejected {
+				assert.Equal(t, testRejection, state.Message, "Argo CD says why")
+				return
+			}
 			if tt.app != nil {
 				assert.Equal(t, testDigest, state.Revision)
 				assert.Equal(t, "health message", state.Message)
 			}
 		})
 	}
+}
+
+// testRejection is the message of an Argo CD InvalidSpecError.
+const testRejection = "application destination is not permitted in project"
+
+// rejected adds the condition Argo CD sets on an Application it refuses to
+// app.
+func rejected(app *unstructured.Unstructured) *unstructured.Unstructured {
+	app.Object[statusField].(map[string]any)["conditions"] = []any{
+		map[string]any{"type": "InvalidSpecError", "message": testRejection},
+	}
+	return app
 }
 
 func TestOptedIn(t *testing.T) {
@@ -257,6 +276,7 @@ func TestChanged(t *testing.T) {
 			new: annotated(withStatus("Healthy", "Synced", testDigest), map[string]string{
 				deliveryv1alpha1.AnnotationAllowedOrder: testOptIn, "argocd.argoproj.io/refresh": "normal",
 			})},
+		{name: "rejected", old: withStatus("Unknown", "Unknown", testDigest), new: rejected(withStatus("Unknown", "Unknown", testDigest)), want: true},
 		{name: "nothing relevant", old: withStatus("Healthy", "Synced", testDigest), new: withStatus("Healthy", "Synced", testDigest)},
 	}
 	for _, tt := range tests {
@@ -278,4 +298,8 @@ func TestTrimStatus(t *testing.T) {
 	assert.Equal(t, before, StateOf(app), "what Kokumi reads stays")
 	assert.NotContains(t, app.Object[statusField], "resources")
 	assert.NotContains(t, app.Object[statusField], "history")
+
+	refused := rejected(withStatus("Unknown", "Unknown", testDigest))
+	TrimStatus(refused)
+	assert.Equal(t, PhaseRejected, StateOf(refused).Phase, "the conditions stay")
 }

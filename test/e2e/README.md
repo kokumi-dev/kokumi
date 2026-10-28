@@ -58,7 +58,7 @@ also exports the logs of the Kind nodes, their kubelet and every container to
 | `rendering_test.go` | `rendering`: every kind of source, pushed as a Preparation. |
 | `overrides_test.go` | `overrides`: what a Product lets its Orders change. |
 | `promotion_test.go` | `promotion`: Manual promotion and rollback. |
-| `pipeline_test.go` | `promotion`: stages, soak, signed records. |
+| `pipeline_test.go` | `promotion`: stages, soak, signed records, Environments a stage must run after. |
 | `clusters_test.go` | `clusters`: the Cluster of the cluster Kokumi runs in. |
 | `environments_test.go` | `environments`: the Environment `local`, the local example, what an Environment's Argo CD project allows, and who may name a Secret in a Cluster. |
 | `approvals_test.go` | `approvals`: required approvals through OIDC sign-in. |
@@ -89,8 +89,10 @@ A spec reads as a scenario; the mechanics live in `framework/`.
   placeholders through `testdata/<example>/`, which fills in only what a user
   would. What only a spec needs goes into `testdata/`, never into YAML built
   in Go.
-- **A namespace per scenario.** `framework.CreateNamespace` creates it and
-  deletes it when the scenario ends.
+- **A namespace per scenario.** `framework.CreateNamespace` creates it, with
+  the Cluster and the Environment of `examples/local`, and deletes it when
+  the scenario ends; the suite waits for every one of them to go before it
+  undeploys Kokumi.
 - **Read the API with types.** `framework.Object[T]`, `framework.LatestPreparation`
   and matchers such as `framework.HaveConditionReason`, not kubectl output.
   Run a CLI only when the CLI is what the spec checks: `kubectl auth can-i`,

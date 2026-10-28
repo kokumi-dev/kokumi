@@ -21,8 +21,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// EnvironmentSpec defines a group of clusters and the engine that deploys
-// there.
+// EnvironmentSpec defines a group of clusters Orders deploy to, through
+// which engine, and what an Order must pass first.
 type EnvironmentSpec struct {
 	// description says what the Environment is for.
 	// +optional
@@ -37,6 +37,11 @@ type EnvironmentSpec struct {
 	// deployer is the engine that deploys to the Environment's clusters.
 	// +required
 	Deployer Deployer `json:"deployer"`
+
+	// promotion configures what an Order must pass before it deploys to the
+	// Environment.
+	// +optional
+	Promotion *EnvironmentPromotion `json:"promotion,omitempty"`
 }
 
 // DeployerType is an engine that deploys Preparations.
@@ -78,6 +83,35 @@ type ArgoCDDeployer struct {
 	Project string `json:"project"`
 }
 
+// EnvironmentPromotion configures what an Order must pass before it deploys
+// to an Environment.
+type EnvironmentPromotion struct {
+	// requireAfter lists Environments of the same namespace an Order must
+	// run after: every Order that deploys to this Environment must name, in
+	// spec.promotion.after, an Order of each of them, with at least its
+	// minSoakSeconds.
+	// +optional
+	// +listType=map
+	// +listMapKey=environment
+	// +kubebuilder:validation:MaxItems=8
+	RequireAfter []RequiredEnvironment `json:"requireAfter,omitempty"`
+}
+
+// RequiredEnvironment is an Environment an Order must run after.
+type RequiredEnvironment struct {
+	// environment is the name of the Environment.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	Environment string `json:"environment"`
+
+	// minSoakSeconds is the least soakSeconds the Order must give its
+	// upstream Order of the Environment.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	MinSoakSeconds int32 `json:"minSoakSeconds,omitempty"`
+}
+
 // EnvironmentStatus defines the observed state of Environment.
 type EnvironmentStatus struct {
 	// observedGeneration is the most recent generation observed by the
@@ -90,8 +124,8 @@ type EnvironmentStatus struct {
 	Clusters *EnvironmentClusters `json:"clusters,omitempty"`
 
 	// conditions represent the current state of the Environment. Ready
-	// reports whether it selects any Cluster and its engine admits it; each
-	// Cluster reports its own readiness.
+	// reports whether Orders can deploy to it at all; each Cluster reports
+	// its own readiness.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
@@ -123,9 +157,10 @@ type EnvironmentClusters struct {
 // +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].reason`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// Environment is a group of clusters for the Orders of its namespace to
-// deploy to. It selects the Clusters of its namespace by their labels, and
-// names the engine that deploys there.
+// Environment is a group of clusters that Orders of its namespace deploy to.
+// It selects the Clusters of its namespace by their labels, decides through
+// which engine Orders deploy there, and which Environments an Order must
+// pass first.
 type Environment struct {
 	metav1.TypeMeta `json:",inline"`
 

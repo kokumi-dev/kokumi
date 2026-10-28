@@ -5,6 +5,8 @@ metadata:
 spec:
   productRef:
     name: external-dns
+  environmentRef:
+    name: local
 
   # With several files, a patch applies in the file that holds its target.
   patches:

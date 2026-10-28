@@ -21,7 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// ClusterConnection is how Kokumi reaches a cluster.
+// ClusterConnection is how Kokumi and its engines reach a cluster.
 // +kubebuilder:validation:Enum=InCluster;Kubeconfig
 type ClusterConnection string
 
@@ -34,7 +34,7 @@ const (
 	ClusterConnectionKubeconfig ClusterConnection = "Kubeconfig"
 )
 
-// ClusterSpec defines a cluster and how to reach it.
+// ClusterSpec defines a cluster that Orders deploy to, and how to reach it.
 // +union
 // +kubebuilder:validation:XValidation:rule="self.connection == 'Kubeconfig' ? has(self.kubeconfig) : !has(self.kubeconfig)",message="kubeconfig is required when connection is Kubeconfig, and forbidden otherwise"
 type ClusterSpec struct {
@@ -103,8 +103,8 @@ type ClusterStatus struct {
 	KubernetesVersion string `json:"kubernetesVersion,omitempty"`
 
 	// conditions represent the current state of the Cluster. Ready reports
-	// whether Kokumi reaches it: its kubeconfig is usable, its control plane
-	// is ready, and it accepts the credential.
+	// whether Orders can deploy to it: it is reachable and accepts the
+	// credential.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
@@ -122,8 +122,8 @@ type ClusterStatus struct {
 // +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].reason`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
-// Cluster is a cluster for Orders to deploy to, and how Kokumi reaches it.
-// Kokumi reports whether it is reachable and accepts the credential.
+// Cluster is a cluster that Orders deploy to. Environments of its namespace
+// select it by its labels. Kokumi reports whether it is reachable.
 type Cluster struct {
 	metav1.TypeMeta `json:",inline"`
 
