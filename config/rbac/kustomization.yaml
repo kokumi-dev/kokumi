@@ -27,6 +27,9 @@ resources:
 # default, aiding admins in cluster management. Those roles are
 # not used by the kokumi itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
+- environment_admin_role.yaml
+- environment_editor_role.yaml
+- environment_viewer_role.yaml
 - cluster_admin_role.yaml
 - cluster_editor_role.yaml
 - cluster_viewer_role.yaml

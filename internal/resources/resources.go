@@ -1,15 +1,17 @@
 // Package resources builds the objects the Kokumi controllers create: the
 // Preparation and Serving of an Order, the Secrets of the Kitchen, and the
-// default Kitchen, Registry and Cluster. It only builds them; the
-// controllers set owner references and write them.
+// default Kitchen, Registry, Cluster and Environment. It only builds them;
+// the controllers set owner references and write them.
 package resources
 
 import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/argocd"
 	"github.com/kokumi-dev/kokumi/internal/cluster"
 	"github.com/kokumi-dev/kokumi/internal/images"
 	"github.com/kokumi-dev/kokumi/internal/oci"
@@ -141,7 +143,8 @@ func BundledRegistry(namespace, host string) *deliveryv1alpha1.Registry {
 
 // InClusterCluster returns the Cluster of the cluster Kokumi runs in, which
 // Kokumi keeps in its own namespace. It is created with the label
-// LabelInCluster; Kokumi does not set the label again once it exists.
+// LabelInCluster, which the Environment local selects; Kokumi does not set
+// the label again once it exists.
 func InClusterCluster(namespace string) *deliveryv1alpha1.Cluster {
 	return &deliveryv1alpha1.Cluster{
 		Name:      cluster.InCluster,
@@ -150,6 +153,26 @@ func InClusterCluster(namespace string) *deliveryv1alpha1.Cluster {
 		Spec: deliveryv1alpha1.ClusterSpec{
 			Description: "The cluster Kokumi runs in",
 			Connection:  deliveryv1alpha1.ClusterConnectionInCluster,
+		},
+	}
+}
+
+// LocalEnvironment returns the Environment Kokumi keeps in its own
+// namespace: the cluster Kokumi runs in, deployed to through Argo CD's
+// default AppProject.
+func LocalEnvironment(namespace string) *deliveryv1alpha1.Environment {
+	return &deliveryv1alpha1.Environment{
+		Name:      cluster.LocalEnvironment,
+		Namespace: namespace,
+		Spec: deliveryv1alpha1.EnvironmentSpec{
+			Description: "The cluster Kokumi runs in",
+			ClusterSelector: metav1.LabelSelector{
+				MatchLabels: map[string]string{deliveryv1alpha1.LabelInCluster: "true"},
+			},
+			Deployer: deliveryv1alpha1.Deployer{
+				Type:   deliveryv1alpha1.DeployerTypeArgoCD,
+				ArgoCD: &deliveryv1alpha1.ArgoCDDeployer{Project: argocd.DefaultProject},
+			},
 		},
 	}
 }

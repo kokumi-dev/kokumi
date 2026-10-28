@@ -37,11 +37,16 @@ import (
 	"github.com/kokumi-dev/kokumi/test/utils"
 )
 
-// ArgoCDApplicationCRD is the Application CRD of the Argo CD release
-// "make argocd" installs. The Serving controller watches Applications and
-// does not start without it.
-const ArgoCDApplicationCRD = "https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.1/" +
-	"manifests/crds/application-crd.yaml"
+// ArgoCDApplicationCRD and ArgoCDAppProjectCRD are the CRDs of the Argo CD
+// release "make argocd" installs that Kokumi uses: the Serving controller
+// deploys through Applications, and the Environment controller checks
+// AppProjects.
+const (
+	ArgoCDApplicationCRD = "https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.1/" +
+		"manifests/crds/application-crd.yaml"
+	ArgoCDAppProjectCRD = "https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.1/" +
+		"manifests/crds/appproject-crd.yaml"
+)
 
 // ecrPublicDockerHub is where ECR Public mirrors the images of Docker Hub,
 // such as the Redis image of Argo CD.
@@ -81,6 +86,28 @@ func InstallArgoCD() {
 	for _, workload := range utils.GetNonEmptyLines(workloads) {
 		_, err = Kubectl("rollout", "status", workload, "-n", ArgoCDNamespace, "--timeout=5m")
 		Expect(err).NotTo(HaveOccurred(), "Argo CD's %s did not become ready", workload)
+	}
+}
+
+// SimulateArgoCD installs what Kokumi uses of Argo CD, without Argo CD: its
+// Application and AppProject CRDs, and its namespace with the project
+// default that every Argo CD creates, as "make argocd" configures it.
+func SimulateArgoCD() {
+	for _, crd := range []string{ArgoCDApplicationCRD, ArgoCDAppProjectCRD} {
+		_, err := Kubectl("apply", "--server-side", "-f", crd)
+		Expect(err).NotTo(HaveOccurred(), "Failed to install %s", crd)
+	}
+	out, err := Kubectl("create", "ns", ArgoCDNamespace)
+	if err != nil {
+		Expect(out).To(ContainSubstring("AlreadyExists"))
+	}
+	ApplyTestdata("", "argocd/default-project.yaml", nil)
+}
+
+// RemoveSimulatedArgoCD removes what SimulateArgoCD installed.
+func RemoveSimulatedArgoCD() {
+	for _, crd := range []string{ArgoCDApplicationCRD, ArgoCDAppProjectCRD} {
+		_, _ = Kubectl("delete", "--ignore-not-found", "-f", crd)
 	}
 }
 

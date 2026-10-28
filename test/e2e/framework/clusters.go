@@ -47,9 +47,21 @@ func Cluster(namespace, name string) func() (*deliveryv1alpha1.Cluster, error) {
 	return Object[deliveryv1alpha1.Cluster](namespace, name)
 }
 
-// HaveReady succeeds for an object, such as a Cluster, whose Ready
-// condition has status and reason.
+// Environment returns a function for Eventually that fetches the
+// Environment name of namespace.
+func Environment(namespace, name string) func() (*deliveryv1alpha1.Environment, error) {
+	return Object[deliveryv1alpha1.Environment](namespace, name)
+}
+
+// HaveReady succeeds for an object, such as a Cluster or an Environment,
+// whose Ready condition has status and reason.
 func HaveReady(status metav1.ConditionStatus, reason string) OmegaMatcher {
 	return SatisfyAll(HaveCondition(deliveryv1alpha1.ConditionTypeReady, status),
 		HaveConditionReason(deliveryv1alpha1.ConditionTypeReady, reason))
+}
+
+// HaveSelectedClusters succeeds for an Environment that selects selected
+// Clusters, ready of them Ready.
+func HaveSelectedClusters(selected, ready int32) OmegaMatcher {
+	return SatisfyAll(HaveField("Status.Clusters.Selected", selected), HaveField("Status.Clusters.Ready", ready))
 }

@@ -1,0 +1,20 @@
+# The project every Argo CD installation creates, for the specs that
+# simulate Argo CD: anything from anywhere, to every cluster. Its
+# sourceNamespaces admit every namespace, as "make argocd" sets them, so that
+# the Environments of the scenario namespaces may use it.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: default
+  namespace: argocd
+spec:
+  sourceNamespaces:
+  - "*"
+  sourceRepos:
+  - "*"
+  destinations:
+  - server: "*"
+    namespace: "*"
+  clusterResourceWhitelist:
+  - group: "*"
+    kind: "*"

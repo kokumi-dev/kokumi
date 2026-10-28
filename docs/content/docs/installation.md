@@ -32,11 +32,12 @@ kubectl apply -f \
 
 This installs:
 - The Kokumi CRDs (`Product`, `Recipe`, `Order`, `Preparation`, `Serving`,
-  `Approval`, `Registry`, `Repository`, `Kitchen`, `Cluster`)
+  `Approval`, `Registry`, `Repository`, `Kitchen`, `Environment`, `Cluster`)
 - The namespace `kokumi-signing`, for the signing key
 - The controller manager in the `kokumi` namespace, which creates the
   `Kitchen` settings, the `Registry` of the bundled registry, and the
-  `Cluster` `in-cluster` in its namespace on start
+  `Cluster` `in-cluster` and the `Environment` `local` in its namespace on
+  start
 - The API server and web UI in the `kokumi` namespace
 - The `kokumi-scanner` component in the `kokumi` namespace, which idles until
   the Kitchen enables [vulnerability scanning](../operator-guide/scanning/)

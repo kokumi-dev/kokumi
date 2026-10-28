@@ -28,7 +28,10 @@ import (
 )
 
 // kokumiKinds are the kinds a failed spec dumps from its namespaces.
-const kokumiKinds = "products,orders,preparations,servings,recipes,approvals,registries,repositories"
+// Clusters go by their full name: Cluster API and Rancher name their kinds
+// clusters too.
+const kokumiKinds = "products,orders,preparations,servings,recipes,approvals,registries,repositories," +
+	"environments.delivery.kokumi.dev,clusters.delivery.kokumi.dev"
 
 // components are the label selectors of the Pods of the install namespace
 // whose logs a failed spec dumps, by name.

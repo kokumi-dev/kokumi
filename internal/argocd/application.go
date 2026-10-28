@@ -25,7 +25,7 @@ import (
 const Namespace = "argocd"
 
 // DefaultProject is Argo CD's own AppProject, which Applications deploy
-// through.
+// through, and which the Environment Kokumi keeps in its namespace names.
 const DefaultProject = "default"
 
 // maxNameLength is the limit of an Application name: Argo CD's label-based
@@ -34,6 +34,9 @@ const maxNameLength = 63
 
 // GroupVersionKind is the kind of Argo CD Applications.
 var GroupVersionKind = schema.GroupVersionKind{Group: "argoproj.io", Version: "v1alpha1", Kind: "Application"}
+
+// AppProjectGroupVersionKind is the kind of Argo CD AppProjects.
+var AppProjectGroupVersionKind = schema.GroupVersionKind{Group: "argoproj.io", Version: "v1alpha1", Kind: "AppProject"}
 
 // ErrOptInRequired reports an Application that exists but is not opted in
 // for management by the Serving's Order. It holds until the Application or

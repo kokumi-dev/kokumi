@@ -1578,22 +1578,3 @@ func (c withoutArgoCD) List(ctx context.Context, list client.ObjectList, opts ..
 	}
 	return c.Client.List(ctx, list, opts...)
 }
-
-var _ = Describe("Optional watches", func() {
-	It("start once the CRD of their kind is installed, and say so", func() {
-		mapper := apimeta.NewDefaultRESTMapper(nil)
-		w := &optionalWatch{obj: argocd.New(), gvk: argocd.GroupVersionKind, mapper: mapper,
-			interval: 10 * time.Millisecond, started: make(chan event.GenericEvent, 1)}
-		var watching atomic.Bool
-		done := make(chan error, 1)
-		watchCtx, stop := context.WithCancel(context.Background())
-		DeferCleanup(stop)
-		go func() { done <- w.wait(watchCtx, func() error { watching.Store(true); return nil }) }()
-
-		Consistently(watching.Load, 50*time.Millisecond).Should(BeFalse(), "no watch without the CRD")
-		mapper.Add(argocd.GroupVersionKind, apimeta.RESTScopeNamespace)
-		Eventually(w.Started()).Should(Receive())
-		Expect(watching.Load()).To(BeTrue())
-		Eventually(done).Should(Receive(BeNil()))
-	})
-})

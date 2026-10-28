@@ -71,13 +71,8 @@ var _ = BeforeSuite(func() {
 		By("installing Argo CD")
 		framework.InstallArgoCD()
 	} else {
-		By("installing only the Argo CD Application CRD; specs simulate Argo CD")
-		_, err = framework.Kubectl("apply", "--server-side", "-f", framework.ArgoCDApplicationCRD)
-		Expect(err).NotTo(HaveOccurred(), "Failed to install the Argo CD Application CRD")
-		out, err = framework.Kubectl("create", "ns", framework.ArgoCDNamespace)
-		if err != nil {
-			Expect(out).To(ContainSubstring("AlreadyExists"))
-		}
+		By("installing only Argo CD's CRDs and default project; specs simulate Argo CD")
+		framework.SimulateArgoCD()
 	}
 
 	By("deploying kokumi")
@@ -110,7 +105,7 @@ var _ = AfterSuite(func() {
 	By("uninstalling CRDs")
 	_, _ = utils.Run(exec.Command("make", "uninstall"))
 	if !framework.RealArgoCD() {
-		_, _ = framework.Kubectl("delete", "--ignore-not-found", "-f", framework.ArgoCDApplicationCRD)
+		framework.RemoveSimulatedArgoCD()
 	}
 
 	By("removing the install namespace")

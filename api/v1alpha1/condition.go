@@ -239,8 +239,9 @@ const (
 
 // Condition reasons used by Servings for where they deploy.
 const (
-	// ReasonArgoCDNotInstalled reports on a Serving that Argo CD's
-	// Application CRD is not installed, so that nothing can be deployed.
+	// ReasonArgoCDNotInstalled reports on a Serving or an Environment that
+	// Argo CD's CRDs are not installed, so that nothing can be deployed
+	// through Argo CD.
 	ReasonArgoCDNotInstalled = "ArgoCDNotInstalled"
 )
 
@@ -286,4 +287,20 @@ const (
 	// ReasonRepositoryListed reports on a Repository that it is ready to be
 	// browsed.
 	ReasonRepositoryListed = "Listed"
+)
+
+// Condition reasons used by Environments.
+const (
+	// ReasonNoClusters reports on an Environment that it selects no Cluster.
+	ReasonNoClusters = "NoClusters"
+	// ReasonProjectNotFound reports on an Environment that its Argo CD
+	// AppProject does not exist.
+	ReasonProjectNotFound = "ProjectNotFound"
+	// ReasonProjectNotPermitted reports on an Environment outside Kokumi's
+	// namespace that its Argo CD AppProject does not admit the
+	// Environment's namespace in its sourceNamespaces.
+	ReasonProjectNotPermitted = "ProjectNotPermitted"
+	// ReasonInvalidSelector reports on an Environment that its
+	// clusterSelector is not a valid label selector.
+	ReasonInvalidSelector = "InvalidSelector"
 )

@@ -15,6 +15,7 @@ what its docs say.
 
 | Example | Shows | Docs | E2E spec |
 |---|---|---|---|
+| [local](local/) | The Cluster and the Environment of the cluster Kokumi runs in, for a namespace of its own | Environments | `environments_test.go` |
 | [getting-started](getting-started/) | A Helm chart, an Order that sets values, Manual promotion | Getting Started | `rendering_test.go`, `overrides_test.go`, `promotion_test.go`, `signing_test.go`, `lifecycle_test.go` |
 | [manifest-bundle](manifest-bundle/) | Pre-rendered manifests, patched by the Order | Getting Started | `rendering_test.go` |
 | [multi-file-manifests](multi-file-manifests/) | Manifests in several files, kept apart | Getting Started | `rendering_test.go` |
