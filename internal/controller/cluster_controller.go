@@ -22,6 +22,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,6 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/events"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -48,6 +51,7 @@ import (
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/cluster"
 	"github.com/kokumi-dev/kokumi/internal/conditions"
+	"github.com/kokumi-dev/kokumi/internal/resolve"
 	"github.com/kokumi-dev/kokumi/internal/resources"
 )
 
@@ -64,18 +68,45 @@ const (
 	clusterConcurrency = 8
 )
 
+// Reasons of the Events on Clusters.
+const (
+	reasonRegistered   = "Registered"
+	reasonUnregistered = "Unregistered"
+)
+
 // clusterProber checks the control planes of clusters. Tests set one;
 // internal/cluster's probe by default.
 type clusterProber interface {
 	Probe(ctx context.Context, cfg *rest.Config) cluster.Health
 }
 
-// ClusterReconciler reports whether Kokumi reaches a Cluster: whether its
-// kubeconfig is usable and its control plane ready and accepting the
-// credential. It keeps the Cluster in-cluster in Kokumi's own namespace.
+// registration is what registering a Cluster with an engine came to: what
+// the Ready message adds about it, the reason when the Cluster cannot be
+// registered, and what an Event says when the registration changed.
+type registration struct {
+	reason, message, event string
+}
+
+// clusterRegistrar registers the clusters an engine deploys to with it, and
+// unregisters them. argoCD implements it.
+type clusterRegistrar interface {
+	// Register registers c, reached with kubeconfig, nil for the cluster
+	// Kokumi runs in.
+	Register(ctx context.Context, c *deliveryv1alpha1.Cluster, kubeconfig *cluster.Kubeconfig) (registration, error)
+	// Unregister removes the registration of c, and returns what an Event
+	// says about it, "" when there was none.
+	Unregister(ctx context.Context, c *deliveryv1alpha1.Cluster) (string, error)
+}
+
+// ClusterReconciler reports whether Orders can deploy to a Cluster: whether
+// its kubeconfig is usable, its control plane ready, and it is registered
+// with the engine of every Environment of its namespace that selects it.
+// It keeps the Cluster in-cluster in Kokumi's own namespace.
 type ClusterReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+	// Recorder records Events on Clusters.
+	Recorder events.EventRecorder
 	// Namespace is Kokumi's own namespace, which holds the Cluster
 	// in-cluster.
 	Namespace string
@@ -87,14 +118,20 @@ type ClusterReconciler struct {
 	clusters clusterProber
 	// probes holds the last probe of every Cluster.
 	probes probeCache
+	// registrars register Clusters with the engines of the Environments
+	// that select them, by deployer type. Tests set them; Argo CD's by
+	// default.
+	registrars map[deliveryv1alpha1.DeployerType]clusterRegistrar
 }
 
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=clusters,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=clusters/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=clusters/finalizers,verbs=update
+// +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=environments,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
 
-// Reconcile checks the Cluster.
+// Reconcile checks the Cluster and keeps its registration with Argo CD.
 func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, err error) {
 	logger := log.FromContext(ctx)
 	logger.Info("Reconciling Cluster", "namespace", req.Namespace, "name", req.Name)
@@ -134,14 +171,20 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 	return r.reconcileCluster(ctx, c)
 }
 
-// reconcileCluster connects to the cluster, checks its control plane, and
-// records in Ready whether Kokumi reaches it. It checks again after
+// reconcileCluster connects to the cluster, keeps its registrations with
+// the engines that deploy there, checks its control plane, and records in
+// Ready whether Orders can deploy to it. It checks again after
 // clusterProbeInterval.
 func (r *ClusterReconciler) reconcileCluster(ctx context.Context, c *deliveryv1alpha1.Cluster) (ctrl.Result, error) {
 	retry := ctrl.Result{RequeueAfter: wait.Jitter(clusterProbeInterval, clusterProbeJitter)}
-	cfg, version, ok := r.connect(ctx, c)
+	cfg, kubeconfig, version, ok := r.connect(ctx, c)
 	if !ok {
-		return retry, nil
+		return retry, r.unregister(ctx, c, "its kubeconfig cannot be used")
+	}
+
+	registered, ok, err := r.register(ctx, c, kubeconfig)
+	if err != nil || !ok {
+		return retry, err
 	}
 
 	health := r.probe(ctx, c, cfg, version)
@@ -152,19 +195,20 @@ func (r *ClusterReconciler) reconcileCluster(ctx context.Context, c *deliveryv1a
 	case !health.Healthy:
 		conditions.MarkFalse(c, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonUnreachable, health.Message)
 	default:
-		conditions.MarkTrue(c, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonReady, health.Message)
+		conditions.MarkTrue(c, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonReady,
+			strings.Join(append([]string{health.Message}, registered...), "; "))
 	}
 	return retry, nil
 }
 
 // connect returns the client configuration of the cluster, for one reached
-// with a kubeconfig the resource version of its Secret, and records the
-// cluster's server. When the kubeconfig is missing or unusable it marks
-// Ready False and returns false.
-func (r *ClusterReconciler) connect(ctx context.Context, c *deliveryv1alpha1.Cluster) (*rest.Config, string, bool) {
+// with a kubeconfig the kubeconfig and the resource version of its Secret,
+// and records the cluster's server. When the kubeconfig is missing or
+// unusable it marks Ready False and returns false.
+func (r *ClusterReconciler) connect(ctx context.Context, c *deliveryv1alpha1.Cluster) (*rest.Config, *cluster.Kubeconfig, string, bool) {
 	if c.Spec.Connection == deliveryv1alpha1.ClusterConnectionInCluster || c.Spec.Kubeconfig == nil {
 		c.Status.Server = cluster.InClusterServer
-		return r.LocalConfig, "", true
+		return r.LocalConfig, nil, "", true
 	}
 
 	ref := c.Spec.Kubeconfig
@@ -176,25 +220,119 @@ func (r *ClusterReconciler) connect(ctx context.Context, c *deliveryv1alpha1.Clu
 			msg = fmt.Sprintf("The Secret %s does not exist: create it with the cluster's kubeconfig under the key %q", ref.SecretRef.Name, key)
 		}
 		conditions.MarkFalse(c, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonSecretNotFound, msg)
-		return nil, "", false
+		return nil, nil, "", false
 	}
 	kubeconfig, err := cluster.ParseKubeconfig(secret.Data[key])
 	if err == nil {
 		var cfg *rest.Config
 		if cfg, err = kubeconfig.Config(); err == nil {
 			c.Status.Server = kubeconfig.Endpoint.Server
-			return cfg, secret.ResourceVersion, true
+			return cfg, &kubeconfig, secret.ResourceVersion, true
 		}
 	}
 	conditions.MarkFalse(c, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonSecretInvalid,
 		fmt.Sprintf("The Secret %s holds no self-contained kubeconfig under the key %q: %v", ref.SecretRef.Name, key, err))
-	return nil, "", false
+	return nil, nil, "", false
 }
 
-// reconcileDelete forgets the cluster's last probe and removes the
-// finalizer.
+// register keeps the cluster registered with the engine of every
+// Environment of its namespace that selects it, and unregisters it from the
+// others. It returns what the Ready message adds about the registrations,
+// and false when the cluster cannot be registered, with Ready False.
+func (r *ClusterReconciler) register(ctx context.Context, c *deliveryv1alpha1.Cluster, kubeconfig *cluster.Kubeconfig) ([]string, bool, error) {
+	selecting, err := r.selectingDeployers(ctx, c)
+	if err != nil {
+		return nil, false, err
+	}
+	var messages []string
+	registrars := r.registrarsByType()
+	for _, deployerType := range slices.Sorted(maps.Keys(registrars)) {
+		registrar := registrars[deployerType]
+		if !selecting[deployerType] {
+			if err := r.unregisterFrom(ctx, c, registrar, "no Environment of its namespace deploys there through it"); err != nil {
+				return nil, false, err
+			}
+			continue
+		}
+		registered, err := registrar.Register(ctx, c, kubeconfig)
+		if registered.event != "" {
+			reason := reasonRegistered
+			if registered.reason != "" {
+				reason = reasonUnregistered
+			}
+			r.event(c, corev1.EventTypeNormal, reason, "%s", registered.event)
+		}
+		if registered.reason != "" {
+			conditions.MarkFalse(c, deliveryv1alpha1.ConditionTypeReady, registered.reason, registered.message)
+			return nil, false, err
+		}
+		if err != nil {
+			return nil, false, err
+		}
+		messages = append(messages, registered.message)
+	}
+	return messages, true, nil
+}
+
+// selectingDeployers returns the deployer types of the Environments of the
+// Cluster's namespace that select it.
+func (r *ClusterReconciler) selectingDeployers(ctx context.Context, c *deliveryv1alpha1.Cluster) (map[deliveryv1alpha1.DeployerType]bool, error) {
+	environments := &deliveryv1alpha1.EnvironmentList{}
+	if err := r.List(ctx, environments, client.InNamespace(c.Namespace), client.UnsafeDisableDeepCopy); err != nil {
+		return nil, fmt.Errorf("failed to list Environments: %w", err)
+	}
+	selecting := map[deliveryv1alpha1.DeployerType]bool{}
+	for i := range environments.Items {
+		env := &environments.Items[i]
+		if !env.DeletionTimestamp.IsZero() {
+			continue
+		}
+		if selection, err := resolve.ClusterSelectionOf(env); err == nil && selection.Selects(c) {
+			selecting[env.Spec.Deployer.Type] = true
+		}
+	}
+	return selecting, nil
+}
+
+// unregister removes the Cluster's registrations with every engine; why
+// goes into the Events.
+func (r *ClusterReconciler) unregister(ctx context.Context, c *deliveryv1alpha1.Cluster, why string) error {
+	for _, registrar := range r.registrarsByType() {
+		if err := r.unregisterFrom(ctx, c, registrar, why); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// unregisterFrom removes the Cluster's registration with registrar, and
+// records an Event that says why when there was one.
+func (r *ClusterReconciler) unregisterFrom(ctx context.Context, c *deliveryv1alpha1.Cluster, registrar clusterRegistrar, why string) error {
+	unregistered, err := registrar.Unregister(ctx, c)
+	if unregistered != "" {
+		r.event(c, corev1.EventTypeNormal, reasonUnregistered, "%s: %s", unregistered, why)
+	}
+	return err
+}
+
+// registrarsByType returns the engines Clusters are registered with, by
+// deployer type.
+func (r *ClusterReconciler) registrarsByType() map[deliveryv1alpha1.DeployerType]clusterRegistrar {
+	if r.registrars != nil {
+		return r.registrars
+	}
+	return map[deliveryv1alpha1.DeployerType]clusterRegistrar{
+		deliveryv1alpha1.DeployerTypeArgoCD: &argoCD{Client: r.Client, namespace: r.Namespace},
+	}
+}
+
+// reconcileDelete unregisters the cluster from every engine and removes
+// the finalizer. What runs on the cluster keeps running.
 func (r *ClusterReconciler) reconcileDelete(ctx context.Context, c *deliveryv1alpha1.Cluster) (ctrl.Result, error) {
 	log.FromContext(ctx).Info("Handling deletion of Cluster")
+	if err := r.unregister(ctx, c, "the Cluster is being deleted"); err != nil {
+		return ctrl.Result{}, err
+	}
 	r.probes.forget(client.ObjectKeyFromObject(c).String())
 	if controllerutil.RemoveFinalizer(c, deliveryv1alpha1.Finalizer) {
 		if err := r.Update(ctx, c); err != nil {
@@ -202,6 +340,13 @@ func (r *ClusterReconciler) reconcileDelete(ctx context.Context, c *deliveryv1al
 		}
 	}
 	return ctrl.Result{}, nil
+}
+
+// event records an Event on the Cluster.
+func (r *ClusterReconciler) event(c *deliveryv1alpha1.Cluster, eventType, reason, msg string, args ...any) {
+	if r.Recorder != nil {
+		r.Recorder.Eventf(c, nil, eventType, reason, "Register", msg, args...)
+	}
 }
 
 // probe checks the control plane of the cluster c connects to with cfg, at
@@ -310,11 +455,26 @@ func clusterKubeconfigSecret(obj client.Object) []string {
 	return []string{c.Spec.Kubeconfig.SecretRef.Name}
 }
 
-// clustersOfSecret maps a kubeconfig Secret to the Clusters that name it.
+// clusterServer returns the API server of a Cluster without a trailing
+// slash, for FieldClusterServer.
+func clusterServer(obj client.Object) []string {
+	c, ok := obj.(*deliveryv1alpha1.Cluster)
+	if !ok || c.Status.Server == "" {
+		return nil
+	}
+	return []string{serverKey(c.Status.Server)}
+}
+
+// clustersOfSecret maps a kubeconfig Secret to the Clusters that name it,
+// and a cluster Secret Kokumi manages in Argo CD's namespace to its Cluster
+// and the Clusters that wait for its server.
 func (r *ClusterReconciler) clustersOfSecret(ctx context.Context, obj client.Object) []ctrl.Request {
 	secret, ok := obj.(*corev1.Secret)
 	if !ok {
 		return nil
+	}
+	if reqs, registration := clustersOfArgoCDSecret(ctx, r.Client, secret); registration {
+		return reqs
 	}
 	clusters := &deliveryv1alpha1.ClusterList{}
 	if err := r.List(ctx, clusters, client.InNamespace(secret.Namespace),
@@ -323,6 +483,27 @@ func (r *ClusterReconciler) clustersOfSecret(ctx context.Context, obj client.Obj
 		return nil
 	}
 	return clusterRequests(clusters.Items)
+}
+
+// clustersOfEnvironment maps an Environment to the Clusters of its
+// namespace it selects, whose registration it may change. An update maps
+// the Environment before and after, so that the Clusters it no longer
+// selects reconcile too.
+func (r *ClusterReconciler) clustersOfEnvironment(ctx context.Context, obj client.Object) []ctrl.Request {
+	env, ok := obj.(*deliveryv1alpha1.Environment)
+	if !ok {
+		return nil
+	}
+	selection, err := resolve.ClusterSelectionOf(env)
+	if err != nil {
+		return nil
+	}
+	clusters := &deliveryv1alpha1.ClusterList{}
+	if err := r.List(ctx, clusters, client.InNamespace(env.Namespace), client.UnsafeDisableDeepCopy); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to list Clusters of Environment", "environment", env.Name)
+		return nil
+	}
+	return clusterRequests(slices.DeleteFunc(clusters.Items, func(c deliveryv1alpha1.Cluster) bool { return !selection.Matches(&c) }))
 }
 
 // clusterRequests returns the requests of clusters.
@@ -368,17 +549,27 @@ func enqueueAtStart(key client.ObjectKey) source.Source {
 }
 
 // SetupWithManager sets up the controller with the Manager. A Cluster
-// reconciles when its spec or its kubeconfig Secret changes. The Cluster
-// in-cluster is reconciled at start, which creates it when it is missing.
+// reconciles when its spec or labels change, when its kubeconfig Secret or
+// a registration with Argo CD of its server changes, and when an
+// Environment that selects it does. The Cluster in-cluster is reconciled at
+// start, which creates it when it is missing.
 func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &deliveryv1alpha1.Cluster{},
+	indexer := mgr.GetFieldIndexer()
+	if err := indexer.IndexField(context.Background(), &deliveryv1alpha1.Cluster{},
 		deliveryv1alpha1.FieldKubeconfigSecretName, clusterKubeconfigSecret); err != nil {
 		return err
 	}
+	if err := indexer.IndexField(context.Background(), &deliveryv1alpha1.Cluster{},
+		deliveryv1alpha1.FieldClusterServer, clusterServer); err != nil {
+		return err
+	}
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&deliveryv1alpha1.Cluster{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		For(&deliveryv1alpha1.Cluster{}, builder.WithPredicates(predicate.Or[client.Object](
+			predicate.GenerationChangedPredicate{}, predicate.LabelChangedPredicate{}))).
 		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.clustersOfSecret),
 			builder.WithPredicates(predicate.ResourceVersionChangedPredicate{})).
+		Watches(&deliveryv1alpha1.Environment{}, handler.EnqueueRequestsFromMapFunc(r.clustersOfEnvironment),
+			builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		WatchesRawSource(enqueueAtStart(r.inCluster())).
 		WithOptions(controller.Options{MaxConcurrentReconciles: clusterConcurrency}).
 		Named("cluster").

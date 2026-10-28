@@ -11,12 +11,21 @@ description: Deploy Kokumi to any Kubernetes cluster.
 | Kubernetes | ≥ 1.26 |
 | Argo CD | ≥ 3.3 |
 
+### Argo CD
+
 Kokumi deploys through Argo CD: the Serving controller creates and updates
 Argo CD `Application` resources that point at the immutable OCI artifacts
-produced by Preparations. Argo CD may be installed before or after Kokumi.
-Until its `Application` CRD exists, Kokumi renders, signs and scans as usual,
-and Servings deploy nothing and report `ArgoCDNotInstalled`; they deploy
-once Argo CD is installed, without a restart.
+produced by Preparations. Install Argo CD, in the namespace `argocd`, before
+Kokumi: the last document of `install.yaml` is a RoleBinding there, which
+lets Kokumi register [Clusters](../operator-guide/clusters/) with Argo CD: it
+may create, update and delete Secrets in `argocd`, and the admission policy
+`kokumi-argocd-secret-integrity` keeps it to the cluster Secrets it manages.
+Installed without Argo CD, everything else applies and that document fails;
+apply `install.yaml` again once Argo CD is installed.
+
+Until Argo CD's CRDs exist, Kokumi renders, signs and scans as
+usual, and Servings deploy nothing and report `ArgoCDNotInstalled`; they
+deploy once Argo CD is installed, without a restart.
 
 See [Getting Started — Argo CD registry credentials](../getting-started/#argo-cd-registry-credentials)
 for the required repo-creds secret to let Argo CD reach the in-cluster registry.
@@ -41,9 +50,11 @@ This installs:
 - The API server and web UI in the `kokumi` namespace
 - The `kokumi-scanner` component in the `kokumi` namespace, which idles until
   the Kitchen enables [vulnerability scanning](../operator-guide/scanning/)
-- RBAC roles and bindings
+- RBAC roles and bindings, and in `argocd` the RoleBinding that lets the
+  controller write the cluster Secrets of Argo CD
 - Admission policies, named `kokumi-*`, that guard Approvals, statuses, the
-  signing key, and the Secrets that Registries and Clusters name
+  signing key, the Secrets that Registries and Clusters name, and the
+  controller's writes in `argocd`
 
 `kubectl get kokumi -A` lists every Kokumi object: all its kinds are in the
 category `kokumi`.
@@ -155,8 +166,8 @@ kubectl apply -f \
 
 Delete Kokumi's CustomResourceDefinitions first, while Kokumi runs: that
 deletes every Kokumi object, and Kokumi releases each of them. Servings remove
-their Argo CD Applications, and what runs on the cluster keeps running. Then
-delete the rest:
+their Argo CD Applications, and what runs on the clusters keeps running.
+Clusters remove their registrations from Argo CD. Then delete the rest:
 
 <!-- x-release-please-start-version -->
 ```bash

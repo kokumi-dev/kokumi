@@ -112,7 +112,8 @@ test-e2e: setup-test-e2e manifests generate fmt vet cosign ## Run the e2e tests 
 		E2E_ARGOCD=$(E2E_ARGOCD) ARTIFACTS="$(ARTIFACTS)" \
 		go test -tags=e2e ./test/e2e/ -v -timeout 2h -ginkgo.v \
 		-ginkgo.label-filter="$(E2E_LABELS)" -ginkgo.junit-report="$(ARTIFACTS)/junit-e2e.xml" \
-		|| { $(KIND) export logs "$(ARTIFACTS)/kind" --name $(KIND_CLUSTER); exit 1; }
+		|| { $(KIND) export logs "$(ARTIFACTS)/kind" --name $(KIND_CLUSTER); \
+			$(KIND) export logs "$(ARTIFACTS)/kind-spoke" --name $(KIND_CLUSTER)-spoke 2>/dev/null; exit 1; }
 	$(MAKE) cleanup-test-e2e
 
 .PHONY: test-e2e-plan
@@ -120,9 +121,10 @@ test-e2e-plan: ## List the e2e specs and their labels without running them. Filt
 	go test -tags=e2e ./test/e2e/ -v -count=1 -ginkgo.dry-run -ginkgo.v -ginkgo.label-filter="$(E2E_LABELS)"
 
 .PHONY: cleanup-test-e2e
-cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
+cleanup-test-e2e: ## Tear down the Kind clusters used for e2e tests: the one Kokumi runs in, and the spoke the clusters specs create
 	@$(KIND) delete cluster --name $(KIND_CLUSTER) --kubeconfig "$(E2E_KUBECONFIG)"
-	@rm -f "$(E2E_KUBECONFIG)"
+	@$(KIND) delete cluster --name $(KIND_CLUSTER)-spoke --kubeconfig "$(LOCALBIN)/$(KIND_CLUSTER)-spoke.kubeconfig"
+	@rm -f "$(E2E_KUBECONFIG)" "$(LOCALBIN)/$(KIND_CLUSTER)-spoke.kubeconfig"
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
@@ -157,6 +159,20 @@ kind-setup: ## Set up a Kind cluster for local development if it does not exist
 kind-delete: ## Delete the Kind cluster for local development
 	$(KIND) delete cluster --name $(KIND_CLUSTER_DEVELOPMENT)
 
+# KIND_SPOKE is a second Kind cluster the local Kokumi deploys to, registered
+# as the Cluster "spoke" of the workspace namespace KIND_SPOKE_NAMESPACE.
+# Kubeconfig Clusters belong in a workspace, not in Kokumi's own namespace.
+KIND_SPOKE ?= kokumi-spoke
+KIND_SPOKE_NAMESPACE ?= platform
+
+.PHONY: kind-spoke
+kind-spoke: ## Create the Kind cluster KIND_SPOKE and store its kubeconfig for the Cluster "spoke" of KIND_SPOKE_NAMESPACE
+	@KIND=$(KIND) KUBECTL=$(KUBECTL) hack/kind/spoke-cluster.sh $(KIND_SPOKE) spoke $(KIND_SPOKE_NAMESPACE)
+
+.PHONY: kind-spoke-delete
+kind-spoke-delete: ## Delete the Kind cluster KIND_SPOKE
+	$(KIND) delete cluster --name $(KIND_SPOKE)
+
 .PHONY: kind-load-image
 kind-load-image: ## Load image into Kind cluster if it exists
 	@command -v $(KIND) >/dev/null 2>&1 || { \
@@ -187,10 +203,11 @@ oidc: ## Install local Dex OIDC (sidecar in kokumi-server) and wire Kitchen auth
 		-p '{"spec":{"auth":{"adminUser":{"enabled":true},"oidc":{"issuerURL":"http://localhost:5556","clientID":"kokumi","scopes":["openid","profile","email","groups"]}}}}'
 
 .PHONY: argocd
-argocd: ## Installs Argo CD in the cluster
+argocd: kustomize ## Installs Argo CD in the cluster
 	"$(KUBECTL)" create namespace argocd --dry-run=client -o yaml | "$(KUBECTL)" apply -f -
 	"$(KUBECTL)" apply -n argocd --server-side --force-conflicts -f https://raw.githubusercontent.com/argoproj/argo-cd/v3.5.1/manifests/install.yaml
 	"$(KUBECTL)" patch svc argocd-server -n argocd -p '{"spec": {"type": "NodePort", "ports": [{"port": 80,"targetPort": 8080,"nodePort": 30052}]}}'
+	"$(KUSTOMIZE)" build config/argocd | "$(KUBECTL)" apply -f -
 	@# For local development only: let the Environments of every namespace use
 	@# the default project, as the e2e suite's simulated Argo CD does.
 	"$(KUBECTL)" wait --for=condition=Established crd/appprojects.argoproj.io --timeout=60s
@@ -266,6 +283,9 @@ build-installer: manifests generate kustomize ## Generate a consolidated YAML wi
 	"$(KUSTOMIZE)" build config/default > dist/install.yaml
 	echo "---" >> dist/install.yaml
 	"$(KUSTOMIZE)" build config/signing >> dist/install.yaml
+	echo "---" >> dist/install.yaml
+	echo "# Lets Kokumi register clusters with Argo CD in its namespace, argocd: install Argo CD first." >> dist/install.yaml
+	"$(KUSTOMIZE)" build config/argocd >> dist/install.yaml
 
 ##@ Deployment
 

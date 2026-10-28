@@ -1,8 +1,8 @@
 # The cluster Kokumi runs in. Kokumi keeps this very Cluster in its own
 # namespace, created with the label delivery.kokumi.dev/in-cluster: "true"
-# that the Environment local selects, so applying it changes nothing. Clusters reached with a kubeconfig belong
-# in a workspace of their own, next to their Secret, not in Kokumi's
-# namespace: see the operator guide on Clusters.
+# that the Environment local selects, so applying it changes nothing.
+# Clusters reached with a kubeconfig belong in a workspace of their own, next
+# to their Secret, not in Kokumi's namespace: see examples/multi-cluster.
 apiVersion: delivery.kokumi.dev/v1alpha1
 kind: Cluster
 metadata:

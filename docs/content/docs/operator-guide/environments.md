@@ -16,9 +16,12 @@ Order authors name an Environment of their namespace in `spec.environmentRef`
 when they create an Order; see
 [Deploy to several clusters](../../user-guide/environments/).
 
-The promotion-pipeline example gives each stage an Environment of its own,
-and the example `local` gives a namespace the cluster Kokumi runs in; see
-[The Environment local](#the-environment-local).
+{{< example file="multi-cluster/platform/environment.yaml" >}}
+
+The multi-cluster example applies it with the Cluster it selects; see
+[Clusters](../clusters/):
+
+{{< apply-example name="multi-cluster/platform" namespace="platform" >}}
 
 ## Clusters
 

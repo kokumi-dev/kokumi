@@ -17,6 +17,7 @@ limitations under the License.
 package framework
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -53,6 +54,30 @@ func CosignVerifyAttestation(key, ref, predicateType string) error {
 	_, err := Cosign("verify-attestation", "--key", key, "--insecure-ignore-tlog=true",
 		"--allow-http-registry", "--type", predicateType, ref)
 	return err
+}
+
+// CosignVerifiedPredicates verifies the attestations of predicateType on
+// ref with key, as CosignVerifyAttestation does, and returns their
+// predicates.
+func CosignVerifiedPredicates(key, ref, predicateType string) []map[string]any {
+	out, err := Cosign("verify-attestation", "--key", key, "--insecure-ignore-tlog=true",
+		"--allow-http-registry", "--type", predicateType, ref)
+	Expect(err).NotTo(HaveOccurred(), "stock cosign verifies the %s attestations of %s", predicateType, ref)
+	var predicates []map[string]any
+	for _, line := range utils.GetNonEmptyLines(out) {
+		var envelope struct {
+			Payload []byte `json:"payload"`
+		}
+		if json.Unmarshal([]byte(line), &envelope) != nil {
+			continue // cosign also prints what it verified
+		}
+		var statement struct {
+			Predicate map[string]any `json:"predicate"`
+		}
+		Expect(json.Unmarshal(envelope.Payload, &statement)).To(Succeed())
+		predicates = append(predicates, statement.Predicate)
+	}
+	return predicates
 }
 
 // CosignSign signs ref with the private key file key, which has an empty

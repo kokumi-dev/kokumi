@@ -150,10 +150,11 @@ func Preparations(namespace, order string) func() ([]deliveryv1alpha1.Preparatio
 }
 
 // Keys of the JSON objects specs build or read: the requests of the API
-// server.
+// server, Argo CD destinations and the targets of deployment records.
 const (
 	KeyName      = "name"
 	KeyNamespace = "namespace"
+	KeyServer    = "server"
 )
 
 // Kubectl runs kubectl with args and returns its combined output.

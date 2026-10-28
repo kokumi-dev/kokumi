@@ -33,8 +33,14 @@ const (
 	// in its own namespace.
 	LabelServingNamespace = "delivery.kokumi.dev/serving-namespace"
 
-	// LabelCluster names the Cluster an Argo CD Application deploys to.
+	// LabelCluster names the Cluster an Argo CD Application deploys to, or
+	// that an Argo CD cluster Secret Kokumi manages registers.
 	LabelCluster = "delivery.kokumi.dev/cluster"
+
+	// LabelClusterNamespace is the namespace of the Cluster an Argo CD
+	// cluster Secret Kokumi manages registers, which lives in the argocd
+	// namespace.
+	LabelClusterNamespace = "delivery.kokumi.dev/cluster-namespace"
 
 	// LabelInCluster marks a Cluster that connects in-cluster, so that
 	// Environments, such as local, select the cluster Kokumi runs in by
@@ -81,14 +87,20 @@ const (
 	// FieldKubeconfigSecretName indexes Clusters by the Secret that holds
 	// their kubeconfig.
 	FieldKubeconfigSecretName = "spec.kubeconfig.secretRef.name"
+
+	// FieldClusterServer indexes Clusters by status.server, without a
+	// trailing slash: the Clusters that wait for a server another Cluster
+	// holds.
+	FieldClusterServer = "status.server"
 )
 
 // Finalizer names registered on kokumi-managed resources.
 const (
 	// Finalizer is added to Orders, Preparations, Recipes, Servings,
 	// Environments and Clusters. The Serving controller deletes the
-	// Serving's Argo CD Applications, which live in another namespace,
-	// before it removes it.
+	// Serving's Argo CD Applications, and the Cluster controller the
+	// Cluster's registration with Argo CD, which live in another namespace,
+	// before they remove it.
 	Finalizer = "delivery.kokumi.dev/finalizer"
 
 	// FinalizerProductProtection keeps a Product from being deleted while

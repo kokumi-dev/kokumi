@@ -294,7 +294,8 @@ spec:
       openAPIV3Schema:
         description: |-
           Cluster is a cluster that Orders deploy to. Environments of its namespace
-          select it by its labels. Kokumi reports whether it is reachable.
+          select it by its labels. Kokumi reports whether it is reachable and hands
+          it to the engines that deploy there.
         properties:
           apiVersion:
             description: |-
@@ -374,8 +375,8 @@ spec:
               conditions:
                 description: |-
                   conditions represent the current state of the Cluster. Ready reports
-                  whether Orders can deploy to it: it is reachable and accepts the
-                  credential.
+                  whether Orders can deploy to it: it is reachable, accepts the
+                  credential, and is registered with every engine that needs it.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -4538,6 +4539,20 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
+  name: kokumi-argocd-cluster-registrar
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - create
+  - update
+  - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: kokumi
@@ -6256,6 +6271,46 @@ spec:
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
+  name: kokumi-argocd-secret-integrity
+  namespace: kokumi
+spec:
+  failurePolicy: Fail
+  matchConditions:
+  - expression: request.userInfo.username == 'system:serviceaccount:kokumi:kokumi-controller-manager'
+    name: controller
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: argocd
+    resourceRules:
+    - apiGroups:
+      - ""
+      apiVersions:
+      - v1
+      operations:
+      - CREATE
+      - UPDATE
+      - DELETE
+      resources:
+      - secrets
+  validations:
+  - expression: variables.newIsRegistration && variables.oldIsRegistration
+    message: In Argo CD's namespace, the kokumi controller may only write the cluster
+      Secrets it manages
+    reason: Forbidden
+  variables:
+  - expression: request.operation == 'DELETE' || (object.metadata.?labels[?'app.kubernetes.io/managed-by'].orValue('')
+      == 'kokumi' && object.metadata.?labels[?'argocd.argoproj.io/secret-type'].orValue('')
+      == 'cluster')
+    name: newIsRegistration
+  - expression: request.operation == 'CREATE' || (oldObject.metadata.?labels[?'app.kubernetes.io/managed-by'].orValue('')
+      == 'kokumi' && oldObject.metadata.?labels[?'argocd.argoproj.io/secret-type'].orValue('')
+      == 'cluster')
+    name: oldIsRegistration
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
   name: kokumi-cluster-secret-access
   namespace: kokumi
 spec:
@@ -6410,6 +6465,16 @@ spec:
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
 metadata:
+  name: kokumi-argocd-secret-integrity
+  namespace: kokumi
+spec:
+  policyName: kokumi-argocd-secret-integrity
+  validationActions:
+  - Deny
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
   name: kokumi-cluster-secret-access
   namespace: kokumi
 spec:
@@ -6509,6 +6574,24 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: kokumi-signing-key-creator
+subjects:
+- kind: ServiceAccount
+  name: kokumi-controller-manager
+  namespace: kokumi
+---
+# Lets Kokumi register clusters with Argo CD in its namespace, argocd: install Argo CD first.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: kokumi
+  name: kokumi-argocd-cluster-registrar
+  namespace: argocd
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kokumi-argocd-cluster-registrar
 subjects:
 - kind: ServiceAccount
   name: kokumi-controller-manager

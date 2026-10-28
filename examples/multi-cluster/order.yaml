@@ -1,0 +1,16 @@
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Order
+metadata:
+  name: podinfo-edge
+spec:
+  productRef:
+    name: podinfo-fleet
+
+  # Deploy to every Cluster of the Environment edge of this namespace. The
+  # Environment cannot be changed later: another Environment is another
+  # Order. Clusters of another region are another Environment.
+  environmentRef:
+    name: edge
+
+  promotion:
+    mode: Automatic

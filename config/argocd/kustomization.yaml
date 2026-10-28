@@ -1,0 +1,9 @@
+# What Kokumi needs in Argo CD's namespace, argocd: a binding of the
+# ClusterRole kokumi-argocd-cluster-registrar to the controller, so that it
+# writes the cluster Secrets that register Clusters with Argo CD. Apply it once
+# Argo CD is installed: dist/install.yaml ends with it, and make argocd
+# applies it.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- argocd_cluster_registrar_role_binding.yaml

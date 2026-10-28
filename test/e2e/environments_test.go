@@ -19,42 +19,23 @@ limitations under the License.
 package e2e
 
 import (
+	"context"
+	"path/filepath"
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
-	"github.com/kokumi-dev/kokumi/internal/cluster"
 	"github.com/kokumi-dev/kokumi/test/e2e/framework"
 )
 
-// The specs of Environments and Clusters that need no second cluster.
+// The specs of Environments and Clusters that need no second cluster; the
+// clusters specs deploy to one.
 var _ = Describe("Environments", Label("environments"), func() {
-	Context("the Environment local Kokumi keeps", func() {
-		It("selects the Cluster in-cluster of Kokumi's namespace, and is ready", func() {
-			local := framework.Environment(framework.InstallNamespace, cluster.LocalEnvironment)
-			Eventually(local, framework.ClusterTimeout).Should(
-				SatisfyAll(framework.BeReady(), framework.HaveSelectedClusters(1, 1)))
-		})
-	})
-
-	Context("the local example, in a namespace of its own", Ordered, func() {
-		var ns string
-
-		BeforeAll(func() {
-			ns = framework.CreateNamespace("local")
-			framework.ApplyExample(ns, "local")
-		})
-
-		It("selects the namespace's Cluster of the cluster Kokumi runs in, once it is ready", func() {
-			Eventually(framework.Environment(ns, cluster.LocalEnvironment), framework.ClusterTimeout).Should(
-				SatisfyAll(framework.BeReady(), framework.HaveSelectedClusters(1, 1)),
-				"the default project admits every namespace, as make argocd sets it")
-		})
-	})
-
 	Context("Environments whose Argo CD project restricts them", Ordered, func() {
 		var ns string
 
@@ -78,9 +59,25 @@ var _ = Describe("Environments", Label("environments"), func() {
 		})
 	})
 
+	Context("a Cluster that reaches the cluster Argo CD runs in through a kubeconfig", func() {
+		It("is refused, and Argo CD keeps its own connection to its cluster", func() {
+			ns := framework.CreateNamespace("hub-by-kubeconfig")
+			framework.ApplyTestdata(ns, "clusters/hub-by-kubeconfig.yaml", nil)
+			connectInCluster := ContainSubstring("connect in-cluster instead")
+			Eventually(framework.Cluster(ns, "hub"), framework.ClusterTimeout).Should(SatisfyAll(
+				framework.HaveReady(metav1.ConditionFalse, deliveryv1alpha1.ReasonClusterConflict),
+				HaveField("Status.Conditions", ContainElement(HaveField("Message", connectInCluster))),
+			))
+			key := framework.ClusterSecretKey("https://kubernetes.default.svc")
+			Expect(framework.Client.Get(context.Background(), key, &corev1.Secret{})).To(Satisfy(apierrors.IsNotFound))
+		})
+	})
+
 	Context("who may name a Secret in a Cluster", Ordered, func() {
 		var ns string
-		clusterFile := func() string { return framework.TestdataFile("clusters/cluster.yaml", nil) }
+		cluster := func() string {
+			return filepath.Join(framework.ProjectDir(), "examples", "multi-cluster", "platform", "cluster.yaml")
+		}
 
 		BeforeAll(func() {
 			ns = framework.CreateNamespace("cluster-secrets")
@@ -89,22 +86,20 @@ var _ = Describe("Environments", Label("environments"), func() {
 
 		It("refuses the admin, who may not read the Secrets of the namespace, a Cluster that names one", func() {
 			Eventually(func(g Gomega) {
-				out, err := framework.KubectlAs("kokumi-admin", "apply", "-n", ns, "-f", clusterFile())
+				out, err := framework.KubectlAs("kokumi-admin", "apply", "-n", ns, "-f", cluster())
 				g.Expect(err).To(HaveOccurred())
 				g.Expect(err.Error() + out).To(ContainSubstring("A Cluster may only name a Secret its author may get"))
 			}).Should(Succeed())
 		})
 
-		It("lets the admin create it once the operator grants it kokumi-cluster-credentials in the namespace", func() {
+		It("lets the admin register it once the operator grants it kokumi-cluster-credentials in the namespace", func() {
 			framework.GrantClusterCredentials(ns)
 			Eventually(func() error {
-				_, err := framework.KubectlAs("kokumi-admin", "apply", "-n", ns, "-f", clusterFile())
+				_, err := framework.KubectlAs("kokumi-admin", "apply", "-n", ns, "-f", cluster())
 				return err
 			}).Should(Succeed(), "RBAC grants the Secret access once the RoleBinding is in")
-			Eventually(framework.Cluster(ns, "spoke"), framework.ClusterTimeout).Should(SatisfyAll(
-				HaveField("Status.Server", "https://spoke.example:6443"),
-				framework.HaveReady(metav1.ConditionFalse, deliveryv1alpha1.ReasonUnreachable),
-			), "Kokumi reads the kubeconfig and finds nothing at its server")
+			Eventually(framework.Cluster(ns, "spoke")).Should(
+				HaveField("Spec.Kubeconfig.SecretRef.Name", "spoke-kubeconfig"))
 		})
 
 		It("lets the admin relabel the Cluster once it may no longer read its Secret", func() {
@@ -116,7 +111,7 @@ var _ = Describe("Environments", Label("environments"), func() {
 			}).Should(Equal("no"), "RBAC no longer grants the Secret")
 
 			_, err = framework.KubectlAs("kokumi-admin",
-				"label", "clusters.delivery.kokumi.dev", "spoke", "-n", ns, "stage=prod", "--overwrite")
+				"label", "clusters.delivery.kokumi.dev", "spoke", "-n", ns, "stage=prod")
 			Expect(err).NotTo(HaveOccurred(), "an update that keeps the Secret needs no access to it")
 
 			out, err := framework.KubectlAs("kokumi-admin", "patch", "clusters.delivery.kokumi.dev", "spoke", "-n", ns,

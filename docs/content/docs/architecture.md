@@ -829,7 +829,9 @@ Orders deploy there, that reaches it with the kubeconfig in a Secret of the
 namespace, or is the cluster Kokumi runs in. Kokumi reports whether each can
 be deployed to and its Kubernetes version. An **Environment** selects Clusters
 of its namespace by label, names its engine and the Environments an Order
-must run after. An
+must run after. Kokumi registers every Cluster an Argo CD Environment selects
+with Argo CD, in a cluster Secret named after its server, with the credential
+of its kubeconfig. An
 Order names an Environment of its namespace in `spec.environmentRef`; it is
 activation, not intent, so it renders nothing. Kokumi keeps the Cluster
 `in-cluster` and the Environment `local` in its own namespace. See
@@ -847,9 +849,11 @@ Environments that use it, and a probe that finds a cluster as it was changes
 nothing.
 
 The controllers reach the engine an Environment names in `deployer` through
-small interfaces, one per controller: the Serving's deployer (admit, apply,
-remove) and the Environment's admitter (admit). One Argo CD adapter
-implements both: it reads AppProjects, and writes the Applications. The Environment's status is for people; the
+three small interfaces, one per controller: the Serving's deployer (admit,
+apply, remove), the Environment's admitter (admit) and the Cluster's
+registrar (register, unregister). One Argo CD adapter implements all three:
+it reads AppProjects, and writes the Applications and the cluster Secrets of
+the clusters they deploy to. The Environment's status is for people; the
 Serving asks the engine itself whenever it deploys, so a change of the
 Environment or its AppProject counts at once, and a stale status never
 decides where an Order deploys.
@@ -863,9 +867,9 @@ is part of the intent, so a Preparation deploys there wherever it is promoted.
 
 ```
 Cluster ──selected by labels──▶ Environment ◀── Order.spec.environmentRef
-          (same namespace)          │             (same namespace)
-                                    └── Serving: one Application per cluster,
-                                        into the Preparation's target namespace
+   │      (same namespace)          │             (same namespace)
+   └── Kokumi registers it ──▶      └── Serving: one Application per cluster,
+       Argo CD cluster Secret           into the Preparation's target namespace
 ```
 
 ### Approvals
@@ -1024,7 +1028,7 @@ Key properties:
 - **Idempotent** — each reconcile produces the same output for the same input
 - **Level-triggered** — the controller always acts on observed state, not events
 - **Owner references** — Preparations and the Serving are owned by their Order; clean deletion is automatic
-- **Argo CD delegates deployment** — Kokumi never applies manifests directly; it only manages the Argo CD Applications
+- **Argo CD delegates deployment** — Kokumi never applies manifests directly; it only manages the Argo CD Applications, and the cluster Secrets of the clusters they deploy to
 
 ## OCI source formats
 

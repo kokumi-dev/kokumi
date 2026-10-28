@@ -1,0 +1,10 @@
+# What an admin applies to the namespace before the example: the Cluster
+# spoke, which names the Secret spoke-kubeconfig of the namespace, and the
+# Environment edge that selects it.
+#
+#   kubectl apply -n <namespace> -k examples/multi-cluster/platform
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- cluster.yaml
+- environment.yaml

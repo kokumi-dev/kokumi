@@ -103,8 +103,8 @@ type ClusterStatus struct {
 	KubernetesVersion string `json:"kubernetesVersion,omitempty"`
 
 	// conditions represent the current state of the Cluster. Ready reports
-	// whether Orders can deploy to it: it is reachable and accepts the
-	// credential.
+	// whether Orders can deploy to it: it is reachable, accepts the
+	// credential, and is registered with every engine that needs it.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
@@ -123,7 +123,8 @@ type ClusterStatus struct {
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Cluster is a cluster that Orders deploy to. Environments of its namespace
-// select it by its labels. Kokumi reports whether it is reachable.
+// select it by its labels. Kokumi reports whether it is reachable and hands
+// it to the engines that deploy there.
 type Cluster struct {
 	metav1.TypeMeta `json:",inline"`
 

@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -99,9 +100,16 @@ func ApplicationKey(namespace, order, cluster string) client.ObjectKey {
 	return argocd.Key(serving, cluster)
 }
 
+// ClusterSecretKey returns the key of the Argo CD cluster Secret with which
+// Kokumi registers the API server server, named after it.
+func ClusterSecretKey(server string) client.ObjectKey {
+	return client.ObjectKey{Namespace: ArgoCDNamespace, Name: argocd.ClusterSecretName(server)}
+}
+
 // SimulateArgoCD installs what Kokumi uses of Argo CD, without Argo CD: its
-// Application and AppProject CRDs, and its namespace with the project
-// default that every Argo CD creates, as "make argocd" configures it.
+// Application and AppProject CRDs, its namespace with the project default
+// that every Argo CD creates, and the binding with which Kokumi registers
+// clusters there, as "make argocd" creates it.
 func SimulateArgoCD() {
 	for _, crd := range []string{ArgoCDApplicationCRD, ArgoCDAppProjectCRD} {
 		_, err := Kubectl("apply", "--server-side", "-f", crd)
@@ -112,6 +120,8 @@ func SimulateArgoCD() {
 		Expect(out).To(ContainSubstring("AlreadyExists"))
 	}
 	ApplyTestdata("", "argocd/default-project.yaml", nil)
+	_, err = Kubectl("apply", "-k", filepath.Join(ProjectDir(), "config", "argocd"))
+	Expect(err).NotTo(HaveOccurred(), "Failed to bind the registrar role in Argo CD's namespace")
 }
 
 // RemoveSimulatedArgoCD removes what SimulateArgoCD installed.
@@ -119,6 +129,7 @@ func RemoveSimulatedArgoCD() {
 	for _, crd := range []string{ArgoCDApplicationCRD, ArgoCDAppProjectCRD} {
 		_, _ = Kubectl("delete", "--ignore-not-found", "-f", crd)
 	}
+	_, _ = Kubectl("delete", "rolebinding", "kokumi-argocd-cluster-registrar", "-n", ArgoCDNamespace, "--ignore-not-found")
 }
 
 // Application returns a function for Eventually that fetches the Argo CD
