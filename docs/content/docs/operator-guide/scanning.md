@@ -1,6 +1,6 @@
 ---
 title: Vulnerability Scanning
-weight: 5
+weight: 6
 description: The kokumi-scanner component, enabling scanning on the Kitchen, the vulnerability database in air-gapped clusters, network isolation and sizing.
 ---
 
@@ -164,7 +164,17 @@ spec:
     - name: corp-mirror        # a Registry in the install namespace
 ```
 
-The bundled registry needs no Registry. Copy into it through a port-forward:
+The Registry and its Secret live in the install namespace, whose Secrets the
+`kokumi-server` ServiceAccount can read (see
+[Authorization](../authorization/#the-kokumi-server-serviceaccount)). Give it
+credentials that may only pull from the mirror.
+
+The bundled registry needs no Registry. Its volume requests 1 GiB by default,
+less than the two databases take together, so raise the storage request of
+`kokumi-registry-pvc` first, or copy only `trivy-db` when no image holds Java
+archives. It accepts pushes from anyone who reaches a node on NodePort 30050,
+so pin the database by digest (see below) when you mirror it there. Copy into
+it through a port-forward:
 
 ```bash
 kubectl -n kokumi port-forward svc/kokumi-registry 5000:5000 &

@@ -13,7 +13,9 @@ applies to users who bypass the UI entirely.
 ## How it works
 
 1. **Authentication** - the server validates the OIDC token (or admin
-   credentials) and extracts stable identity claims: `sub`, `email`, `groups`.
+   credentials) and extracts stable identity claims: `sub`, the email and the
+   groups, from the claims that
+   [the OIDC configuration](../authentication/#configuration) names.
 2. **Mapping** - the identity is mapped to one or more Kubernetes
    ServiceAccounts in the install namespace via annotations (below).
 3. **Execution** - every API operation the server performs on the user's behalf
@@ -55,6 +57,11 @@ Matching rules:
   operation.
 - Users who match no ServiceAccount are authenticated but authorized for
   nothing (every operation returns 403).
+
+Map by `sub` or by group rather than by email. The provider assigns the
+subject and the groups, while some providers let users set their own email
+address. Groups reach Kokumi only when the requested scopes put them into the
+ID token; see [OIDC configuration](../authentication/#configuration).
 
 ### Adding your own ServiceAccount
 
@@ -134,9 +141,15 @@ The installation ships three identity ServiceAccounts in the install namespace:
 
 | ServiceAccount | Default binding | Default identity mapping | Purpose |
 | -------------- | ---------------- | ------------------------ | ------- |
-| `kokumi-admin` | `kokumi-server-role` (full CRUD incl. `kitchens`, `environments` and `clusters`) | `kokumi.dev/identity-groups: "kokumi-admin"` | Full access; also used by the built-in admin login |
-| `kokumi-editor` | `kokumi-server-editor-role` (CRUD, no `kitchens`; reads `environments` and `clusters`) | `kokumi.dev/identity-groups: "kokumi-editor"` | Editors |
+| `kokumi-admin` | `kokumi-server-role` (full CRUD incl. `kitchens`, `environments` and `clusters`; `approve` on `preparations`) | `kokumi.dev/identity-groups: "kokumi-admin"` | Full access; also used by the built-in admin login |
+| `kokumi-editor` | `kokumi-server-editor-role` (CRUD, no `kitchens`; reads `environments` and `clusters`; `approve` on `preparations`) | `kokumi.dev/identity-groups: "kokumi-editor"` | Editors |
 | `kokumi-viewer` | `kokumi-server-viewer-role` (read-only) | `kokumi.dev/identity-groups: "kokumi-viewer"` | Read-only users |
+
+Both the admin and the editor role hold the custom verb `approve` on
+`preparations`, so every OIDC user mapped to `kokumi-editor` may approve. The
+built-in admin login cannot approve, since a vote needs a personal OIDC login.
+To keep editors from approving, bind them to a role of your own without the
+verb.
 
 None of the built-in roles grants access to Secrets. They are bound
 cluster-wide, which would include the `kokumi-signing` namespace, and the key
@@ -146,19 +159,28 @@ read or replace it could forge trusted signatures. See
 [Cluster credentials](#cluster-credentials) for granting Secret access per
 namespace, and [Signing](../signing/) for how the key is protected.
 
+`update` on the Kitchen is as powerful as the signing key: it decides which
+keys Kokumi trusts, whether sources must verify, and how users sign in. Of the
+built-in roles only `kokumi-server-role` holds it. Grant it only to those you
+would trust with the key.
+
 The built-in admin login always acts as `kokumi-admin`, regardless of the
 annotations. Additionally, OIDC users are matched against the default
 `kokumi.dev/identity-groups` values: with the defaults, an OIDC identity whose
 token carries the `kokumi-admin` group gets full access, `kokumi-editor`
 editor access, and `kokumi-viewer` read-only access (multiple matches are
-merged as described above).
+merged as described above). The token carries groups only when the requested
+scopes ask for them; see [OIDC configuration](../authentication/#configuration).
 
 To grant the `devops` OIDC group editor access:
 
 ```bash
 kubectl -n kokumi annotate sa kokumi-editor \
-  kokumi.dev/identity-groups=devops --overwrite
+  kokumi.dev/identity-groups=kokumi-editor,devops --overwrite
 ```
+
+`--overwrite` replaces the whole annotation, so list the default group too to
+keep its mapping.
 
 ## Registry credentials
 
@@ -303,8 +325,8 @@ denies it on the first load.
 
 ## The kokumi-server ServiceAccount
 
-The server's own ServiceAccount holds **no write permissions on kokumi
-resources**. It can only:
+The server's own ServiceAccount holds **one write permission on kokumi
+resources**: it creates Approvals. It can only:
 
 - `impersonate` the identity ServiceAccounts in the install namespace, by
   default `kokumi-admin`, `kokumi-editor` and `kokumi-viewer` (see
@@ -312,13 +334,29 @@ resources**. It can only:
   the trust boundary: treat access to this ServiceAccount as cluster-admin
   equivalent for kokumi resources,
 - read ServiceAccounts (mapping resolution),
-- read Secrets in the install namespace (login/OIDC config). It cannot read
-  the signing key, which lives in the `kokumi-signing` namespace,
+- read all Secrets in the install namespace: the login and OIDC Secrets, and
+  the Secrets of Registries kept there. It cannot read the signing key, which
+  lives in the `kokumi-signing` namespace,
 - read (get/list/watch) kokumi resources to power the live UI event stream:
   the hub must be able to see all events in order to filter them per user
   (each connected user only receives events for resources their mapped
-  ServiceAccounts may list). The server never writes kokumi resources with
-  its own identity.
+  ServiceAccounts may list),
+- `create` `approvals` in every namespace, through the ClusterRole
+  `kokumi-server-approval-submitter`. The server records a vote with its own
+  identity, after it checked that the voter's mapped ServiceAccount may
+  `approve` the Preparation. The admission policy `kokumi-approval-integrity`
+  admits new Approvals only from this ServiceAccount, and rejects every update
+  and every delete except the namespace controller's.
+
+Apart from Approvals, the server never writes kokumi resources with its own
+identity.
+
+The admission policies `kokumi-approval-integrity`, `kokumi-status-integrity`,
+`kokumi-signing-key-integrity` and `kokumi-argocd-secret-integrity` name the
+ServiceAccounts of the install namespace `kokumi`, and the signing key policy
+also the Kitchen there. When you install into another namespace, change these
+names to match. Otherwise the policies reject the writes of the controller
+and the server, and stop restricting the controller in `argocd`.
 
 ## The kokumi-scanner ServiceAccount
 

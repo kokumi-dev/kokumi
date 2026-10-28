@@ -1,6 +1,6 @@
 ---
 title: Registries and Repositories
-weight: 1
+weight: 6
 description: Connect Kokumi to private OCI registries, and see which credentials every location uses.
 ---
 
@@ -70,6 +70,8 @@ metadata:
 spec:
   productRef:
     name: mychart
+  environmentRef:
+    name: local
   destination:
     url: oci://ghcr.io/myorg/mychart-rendered
   registryRefs:
@@ -90,9 +92,12 @@ spec:
 
 Products and Orders report every location they need in
 `status.registryAccess`: the URL prefix, `Pull` or `Push`, who accesses it,
-and the Registry Kokumi connects through. Kokumi gives no credentials to Argo
-CD and the kubelet; their entries tell you where they need their own, for
-example an Argo CD repository credential or an `imagePullSecret`.
+and the Registry Kokumi connects through. A Product lists its source and its
+vendor location. The images belong to the render of each Order, so an Order
+lists them, through the Product's Registries, next to its source and
+destination. Kokumi gives no credentials to Argo CD and the kubelet; their
+entries tell you where they need their own, for example an Argo CD repository
+credential or an `imagePullSecret`.
 
 ```bash
 kubectl -n team-a get order mychart-prod -o jsonpath='{.status.registryAccess}' | jq
@@ -104,8 +109,8 @@ kubectl -n team-a get order mychart-prod -o jsonpath='{.status.registryAccess}' 
   { "url": "oci://ghcr.io/myorg/mychart-rendered", "operation": "Pull", "client": "ArgoCD" },
   { "url": "oci://ghcr.io/myorg/mychart-rendered", "operation": "Push", "client": "Kokumi", "registry": "ghcr-myorg-push" },
   { "url": "oci://ghcr.io/myorg/vendor/mychart", "operation": "Pull", "client": "Kokumi", "registry": "ghcr-myorg" },
-  { "url": "oci://ghcr.io/myorg/vendor/mychart/images", "operation": "Pull", "client": "Kubelet" },
-  { "url": "oci://ghcr.io/myorg/vendor/mychart/images", "operation": "Push", "client": "Kokumi", "registry": "ghcr-myorg" }
+  { "url": "oci://ghcr.io/myorg/vendor/mychart/images", "operation": "Push", "client": "Kokumi", "registry": "ghcr-myorg" },
+  { "url": "oci://ghcr.io/myorg/vendor/mychart/images", "operation": "Pull", "client": "Kubelet" }
 ]
 ```
 

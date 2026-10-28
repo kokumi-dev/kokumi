@@ -1,6 +1,6 @@
 ---
 title: Signing
-weight: 3
+weight: 4
 description: The key that signs every Kokumi artifact, how it is protected and rotated, how to verify artifacts with cosign, and how to require signed sources.
 ---
 
@@ -19,6 +19,11 @@ sources it renders to be signed by their publishers.
 | Preparation | Sealed approvals (`https://kokumi.dev/attestations/approval/v1`) | When an approved Preparation becomes the Serving's target |
 | Preparation | Promotion record (`https://kokumi.dev/attestations/promotion/v1`) | When a Serving promotes it, past its gates |
 | Preparation | Deployment record (`https://kokumi.dev/attestations/deployment/v1`) | When its deployment is first healthy |
+| Vendored image | SBOM (`https://cyclonedx.org/bom`) | When a scan generates one, because no SBOM could be reused |
+| Vendored image | Vulnerability report (`https://cosign.sigstore.dev/attestation/vuln/v1`) | On every scan |
+
+The SBOMs and reports are written only when the Kitchen enables
+[vulnerability scanning](../scanning/).
 
 Each attestation is an OCI referrer of the artifact: a Sigstore bundle
 (`application/vnd.dev.sigstore.bundle.v0.3+json`) holding a DSSE envelope over
@@ -115,7 +120,11 @@ Only the controller manager and cluster admins can read or write the key:
   ```
 
   The holder still needs ordinary RBAC on the Secret. The namespace controller
-  may delete the Secret with the `kokumi-signing` namespace.
+  may delete the Secret with the `kokumi-signing` namespace. The policy names
+  the controller's ServiceAccount and the Kitchen in the install namespace
+  `kokumi`; see
+  [Authorization](../authorization/#the-kokumi-server-serviceaccount) for
+  installing into another namespace.
 - No Kokumi role grants read access. Only the controller is granted access to
   Secrets in `kokumi-signing`. The built-in `admin`, `editor` and `viewer`
   roles hold no Secret access, because they are bound cluster-wide, and the
@@ -129,6 +138,11 @@ Only the controller manager and cluster admins can read or write the key:
 Anyone who can read the key can forge signatures that Kokumi trusts. Never
 grant access to Secrets in `kokumi-signing`, and treat cluster-wide Secret
 read access as access to the key.
+
+Anyone who may `update` the Kitchen can do the same with a key of their own:
+they can add it to [`spec.signing.trustedKeys`](#trusted-keys) and turn off
+`requireSourceVerification`. Of the built-in roles only the admin role holds
+`update` on `kitchens`. Grant it only to those you would trust with the key.
 
 ### Rotate the key
 
@@ -178,7 +192,7 @@ keys before saving them.
 
 A Product can require its source to be signed by its publisher, by key or
 keyless against the expected signer identity. See
-[Source verification](../../architecture/#source-verification) for the
+[Source Verification](../../user-guide/source-verification/) for the
 fields. A source signed by a key the Kitchen trusts verifies without any
 configuration.
 

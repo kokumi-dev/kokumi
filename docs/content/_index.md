@@ -43,8 +43,8 @@ layout: hextra-home
     subtitle="Rendering and deployment are fully decoupled. Inspect the complete rendered manifest in the built-in UI before promoting, or require explicit human sign-off between environments."
   >}}
   {{< hextra/feature-card
-    title="Drift Detection"
-    subtitle="The deployed SHA-256 digest is compared on every sync. Any mismatch between desired and running is a concrete, actionable signal — not an ambiguous diff."
+    title="What Runs Where"
+    subtitle="Every cluster runs one Preparation, pinned by its SHA-256 digest. Kokumi shows which one runs where and whether it is healthy, and Argo CD's self-heal keeps it there."
   >}}
   {{< hextra/feature-card
     title="Air-Gap Ready"

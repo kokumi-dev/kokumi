@@ -19,13 +19,13 @@ what its docs say.
 | Example | Shows | Docs | E2E spec |
 |---|---|---|---|
 | [local](local/) | The Cluster and the Environment that let a namespace deploy to the cluster Kokumi runs in | Getting Started, Environments | every spec, through `framework.CreateNamespace` |
-| [getting-started](getting-started/) | A Helm chart, an Order that sets values, Manual promotion | Getting Started | `rendering_test.go`, `overrides_test.go`, `promotion_test.go`, `signing_test.go`, `lifecycle_test.go` |
-| [manifest-bundle](manifest-bundle/) | Pre-rendered manifests, patched by the Order | Getting Started | `rendering_test.go` |
-| [multi-file-manifests](multi-file-manifests/) | Manifests in several files, kept apart | Getting Started | `rendering_test.go` |
-| [kustomize](kustomize/) | A Kustomize source | Getting Started | `rendering_test.go` |
+| [getting-started](getting-started/) | A Helm chart, an Order that sets values, Manual promotion | Getting Started, Products and Orders | `rendering_test.go`, `overrides_test.go`, `promotion_test.go`, `signing_test.go`, `lifecycle_test.go` |
+| [manifest-bundle](manifest-bundle/) | Pre-rendered manifests, patched by the Order | Products and Orders | `rendering_test.go` |
+| [multi-file-manifests](multi-file-manifests/) | Manifests in several files, kept apart | Products and Orders | `rendering_test.go` |
+| [kustomize](kustomize/) | A Kustomize source | Products and Orders | `rendering_test.go` |
 | [promotion-pipeline](promotion-pipeline/) | dev, staging and prod stages in Environments of their own, with a soak and pinned images | Promotion Pipelines, Environments | `pipeline_test.go` |
 | [multi-cluster](multi-cluster/) | One Order deployed to every cluster of an Environment, into the Product's target namespace; a spoke cluster registered as a Cluster | Deploy to Several Clusters, Clusters | `clusters_test.go` |
-| [approvals](approvals/) | Two required approvals from a group | Architecture: Approvals | `approvals_test.go` |
+| [approvals](approvals/) | Two required approvals from a group | Approvals | `approvals_test.go` |
 | [image-vendoring](image-vendoring/) | Images copied into the bundled registry | Images | `images_test.go` |
 | [source-verification](source-verification/) | A keyless signature on the source | Source Verification | `source_verification_test.go` |
 | [vulnerability-scanning](vulnerability-scanning/) | Scanning vendored images, holding promotions on findings | Security Scanning | `scanning_test.go` |
