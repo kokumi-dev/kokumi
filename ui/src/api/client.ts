@@ -1,5 +1,5 @@
 import { authHeaders, refresh } from './auth'
-import type { Order, Preparation, OrderFormData, OrderPreviewRequest, Product, ProductFormData, ProductPreviewRequest, Patch, Render, ChartInfo, Registry, RegistryFormData, Repository, RepositoryFormData, ArtifactInfo, ArtifactFile, Approval, ApprovalDecision, ArtifactConfig, ArtifactGraph, ProductSourceArtifact, ProductVulnerabilityReport, PreparationVulnerabilityReport, RegistryRef, DeploymentTarget } from './types'
+import type { Order, Preparation, OrderFormData, OrderPreviewRequest, Product, ProductFormData, ProductPreviewRequest, Patch, Render, ChartInfo, Registry, RegistryFormData, Repository, RepositoryFormData, ArtifactInfo, ArtifactFile, Approval, ApprovalDecision, ArtifactConfig, ArtifactGraph, ProductSourceArtifact, ProductVulnerabilityReport, PreparationVulnerabilityReport, RegistryRef, Environment, EnvironmentFormData, EnvironmentSpec, Cluster, ClusterDeployment, ClusterFormData, DeploymentTarget } from './types'
 
 // All API calls are relative so they work both in dev (proxied by Vite) and
 // in production (served from the same Go binary).
@@ -419,6 +419,111 @@ export function deleteRepository(namespace: string, name: string): Promise<void>
   return request<void>(`/repositories/${namespace}/${name}`, { method: 'DELETE' })
 }
 
+// ── Environments ──────────────────────────────────────────────────────────────
+
+/** Lists the Environments; with a namespace, only those of it. */
+export function listEnvironments(namespace?: string): Promise<Environment[]> {
+  return request<Environment[]>(namespace ? `/environments?namespace=${encodeURIComponent(namespace)}` : '/environments')
+}
+
+/** The spec of an Environment request body, in the API's field names. */
+function environmentSpecBody(data: EnvironmentFormData): EnvironmentSpec {
+  return {
+    description: data.description,
+    clusterSelector: data.clusterSelector,
+    deployer: { type: 'ArgoCD', argoCD: { project: data.project } },
+    ...(data.requireAfter.length > 0 ? { promotion: { requireAfter: data.requireAfter } } : {}),
+  }
+}
+
+export function createEnvironment(data: EnvironmentFormData): Promise<Environment> {
+  return request<Environment>('/environments', {
+    method: 'POST',
+    body: JSON.stringify({ namespace: data.namespace, name: data.name, ...environmentSpecBody(data) }),
+  })
+}
+
+export function updateEnvironment(namespace: string, name: string, data: EnvironmentFormData): Promise<Environment> {
+  return request<Environment>(`/environments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    body: JSON.stringify(environmentSpecBody(data)),
+  })
+}
+
+/** Deletes an Environment; the Orders that deploy to it stop deploying. */
+export function deleteEnvironment(namespace: string, name: string): Promise<void> {
+  return request<void>(`/environments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`, { method: 'DELETE' })
+}
+
+// ── Clusters ──────────────────────────────────────────────────────────────────
+
+/**
+ * Lists the Clusters; with a namespace, only those of it. With a label
+ * selector in kubectl's syntax, only those an Environment with that
+ * clusterSelector selects; an empty one selects every Cluster. The server
+ * refuses a selector that does not parse.
+ */
+export function listClusters(namespace?: string, labelSelector?: string): Promise<Cluster[]> {
+  const query = new URLSearchParams()
+  if (namespace) query.set('namespace', namespace)
+  if (labelSelector !== undefined) query.set('labelSelector', labelSelector)
+  const params = query.toString()
+  return request<Cluster[]>(params ? `/clusters?${params}` : '/clusters')
+}
+
+/** The request body of a Cluster form; the cluster Kokumi runs in, and a kept credential, send none. */
+function clusterBody(data: ClusterFormData) {
+  const body: Record<string, unknown> = { description: data.description, labels: data.labels }
+  if (data.credentialMode === 'kubeconfig') {
+    body.kubeconfig = data.kubeconfig
+  } else if (data.credentialMode === 'token') {
+    body.server = data.server
+    body.caData = data.caData
+    body.token = data.token
+  }
+  return body
+}
+
+/**
+ * Creates a Cluster: the cluster Kokumi runs in, or one reached with a
+ * kubeconfig, which the server stores in a Secret of its namespace, owned by
+ * the Cluster.
+ */
+export function createCluster(data: ClusterFormData): Promise<Cluster> {
+  return request<Cluster>('/clusters', {
+    method: 'POST',
+    body: JSON.stringify({
+      namespace: data.namespace,
+      name: data.name,
+      connection: data.credentialMode === 'inCluster' ? 'InCluster' : 'Kubeconfig',
+      ...clusterBody(data),
+    }),
+  })
+}
+
+/** Changes the description and labels of a Cluster and, unless kept, the kubeconfig of one reached with it. */
+export function updateCluster(namespace: string, name: string, data: ClusterFormData): Promise<Cluster> {
+  return request<Cluster>(`/clusters/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`, {
+    method: 'PUT',
+    body: JSON.stringify(clusterBody(data)),
+  })
+}
+
+/** Every cluster a Serving deploys to, by name, with how its deployment stands there. */
+export function getServingTargets(namespace: string, name: string): Promise<DeploymentTarget[]> {
+  return request<DeploymentTarget[]>(`/servings/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/targets`)
+}
+
+/** What each Order of the Environments that select a Cluster deploys there, by Order name. */
+export function getClusterDeployments(namespace: string, name: string): Promise<ClusterDeployment[]> {
+  return request<ClusterDeployment[]>(`/clusters/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/deployments`)
+}
+
+/** Deletes a Cluster, with the kubeconfig Secret it owns. */
+export function deleteCluster(namespace: string, name: string): Promise<void> {
+  return request<void>(`/clusters/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`, { method: 'DELETE' })
+}
+
 // ── Settings (singleton Kitchen) ──────────────────────────────────────────────
 
 export interface SecretRef {
@@ -603,9 +708,4 @@ export interface NamespaceCapabilities {
 
 export function getNamespaceCapabilities(namespace: string): Promise<NamespaceCapabilities> {
   return request<NamespaceCapabilities>(`/namespaces/${encodeURIComponent(namespace)}/capabilities`)
-}
-
-/** Every cluster a Serving deploys to, by name, with how its deployment stands there. */
-export function getServingTargets(namespace: string, name: string): Promise<DeploymentTarget[]> {
-  return request<DeploymentTarget[]>(`/servings/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/targets`)
 }

@@ -181,8 +181,9 @@ it. Three things guard that:
   credentials.
 - **The UI stores credentials as the user.** A Registry saved with a username
   and password gets a `kubernetes.io/dockerconfigjson` Secret
-  `<registry>-credentials`, owned by the Registry. The server never
-  overwrites a Secret of that name it did not create.
+  `<registry>-credentials`, created after the Registry and owned by it. The
+  server never overwrites a Secret of that name it did not create, and
+  refuses such a name before it creates anything.
 
 The built-in roles grant no Secret access. Platform admins grant it per tenant
 namespace by binding the `kokumi-registry-credentials` ClusterRole (`get`,
@@ -219,11 +220,15 @@ of different trust levels in different namespaces.
 
 A [Cluster](../clusters/) lends the credential in its kubeconfig Secret to
 every Order of the Environments that select it: the controller reads it with
-its own identity and hands it to Argo CD. The admission policy
-`kokumi-cluster-secret-access` therefore admits a Cluster that names a
-kubeconfig Secret only when its author may `get` that Secret. An update
-that keeps the Secret's name and key needs no Secret access; changing either
-does, because another key could hold another credential.
+its own identity and hands it to Argo CD. Two things guard that:
+
+- **The admission policy `kokumi-cluster-secret-access`** admits a Cluster
+  that names a kubeconfig Secret only when its author may `get` that Secret.
+  An update that keeps the Secret's name and key needs no Secret access;
+  changing either does, because another key could hold another credential.
+- **The UI stores the kubeconfig as the user**, in a Secret
+  `<cluster>-kubeconfig`, created after the Cluster and owned by it. A Secret
+  of that name the UI did not create is refused before anything is created.
 
 The built-in admin role creates Clusters in every namespace but grants no
 Secret access. Bind the `kokumi-cluster-credentials` ClusterRole (`get`,
@@ -238,7 +243,9 @@ kubectl -n platform create rolebinding kokumi-cluster-credentials \
 
 Never bind it with a ClusterRoleBinding, in the `kokumi-signing` namespace, or
 in the install namespace, for the reasons above. The Cluster `in-cluster` that
-Kokumi keeps in the install namespace needs no Secret.
+Kokumi keeps in the install namespace needs no Secret. The Cluster form shows
+whether the user may store a kubeconfig in the selected namespace, from the
+namespaced capability `clusters.credentials:update`.
 
 ## UI capabilities
 
@@ -263,6 +270,8 @@ answer.
 | `products:create` / `products:update` / `products:delete` | `create` / `update` / `delete` `products` | New, Edit, Delete Product |
 | `registries:create` / `registries:update` / `registries:delete` | `create` / `patch` / `delete` `registries` | New, Edit, Delete Registry |
 | `repositories:create` / `repositories:update` / `repositories:delete` | `create` / `patch` / `delete` `repositories` | New, Edit, Delete Repository |
+| `environments:create` / `environments:update` / `environments:delete` | `create` / `update` / `delete` `environments` | New, Edit, Delete Environment |
+| `clusters:create` / `clusters:update` / `clusters:delete` | `create` / `patch` / `delete` `clusters` | New, Edit, Delete Cluster |
 | `preparations:promote` | `create` and `update` `servings` | Promote and Rollback |
 | `preparations:approve` | `approve` `preparations`, and the user signed in with OIDC | Approve and Request changes |
 
@@ -270,14 +279,15 @@ answer.
 collector deletes the Order's Serving, and with it the Argo CD Application.
 The deployed workloads keep running until you remove them.
 
-One capability holds per namespace and is reported by
+Two capabilities hold per namespace and are reported by
 `GET /api/v1/namespaces/{namespace}/capabilities`:
 
 | Capability | Granted when a mapped ServiceAccount may | UI |
 | ---------- | ---------------------------------------- | -- |
 | `registries.credentials:update` | `get`, `create` and `patch` `secrets` in the namespace | Credentials and Secrets in the Registry form |
+| `clusters.credentials:update` | `get`, `create` and `patch` `secrets` in the namespace | The kubeconfig in the Cluster form |
 
-Except for the settings and the namespaced capability, capabilities are
+Except for the settings and the namespaced capabilities, capabilities are
 evaluated **across all namespaces**:
 a permission granted only by a namespaced `RoleBinding` does not enable the
 action in the UI. This matches the live event stream, which only serves users

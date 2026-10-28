@@ -72,6 +72,21 @@ func addRoutes(
 	mux.HandleFunc("PUT /api/v1/repositories/{namespace}/{name}", handleUpdateRepository(deps))
 	mux.HandleFunc("DELETE /api/v1/repositories/{namespace}/{name}", handleDeleteRepository(deps))
 
+	// Environment CRUD
+	mux.HandleFunc("GET /api/v1/environments", handleListEnvironments(deps))
+	mux.HandleFunc("POST /api/v1/environments", handleCreateEnvironment(deps))
+	mux.HandleFunc("GET /api/v1/environments/{namespace}/{name}", handleGetEnvironment(deps))
+	mux.HandleFunc("PUT /api/v1/environments/{namespace}/{name}", handleUpdateEnvironment(deps))
+	mux.HandleFunc("DELETE /api/v1/environments/{namespace}/{name}", handleDeleteEnvironment(deps))
+
+	// Cluster CRUD
+	mux.HandleFunc("GET /api/v1/clusters", handleListClusters(deps))
+	mux.HandleFunc("POST /api/v1/clusters", handleCreateCluster(deps))
+	mux.HandleFunc("GET /api/v1/clusters/{namespace}/{name}", handleGetCluster(deps))
+	mux.HandleFunc("GET /api/v1/clusters/{namespace}/{name}/deployments", handleClusterDeployments(deps))
+	mux.HandleFunc("PUT /api/v1/clusters/{namespace}/{name}", handleUpdateCluster(deps))
+	mux.HandleFunc("DELETE /api/v1/clusters/{namespace}/{name}", handleDeleteCluster(deps))
+
 	// Preparations scoped to a Order
 	mux.HandleFunc("GET /api/v1/orders/{namespace}/{name}/preparations", handleListPreparations(deps))
 	mux.HandleFunc("GET /api/v1/orders/{namespace}/{name}/approvals", handleListOrderApprovals(deps))

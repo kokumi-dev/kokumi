@@ -1,5 +1,33 @@
-import type { DeploymentClusters, DeploymentTarget } from '../api/types'
+import type { Cluster, DeploymentClusters, DeploymentTarget, Environment } from '../api/types'
 import type { Tone } from '../components/shared/tone'
+
+/**
+ * The tone of a Cluster's state: Ready, Unknown while it is not checked yet,
+ * and any other reason keeps Orders from deploying to it.
+ */
+export function clusterTone(cluster: Cluster): Tone {
+  if (cluster.ready) return 'success'
+  return cluster.state === 'Unknown' ? 'neutral' : 'danger'
+}
+
+/** How Kokumi reaches a Cluster, in a word or two. */
+export function connectionLabel(cluster: Cluster): string {
+  return cluster.connection === 'InCluster' ? 'In cluster' : 'Kubeconfig'
+}
+
+/**
+ * How the Clusters an Environment selects read, e.g. "2 clusters, both
+ * ready", from the counts its status keeps.
+ */
+export function environmentClustersSummary(env: Pick<Environment, 'selectedClusters' | 'readyClusters'>): string {
+  const count = env.selectedClusters ?? 0
+  const ready = env.readyClusters ?? 0
+  if (count === 0) return 'No cluster'
+  const total = count === 1 ? '1 cluster' : `${count} clusters`
+  if (ready === count) return `${total}, ${count === 1 ? 'ready' : count === 2 ? 'both ready' : 'all ready'}`
+  if (ready === 0) return `${total}, ${count === 1 ? 'not ready' : 'none ready'}`
+  return `${total}, ${ready} ready`
+}
 
 /**
  * The tone of a cluster a Serving deploys to: Healthy runs the deployed

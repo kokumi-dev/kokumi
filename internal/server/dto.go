@@ -814,6 +814,25 @@ type DeploymentClustersDTO struct {
 	Held        int32 `json:"held"`
 }
 
+// ClusterDeploymentDTO is what one Order deploys to a cluster: the
+// Preparation its Serving deploys, and how Argo CD reports it there.
+type ClusterDeploymentDTO struct {
+	Order       string `json:"order"`
+	Environment string `json:"environment"`
+	// Preparation is the Preparation the Serving deploys; empty before its
+	// first promotion.
+	Preparation string `json:"preparation,omitempty"`
+	// State is the reason of the target's Ready condition, Healthy for a
+	// cluster the Serving does not list, or Pending before the first
+	// promotion.
+	State   string     `json:"state"`
+	Ready   bool       `json:"ready"`
+	Message string     `json:"message,omitempty"`
+	Since   *time.Time `json:"since,omitempty"`
+	// ApplicationName is the Argo CD Application that deploys there.
+	ApplicationName string `json:"applicationName"`
+}
+
 // EnvironmentRefDTO is the Environment, in the Order's namespace, an Order
 // deploys to.
 type EnvironmentRefDTO struct {
@@ -836,4 +855,59 @@ type EnvironmentDTO struct {
 	// namespace, which comes back when deleted.
 	Ensured   bool       `json:"ensured,omitempty"`
 	CreatedAt *time.Time `json:"createdAt,omitempty"`
+}
+
+// EnvironmentRequest is the body for POST /api/v1/environments, and for PUT
+// /api/v1/environments/{namespace}/{name}, which ignores the namespace and
+// the name: the Environment's spec as the API has it.
+type EnvironmentRequest struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	deliveryv1alpha1.EnvironmentSpec
+}
+
+// ClusterDTO is the data-transfer representation of a Cluster.
+type ClusterDTO struct {
+	Namespace   string `json:"namespace"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	// Connection is InCluster or Kubeconfig.
+	Connection string `json:"connection"`
+	// KubeconfigSecret names the Secret holding the kubeconfig of a cluster
+	// reached with one.
+	KubeconfigSecret  string            `json:"kubeconfigSecret,omitempty"`
+	Labels            map[string]string `json:"labels,omitempty"`
+	Server            string            `json:"server,omitempty"`
+	KubernetesVersion string            `json:"kubernetesVersion,omitempty"`
+	// State is the reason of the Cluster's Ready condition, such as Ready,
+	// Unreachable or ClusterConflict.
+	State   string `json:"state"`
+	Ready   bool   `json:"ready"`
+	Message string `json:"message,omitempty"`
+	// Environments are the Environments of its namespace that select it.
+	Environments []string       `json:"environments,omitempty"`
+	Conditions   []ConditionDTO `json:"conditions,omitempty"`
+	// Ensured reports the Cluster in-cluster Kokumi keeps in its own
+	// namespace, which comes back when deleted.
+	Ensured   bool       `json:"ensured,omitempty"`
+	CreatedAt *time.Time `json:"createdAt,omitempty"`
+}
+
+// ClusterRequest is the body for POST /api/v1/clusters, and for PUT
+// /api/v1/clusters/{namespace}/{name}, which ignores the namespace, the name
+// and the connection. A Kubeconfig cluster's credential is either a
+// self-contained kubeconfig, or the server, its CA and a token; on PUT it is
+// optional and replaces the stored one.
+type ClusterRequest struct {
+	Namespace   string            `json:"namespace"`
+	Name        string            `json:"name"`
+	Description string            `json:"description,omitempty"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	// Connection is InCluster or Kubeconfig; Kubeconfig when empty.
+	Connection string `json:"connection,omitempty"`
+	Kubeconfig string `json:"kubeconfig,omitempty"`
+	Server     string `json:"server,omitempty"`
+	// CAData is the PEM-encoded CA of the server.
+	CAData string `json:"caData,omitempty"`
+	Token  string `json:"token,omitempty"`
 }

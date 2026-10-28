@@ -40,6 +40,10 @@ type apiDeps struct {
 
 	// kitchen returns the Kitchen singleton from the informer cache.
 	kitchen func() (*deliveryv1alpha1.Kitchen, error)
+
+	// installNamespace is Kokumi's own namespace, which holds the Cluster
+	// in-cluster and the Environment local that Kokumi keeps.
+	installNamespace string
 }
 
 // trustSet returns the keys the Kitchen trusts: its published public key and

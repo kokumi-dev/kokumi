@@ -21,6 +21,12 @@ export const capabilities = [
   'repositories:create',
   'repositories:update',
   'repositories:delete',
+  'environments:create',
+  'environments:update',
+  'environments:delete',
+  'clusters:create',
+  'clusters:update',
+  'clusters:delete',
   'preparations:promote',
   'preparations:approve',
 ] as const
@@ -45,6 +51,12 @@ export const deniedReasons: Record<Capability, string> = {
   'repositories:create': 'You are not allowed to create Repositories',
   'repositories:update': 'You are not allowed to edit Repositories',
   'repositories:delete': 'You are not allowed to delete Repositories',
+  'environments:create': 'You are not allowed to create Environments',
+  'environments:update': 'You are not allowed to edit Environments',
+  'environments:delete': 'You are not allowed to delete Environments',
+  'clusters:create': 'You are not allowed to register clusters',
+  'clusters:update': 'You are not allowed to edit clusters',
+  'clusters:delete': 'You are not allowed to delete clusters',
   'preparations:promote': 'You are not allowed to promote Preparations',
   'preparations:approve': 'Approving requires a personal SSO login with approval permission',
 }
@@ -72,6 +84,7 @@ export function mergeCapabilities(
  */
 export const namespacedCapabilities = [
   'registries.credentials:update',
+  'clusters.credentials:update',
 ] as const
 
 export type NamespacedCapability = typeof namespacedCapabilities[number]

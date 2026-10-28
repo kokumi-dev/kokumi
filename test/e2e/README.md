@@ -72,7 +72,7 @@ also exports the logs of the Kind nodes, their kubelet and every container to
 | `images_test.go` | `images`: vendoring. |
 | `scanning_test.go` | `scanning`, `slow`: scanning and the vulnerability check. |
 | `registries_test.go` | `registries`: credentials for a private registry, and who may name a Secret. |
-| `server_test.go` | `server`: the API server acts as the signed-in user. |
+| `server_test.go` | `server`: the API server acts as the signed-in user, also when it registers clusters. |
 | `access_test.go` | `access`: who may read and write the signing key. |
 | `framework/` | What the specs share: namespaces, examples and fixtures, the typed client and matchers, the registry, cosign, Argo CD, the spoke cluster, the API server, diagnostics. |
 | `testdata/` | Test-only fixtures, `${NAME}` replaced by the spec. |

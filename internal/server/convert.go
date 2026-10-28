@@ -11,13 +11,13 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/cluster"
 	"github.com/kokumi-dev/kokumi/internal/resolve"
 	"github.com/kokumi-dev/kokumi/internal/scmlink"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // errorResponse is the JSON body for all 4xx/5xx responses.
@@ -101,13 +101,13 @@ func stateFromConditions(conditions []metav1.Condition) string {
 func orderToDTO(r deliveryv1alpha1.Order, activePreparation string, product *deliveryv1alpha1.Product) OrderDTO {
 	targetNamespace, targetNamespaceSource := effectiveTargetNamespace(&r, product)
 	dto := OrderDTO{
+		EffectiveTargetNamespace: targetNamespace,
+		TargetNamespaceSource:    targetNamespaceSource,
 		Name:                     r.Name,
 		Namespace:                r.Namespace,
 		Labels:                   r.Labels,
 		EnvironmentRef:           EnvironmentRefDTO{Name: r.Spec.EnvironmentRef.Name},
 		TargetNamespace:          r.Spec.TargetNamespace,
-		EffectiveTargetNamespace: targetNamespace,
-		TargetNamespaceSource:    targetNamespaceSource,
 		ProductRef:               ProductRefDTO{Name: r.Spec.ProductRef.Name},
 		Destination: func() OCIDestinationDTO {
 			if d := destinationToDTO(r.Spec.Destination); d != nil {
@@ -997,7 +997,7 @@ func artifactFilesToDTO(files []artifact.File) []ArtifactFileDTO {
 	return out
 }
 
-// --- Environment conversions ---
+// --- Environment and cluster conversions ---
 
 // environmentToDTO converts an Environment. installNamespace is Kokumi's
 // own namespace, where it keeps the Environment local.
@@ -1026,6 +1026,69 @@ func environmentsToDTO(environments []deliveryv1alpha1.Environment, installNames
 		out = append(out, environmentToDTO(env, installNamespace))
 	}
 	slices.SortFunc(out, func(a, b EnvironmentDTO) int {
+		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
+	})
+	return out
+}
+
+// clusterToDTO converts a Cluster, with the Environments of its namespace
+// that select it. installNamespace is Kokumi's own namespace, where it keeps
+// the Cluster in-cluster.
+func clusterToDTO(c deliveryv1alpha1.Cluster, environments []string, installNamespace string) ClusterDTO {
+	dto := ClusterDTO{
+		Namespace:         c.Namespace,
+		Name:              c.Name,
+		Description:       c.Spec.Description,
+		Connection:        string(c.Spec.Connection),
+		Labels:            c.Labels,
+		Server:            c.Status.Server,
+		KubernetesVersion: c.Status.KubernetesVersion,
+		State:             stateUnknown,
+		Environments:      environments,
+		Conditions:        conditionsToDTO(c.Status.Conditions),
+		Ensured:           c.Namespace == installNamespace && c.Name == cluster.InCluster,
+	}
+	if k := c.Spec.Kubeconfig; k != nil {
+		dto.KubeconfigSecret = k.SecretRef.Name
+	}
+	if ready := apimeta.FindStatusCondition(c.Status.Conditions, deliveryv1alpha1.ConditionTypeReady); ready != nil {
+		dto.State, dto.Message = ready.Reason, ready.Message
+		dto.Ready = ready.Status == metav1.ConditionTrue
+	}
+	if !c.CreationTimestamp.IsZero() {
+		dto.CreatedAt = new(c.CreationTimestamp.UTC())
+	}
+	return dto
+}
+
+// clustersToDTO converts Clusters, sorted by namespace and name, each with
+// the Environments of its namespace that select it. Each clusterSelector is
+// parsed once; one that does not parse selects nothing.
+func clustersToDTO(clusters []deliveryv1alpha1.Cluster, environments []deliveryv1alpha1.Environment, installNamespace string) []ClusterDTO {
+	type selection struct {
+		name      string
+		selection resolve.ClusterSelection
+	}
+	byNamespace := map[string][]selection{}
+	for i := range environments {
+		env := &environments[i]
+		if s, err := resolve.ClusterSelectionOf(env); err == nil {
+			byNamespace[env.Namespace] = append(byNamespace[env.Namespace], selection{name: env.Name, selection: s})
+		}
+	}
+	out := make([]ClusterDTO, 0, len(clusters))
+	for i := range clusters {
+		c := &clusters[i]
+		var selecting []string
+		for _, s := range byNamespace[c.Namespace] {
+			if s.selection.Selects(c) {
+				selecting = append(selecting, s.name)
+			}
+		}
+		slices.Sort(selecting)
+		out = append(out, clusterToDTO(*c, selecting, installNamespace))
+	}
+	slices.SortFunc(out, func(a, b ClusterDTO) int {
 		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
 	})
 	return out

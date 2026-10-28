@@ -43,6 +43,7 @@ const (
 	eventRegistries   = "registries"
 	eventRepositories = "repositories"
 	eventEnvironments = "environments"
+	eventClusters     = "clusters"
 	// eventHeartbeat carries no data; it only shows the stream is alive.
 	eventHeartbeat = "heartbeat"
 )
@@ -108,10 +109,11 @@ func startK8sWatcher(
 	}
 
 	deps := &apiDeps{
-		registries:     registry.NewClients(artifact.DefaultRegistryHost),
-		store:          artifact.NewStore(oci.NewClient(oci.Options{}), afero.NewOsFs(), "/tmp/kokumi-pull-cache"),
-		logger:         logger,
-		approvalWriter: writer,
+		registries:       registry.NewClients(artifact.DefaultRegistryHost),
+		store:            artifact.NewStore(oci.NewClient(oci.Options{}), afero.NewOsFs(), "/tmp/kokumi-pull-cache"),
+		logger:           logger,
+		approvalWriter:   writer,
+		installNamespace: installNamespace,
 	}
 	deps.pipeline = artifact.NewPipeline(deps.store)
 
@@ -145,6 +147,7 @@ func startK8sWatcher(
 	registryInformer := informers.registry
 	repositoryInformer := informers.repository
 	environmentInformer := informers.environment
+	clusterInformer := informers.cluster
 	kitchenInformer := informers.kitchen
 	secretInformer := informers.secret
 	saInformer := informers.sa
@@ -208,6 +211,12 @@ func startK8sWatcher(
 			return
 		}
 
+		clusterList := &deliveryv1alpha1.ClusterList{}
+		if err := k8sCache.List(ctx, clusterList); err != nil {
+			logger.Error(err, "Failed to list Clusters from cache")
+			return
+		}
+
 		// Lists are published before the lists that refer to them: Orders name
 		// their Product and active Preparation; Repositories, Products and
 		// Orders name Registries. A client that applies events in arrival
@@ -219,6 +228,7 @@ func startK8sWatcher(
 		}{
 			{eventRegistries, registriesToDTO(registryList.Items)},
 			{eventRepositories, repositoriesToDTO(repositoryList.Items)},
+			{eventClusters, clustersToDTO(clusterList.Items, environmentList.Items, installNamespace)},
 			{eventEnvironments, environmentsToDTO(environmentList.Items, installNamespace)},
 			{eventProducts, productsToDTO(productList.Items)},
 			{eventPreparations, enrichPreparations(prepList.Items, servingList.Items)},
@@ -264,7 +274,7 @@ func startK8sWatcher(
 
 	if err := registerWatchers(
 		orderInformer, prepInformer, servingInformer, productInformer, registryInformer, repositoryInformer,
-		environmentInformer, kitchenInformer, secretInformer, saInformer,
+		environmentInformer, clusterInformer, kitchenInformer, secretInformer, saInformer,
 		scheduleRefresh, kitchenHandler, secretHandler,
 	); err != nil {
 		return nil, err
@@ -349,7 +359,7 @@ func newAuthSecretHandler(mgr *authManager, ctx context.Context, isAuthSecret fu
 // registerWatchers wires the SSE-refresh handler onto resource informers and the
 // auth handlers onto Kitchen/Secret informers (split out to keep startK8sWatcher small).
 func registerWatchers(
-	order, prep, serving, product, registryInformer, repositoryInformer, environment, kitchen, secret, sa cache.Informer,
+	order, prep, serving, product, registryInformer, repositoryInformer, environment, clusterInformer, kitchen, secret, sa cache.Informer,
 	scheduleRefresh func(),
 	kitchenHandler, secretHandler toolscache.ResourceEventHandlerFuncs,
 ) error {
@@ -373,6 +383,7 @@ func registerWatchers(
 		{registryInformer, sseHandler, "Registry"},
 		{repositoryInformer, sseHandler, "Repository"},
 		{environment, sseHandler, "Environment"},
+		{clusterInformer, sseHandler, "Cluster"},
 		{kitchen, kitchenHandler, "Kitchen"},
 		{secret, secretHandler, "Secret"},
 		{sa, noopHandler, "ServiceAccount"},
@@ -393,6 +404,7 @@ type informers struct {
 	registry    cache.Informer
 	repository  cache.Informer
 	environment cache.Informer
+	cluster     cache.Informer
 	kitchen     cache.Informer
 	secret      cache.Informer
 	sa          cache.Informer
@@ -422,6 +434,9 @@ func getInformers(ctx context.Context, c cache.Cache) (informers, error) {
 	}
 	if out.environment, err = c.GetInformer(ctx, &deliveryv1alpha1.Environment{}); err != nil {
 		return out, fmt.Errorf("getting Environment informer: %w", err)
+	}
+	if out.cluster, err = c.GetInformer(ctx, &deliveryv1alpha1.Cluster{}); err != nil {
+		return out, fmt.Errorf("getting Cluster informer: %w", err)
 	}
 	if out.kitchen, err = c.GetInformer(ctx, &deliveryv1alpha1.Kitchen{}); err != nil {
 		return out, fmt.Errorf("getting Kitchen informer: %w", err)

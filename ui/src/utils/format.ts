@@ -68,3 +68,14 @@ export function formatDuration(seconds: number): string {
   if (seconds >= 3600) return plural(Math.round((seconds / 3600) * 10) / 10, 'hour')
   return plural(Math.round(seconds / 60), 'minute')
 }
+
+/** A soak in minutes as an editor shows it; empty for none. */
+export function soakText(seconds?: number): string {
+  return seconds ? String(Math.round((seconds / 60) * 100) / 100) : ''
+}
+
+/** The soak typed in minutes, in whole seconds; 0 when it is empty or not a positive number. */
+export function soakSeconds(text: string): number {
+  const minutes = Number(text)
+  return text.trim() && Number.isFinite(minutes) && minutes > 0 ? Math.round(minutes * 60) : 0
+}

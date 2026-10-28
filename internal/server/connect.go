@@ -19,7 +19,6 @@ import (
 const (
 	registriesResource   = "registries"
 	repositoriesResource = "repositories"
-	environmentsResource = "environments"
 )
 
 // registryCredentialsRole is the ClusterRole that grants reading the Secrets

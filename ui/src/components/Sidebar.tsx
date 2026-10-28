@@ -91,6 +91,27 @@ function IconRepository() {
   )
 }
 
+function IconEnvironment() {
+  return (
+    <svg className={styles.navIcon} viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 1.5 16.5 5.5 9 9.5 1.5 5.5 9 1.5Z" />
+      <path d="M1.5 9 9 13l7.5-4" />
+      <path d="M1.5 12.5 9 16.5l7.5-4" />
+    </svg>
+  )
+}
+
+/** A server rack: reserved for the clusters. */
+function IconCluster() {
+  return (
+    <svg className={styles.navIcon} viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="1.5" y="2" width="15" height="5.5" rx="1.2" />
+      <rect x="1.5" y="10.5" width="15" height="5.5" rx="1.2" />
+      <path d="M4.5 4.75h.01M4.5 13.25h.01M7.5 4.75h.01M7.5 13.25h.01" />
+    </svg>
+  )
+}
+
 function IconProduct() {
   return (
     <svg className={styles.navIcon} viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
@@ -114,6 +135,13 @@ const sections: NavSection[] = [
       { to: '/orders',       label: 'Orders',       icon: <IconOrder /> },
       { to: '/preparations', label: 'Preparations', icon: <IconPreparation /> },
       { to: '/servings',     label: 'Servings',     icon: <IconServing /> },
+    ],
+  },
+  {
+    label: 'Deployment',
+    items: [
+      { to: '/environments', label: 'Environments', icon: <IconEnvironment /> },
+      { to: '/clusters',     label: 'Clusters',     icon: <IconCluster /> },
     ],
   },
   {

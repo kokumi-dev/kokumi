@@ -35,5 +35,15 @@ export const paths = {
   newRegistry: () => '/registries/new',
   registry: (ns: string, name: string, tab?: 'edit') =>
     `/registries/${seg(ns)}/${seg(name)}${tab ? `/${tab}` : ''}`,
+  environments: () => '/environments',
+  /** Optionally preselects the namespace of the new Environment. */
+  newEnvironment: (namespace?: string) => (namespace ? `/environments/new?namespace=${seg(namespace)}` : '/environments/new'),
+  environment: (ns: string, name: string, tab?: 'clusters' | 'orders' | 'edit') =>
+    `/environments/${seg(ns)}/${seg(name)}${tab ? `/${tab}` : ''}`,
+  clusters: () => '/clusters',
+  /** Optionally preselects the namespace of the new Cluster. */
+  newCluster: (namespace?: string) => (namespace ? `/clusters/new?namespace=${seg(namespace)}` : '/clusters/new'),
+  cluster: (ns: string, name: string, tab?: 'deployments' | 'edit') =>
+    `/clusters/${seg(ns)}/${seg(name)}${tab ? `/${tab}` : ''}`,
   settings: (tab: SettingsTab = 'general') => `/settings/${tab}`,
 }

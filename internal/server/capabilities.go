@@ -38,12 +38,21 @@ const (
 	CapRepositoriesUpdate Capability = "repositories:update"
 	CapRepositoriesDelete Capability = "repositories:delete"
 
+	CapEnvironmentsCreate Capability = "environments:create"
+	CapEnvironmentsUpdate Capability = "environments:update"
+	CapEnvironmentsDelete Capability = "environments:delete"
+
+	CapClustersCreate Capability = "clusters:create"
+	CapClustersUpdate Capability = "clusters:update"
+	CapClustersDelete Capability = "clusters:delete"
+
 	CapPreparationsPromote Capability = "preparations:promote"
 	CapPreparationsApprove Capability = "preparations:approve"
 
-	// CapRegistriesCredentialsUpdate is namespaced; see
-	// namespacedCapabilityCatalog.
+	// CapRegistriesCredentialsUpdate and CapClustersCredentialsUpdate are
+	// namespaced; see namespacedCapabilityCatalog.
 	CapRegistriesCredentialsUpdate Capability = "registries.credentials:update"
+	CapClustersCredentialsUpdate   Capability = "clusters.credentials:update"
 )
 
 // accessCheck is one SelfSubjectAccessReview on a resource the server
@@ -112,6 +121,17 @@ func capabilityCatalog(installNamespace string) []capabilityRule {
 		{capability: CapRepositoriesUpdate, checks: allNamespaces(repositoriesResource, "patch")},
 		{capability: CapRepositoriesDelete, checks: allNamespaces(repositoriesResource, "delete")},
 
+		{capability: CapEnvironmentsCreate, checks: allNamespaces(environmentsResource, "create")},
+		{capability: CapEnvironmentsUpdate, checks: allNamespaces(environmentsResource, "update")},
+		{capability: CapEnvironmentsDelete, checks: allNamespaces(environmentsResource, "delete")},
+
+		// Cluster edits are applied as a patch. Storing a kubeconfig also
+		// needs access to Secrets in the Cluster's namespace, which RBAC
+		// grants per namespace.
+		{capability: CapClustersCreate, checks: allNamespaces(clustersResource, "create")},
+		{capability: CapClustersUpdate, checks: allNamespaces(clustersResource, "patch")},
+		{capability: CapClustersDelete, checks: allNamespaces(clustersResource, "delete")},
+
 		// Promote updates the Order's Serving, or creates it on first promotion.
 		{capability: CapPreparationsPromote, checks: allNamespaces("servings", "create", "update")},
 		// Votes are recorded against the approver's OIDC identity.
@@ -127,16 +147,22 @@ func capabilityCatalog(installNamespace string) []capabilityRule {
 // to their RBAC checks in namespace. The built-in roles grant none of them
 // cluster-wide.
 func namespacedCapabilityCatalog(namespace string) []capabilityRule {
+	secrets := []accessCheck{
+		{verb: "get", resource: secretsResource, namespace: namespace},
+		{verb: "create", resource: secretsResource, namespace: namespace},
+		{verb: "patch", resource: secretsResource, namespace: namespace},
+	}
 	return []capabilityRule{
 		// Registry credentials are Secrets in the Registry's namespace. The
 		// UI writes them, and reads through Registries, with the user's
 		// identity. Platform admins grant this per namespace by binding the
 		// kokumi-registry-credentials ClusterRole.
-		{capability: CapRegistriesCredentialsUpdate, checks: []accessCheck{
-			{verb: "get", resource: secretsResource, namespace: namespace},
-			{verb: "create", resource: secretsResource, namespace: namespace},
-			{verb: "patch", resource: secretsResource, namespace: namespace},
-		}},
+		{capability: CapRegistriesCredentialsUpdate, checks: secrets},
+		// Cluster kubeconfigs are Secrets in the Cluster's namespace, written
+		// with the user's identity; the cluster-secret-access policy also
+		// requires get. Platform admins grant this per namespace by binding
+		// the kokumi-cluster-credentials ClusterRole, never in Kokumi's own.
+		{capability: CapClustersCredentialsUpdate, checks: secrets},
 	}
 }
 

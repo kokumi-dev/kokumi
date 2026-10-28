@@ -107,7 +107,7 @@ func requireFiles(t *testing.T, rec *httptest.ResponseRecorder, paths ...string)
 func TestHandlePreview(t *testing.T) {
 	const source = "oci://registry.example.com/charts/web"
 	product := &deliveryv1alpha1.Product{
-		Name:      "web",
+		Name:      scanProduct,
 		Namespace: nsA,
 		Status: deliveryv1alpha1.ProductStatus{
 			Source: &deliveryv1alpha1.ProductSourceStatus{URL: source, Version: testSourceVersion},
@@ -183,7 +183,7 @@ func TestPreviewRequest(t *testing.T) {
 
 func TestLockedImagesAs(t *testing.T) {
 	const digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	order := newOrder("web", nsA)
+	order := newOrder(scanProduct, nsA)
 	order.Status.LatestPreparationName = webPreparation
 	prep := &deliveryv1alpha1.Preparation{
 		Name:      webPreparation,
@@ -200,7 +200,7 @@ func TestLockedImagesAs(t *testing.T) {
 
 	require.Equal(t, []images.Image{
 		{Ref: nginxRef, Name: nginxName, Digest: digest, Vendored: "registry/shop/web/images/docker.io/library/nginx:1.27@" + digest},
-	}, lockedImagesAs(ctx, deps, uc, pin, nsA, "web"))
-	require.Nil(t, lockedImagesAs(ctx, deps, uc, deliveryv1alpha1.ProductImages{}, nsA, "web"), "Record locks nothing")
+	}, lockedImagesAs(ctx, deps, uc, pin, nsA, scanProduct))
+	require.Nil(t, lockedImagesAs(ctx, deps, uc, deliveryv1alpha1.ProductImages{}, nsA, scanProduct), "Record locks nothing")
 	require.Nil(t, lockedImagesAs(ctx, deps, uc, pin, nsA, "new"), "a new Order locks nothing")
 }

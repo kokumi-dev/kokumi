@@ -12,7 +12,7 @@ import (
 
 // streamedResources are the resources the event stream discloses lists of.
 var streamedResources = []string{
-	eventOrders, eventPreparations, eventServings, eventProducts, registriesResource, repositoriesResource, environmentsResource,
+	eventOrders, eventPreparations, eventServings, eventProducts, registriesResource, repositoriesResource, environmentsResource, clustersResource,
 }
 
 // countedResources are the resources the counts event discloses the number
@@ -102,6 +102,7 @@ func handleEventsStream(h *hub, deps *apiDeps, heartbeat time.Duration) http.Han
 			eventRegistries:   registriesResource,
 			eventRepositories: repositoriesResource,
 			eventEnvironments: environmentsResource,
+			eventClusters:     clustersResource,
 		}
 
 		sub := h.subscribe()
