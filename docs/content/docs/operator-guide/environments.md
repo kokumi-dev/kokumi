@@ -146,3 +146,9 @@ the label, and an AppProject that admits them:
 {{< /tabs >}}
 
 {{< apply-example name="local" >}}
+
+## In the UI
+
+**Environments** lists the Environments of every namespace you may read.
+Each has the tabs Overview, Clusters and Orders. Admins create and edit them;
+the cluster selector previews which Clusters of the namespace it selects.

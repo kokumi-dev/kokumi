@@ -1,0 +1,33 @@
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-main);
+}
+
+/* The title of the labels and of the expressions, quieter than a field label. */
+.title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-muted-light);
+}
+
+.operator {
+  flex: 0 0 130px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-card);
+  font-family: inherit;
+  font-size: 0.78rem;
+  color: var(--color-text-on-light);
+  outline: none;
+  cursor: pointer;
+}
+
+.operator:focus {
+  border-color: var(--color-accent);
+}

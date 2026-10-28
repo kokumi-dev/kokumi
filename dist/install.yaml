@@ -5446,6 +5446,7 @@ rules:
   - repositories
   - approvals
   - environments
+  - clusters
   verbs:
   - get
   - list

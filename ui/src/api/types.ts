@@ -421,6 +421,21 @@ export interface DeploymentClusters {
   held: number
 }
 
+/** What one Order deploys to a cluster, as GET /clusters/{namespace}/{name}/deployments reports it. */
+export interface ClusterDeployment {
+  order: string
+  environment: string
+  /** The Preparation its Serving deploys; absent before its first promotion. */
+  preparation?: string
+  /** Healthy, the reason it is not, Pending before the first promotion, or Unknown. */
+  state: string
+  ready: boolean
+  message?: string
+  since?: string
+  /** The Argo CD Application that deploys there; empty before the first promotion. */
+  applicationName: string
+}
+
 /** A cluster a Serving deploys to, with what Argo CD reports on its deployment there. */
 export interface DeploymentTarget {
   /** The name of the Cluster, in the Serving's namespace. */
@@ -784,6 +799,8 @@ export interface LabelSelectorRequirement {
 
 export type LabelSelectorOperator = 'In' | 'NotIn' | 'Exists' | 'DoesNotExist'
 
+export const labelSelectorOperators: readonly LabelSelectorOperator[] = ['In', 'NotIn', 'Exists', 'DoesNotExist']
+
 /** A Kubernetes label selector; {} selects everything. */
 export interface LabelSelector {
   matchLabels?: Record<string, string>
@@ -839,6 +856,34 @@ export interface Environment extends EnvironmentSpec {
   createdAt?: string
 }
 
+/** A cluster Orders deploy to, in the namespace of the Environments that select it. */
+export interface Cluster {
+  namespace: string
+  name: string
+  /** What the cluster is, such as where it runs and who runs it. */
+  description?: string
+  /** How Kokumi reaches it: as the cluster it runs in, or with a kubeconfig in a Secret. */
+  connection: 'InCluster' | 'Kubeconfig'
+  /** The Secret of its namespace that holds the kubeconfig of a Kubeconfig cluster. */
+  kubeconfigSecret?: string
+  labels?: Record<string, string>
+  server?: string
+  kubernetesVersion?: string
+  /**
+   * The reason of its Ready condition: Ready, or why Orders cannot deploy to
+   * it, such as Unreachable, Unauthorized or ClusterConflict; Unknown while
+   * it is not checked yet.
+   */
+  state: string
+  ready: boolean
+  message?: string
+  /** The Environments of its namespace that select it. */
+  environments?: string[]
+  conditions?: Condition[]
+  /** The Cluster in-cluster Kokumi keeps in its own namespace: it comes back when deleted. */
+  ensured?: boolean
+  createdAt?: string
+}
 
 // ── Form data types ───────────────────────────────────────────────────────────
 
@@ -1071,4 +1116,81 @@ export const repositoryToFormData = (r: Repository): RepositoryFormData => ({
   url: r.url,
   registryRef: r.registryRef ?? '',
   description: r.description ?? '',
+})
+
+/**
+ * How a Cluster form connects to the cluster: as the cluster Kokumi runs in,
+ * without a credential, or with a kubeconfig in a Secret: the stored one
+ * kept, a kubeconfig, or one Kokumi builds from a server and a token.
+ */
+export type ClusterCredentialMode = 'inCluster' | 'keep' | 'kubeconfig' | 'token'
+
+export interface ClusterFormData {
+  namespace: string
+  name: string
+  description: string
+  labels: Record<string, string>
+  credentialMode: ClusterCredentialMode
+  /** A self-contained kubeconfig: the server, its CA and the credential inline. */
+  kubeconfig: string
+  server: string
+  /** The PEM-encoded CA of the server; empty trusts the system roots. */
+  caData: string
+  token: string
+}
+
+export const emptyClusterForm = (namespace: string): ClusterFormData => ({
+  namespace,
+  name: '',
+  description: '',
+  labels: {},
+  credentialMode: 'kubeconfig',
+  kubeconfig: '',
+  server: '',
+  caData: '',
+  token: '',
+})
+
+export const clusterToFormData = (c: Cluster): ClusterFormData => ({
+  ...emptyClusterForm(c.namespace),
+  name: c.name,
+  description: c.description ?? '',
+  labels: { ...c.labels },
+  credentialMode: c.connection === 'InCluster' ? 'inCluster' : 'keep',
+})
+
+/** A deep copy of a label selector. */
+const copyLabelSelector = (s: LabelSelector): LabelSelector => ({
+  ...(s.matchLabels ? { matchLabels: { ...s.matchLabels } } : {}),
+  ...(s.matchExpressions
+    ? { matchExpressions: s.matchExpressions.map((e) => ({ ...e, ...(e.values ? { values: [...e.values] } : {}) })) }
+    : {}),
+})
+
+export interface EnvironmentFormData {
+  namespace: string
+  name: string
+  description: string
+  clusterSelector: LabelSelector
+  /** The Argo CD AppProject; the form sends default when it is left empty. */
+  project: string
+  requireAfter: RequiredEnvironment[]
+}
+
+export const emptyEnvironmentForm = (namespace = 'kokumi'): EnvironmentFormData => ({
+  namespace,
+  name: '',
+  description: '',
+  clusterSelector: {},
+  project: '',
+  requireAfter: [],
+})
+
+export const environmentToFormData = (e: Environment): EnvironmentFormData => ({
+  namespace: e.namespace,
+  name: e.name,
+  description: e.description ?? '',
+  clusterSelector: copyLabelSelector(e.clusterSelector),
+  project: e.deployer.argoCD?.project ?? '',
+  requireAfter: (e.promotion?.requireAfter ?? []).map((r) => ({ ...r })),
 })

@@ -1,8 +1,11 @@
 import { useEffect, useId } from 'react'
+import { Link } from 'react-router'
 import type { Environment } from '../../api/types'
 import { useEnvironments } from '../../hooks/useEnvironments'
 import { formatDuration } from '../../utils/format'
+import { paths } from '../../routes/paths'
 import styles from '../shared/Form.module.css'
+import layout from '../layout/layout.module.css'
 
 interface EnvironmentPickerProps {
   namespace: string
@@ -33,7 +36,9 @@ export default function EnvironmentPicker({ namespace, value, onChange, onPresel
     if (!locked && !value && only) onPreselect(only)
   }, [locked, value, only, onPreselect])
 
-  const named = (name: string) => <code>{name}</code>
+  const link = (name: string) => (
+    <Link className={layout.inlineLink} to={paths.environment(namespace, name)}>{name}</Link>
+  )
 
   return (
     <div className={styles.fieldGroup}>
@@ -51,19 +56,19 @@ export default function EnvironmentPicker({ namespace, value, onChange, onPresel
       )}
       {locked ? (
         <span className={styles.hint}>
-          Deploys to the Clusters of {named(value)}. The Environment of an Order cannot change: create a new Order to
+          Deploys to the Clusters of {link(value)}. The Environment of an Order cannot change: create a new Order to
           deploy to another one.
         </span>
       ) : environments?.length === 0 ? (
         <span className={styles.hint}>
-          No Environment in namespace <code>{namespace || '—'}</code> yet: an admin creates one, or applies the example{' '}
-          <code>local</code> to the namespace.
+          No Environment in namespace <code>{namespace || '—'}</code> yet.{' '}
+          <Link className={layout.inlineLink} to={paths.newEnvironment(namespace || undefined)}>Create an Environment</Link>
         </span>
       ) : value && environments && !environment ? (
         <span className={styles.fieldError}>Environment {value} is not in namespace {namespace}: the Order would not deploy.</span>
       ) : (
         <span className={styles.hint}>
-          {value ? <>Deploys to the Clusters of {named(value)}, one Argo CD Application each.</> : 'The Environment of its namespace the Order deploys to.'}{' '}
+          {value ? <>Deploys to the Clusters of {link(value)}, one Argo CD Application each.</> : 'The Environment of its namespace the Order deploys to.'}{' '}
           It is picked once, when the Order is created.
         </span>
       )}

@@ -81,6 +81,13 @@ select.input {
   cursor: not-allowed;
 }
 
+/* A rule between the groups of fields of a form. */
+.divider {
+  border: none;
+  border-top: 1px solid var(--color-border);
+  margin: 2px 0;
+}
+
 /* Muted help text below a field. */
 .hint {
   font-size: 0.75rem;

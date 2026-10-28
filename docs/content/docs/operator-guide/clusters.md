@@ -107,6 +107,13 @@ the credential to every Order of its Environments. An update that keeps the
 Secret and its key needs no access to the Secret; changing either does, since
 another key could hold another credential.
 
+In the UI, **Clusters → New Cluster** does the same in one form, from a
+kubeconfig or from the server, its CA and a token, or registers the cluster
+Kokumi runs in. As the signed-in user, it creates the Cluster first and then
+the Secret `<name>-kubeconfig`, owned by the Cluster, so that the Secret is
+deleted with it. A Secret of that name the UI did not create is refused before
+anything is created.
+
 ### Secrets of Clusters
 
 The built-in admin role may create Clusters in every namespace, but holds no
@@ -158,7 +165,8 @@ changes only when what the check finds changes.
 | `RegistrationFailed` | Kokumi could not write its registration in Argo CD's namespace. |
 
 `status.server` and `status.kubernetesVersion` say where the cluster is and
-what it runs.
+what it runs. The UI shows the same state on the cluster, in the Environments
+that select it, and on every Serving that deploys there.
 
 ## The cluster Kokumi runs in
 

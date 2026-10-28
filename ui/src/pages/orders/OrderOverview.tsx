@@ -82,7 +82,11 @@ export default function OrderOverview() {
             },
             {
               label: 'Environment',
-              value: order.environmentRef.name,
+              value: (
+                <Link className={layout.inlineLink} to={paths.environment(order.namespace, order.environmentRef.name)}>
+                  {order.environmentRef.name}
+                </Link>
+              ),
             },
             {
               label: 'Target namespace',

@@ -72,7 +72,9 @@ export default function OrdersList() {
                 width: '14%',
                 truncate: true,
                 title: (o) => o.environmentRef.name,
-                cell: (o) => o.environmentRef.name,
+                cell: (o) => (
+                  <Link className={layout.refLink} to={paths.environment(o.namespace, o.environmentRef.name)}>{o.environmentRef.name}</Link>
+                ),
               },
               {
                 header: 'Active',

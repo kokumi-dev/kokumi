@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -128,13 +127,11 @@ func handleCreateRegistry(deps *apiDeps) http.HandlerFunc {
 		}
 		setRegistryRefs(reg, req.SecretRef, req.CertSecretRef)
 
-		credentials := req.Username != "" && req.Password != ""
-		if credentials {
+		var secret *corev1.Secret
+		if req.Username != "" && req.Password != "" {
 			reg.Spec.SecretRef = &corev1.LocalObjectReference{Name: req.Name + credentialsSecretSuffix}
-			// Refuse before creating anything when the Secret belongs to
-			// someone else.
-			if err := checkManagedSecret(r.Context(), uc, ns, reg.Spec.SecretRef.Name); err != nil {
-				respondSecretError(w, err)
+			if secret, err = credentialsSecret(reg, req.Username, req.Password); err != nil {
+				respondError(w, http.StatusBadRequest, err.Error())
 				return
 			}
 		}
@@ -143,6 +140,14 @@ func handleCreateRegistry(deps *apiDeps) http.HandlerFunc {
 		if err != nil {
 			respondForbiddenOrError(w, err, "failed to create registry")
 			return
+		}
+		// The Registry comes first: the Secret of an existing Registry of
+		// that name is never written, and the Secret is owned by it.
+		if secret != nil {
+			if err := checkCredentialSecret(r.Context(), uc, ns, secret.Name); err != nil {
+				respondSecretError(w, err)
+				return
+			}
 		}
 		if err := writer.Create(r.Context(), reg); err != nil {
 			if apierrors.IsAlreadyExists(err) {
@@ -153,9 +158,9 @@ func handleCreateRegistry(deps *apiDeps) http.HandlerFunc {
 			respondForbiddenOrError(w, err, "failed to create registry")
 			return
 		}
-
-		if credentials {
-			if err := upsertCredentialsSecret(r.Context(), uc, reg, req.Username, req.Password); err != nil {
+		if secret != nil {
+			secret.OwnerReferences = []metav1.OwnerReference{registryOwnerReference(reg)}
+			if err := writeCredentialSecret(r.Context(), uc, secret); err != nil {
 				deps.logger.Error(err, "Failed to store Registry credentials", "name", req.Name)
 				respondSecretError(w, err)
 				return
@@ -203,7 +208,12 @@ func handleUpdateRegistry(deps *apiDeps) http.HandlerFunc {
 		credentials := req.Username != "" && req.Password != ""
 		if credentials {
 			reg.Spec.SecretRef = &corev1.LocalObjectReference{Name: reg.Name + credentialsSecretSuffix}
-			if err := upsertCredentialsSecret(r.Context(), uc, reg, req.Username, req.Password); err != nil {
+			secret, err := credentialsSecret(reg, req.Username, req.Password)
+			if err == nil {
+				secret.OwnerReferences = []metav1.OwnerReference{registryOwnerReference(reg)}
+				err = writeCredentialSecret(r.Context(), uc, secret)
+			}
+			if err != nil {
 				deps.logger.Error(err, "Failed to store Registry credentials", "name", reg.Name)
 				respondSecretError(w, err)
 				return
@@ -297,53 +307,19 @@ func registrySecretNames(reg *deliveryv1alpha1.Registry) []string {
 	return names
 }
 
-// checkManagedSecret fails with errSecretNotManaged when the named Secret
-// exists and the UI did not create it.
-func checkManagedSecret(ctx context.Context, uc *userClient, ns, name string) error {
-	secret := &corev1.Secret{}
-	if err := uc.get(ctx, types.NamespacedName{Namespace: ns, Name: name}, secret); err != nil {
-		return client.IgnoreNotFound(err)
-	}
-	if secret.Labels[labelManagedBy] != managedByKokumi {
-		return fmt.Errorf("%w: Secret %q exists; name it in secretRef instead, or delete it", errSecretNotManaged, name)
-	}
-	return nil
-}
-
-// upsertCredentialsSecret stores username and password for the host of reg
-// in the Secret reg.Spec.SecretRef names, owned by reg. It creates the
-// Secret, or updates it when the UI created it; any other Secret of that
-// name is left alone.
-func upsertCredentialsSecret(ctx context.Context, uc *userClient, reg *deliveryv1alpha1.Registry, username, password string) error {
+// credentialsSecret returns the Secret, named by reg.Spec.SecretRef, that
+// holds username and password for the host of reg.
+func credentialsSecret(reg *deliveryv1alpha1.Registry, username, password string) (*corev1.Secret, error) {
 	data, err := dockerConfigJSON(reg.Spec.URL, username, password)
 	if err != nil {
-		return err
+		return nil, err
 	}
-
-	name := reg.Spec.SecretRef.Name
-	secret := &corev1.Secret{}
-	err = uc.get(ctx, types.NamespacedName{Namespace: reg.Namespace, Name: name}, secret)
-	switch {
-	case apierrors.IsNotFound(err):
-		secret = &corev1.Secret{
-			Name:            name,
-			Namespace:       reg.Namespace,
-			Labels:          map[string]string{labelManagedBy: managedByKokumi},
-			OwnerReferences: []metav1.OwnerReference{registryOwnerReference(reg)},
-			Type:            corev1.SecretTypeDockerConfigJson,
-			Data:            map[string][]byte{corev1.DockerConfigJsonKey: data},
-		}
-		return uc.create(ctx, secret, secretsResource)
-	case err != nil:
-		return err
-	case secret.Labels[labelManagedBy] != managedByKokumi:
-		return fmt.Errorf("%w: Secret %q exists; name it in secretRef instead, or delete it", errSecretNotManaged, name)
-	}
-
-	patch := client.MergeFrom(secret.DeepCopy())
-	secret.Type = corev1.SecretTypeDockerConfigJson
-	secret.Data = map[string][]byte{corev1.DockerConfigJsonKey: data}
-	return uc.patch(ctx, secret, patch, secretsResource)
+	return &corev1.Secret{
+		Name:      reg.Spec.SecretRef.Name,
+		Namespace: reg.Namespace,
+		Type:      corev1.SecretTypeDockerConfigJson,
+		Data:      map[string][]byte{corev1.DockerConfigJsonKey: data},
+	}, nil
 }
 
 // registryOwnerReference makes reg the owner of its credential Secret.
@@ -366,7 +342,7 @@ func respondSecretError(w http.ResponseWriter, err error) {
 		respondError(w, http.StatusConflict, err.Error())
 		return
 	}
-	respondForbiddenOrError(w, err, "failed to store the registry credentials")
+	respondForbiddenOrError(w, err, "failed to store the credential Secret")
 }
 
 // dockerConfigJSON returns a .dockerconfigjson payload with username and

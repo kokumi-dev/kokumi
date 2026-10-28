@@ -41,6 +41,17 @@ import RepositoryEditor from '../pages/repositories/RepositoryEditor'
 import RegistriesList from '../pages/registries/RegistriesList'
 import RegistryDetail from '../pages/registries/RegistryDetail'
 import RegistryEditor from '../pages/registries/RegistryEditor'
+import EnvironmentsList from '../pages/environments/EnvironmentsList'
+import EnvironmentLayout from '../pages/environments/EnvironmentLayout'
+import EnvironmentOverview from '../pages/environments/EnvironmentOverview'
+import EnvironmentClusters from '../pages/environments/EnvironmentClusters'
+import EnvironmentOrders from '../pages/environments/EnvironmentOrders'
+import EnvironmentEditor from '../pages/environments/EnvironmentEditor'
+import ClustersList from '../pages/clusters/ClustersList'
+import ClusterLayout from '../pages/clusters/ClusterLayout'
+import ClusterOverview from '../pages/clusters/ClusterOverview'
+import ClusterDeployments from '../pages/clusters/ClusterDeployments'
+import ClusterEditor from '../pages/clusters/ClusterEditor'
 
 export const router = createBrowserRouter([
   {
@@ -120,6 +131,31 @@ export const router = createBrowserRouter([
       { path: 'registries/new', element: <RequireCapability anyOf={['registries:create']}><RegistryEditor /></RequireCapability> },
       { path: 'registries/:namespace/:name/edit', element: <RequireCapability anyOf={['registries:update']}><RegistryEditor /></RequireCapability> },
       { path: 'registries/:namespace/:name', element: <RegistryDetail /> },
+
+      { path: 'environments', element: <EnvironmentsList /> },
+      { path: 'environments/new', element: <RequireCapability anyOf={['environments:create']}><EnvironmentEditor /></RequireCapability> },
+      { path: 'environments/:namespace/:name/edit', element: <RequireCapability anyOf={['environments:update']}><EnvironmentEditor /></RequireCapability> },
+      {
+        path: 'environments/:namespace/:name',
+        element: <EnvironmentLayout />,
+        children: [
+          { index: true, element: <EnvironmentOverview /> },
+          { path: 'clusters', element: <EnvironmentClusters /> },
+          { path: 'orders', element: <EnvironmentOrders /> },
+        ],
+      },
+
+      { path: 'clusters', element: <ClustersList /> },
+      { path: 'clusters/new', element: <RequireCapability anyOf={['clusters:create']}><ClusterEditor /></RequireCapability> },
+      { path: 'clusters/:namespace/:name/edit', element: <RequireCapability anyOf={['clusters:update']}><ClusterEditor /></RequireCapability> },
+      {
+        path: 'clusters/:namespace/:name',
+        element: <ClusterLayout />,
+        children: [
+          { index: true, element: <ClusterOverview /> },
+          { path: 'deployments', element: <ClusterDeployments /> },
+        ],
+      },
 
       { path: 'settings', element: <Navigate to="/settings/general" replace /> },
       {

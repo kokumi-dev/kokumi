@@ -11,6 +11,7 @@ export type SSEEventType =
   | 'registries'
   | 'repositories'
   | 'environments'
+  | 'clusters'
 
 const ENDPOINT = '/api/v1/events'
 const EVENT_TYPES: SSEEventType[] = [
@@ -22,6 +23,7 @@ const EVENT_TYPES: SSEEventType[] = [
   'registries',
   'repositories',
   'environments',
+  'clusters',
 ]
 
 // Keep the stream open briefly after the last subscriber leaves, so navigating

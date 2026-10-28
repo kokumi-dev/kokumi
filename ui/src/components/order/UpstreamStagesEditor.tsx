@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { UpstreamStage } from '../../api/types'
 import { useOrders } from '../../hooks/useOrders'
 import { Button } from '../ui'
+import { soakSeconds, soakText } from '../../utils/format'
 import styles from '../shared/Form.module.css'
 
 interface UpstreamStagesEditorProps {
@@ -12,17 +13,6 @@ interface UpstreamStagesEditorProps {
   self: string
   value: UpstreamStage[]
   onChange: (stages: UpstreamStage[]) => void
-}
-
-/** A soak in minutes as the editor shows it; empty for none. */
-function soakText(seconds?: number): string {
-  return seconds ? String(Math.round((seconds / 60) * 100) / 100) : ''
-}
-
-/** The soak typed in minutes, in whole seconds; 0 when it is empty or not a positive number. */
-function soakSeconds(text: string): number {
-  const minutes = Number(text)
-  return text.trim() && Number.isFinite(minutes) && minutes > 0 ? Math.round(minutes * 60) : 0
 }
 
 /**

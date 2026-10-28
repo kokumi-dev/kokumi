@@ -6,6 +6,7 @@ import PropertyList from '../../components/layout/PropertyList'
 import ConditionList from '../../components/layout/ConditionList'
 import DataTable from '../../components/layout/DataTable'
 import EmptyState from '../../components/layout/EmptyState'
+import NameCell from '../../components/layout/NameCell'
 import StatusIndicator from '../../components/shared/StatusIndicator'
 import RelativeTime from '../../components/shared/RelativeTime'
 import VulnerabilityCounts from '../../components/vulnerability/VulnerabilityCounts'
@@ -119,12 +120,7 @@ export default function ServingOverview() {
               {
                 header: 'Cluster',
                 width: '24%',
-                cell: (t) => (
-                  <>
-                    <span title={t.cluster}>{t.cluster}</span>
-                    {t.server && <span className={layout.secondaryText} title={t.server}>{t.server}</span>}
-                  </>
-                ),
+                cell: (t) => <NameCell to={paths.cluster(serving.namespace, t.cluster)} name={t.cluster} secondary={t.server} />,
               },
               {
                 header: 'State',

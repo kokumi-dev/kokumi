@@ -217,7 +217,7 @@ func TestServingToDTO_history(t *testing.T) {
 	started := metav1.NewTime(time.Date(2026, 11, 3, 10, 0, 0, 0, time.UTC))
 	healthy := metav1.NewTime(started.Add(time.Minute))
 	serving := deliveryv1alpha1.Serving{
-		Name: prod, Namespace: "shop",
+		Name: prod, Namespace: shopNS,
 		Spec: deliveryv1alpha1.ServingSpec{OrderName: prod},
 		Status: deliveryv1alpha1.ServingStatus{History: []deliveryv1alpha1.DeploymentEntry{
 			{PreparationName: "prod-2", Digest: digest("2"), StartedTime: started},
@@ -264,22 +264,4 @@ func TestPreparationToDTO_gates(t *testing.T) {
 	assert.Equal(t, []UpstreamStageDTO{{Order: testStage}}, dto.After)
 	assert.Equal(t, "High", dto.Checks.Vulnerabilities.MaxSeverity)
 	assert.Nil(t, dto.Approval, "no approval policy applies")
-}
-
-func TestEffectiveTargetNamespace(t *testing.T) {
-	const (
-		orderNamespace   = "store"
-		productNamespace = "storefront"
-		orderOverride    = "checkout"
-	)
-	order := &deliveryv1alpha1.Order{Name: orderOverride, Namespace: orderNamespace}
-	product := &deliveryv1alpha1.Product{Spec: deliveryv1alpha1.ProductSpec{TargetNamespace: productNamespace}}
-
-	namespace, source := effectiveTargetNamespace(order, nil)
-	assert.Equal(t, [2]string{orderNamespace, targetNamespaceFromNamespace}, [2]string{namespace, source}, "without a Product, the Order's own")
-	namespace, source = effectiveTargetNamespace(order, product)
-	assert.Equal(t, [2]string{productNamespace, targetNamespaceFromProduct}, [2]string{namespace, source})
-	order.Spec.TargetNamespace = orderOverride
-	namespace, source = effectiveTargetNamespace(order, product)
-	assert.Equal(t, [2]string{orderOverride, targetNamespaceFromOrder}, [2]string{namespace, source})
 }

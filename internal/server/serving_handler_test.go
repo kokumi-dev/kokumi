@@ -25,7 +25,6 @@ const (
 	promoteOrder    = "web-prod"
 	promoteDeployed = "web-prod-1"
 	promoteQueued   = "web-prod-2"
-	prod            = "prod"
 )
 
 // promotablePreparation returns a signed and ready Preparation of the
@@ -137,7 +136,7 @@ func TestHandleServingTargets(t *testing.T) {
 	}}
 	prodCluster := func(name, server string) *deliveryv1alpha1.Cluster {
 		return &deliveryv1alpha1.Cluster{
-			Name: name, Namespace: nsA, Labels: map[string]string{"stage": prod},
+			Name: name, Namespace: nsA, Labels: map[string]string{"stage": "prod"},
 			Status: deliveryv1alpha1.ClusterStatus{Server: server},
 		}
 	}

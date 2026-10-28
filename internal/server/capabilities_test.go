@@ -227,9 +227,10 @@ func TestCapabilities(t *testing.T) {
 
 func TestNamespacedCapabilities(t *testing.T) {
 	const teamA = "team-a"
-	// registryCredentialsRBAC mirrors a RoleBinding of
-	// kokumi-registry-credentials in the namespace teamA.
-	registryCredentialsRBAC := func(ra authorizationv1.ResourceAttributes) (bool, error) {
+	// secretsRBAC mirrors a RoleBinding of kokumi-registry-credentials or
+	// kokumi-cluster-credentials in the namespace teamA: both grant the
+	// same Secret access.
+	secretsRBAC := func(ra authorizationv1.ResourceAttributes) (bool, error) {
 		return ra.Group == "" && ra.Resource == secretsResource && ra.Namespace == teamA &&
 			slices.Contains([]string{"get", "create", "patch"}, ra.Verb), nil
 	}
@@ -240,8 +241,9 @@ func TestNamespacedCapabilities(t *testing.T) {
 		rbacs     []rbacFunc
 		want      []Capability
 	}{
-		{name: "bound in the namespace", namespace: teamA, rbacs: []rbacFunc{registryCredentialsRBAC}, want: []Capability{CapRegistriesCredentialsUpdate}},
-		{name: "bound in another namespace", namespace: "team-b", rbacs: []rbacFunc{registryCredentialsRBAC}, want: []Capability{}},
+		{name: "bound in the namespace", namespace: teamA, rbacs: []rbacFunc{secretsRBAC},
+			want: []Capability{CapClustersCredentialsUpdate, CapRegistriesCredentialsUpdate}},
+		{name: "bound in another namespace", namespace: "team-b", rbacs: []rbacFunc{secretsRBAC}, want: []Capability{}},
 		{name: "built-in editor", namespace: teamA, rbacs: []rbacFunc{func(ra authorizationv1.ResourceAttributes) (bool, error) {
 			// server-editor-role grants no Secret access.
 			return ra.Group == "delivery.kokumi.dev", nil

@@ -126,3 +126,4 @@ registry every cluster reaches; see [Container Images](../images/).
   where the Order deploys.
 - **Serving:** a table of the clusters, with health, revision and since when,
   and a link to each Argo CD Application.
+- **Cluster:** its Deployments tab lists what runs there.
