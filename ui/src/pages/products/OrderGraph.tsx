@@ -30,9 +30,9 @@ const orderNode = (name: string) => `order:${name}`
 /**
  * OrderGraph draws the Orders of a Product from left to right, each after
  * the Orders it runs after, and the details of the Order selected beside
- * them. When Orders name their environment, each environment is a column,
- * its Orders stacked by wave, and only the edges between environments are
- * drawn. A Product without Orders shows a link to create the first; the
+ * them. Each Environment the Orders deploy to is a column, its Orders
+ * stacked by wave, and only the edges between them are drawn. A Product
+ * without Orders shows a link to create the first; the
  * page header offers it otherwise.
  */
 export default function OrderGraph({ product, orders, preparations, servings, orderDenied }: Props) {
@@ -104,14 +104,14 @@ function deliveryStatus({ pending, currentRevision }: OrderInsight): Status | un
   return undefined
 }
 
-/** The wave of an Order in its environment, as a tooltip says it. */
-function waveText(environment: string | undefined, { wave, after }: { wave: number; after: string[] }): string {
+/** The wave of an Order in its Environment, as a tooltip says it. */
+function waveText(environment: string, { wave, after }: { wave: number; after: string[] }): string {
   return `Wave ${wave} of ${environment}: ${after.length > 0 ? `runs after ${after.join(', ')}` : 'runs first'}`
 }
 
 /**
  * An Order: its state, the version it runs and what its latest Preparation
- * waits for, and its wave in an environment of several waves.
+ * waits for, and its wave in an Environment of several waves.
  */
 function OrderCard({
   insight,
@@ -132,7 +132,7 @@ function OrderCard({
         title={
           wave ? (
             <>
-              <span className={styles.wave} title={waveText(order.environment, wave)}>{wave.wave}</span>
+              <span className={styles.wave} title={waveText(order.environmentRef.name, wave)}>{wave.wave}</span>
               {order.name}
             </>
           ) : (

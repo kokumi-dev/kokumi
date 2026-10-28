@@ -5,6 +5,8 @@ metadata:
 spec:
   productRef:
     name: podinfo-approvals
+  environmentRef:
+    name: local
 
   # Every Preparation is promoted right away, and deploys once two distinct
   # members of release-approvers approved it. The policy is copied into each

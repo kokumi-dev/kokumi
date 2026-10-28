@@ -1,38 +1,37 @@
 import type { Order } from '../../api/types'
 
-/** The Orders of a Product laid out by their environments: one column each, waves inside. */
+/** The Orders of a Product laid out by the Environments they deploy to: one column each, waves inside. */
 export interface EnvironmentLayout {
   /** The Orders in the order they are drawn: by column, environment, wave and name. */
   orders: Order[]
   /** The column of each Order, by name, from 0. */
   column: Map<string, number>
-  /** The title of each column: the environments in it; empty for a column of Orders without one. */
+  /** The title of each column: the Environments in it. */
   titles: string[]
-  /** The wave of each Order inside an environment of several waves, from 1, with the Orders it runs after there. */
+  /** The wave of each Order inside an Environment of several waves, from 1, with the Orders it runs after there. */
   wave: Map<string, { wave: number; after: string[] }>
-  /** Whether the link from one Order to another stays inside an environment, where its wave shows it. */
+  /** Whether the link from one Order to another stays inside an Environment, where its wave shows it. */
   inside: (from: string, to: string) => boolean
 }
 
-/** Why the environments of the Orders cannot be drawn as columns. */
+/** Why the Environments of the Orders cannot be drawn as columns. */
 export interface EnvironmentConflict {
   conflict: string
 }
 
 /**
- * environmentLayout groups the Orders of a Product by their environment,
- * each one an Order without an environment of its own, and puts each
- * environment one column after the furthest environment it runs after. In
- * an environment, an Order is one wave after the furthest Order it runs after
- * there. Undefined when no Order has an environment. A conflict when an
- * environment runs after itself through another, so that no order of
- * columns follows the stages.
+ * environmentLayout groups the Orders of a Product by the Environment they
+ * deploy to, and puts each Environment one column after the furthest
+ * Environment it runs after. In an Environment, an Order is one wave after
+ * the furthest Order it runs after there. Undefined without Orders. A
+ * conflict when an Environment runs after itself through another, so that no
+ * order of columns follows the stages.
  */
 export function environmentLayout(orders: Order[]): EnvironmentLayout | EnvironmentConflict | undefined {
-  if (!orders.some((o) => o.environment)) return undefined
+  if (orders.length === 0) return undefined
 
   const byName = new Map(orders.map((o) => [o.name, o]))
-  const group = (o: Order) => (o.environment ? `environment:${o.environment}` : `order:${o.name}`)
+  const group = (o: Order) => o.environmentRef.name
   const upstreams = (o: Order) => (o.after ?? []).map((s) => byName.get(s.order)).filter((u): u is Order => !!u)
 
   const groupsBefore = new Map<string, Set<string>>()
@@ -61,10 +60,7 @@ export function environmentLayout(orders: Order[]): EnvironmentLayout | Environm
   }
   for (const g of groupsBefore.keys()) {
     const c = columnOfGroup(g)
-    if (Array.isArray(c)) {
-      const names = c.map((k) => k.replace(/^environment:/, '').replace(/^order:/, 'Order '))
-      return { conflict: `The environments run after each other in a circle: ${names.join(' → ')}.` }
-    }
+    if (Array.isArray(c)) return { conflict: `The Environments run after each other in a circle: ${c.join(' → ')}.` }
   }
 
   const waveOf = new Map<string, number>()
@@ -97,7 +93,7 @@ export function environmentLayout(orders: Order[]): EnvironmentLayout | Environm
   for (const o of sorted) {
     const c = columnOf.get(group(o))!
     const environments = new Set((titles[c] ?? '').split(' · ').filter(Boolean))
-    if (o.environment) environments.add(o.environment)
+    environments.add(group(o))
     titles[c] = [...environments].join(' · ')
   }
 

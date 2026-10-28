@@ -71,7 +71,7 @@ export default function UpstreamStagesEditor({ namespace, product, self, value, 
                 <label className={styles.checkRow}>
                   <input type="checkbox" checked={!!stage} onChange={(e) => toggle(o.name, e.target.checked)} />
                   <span>{o.name}</span>
-                  <span className={styles.hint}>{o.mode}</span>
+                  <span className={styles.hint}>{o.environmentRef.name} · {o.mode}</span>
                 </label>
                 {stage && (
                   <input

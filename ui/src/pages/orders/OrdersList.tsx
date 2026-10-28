@@ -22,7 +22,7 @@ export default function OrdersList() {
   const createDenied = useDeniedReason('orders:create')
 
   const filtered = (orders ?? []).filter((o) =>
-    matchesFilter(query, o.name, o.namespace, o.productRef.name),
+    matchesFilter(query, o.name, o.namespace, o.productRef.name, o.environmentRef.name),
   )
 
   return (
@@ -35,7 +35,7 @@ export default function OrdersList() {
 
       <Section
         title="All Orders"
-        actions={<FilterInput label="Filter orders" value={query} onChange={setQuery} placeholder="Filter by name, namespace or Product…" />}
+        actions={<FilterInput label="Filter orders" value={query} onChange={setQuery} placeholder="Filter by name, namespace, Product or Environment…" />}
         flush
       >
         {orders === null ? (
@@ -66,6 +66,13 @@ export default function OrdersList() {
                     {o.productRef.name}
                   </Link>
                 ),
+              },
+              {
+                header: 'Environment',
+                width: '14%',
+                truncate: true,
+                title: (o) => o.environmentRef.name,
+                cell: (o) => o.environmentRef.name,
               },
               {
                 header: 'Active',

@@ -106,9 +106,9 @@ export interface Order {
   name: string
   namespace: string
   labels?: Record<string, string>
-  /** The environment of the pipeline the Order belongs to, from its delivery.kokumi.dev/environment label. */
-  environment?: string
-  /** The namespace it deploys into; absent: the Product's, else its own. */
+  /** The Environment, in the Order's namespace, the Order deploys to; it cannot change. */
+  environmentRef: EnvironmentRef
+  /** The namespace it deploys into on every cluster of its Environment; absent: the Product's, else its own. */
   targetNamespace?: string
   /** The namespace it deploys into, resolved by the server, and what sets it. */
   effectiveTargetNamespace: string
@@ -402,11 +402,46 @@ export interface Serving {
   history?: DeploymentEntry[]
   /** The latest scans of the deployed Preparation's images, summed; changes as vulnerabilities are published. */
   deployedVulnerabilities?: VulnerabilitySummary
-  /** The Argo CD Application that deploys the Order. */
-  applicationName: string
+  /**
+   * How many clusters the Serving deploys to, by the state of their
+   * deployment; GET /servings/{namespace}/{name}/targets lists them.
+   */
+  clusters?: DeploymentClusters
   state: string
   conditions?: Condition[]
   createdAt?: string
+}
+
+/** The clusters a Serving deploys to, counted by the state of their deployment. */
+export interface DeploymentClusters {
+  selected: number
+  healthy: number
+  progressing: number
+  degraded: number
+  held: number
+}
+
+/** A cluster a Serving deploys to, with what Argo CD reports on its deployment there. */
+export interface DeploymentTarget {
+  /** The name of the Cluster, in the Serving's namespace. */
+  cluster: string
+  server?: string
+  /** The artifact digest Argo CD reports synced to the cluster. */
+  revision?: string
+  /**
+   * The reason of the target's Ready condition: Healthy, Progressing,
+   * Degraded, or why it is held, such as ClusterNotReady, ClusterConflict
+   * (another Cluster of the Environment reaches the same server) or Rejected
+   * (Argo CD refuses the deployment).
+   */
+  state: string
+  /** Whether the cluster runs the deployed Preparation healthily. */
+  ready: boolean
+  message?: string
+  /** Since when the target is in its state. */
+  since?: string
+  /** The Argo CD Application that deploys there, in Argo CD's namespace. */
+  applicationName: string
 }
 
 /**
@@ -649,7 +684,7 @@ export interface Product {
    */
   vendor?: OCIDestination
   render?: Render
-  /** The namespace its Orders deploy into, unless an Order sets its own; absent: each Order's namespace. */
+  /** The namespace its Orders deploy into on every cluster, unless an Order sets its own; absent: each Order's namespace. */
   targetNamespace?: string
   patches?: Patch[]
   overrides: Overrides
@@ -737,14 +772,82 @@ export interface ChartInfo {
   hasSchema: boolean
 }
 
+// ── Environment and cluster types ─────────────────────────────────────────────
+
+/** A requirement of a label selector, as Kubernetes defines it. */
+export interface LabelSelectorRequirement {
+  key: string
+  operator: LabelSelectorOperator
+  /** Set for In and NotIn, empty for Exists and DoesNotExist. */
+  values?: string[]
+}
+
+export type LabelSelectorOperator = 'In' | 'NotIn' | 'Exists' | 'DoesNotExist'
+
+/** A Kubernetes label selector; {} selects everything. */
+export interface LabelSelector {
+  matchLabels?: Record<string, string>
+  matchExpressions?: LabelSelectorRequirement[]
+}
+
+/** The Environment, in the Order's namespace, an Order deploys to. */
+export interface EnvironmentRef {
+  name: string
+}
+
+/** The engine that deploys to the clusters of an Environment, with its settings. */
+export interface Deployer {
+  type: 'ArgoCD'
+  /** Set when type is ArgoCD. */
+  argoCD?: {
+    /** The Argo CD AppProject of every Application that deploys to the Environment. */
+    project: string
+  }
+}
+
+/** An Environment an Order must run after: it must name an Order of it in its upstream stages. */
+export interface RequiredEnvironment {
+  environment: string
+  /** The least soak the Order must give its upstream Order of the Environment. */
+  minSoakSeconds?: number
+}
+
+/** The spec of an Environment, as the API has it. */
+export interface EnvironmentSpec {
+  description?: string
+  /** Selects the Clusters of its namespace; {} selects every one. */
+  clusterSelector: LabelSelector
+  deployer: Deployer
+  /** What an Order must pass before it deploys to the Environment. */
+  promotion?: {
+    /** Environments of its namespace an Order must run after first. */
+    requireAfter?: RequiredEnvironment[]
+  }
+}
+
+/** A group of the Clusters of its namespace that the Orders of the namespace deploy to. */
+export interface Environment extends EnvironmentSpec {
+  namespace: string
+  name: string
+  /** How many Clusters of its namespace it selects, and how many of them are ready. */
+  selectedClusters: number
+  readyClusters: number
+  state: string
+  conditions?: Condition[]
+  /** The Environment local Kokumi keeps in its own namespace: it comes back when deleted. */
+  ensured?: boolean
+  createdAt?: string
+}
+
+
 // ── Form data types ───────────────────────────────────────────────────────────
 
 export interface OrderFormData {
   name: string
   namespace: string
   productRef: ProductRef
-  /** The environment of the pipeline it belongs to; empty for none. Always sent on update: an update without it removes it. */
-  environment: string
+  /** The Environment it deploys to, in its namespace; empty until one is picked. It cannot change after creation. */
+  environmentRef: EnvironmentRef
   /** Empty: the Product's target namespace, else the Order's namespace. */
   targetNamespace: string
   /** Helm values; only sent when the Product renders with Helm. */
@@ -765,7 +868,7 @@ export const emptyOrderForm = (product?: { namespace: string; name: string }): O
   name: '',
   namespace: product?.namespace ?? 'kokumi',
   productRef: { name: product?.name ?? '' },
-  environment: '',
+  environmentRef: { name: '' },
   targetNamespace: '',
   values: {},
   destination: {},
@@ -785,7 +888,7 @@ export const orderToFormData = (r: Order): OrderFormData => ({
   name: r.name,
   namespace: r.namespace,
   productRef: { name: r.productRef.name },
-  environment: r.environment ?? '',
+  environmentRef: { name: r.environmentRef.name },
   targetNamespace: r.targetNamespace ?? '',
   values: r.values ?? {},
   destination: r.destination ? { ...r.destination } : {},

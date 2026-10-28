@@ -1,7 +1,8 @@
-# The Environment local of this namespace: the cluster Kokumi runs in,
-# through Argo CD's project default. Outside Kokumi's own namespace, that
-# project must admit the namespace in its sourceNamespaces; Argo CD's default
-# project admits none. This replaces the list:
+# Orders of this namespace that name the Environment local deploy to the
+# cluster Kokumi runs in, through Argo CD's project default. Outside Kokumi's
+# own namespace, that project must admit the namespace in its
+# sourceNamespaces; Argo CD's default project admits none. This replaces the
+# list:
 #
 #   kubectl -n argocd patch appproject default --type=merge \
 #     -p '{"spec":{"sourceNamespaces":["<namespace>"]}}'

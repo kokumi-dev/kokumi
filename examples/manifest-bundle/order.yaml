@@ -5,6 +5,8 @@ metadata:
 spec:
   productRef:
     name: external-secrets
+  environmentRef:
+    name: local
 
   # Patches set fields of the rendered manifests, by path. Values are strings.
   patches:

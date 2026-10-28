@@ -21,7 +21,7 @@ export function useArgoCDBase(): string {
   }
 }
 
-/** The page of the Argo CD Application applicationName, as the server names it. */
+/** The page of an Argo CD Application, which Kokumi creates in Argo CD's namespace argocd; null without a base URL. */
 export function argoAppURL(base: string, applicationName: string): string | null {
   return base ? `${base}/applications/argocd/${encodeURIComponent(applicationName)}` : null
 }

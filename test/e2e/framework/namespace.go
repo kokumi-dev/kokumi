@@ -34,15 +34,20 @@ var (
 	// namespaces are the namespaces of the scenarios that run, which a
 	// failed spec dumps.
 	namespaces []string
+	// deleted are the namespaces of the scenarios that ended, which may
+	// still be terminating.
+	deleted []string
 )
 
 // CreateNamespace creates a namespace of its own for the scenario that calls
-// it, named e2e-<name>-<random suffix>, and deletes it when the scenario
-// ends. Call it from BeforeAll or BeforeEach.
+// it, named e2e-<name>-<random suffix>, with the Cluster and the Environment
+// of examples/local, so that its Orders deploy to the cluster Kokumi runs
+// in, and deletes it when the scenario ends. Call it from BeforeAll or
+// BeforeEach.
 //
-// The cleanup waits until the namespace is gone: Argo CD Applications are
-// named after their Serving alone, so the next scenario's Serving of the same
-// name must not meet this scenario's Application.
+// The next scenario does not wait for the namespace to go: names never
+// repeat, and the Argo CD Applications of a namespace are named after it.
+// WaitForDeletedNamespaces waits for all of them before Kokumi is undeployed.
 func CreateNamespace(name string) string {
 	ctx := context.Background()
 	ns := &corev1.Namespace{GenerateName: "e2e-" + name + "-"}
@@ -55,14 +60,35 @@ func CreateNamespace(name string) string {
 	DeferCleanup(func() {
 		namespacesMu.Lock()
 		namespaces = slices.DeleteFunc(namespaces, func(n string) bool { return n == ns.Name })
+		deleted = append(deleted, ns.Name)
 		namespacesMu.Unlock()
 
 		Expect(client.IgnoreNotFound(Client.Delete(ctx, ns))).To(Succeed())
-		Eventually(func() error {
-			return Client.Get(ctx, client.ObjectKeyFromObject(ns), &corev1.Namespace{})
-		}, 3*time.Minute).Should(Satisfy(apierrors.IsNotFound), "The namespace %s is not deleted", ns.Name)
 	})
+	ApplyExample(ns.Name, "local")
 	return ns.Name
+}
+
+// WaitForDeletedNamespaces waits until the namespaces of the scenarios that
+// ended are gone. Their Kokumi objects carry finalizers that only a running
+// Kokumi releases: Servings delete their Argo CD Applications, Clusters
+// their registrations. Call it before Kokumi is undeployed.
+func WaitForDeletedNamespaces() {
+	namespacesMu.Lock()
+	pending := slices.Clone(deleted)
+	namespacesMu.Unlock()
+
+	for _, name := range pending {
+		WaitForNamespaceDeleted(name)
+	}
+}
+
+// WaitForNamespaceDeleted waits until the namespace name is gone, for a
+// scenario whose cleanup must run after the cleanup of its namespace.
+func WaitForNamespaceDeleted(name string) {
+	Eventually(func() error {
+		return Client.Get(context.Background(), client.ObjectKey{Name: name}, &corev1.Namespace{})
+	}, 3*time.Minute).Should(Satisfy(apierrors.IsNotFound), "The namespace %s is not deleted", name)
 }
 
 // scenarioNamespaces returns the namespaces of the scenarios that run.

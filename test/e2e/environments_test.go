@@ -60,7 +60,6 @@ var _ = Describe("Environments", Label("environments"), func() {
 
 		BeforeAll(func() {
 			ns = framework.CreateNamespace("restricted")
-			framework.ApplyExample(ns, "local")
 			framework.ApplyTestdata("", "clusters/projects.yaml", map[string]string{"NAMESPACE": ns})
 			DeferCleanup(func() {
 				_, _ = framework.Kubectl("delete", "appprojects.argoproj.io", ns+"-restricted",
@@ -69,9 +68,13 @@ var _ = Describe("Environments", Label("environments"), func() {
 			framework.ApplyTestdata(ns, "clusters/restricted.yaml", nil)
 		})
 
-		It("refuses a project that does not admit the Environment's namespace", func() {
+		It("refuses a project that does not admit the Environment's namespace, and deploys nothing there", func() {
 			Eventually(framework.Environment(ns, "restricted")).Should(
 				framework.HaveReady(metav1.ConditionFalse, deliveryv1alpha1.ReasonProjectNotPermitted))
+			Eventually(framework.Serving(ns, "podinfo-restricted"), framework.RenderTimeout).Should(
+				framework.HaveConditionReason(deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonProjectNotPermitted),
+				"the Serving asks the project itself before it deploys")
+			framework.ExpectNoApplication(ns, "podinfo-restricted")
 		})
 	})
 

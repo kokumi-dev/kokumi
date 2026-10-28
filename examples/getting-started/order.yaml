@@ -6,6 +6,13 @@ spec:
   productRef:
     name: podinfo
 
+  # The Environment it deploys to, in the Order's namespace. Kokumi keeps the
+  # Environment local in its own namespace, kokumi: the cluster it runs in.
+  # The Environment cannot be changed later; another Environment is another
+  # Order.
+  environmentRef:
+    name: local
+
   # Deep-merged over the Product's values; the Order's win.
   values:
     ui:

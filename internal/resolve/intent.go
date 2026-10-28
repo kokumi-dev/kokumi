@@ -27,7 +27,7 @@ type Intent struct {
 	// Destination is the resolved OCI URL the artifact is pushed to.
 	Destination string `json:"destination"`
 	// TargetNamespace is the namespace the artifact is rendered for and
-	// deploys into.
+	// deploys into on every cluster.
 	TargetNamespace string `json:"targetNamespace"`
 	// Render is the render configuration after merging the Order over its
 	// Product.

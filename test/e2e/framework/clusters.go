@@ -17,6 +17,7 @@ limitations under the License.
 package framework
 
 import (
+	"path/filepath"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2" //nolint:revive,staticcheck
@@ -39,6 +40,17 @@ func GrantClusterCredentials(namespace string) {
 	_, err := Kubectl("create", "rolebinding", "kokumi-cluster-credentials", "-n", namespace,
 		"--clusterrole=kokumi-cluster-credentials", "--serviceaccount="+InstallNamespace+":kokumi-admin")
 	Expect(err).NotTo(HaveOccurred(), "Failed to bind kokumi-cluster-credentials in %s", namespace)
+}
+
+// ApplyPlatform applies what an admin applies for the example name to
+// namespace: kubectl apply -n <namespace> -k examples/<name>/platform/. It
+// goes with the namespace.
+func ApplyPlatform(namespace, name string) {
+	dir := filepath.Join(ProjectDir(), "examples", name, "platform")
+	By("applying what an admin applies for the " + name + " example: " +
+		"kubectl apply -n " + namespace + " -k examples/" + name + "/platform/")
+	_, err := Kubectl("apply", "-n", namespace, "-k", dir)
+	Expect(err).NotTo(HaveOccurred(), "Failed to apply the platform of the %s example", name)
 }
 
 // Cluster returns a function for Eventually that fetches the Cluster name

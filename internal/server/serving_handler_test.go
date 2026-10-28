@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,12 +18,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/argocd"
 )
 
 const (
 	promoteOrder    = "web-prod"
 	promoteDeployed = "web-prod-1"
 	promoteQueued   = "web-prod-2"
+	prod            = "prod"
 )
 
 // promotablePreparation returns a signed and ready Preparation of the
@@ -122,4 +125,42 @@ func TestHandlePromote(t *testing.T) {
 		rec := promote(t, cluster, promoteQueued)
 		assert.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
 	})
+}
+
+func TestHandleServingTargets(t *testing.T) {
+	const digest = "sha256:" + "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0"
+	env := &deliveryv1alpha1.Environment{Name: prod, Namespace: nsA, Spec: deliveryv1alpha1.EnvironmentSpec{
+		ClusterSelector: metav1.LabelSelector{MatchLabels: map[string]string{"stage": prod}},
+	}}
+	order := &deliveryv1alpha1.Order{Name: promoteOrder, Namespace: nsA, Spec: deliveryv1alpha1.OrderSpec{
+		EnvironmentRef: deliveryv1alpha1.EnvironmentRef{Name: prod},
+	}}
+	prodCluster := func(name, server string) *deliveryv1alpha1.Cluster {
+		return &deliveryv1alpha1.Cluster{
+			Name: name, Namespace: nsA, Labels: map[string]string{"stage": prod},
+			Status: deliveryv1alpha1.ClusterStatus{Server: server},
+		}
+	}
+	serving := &deliveryv1alpha1.Serving{
+		Name: promoteOrder, Namespace: nsA, Spec: deliveryv1alpha1.ServingSpec{OrderName: promoteOrder},
+		Status: deliveryv1alpha1.ServingStatus{
+			History:  []deliveryv1alpha1.DeploymentEntry{{PreparationName: promoteDeployed, Digest: digest, PromotionRecord: digest}},
+			Clusters: &deliveryv1alpha1.DeploymentClusters{Selected: 2, Healthy: 1, Degraded: 1},
+			Targets: []deliveryv1alpha1.DeploymentTarget{{Cluster: "eu", Conditions: []metav1.Condition{{
+				Type: deliveryv1alpha1.ConditionTypeReady, Status: metav1.ConditionFalse, Reason: deliveryv1alpha1.ReasonDegraded,
+			}}}},
+		},
+	}
+	cluster := adminCluster(t, env, order, serving, prodCluster("eu", "https://eu.example:6443"), prodCluster("us", "https://us.example:6443"))
+
+	rec := serveAsAdminWith(t, httptest.NewRequest(http.MethodGet, "/api/v1/servings/"+nsA+"/"+promoteOrder+"/targets", nil), testBackend{cluster: cluster})
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var targets []DeploymentTargetDTO
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &targets))
+	require.Len(t, targets, 2, "every cluster the Environment selects")
+	assert.Equal(t, deliveryv1alpha1.ReasonDegraded, targets[0].State, "as the Serving lists it")
+	assert.Equal(t, "https://eu.example:6443", targets[0].Server, "from the Cluster")
+	assert.Equal(t, deliveryv1alpha1.ReasonHealthy, targets[1].State, "a cluster the Serving does not list runs it healthily")
+	assert.Equal(t, digest, targets[1].Revision)
+	assert.Equal(t, argocd.Key(serving, "us").Name, targets[1].ApplicationName)
 }

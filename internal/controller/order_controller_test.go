@@ -71,7 +71,8 @@ var _ = Describe("Order Controller", func() {
 					Name:      resourceName,
 					Namespace: testNamespace,
 					Spec: deliveryv1alpha1.OrderSpec{
-						ProductRef: deliveryv1alpha1.ProductRef{Name: testProductName},
+						EnvironmentRef: localEnvironment,
+						ProductRef:     deliveryv1alpha1.ProductRef{Name: testProductName},
 						Promotion: &deliveryv1alpha1.PromotionSpec{
 							Mode: deliveryv1alpha1.PromotionModeManual,
 						},
@@ -209,10 +210,11 @@ var _ = Describe("Order Controller", func() {
 			order := &deliveryv1alpha1.Order{
 				Name: name, Namespace: ns,
 				Spec: deliveryv1alpha1.OrderSpec{
-					ProductRef:   deliveryv1alpha1.ProductRef{Name: name},
-					Promotion:    &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
-					Destination:  dest,
-					RegistryRefs: orderRefs,
+					EnvironmentRef: localEnvironment,
+					ProductRef:     deliveryv1alpha1.ProductRef{Name: name},
+					Promotion:      &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
+					Destination:    dest,
+					RegistryRefs:   orderRefs,
 				},
 			}
 			Expect(k8sClient.Create(ctx, order)).To(Succeed())
@@ -360,7 +362,8 @@ var _ = Describe("Order Controller", func() {
 			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Order{
 				Name: orderName, Namespace: ns,
 				Spec: deliveryv1alpha1.OrderSpec{
-					ProductRef: deliveryv1alpha1.ProductRef{Name: orderName},
+					EnvironmentRef: localEnvironment,
+					ProductRef:     deliveryv1alpha1.ProductRef{Name: orderName},
 					Promotion: &deliveryv1alpha1.PromotionSpec{
 						Mode: deliveryv1alpha1.PromotionModeManual,
 					},
@@ -700,8 +703,9 @@ var _ = Describe("Order Controller", func() {
 			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Order{
 				Name: orderName, Namespace: ns,
 				Spec: deliveryv1alpha1.OrderSpec{
-					ProductRef: deliveryv1alpha1.ProductRef{Name: productName},
-					Promotion:  &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
+					EnvironmentRef: localEnvironment,
+					ProductRef:     deliveryv1alpha1.ProductRef{Name: productName},
+					Promotion:      &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
 				},
 			})).To(Succeed())
 			DeferCleanup(func() {
@@ -749,8 +753,9 @@ var _ = Describe("Order Controller", func() {
 			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Order{
 				Name: orderName, Namespace: ns,
 				Spec: deliveryv1alpha1.OrderSpec{
-					ProductRef: deliveryv1alpha1.ProductRef{Name: productName},
-					Promotion:  &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
+					EnvironmentRef: localEnvironment,
+					ProductRef:     deliveryv1alpha1.ProductRef{Name: productName},
+					Promotion:      &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
 				},
 			})).To(Succeed())
 			DeferCleanup(func() {
@@ -893,6 +898,7 @@ var _ = Describe("Order Controller", func() {
 				Name: "product-restricted", Namespace: ns,
 				Spec: deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion}},
 			}, deliveryv1alpha1.OrderSpec{
+				EnvironmentRef: localEnvironment,
 				Patches: []deliveryv1alpha1.Patch{{
 					Target: deliveryv1alpha1.PatchTarget{Kind: testDeploymentKind, Name: testDeploymentName},
 					Set:    map[string]string{testReplicasPath: "3"},
@@ -909,7 +915,8 @@ var _ = Describe("Order Controller", func() {
 				Name: "product-manifests", Namespace: ns,
 				Spec: deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion}},
 			}, deliveryv1alpha1.OrderSpec{
-				Values: &apiextensionsv1.JSON{Raw: []byte(`{"replicaCount":3}`)},
+				EnvironmentRef: localEnvironment,
+				Values:         &apiextensionsv1.JSON{Raw: []byte(`{"replicaCount":3}`)},
 			})
 
 			expectRejected("order-values-no-helm", "only allowed when the Product renders with Helm")
@@ -987,7 +994,6 @@ var _ = Describe("Order Controller", func() {
 			prep := &deliveryv1alpha1.Preparation{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: order.Status.LatestPreparationName}, prep)).To(Succeed())
 			Expect(prep.Spec.CommitMessage).To(Equal("Raise the replicas"))
-			Expect(prep.Spec.TargetNamespace).To(Equal(testNamespace), "without a targetNamespace, the Order's namespace")
 		})
 	})
 
@@ -996,7 +1002,7 @@ var _ = Describe("Order Controller", func() {
 			ctx := context.Background()
 			order := &deliveryv1alpha1.Order{
 				Name: "order-immutable-product", Namespace: testNamespace,
-				Spec: deliveryv1alpha1.OrderSpec{ProductRef: deliveryv1alpha1.ProductRef{Name: "one"}},
+				Spec: deliveryv1alpha1.OrderSpec{EnvironmentRef: localEnvironment, ProductRef: deliveryv1alpha1.ProductRef{Name: "one"}},
 			}
 			Expect(k8sClient.Create(ctx, order)).To(Succeed())
 			DeferCleanup(func() { _ = k8sClient.Delete(ctx, order) })
@@ -1008,13 +1014,29 @@ var _ = Describe("Order Controller", func() {
 		})
 	})
 
+	Context("When the Environment of an Order is changed", func() {
+		It("rejects the change", func() {
+			ctx := context.Background()
+			order := &deliveryv1alpha1.Order{
+				Name: "order-immutable-environment", Namespace: testNamespace,
+				Spec: deliveryv1alpha1.OrderSpec{EnvironmentRef: localEnvironment, ProductRef: deliveryv1alpha1.ProductRef{Name: testProductName}},
+			}
+			Expect(k8sClient.Create(ctx, order)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, order) })
+
+			order.Spec.EnvironmentRef.Name = "prod"
+			Expect(k8sClient.Update(ctx, order)).To(MatchError(ContainSubstring("environmentRef is immutable")))
+		})
+	})
+
 	Context("When the values of an Order are not an object", func() {
 		It("rejects the Order", func() {
 			err := k8sClient.Create(context.Background(), &deliveryv1alpha1.Order{
 				Name: "order-values-string", Namespace: testNamespace,
 				Spec: deliveryv1alpha1.OrderSpec{
-					ProductRef: deliveryv1alpha1.ProductRef{Name: "one"},
-					Values:     &apiextensionsv1.JSON{Raw: []byte(`"replicaCount=3"`)},
+					EnvironmentRef: localEnvironment,
+					ProductRef:     deliveryv1alpha1.ProductRef{Name: "one"},
+					Values:         &apiextensionsv1.JSON{Raw: []byte(`"replicaCount=3"`)},
 				},
 			})
 			Expect(err).To(HaveOccurred())
@@ -1144,8 +1166,9 @@ func createTestOrder(ctx context.Context, name string, mode deliveryv1alpha1.Pro
 		Name:      name,
 		Namespace: testNamespace,
 		Spec: deliveryv1alpha1.OrderSpec{
-			ProductRef: deliveryv1alpha1.ProductRef{Name: testProductName},
-			Promotion:  &deliveryv1alpha1.PromotionSpec{Mode: mode},
+			EnvironmentRef: localEnvironment,
+			ProductRef:     deliveryv1alpha1.ProductRef{Name: testProductName},
+			Promotion:      &deliveryv1alpha1.PromotionSpec{Mode: mode},
 		},
 	}
 	if len(policy) > 0 {
@@ -1269,7 +1292,7 @@ var _ = Describe("Order images", func() {
 		order := &deliveryv1alpha1.Order{
 			Name:      orderName,
 			Namespace: testNamespace,
-			Spec:      deliveryv1alpha1.OrderSpec{ProductRef: deliveryv1alpha1.ProductRef{Name: productName}},
+			Spec:      deliveryv1alpha1.OrderSpec{EnvironmentRef: localEnvironment, ProductRef: deliveryv1alpha1.ProductRef{Name: productName}},
 		}
 		Expect(k8sClient.Create(ctx, order)).To(Succeed())
 		DeferCleanup(func() {
@@ -1373,7 +1396,7 @@ var _ = Describe("Order images", func() {
 		order := &deliveryv1alpha1.Order{
 			Name:      name,
 			Namespace: testNamespace,
-			Spec:      deliveryv1alpha1.OrderSpec{ProductRef: deliveryv1alpha1.ProductRef{Name: name}},
+			Spec:      deliveryv1alpha1.OrderSpec{EnvironmentRef: localEnvironment, ProductRef: deliveryv1alpha1.ProductRef{Name: name}},
 		}
 		Expect(k8sClient.Create(ctx, order)).To(Succeed())
 		DeferCleanup(func() {
@@ -1541,8 +1564,9 @@ var _ = Describe("Order field indexes", func() {
 	It("indexes an Order by every Registry it lists", func() {
 		const upstream, mirror = "order-upstream", "order-mirror"
 		order := &deliveryv1alpha1.Order{Spec: deliveryv1alpha1.OrderSpec{
-			ProductRef:   deliveryv1alpha1.ProductRef{Name: "chart"},
-			RegistryRefs: []corev1.LocalObjectReference{{Name: upstream}, {Name: mirror}},
+			EnvironmentRef: localEnvironment,
+			ProductRef:     deliveryv1alpha1.ProductRef{Name: "chart"},
+			RegistryRefs:   []corev1.LocalObjectReference{{Name: upstream}, {Name: mirror}},
 		}}
 		Expect(orderRegistryNames(order)).To(Equal([]string{upstream, mirror}))
 		Expect(orderRegistryNames(&deliveryv1alpha1.Order{})).To(BeEmpty())
@@ -1613,8 +1637,9 @@ var _ = Describe("Order pipelines", func() {
 		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Order{
 			Name: name, Namespace: ns,
 			Spec: deliveryv1alpha1.OrderSpec{
-				ProductRef: deliveryv1alpha1.ProductRef{Name: product},
-				Promotion:  &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual, After: after},
+				EnvironmentRef: localEnvironment,
+				ProductRef:     deliveryv1alpha1.ProductRef{Name: product},
+				Promotion:      &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual, After: after},
 			},
 		})).To(Succeed())
 		DeferCleanup(func() {
@@ -1716,7 +1741,7 @@ var _ = Describe("Order pipelines", func() {
 	})
 
 	It("indexes an Order by the Orders it runs after", func() {
-		order := &deliveryv1alpha1.Order{Spec: deliveryv1alpha1.OrderSpec{Promotion: &deliveryv1alpha1.PromotionSpec{
+		order := &deliveryv1alpha1.Order{Spec: deliveryv1alpha1.OrderSpec{EnvironmentRef: localEnvironment, Promotion: &deliveryv1alpha1.PromotionSpec{
 			After: []deliveryv1alpha1.UpstreamStage{{Order: "staging"}, {Order: "qa", SoakSeconds: 60}},
 		}}}
 		Expect(orderUpstreamNames(order)).To(Equal([]string{"staging", "qa"}))

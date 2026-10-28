@@ -235,12 +235,13 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.ServingReconciler{
-		Client:           mgr.GetClient(),
-		Scheme:           mgr.GetScheme(),
-		Registries:       registries,
-		Signing:          signingProvider,
-		Recorder:         mgr.GetEventRecorder("kokumi-serving-controller"),
-		InstallNamespace: installNamespace,
+		Client:              mgr.GetClient(),
+		Scheme:              mgr.GetScheme(),
+		Registries:          registries,
+		Signing:             signingProvider,
+		Recorder:            mgr.GetEventRecorder("kokumi-serving-controller"),
+		InstallNamespace:    installNamespace,
+		BundledRegistryHost: artifact.DefaultRegistryHost,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Serving")
 		os.Exit(1)
@@ -302,11 +303,11 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.RegistryReconciler{
-		Client:      mgr.GetClient(),
-		Scheme:      mgr.GetScheme(),
-		Registries:  registries,
-		Namespace:   installNamespace,
-		BundledHost: artifact.DefaultRegistryHost,
+		Client:              mgr.GetClient(),
+		Scheme:              mgr.GetScheme(),
+		Registries:          registries,
+		Namespace:           installNamespace,
+		BundledRegistryHost: artifact.DefaultRegistryHost,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "registry")
 		os.Exit(1)

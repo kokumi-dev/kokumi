@@ -1,0 +1,15 @@
+# A stage that deploys to prod without running after staging, which the
+# Environment prod requires.
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Order
+metadata:
+  name: podinfo-prod-direct
+spec:
+  productRef:
+    name: podinfo-pipeline
+  environmentRef:
+    name: prod
+  promotion:
+    mode: Automatic
+    after:
+    - order: podinfo-dev

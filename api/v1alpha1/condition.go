@@ -237,12 +237,49 @@ const (
 	ReasonInvalidPipeline = "InvalidPipeline"
 )
 
-// Condition reasons used by Servings for where they deploy.
+// Condition reasons used by Servings for where they deploy, and for each of
+// their targets.
 const (
+	// ReasonPipelineRequired reports on a Serving that its Environment
+	// requires an upstream stage of another Environment that the
+	// Preparation to serve does not run after, or not with the soak the
+	// Environment requires.
+	ReasonPipelineRequired = "PipelineRequired"
+	// ReasonEnvironmentNotFound reports on a Serving that the Environment
+	// its Order names does not exist.
+	ReasonEnvironmentNotFound = "EnvironmentNotFound"
 	// ReasonArgoCDNotInstalled reports on a Serving or an Environment that
 	// Argo CD's CRDs are not installed, so that nothing can be deployed
-	// through Argo CD.
+	// through Argo CD, and on a target of a Serving that its Application
+	// cannot be written for that reason.
 	ReasonArgoCDNotInstalled = "ArgoCDNotInstalled"
+
+	// ReasonHealthy reports on a target of a Serving that it runs the
+	// deployed Preparation synced and healthy.
+	ReasonHealthy = "Healthy"
+	// ReasonProgressing reports on a target of a Serving that it has not
+	// reached the deployed Preparation or is not healthy yet.
+	ReasonProgressing = "Progressing"
+	// ReasonDegraded reports on a target of a Serving that its deployment
+	// of the deployed Preparation is degraded.
+	ReasonDegraded = "Degraded"
+	// ReasonOptInRequired reports on a target of a Serving that an Argo CD
+	// Application of its name exists and is not opted in for the Order.
+	ReasonOptInRequired = "OptInRequired"
+	// ReasonRegistryUnreachable reports on a target of a Serving that its
+	// kubelet would pull images from the bundled registry, which only the
+	// cluster Kokumi runs in can reach.
+	ReasonRegistryUnreachable = "RegistryUnreachable"
+	// ReasonRejected reports on a target of a Serving that the engine
+	// refuses its deployment as it is, for example because the Argo CD
+	// AppProject of its Environment does not permit the cluster's server and
+	// the Preparation's target namespace; the message is the engine's.
+	ReasonRejected = "Rejected"
+	// ReasonClusterNotReady reports on a target of a Serving that its
+	// Cluster is not Ready; the message gives the Cluster's reason. The
+	// target is held, and left out of the Serving's health until the
+	// Cluster is Ready again.
+	ReasonClusterNotReady = "ClusterNotReady"
 )
 
 // Condition reasons used by Registries.
@@ -289,18 +326,26 @@ const (
 	ReasonRepositoryListed = "Listed"
 )
 
-// Condition reasons used by Environments.
+// Condition reasons used by Environments and Clusters, and by the Servings
+// of the Orders that deploy to them.
 const (
-	// ReasonNoClusters reports on an Environment that it selects no Cluster.
+	// ReasonNoClusters reports on an Environment, and on the Servings that
+	// deploy to it, that it selects no Cluster.
 	ReasonNoClusters = "NoClusters"
-	// ReasonProjectNotFound reports on an Environment that its Argo CD
-	// AppProject does not exist.
+	// ReasonProjectNotFound reports on an Environment, and on the Servings
+	// that deploy to it, that its Argo CD AppProject does not exist.
 	ReasonProjectNotFound = "ProjectNotFound"
 	// ReasonProjectNotPermitted reports on an Environment outside Kokumi's
-	// namespace that its Argo CD AppProject does not admit the
-	// Environment's namespace in its sourceNamespaces.
+	// namespace, and on the Servings that deploy to it, that its Argo CD
+	// AppProject does not admit the Environment's namespace in its
+	// sourceNamespaces.
 	ReasonProjectNotPermitted = "ProjectNotPermitted"
-	// ReasonInvalidSelector reports on an Environment that its
-	// clusterSelector is not a valid label selector.
+	// ReasonInvalidSelector reports on an Environment, and on the Servings
+	// that deploy to it, that its clusterSelector is not a valid label
+	// selector.
 	ReasonInvalidSelector = "InvalidSelector"
+
+	// ReasonClusterConflict reports on a target of a Serving a Cluster that
+	// connects to the same server as another target of the Serving.
+	ReasonClusterConflict = "ClusterConflict"
 )

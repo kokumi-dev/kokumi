@@ -4,10 +4,11 @@ weight: 6
 description: Register clusters as Clusters with a kubeconfig Secret, and see whether Kokumi reaches them.
 ---
 
-A **Cluster** describes one cluster for Kokumi to deploy to: how to reach it.
-Kokumi reports whether it reaches the cluster, and the cluster's Kubernetes
-version. Admins put Clusters into [Environments](../environments/) of the same
-namespace by their labels.
+Kokumi deploys to **Clusters**: one object per cluster, in the namespace whose
+Orders deploy there. A Cluster says how to reach the cluster, and Kokumi reports
+whether it can be deployed to and its Kubernetes version. Admins put Clusters
+into [Environments](../environments/) of the same namespace by their labels, and
+Orders deploy to Environments.
 
 A Cluster reaches its cluster in one of two ways:
 
@@ -18,17 +19,19 @@ A Cluster reaches its cluster in one of two ways:
 
 ## Workspaces
 
-Every reference stays inside one namespace, as all of Kokumi's do: an
-Environment selects Clusters of its namespace, and a Cluster names a Secret of
-its namespace. A namespace with Environments and Clusters is a workspace:
+Every reference stays inside one namespace, as all of Kokumi's do: an Order
+names an Environment of its namespace, an Environment selects Clusters of its
+namespace, and a Cluster names a Secret of its namespace. A namespace with
+Products, Orders, Environments and Clusters is a workspace:
 
-- **Kokumi's own namespace**, `kokumi`, where Kokumi keeps the Cluster
-  `in-cluster` and the Environment `local`.
-- **A platform namespace** with the fleet's Clusters and Environments.
+- **Everything in one namespace**, such as `kokumi`, where Kokumi keeps the
+  Cluster `in-cluster` and the Environment `local`.
+- **A platform namespace** with the fleet's Clusters and Environments, and the
+  Orders of the teams that deploy there.
 - **Team namespaces** with clusters of their own.
 
-A Cluster's name is at most 63 characters, so that it fits into a label
-value.
+A Cluster's name is at most 63 characters: Kokumi puts it into the labels of
+the Argo CD Applications it writes for the cluster.
 
 ## Register a cluster
 
@@ -51,10 +54,10 @@ type: kubernetes.io/service-account-token
 EOF
 ```
 
-Grant less than `cluster-admin` where you can: what deploys there needs to
-manage the workloads in their target namespaces. Then write a self-contained
-kubeconfig of that ServiceAccount, with the server as Kokumi's cluster reaches
-it:
+Grant less than `cluster-admin` where you can: Argo CD needs to manage what
+the Orders deploy there, in their target namespaces. Then write a
+self-contained kubeconfig of that ServiceAccount, with the server as Kokumi's
+cluster reaches it:
 
 ```bash
 server=https://spoke.example:6443
@@ -131,12 +134,12 @@ Write the full name, or the short name `kcl`: on a management cluster with
 Cluster API or Rancher, `kubectl get clusters` may list theirs.
 `kubectl get kokumi -n <namespace>` lists every Kokumi object of a namespace.
 
-A Cluster has one condition, **`Ready`**: whether Kokumi reaches it. Kokumi
-checks every Cluster about once a minute, each a little later than the minute
-at random so that the checks of many Clusters spread out, eight at a time, and
-gives each check 10 seconds. A Cluster that reconciles for another reason in
-between reuses its last check while it is less than half a minute old and the
-kubeconfig Secret is unchanged. All in-cluster Clusters share one check of the
+A Cluster has one condition, **`Ready`**: whether Orders can deploy to it.
+Kokumi checks every Cluster about once a minute, each a little later than the
+minute at random so that the checks of many Clusters spread out, eight at a
+time, and gives each check 10 seconds. A Cluster that reconciles for another
+reason in between reuses its last check while it is less than half a minute
+old and the kubeconfig Secret is unchanged. All in-cluster Clusters share one check of the
 cluster Kokumi runs in. The status changes only when what the check finds
 changes.
 
@@ -153,9 +156,12 @@ what it runs.
 
 ## The cluster Kokumi runs in
 
-Kokumi keeps the Cluster `in-cluster` (`connection: InCluster`) in its own
-namespace. It creates it when it is missing, also after you delete it, and
-does not change it otherwise: label it as you need.
+Kokumi keeps the Cluster `in-cluster` (`connection: InCluster`) and the
+Environment `local` that selects it in its own namespace. It creates them when
+they are missing, also after you delete them, and does not change them
+otherwise: label `in-cluster` and edit `local` as you need. To stop Orders in
+`kokumi` from deploying to the cluster Kokumi runs in, change `local` rather
+than deleting it.
 
 When Kokumi creates the Cluster `in-cluster`, it labels it
 `delivery.kokumi.dev/in-cluster: "true"`, and the Environment `local` selects
@@ -165,4 +171,15 @@ their own, with the label, as the example `local` adds one:
 
 {{< example file="local/cluster.yaml" >}}
 
-Kokumi's manager must reach the API server of every cluster.
+## Clusters Argo CD deploys to
+
+Argo CD deploys to a `Kubeconfig` Cluster only once it knows the cluster:
+until then it refuses the Application, and the Serving holds that target with
+`Rejected` and Argo CD's message. `InCluster` Clusters need nothing: Argo CD
+knows its own cluster.
+
+Of two Ready Clusters of one Environment that connect to the same server,
+such as two in-cluster Clusters, only the first by name deploys; the Serving
+holds the other's target with `ClusterConflict`.
+
+Both Kokumi's manager and Argo CD must reach the API server of every cluster.

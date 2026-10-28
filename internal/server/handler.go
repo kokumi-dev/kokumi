@@ -4,13 +4,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/kokumi-dev/kokumi/internal/version"
 )
 
 // streamedResources are the resources the event stream discloses lists of.
-var streamedResources = []string{"orders", "preparations", "servings", "products", registriesResource, repositoriesResource}
+var streamedResources = []string{
+	eventOrders, eventPreparations, eventServings, eventProducts, registriesResource, repositoriesResource, environmentsResource,
+}
+
+// countedResources are the resources the counts event discloses the number
+// of; see Counts.
+var countedResources = []string{eventOrders, eventPreparations, eventServings, eventProducts, registriesResource, repositoriesResource}
 
 // InfoResponse is the response body for GET /api/v1/info.
 type InfoResponse struct {
@@ -82,9 +89,9 @@ func handleEventsStream(h *hub, deps *apiDeps, heartbeat time.Duration) http.Han
 				}
 			}
 		}
-		// The counts event aggregates all resources; only users who may list
-		// everything receive it.
-		allReadable := len(readable) == len(streamedResources)
+		// The counts event aggregates the counted resources; only users who
+		// may list all of them receive it.
+		allReadable := !slices.ContainsFunc(countedResources, func(res string) bool { return !readable[res] })
 
 		// eventResource maps event type -> resource it discloses.
 		eventResource := map[string]string{
@@ -94,6 +101,7 @@ func handleEventsStream(h *hub, deps *apiDeps, heartbeat time.Duration) http.Han
 			eventProducts:     "products",
 			eventRegistries:   registriesResource,
 			eventRepositories: repositoriesResource,
+			eventEnvironments: environmentsResource,
 		}
 
 		sub := h.subscribe()

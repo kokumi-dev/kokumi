@@ -24,11 +24,45 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/argocd"
+	"github.com/kokumi-dev/kokumi/internal/promotion"
 )
+
+// withoutArgoCD returns a client that answers every read of an Argo CD kind
+// as the API server does while Argo CD's CRDs are not installed.
+func withoutArgoCD() client.Client {
+	noMatch := func(obj any) error {
+		if _, ok := obj.(*unstructured.Unstructured); ok {
+			return &meta.NoKindMatchError{GroupKind: argocd.GroupVersionKind.GroupKind()}
+		}
+		if _, ok := obj.(*unstructured.UnstructuredList); ok {
+			return &meta.NoKindMatchError{GroupKind: argocd.GroupVersionKind.GroupKind()}
+		}
+		return nil
+	}
+	return fake.NewClientBuilder().WithScheme(scheme.Scheme).WithInterceptorFuncs(interceptor.Funcs{
+		Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if err := noMatch(obj); err != nil {
+				return err
+			}
+			return c.Get(ctx, key, obj, opts...)
+		},
+		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			if err := noMatch(list); err != nil {
+				return err
+			}
+			return c.List(ctx, list, opts...)
+		},
+	}).Build()
+}
 
 var _ = Describe("Argo CD engine", func() {
 	ctx := context.Background()
@@ -38,15 +72,23 @@ var _ = Describe("Argo CD engine", func() {
 			Type: deliveryv1alpha1.DeployerTypeArgoCD, ArgoCD: &deliveryv1alpha1.ArgoCDDeployer{Project: argocd.DefaultProject},
 		}},
 	}
+	serving := &deliveryv1alpha1.Serving{Name: "argo-web", Namespace: testWorkspace, Spec: deliveryv1alpha1.ServingSpec{OrderName: "argo-web"}}
 
-	It("admits nothing while Argo CD is not installed", func() {
-		missing := &atomic.Bool{}
-		missing.Store(true)
-		engine := &argoCD{Client: withoutArgoCD{Client: k8sClient, missing: missing}, namespace: testKokumiNamespace}
+	It("admits nothing, deploys nothing and has nothing to remove while Argo CD is not installed", func() {
+		engine := &argoCD{Client: withoutArgoCD(), namespace: testKokumiNamespace}
 
 		admitted, err := engine.Admit(ctx, env)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(admitted.reason).To(Equal(deliveryv1alpha1.ReasonArgoCDNotInstalled))
+
+		state, err := engine.Apply(ctx, env, serving, &promotion.Entry{Preparation: "argo-web-p1", OCIRef: testOCIRef + "@" + testProductRevision},
+			deployTarget{cluster: "in-cluster", server: "https://kubernetes.default.svc", namespace: testWorkspace})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(state.held).To(Equal(deliveryv1alpha1.ReasonArgoCDNotInstalled))
+
+		removed, err := engine.Remove(ctx, serving, nil)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(removed).To(BeEmpty())
 	})
 
 	It("starts an optional watch once the CRD of its kind is installed, and says so", func() {

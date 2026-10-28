@@ -1,0 +1,8 @@
+# What an admin applies to the namespace before the example: the Environments
+# dev, staging and prod.
+#
+#   kubectl apply -n <namespace> -k examples/promotion-pipeline/platform
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- environments.yaml

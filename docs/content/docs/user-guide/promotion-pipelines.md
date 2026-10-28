@@ -39,7 +39,14 @@ minute.
 {{< /tab >}}
 {{< /tabs >}}
 
-Apply it:
+Each stage deploys to an Environment of its own, which an admin creates
+first in the namespace; see [Group stages into environments](#group-stages-into-environments):
+
+{{< example file="promotion-pipeline/platform/environments.yaml" >}}
+
+{{< apply-example name="promotion-pipeline/platform" >}}
+
+Then apply it:
 
 {{< apply-example name="promotion-pipeline" >}}
 
@@ -58,36 +65,45 @@ Every entry of `after` holds:
 
 ## Group stages into environments
 
-A pipeline often runs several stages per environment, such as one per
-region: `int-eu` first, then `int-us` and `int-amap` once it ran healthily.
-Label each Order with the environment it belongs to, as the example does:
+A pipeline usually runs through environments, such as dev, staging and prod,
+and often runs several stages in one, such as one per cluster group:
+`int-eu` first, then `int-us` once it ran healthily, each an Environment of
+its own clusters. Each Order names the [Environment](../environments/) of its
+namespace it deploys to in `spec.environmentRef`:
 
 ```yaml
-metadata:
-  labels:
-    delivery.kokumi.dev/environment: int
+spec:
+  environmentRef:
+    name: int-eu
 ```
 
-The label only groups the drawing; the order the stages deploy in still
-comes from `after`. The Product's Orders graph draws each environment as a
-column, after the environments it runs after, and stacks its Orders by wave:
-an Order runs one wave after the furthest Order of its environment it runs
-after. Only the edges between environments are drawn; the wave number's
-tooltip names what an Order runs after inside its environment. An Order
-without the label is a column of its own, so a pipeline without environments
-is drawn by its stages alone. Environments that run after each other in a
-circle, such as an `int` stage after a `prod` stage that runs after `int`,
-cannot be columns; the graph then draws the stages alone and says why. Argo
-CD's progressive syncs group Applications into steps by labels the same way.
+Environments belong to the admins of the namespace: they decide which
+clusters an environment covers, through which Argo CD project, and which
+environments a stage must run after first. The promotion-pipeline example's
+three Environments all deploy to the cluster Kokumi runs in; prod requires
+every stage that deploys there to run after a stage of staging, for at least
+60 seconds. A stage that skips staging is held: its Serving reports
+`UpstreamDeployed=False` with reason `PipelineRequired`.
 
-The label is metadata, not intent: changing it renders no new Preparation.
-Set it in the Order form, or with kubectl, and select an environment's Orders
-by it:
+The order the stages deploy in still comes from `after`. The Product's Orders
+graph draws each Environment as a column, after the Environments it runs
+after, and stacks its Orders by wave: an Order runs one wave after the
+furthest Order of its Environment it runs after. Only the edges between
+Environments are drawn; the wave number's tooltip names what an Order runs
+after inside its Environment. Environments that run after each
+other in a circle, such as an `int` stage after a `prod` stage that runs
+after `int`, cannot be columns; the graph then draws the stages alone and
+says why.
+
+The Environment decides where a Preparation runs, not what it is: it is not
+part of the intent, and setting it renders nothing. It is set when the Order
+is created and cannot be changed, so that no Order reaches an Environment
+without passing its gates: to deploy to another Environment, create another
+Order. Select an Environment's Orders by it:
 
 ```bash
-kubectl label order podinfo-staging -n shop delivery.kokumi.dev/environment=staging --overwrite
-kubectl get orders -n shop -L delivery.kokumi.dev/environment
-kubectl get orders -n shop -l delivery.kokumi.dev/environment=staging
+kubectl get orders -n shop                                       # the ENVIRONMENT column
+kubectl get orders -n shop --field-selector spec.environmentRef.name=staging
 ```
 
 ## What a Product change is: the Product revision
@@ -116,6 +132,12 @@ revision that
 
 - was healthy for `soakSeconds`, without degrading,
 - and whose signed deployment record verifies in the registry.
+
+A stage is healthy once every cluster of its Environment whose Cluster is
+Ready runs the Preparation synced and healthy, and at least one does. A
+Cluster that is not Ready is left out: it holds back neither the soak nor the
+stages after it. One degraded cluster ends the healthy time; see
+[Deploy to Several Clusters](../environments/#what-runs-where).
 
 An upstream stage that has moved on to a newer revision since still qualifies
 the older one. The Serving reports the gate in its `UpstreamDeployed`
@@ -183,7 +205,8 @@ The promotion record names the Order, the Preparation and the one deployed
 before, the Product revision, the promotion mode, and the evidence of every
 gate: the approval attestation, the upstream deployment records with their
 healthy times, and the vulnerability report of each image. The deployment
-record names the promotion it completes. So each stage's promotion points to
+record names the promotion it completes, and the clusters that ran the
+Preparation healthily. So each stage's promotion points to
 the upstream deployment that qualified it, and the chain can be walked from
 the registry alone.
 
@@ -199,15 +222,14 @@ cosign verify-attestation --key kokumi.pub --insecure-ignore-tlog=true \
 
 ## In the UI
 
-- **Order form:** "Environment" sets the environment of the stage, offering
-  the ones the Product's other Orders use, and "Runs after" picks the other
-  Orders of the Product and the soak after each.
+- **Order form:** "Environment" picks the Environment of the stage, among
+  those of the Order's namespace, when the Order is created; "Runs after"
+  picks the other Orders of the Product and the soak after each.
 - **Order overview:** the Pipeline section lists the stages of the pipeline,
   what each deploys, its revision and since when it is healthy, and what holds
   the Order's newest Preparation.
 - **Product Orders graph:** each environment is a column, titled with its
-  name, and its stages are numbered by wave; without environments, each
-  Order follows the Orders it runs after, also past the stages between them.
+  name, and its stages are numbered by wave.
   Stages that run the current Product revision are marked. A stage whose
   newest Preparation is not deployed says what holds it: "Waits for
   approvals", "Queued · upstream" for a promotion that waits, or "Not

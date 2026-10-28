@@ -210,9 +210,9 @@ type ProductSpec struct {
 	// +optional
 	Render *Render `json:"render,omitempty"`
 
-	// targetNamespace is the namespace Orders of the Product deploy into,
-	// unless an Order sets its own. When neither sets it, it is the Order's
-	// namespace.
+	// targetNamespace is the namespace Orders of the Product deploy into on
+	// every cluster of their Environment, unless an Order sets its own. When
+	// neither sets it, it is the Order's namespace.
 	// +optional
 	// +kubebuilder:validation:MaxLength=63
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`

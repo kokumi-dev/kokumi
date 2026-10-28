@@ -1,7 +1,10 @@
 # Examples
 
 Each directory is a scenario of one feature that you can apply to a namespace
-of your choice on a cluster with Kokumi installed:
+of your choice on a cluster with Kokumi installed. Its Orders deploy to the
+Environment `local` of the namespace, the cluster Kokumi runs in: Kokumi keeps
+one in its own namespace, `kokumi`, and [local](local/) adds one to any other,
+whose Argo CD project must admit the namespace.
 
 ```bash
 kubectl apply -n <namespace> -k examples/<example>
@@ -15,12 +18,12 @@ what its docs say.
 
 | Example | Shows | Docs | E2E spec |
 |---|---|---|---|
-| [local](local/) | The Cluster and the Environment of the cluster Kokumi runs in, for a namespace of its own | Environments | `environments_test.go` |
+| [local](local/) | The Cluster and the Environment that let a namespace deploy to the cluster Kokumi runs in | Getting Started, Environments | every spec, through `framework.CreateNamespace` |
 | [getting-started](getting-started/) | A Helm chart, an Order that sets values, Manual promotion | Getting Started | `rendering_test.go`, `overrides_test.go`, `promotion_test.go`, `signing_test.go`, `lifecycle_test.go` |
 | [manifest-bundle](manifest-bundle/) | Pre-rendered manifests, patched by the Order | Getting Started | `rendering_test.go` |
 | [multi-file-manifests](multi-file-manifests/) | Manifests in several files, kept apart | Getting Started | `rendering_test.go` |
 | [kustomize](kustomize/) | A Kustomize source | Getting Started | `rendering_test.go` |
-| [promotion-pipeline](promotion-pipeline/) | dev, staging and prod stages with a soak, pinned images | Promotion Pipelines | `pipeline_test.go` |
+| [promotion-pipeline](promotion-pipeline/) | dev, staging and prod stages in Environments of their own, with a soak and pinned images | Promotion Pipelines, Environments | `pipeline_test.go` |
 | [approvals](approvals/) | Two required approvals from a group | Architecture: Approvals | `approvals_test.go` |
 | [image-vendoring](image-vendoring/) | Images copied into the bundled registry | Images | `images_test.go` |
 | [source-verification](source-verification/) | A keyless signature on the source | Source Verification | `source_verification_test.go` |
@@ -42,8 +45,13 @@ An example
 - explains itself in comments, since the docs show its files as they are.
 - uses Product and Order names that no other example uses, so that several
   examples fit into one namespace.
+- names the Environment of its Orders, `local` unless it shows Environments.
 - states in its `kustomization.yaml` what it needs beyond the namespace, such
-  as a Kitchen patch a cluster admin applies (`kitchen-patch.yaml`).
+  as a Kitchen patch a cluster admin applies (`kitchen-patch.yaml`), or the
+  Clusters and Environments of its `platform/` directory, a kustomization of
+  its own that an admin applies to the namespace with
+  `kubectl apply -n <namespace> -k examples/<example>/platform`, shown in the
+  docs with `{{< apply-example name="<example>/platform" >}}`.
 
 Show it in the docs with `{{< example file="<example>/<file>" >}}` and
 `{{< apply-example name="<example>" >}}`, and apply it in an e2e spec with

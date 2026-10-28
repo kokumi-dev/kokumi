@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
+	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/vulnerability"
 )
 
@@ -128,11 +129,11 @@ type OrderDTO struct {
 	Name            string            `json:"name"`
 	Namespace       string            `json:"namespace"`
 	Labels          map[string]string `json:"labels,omitempty"`
-	Environment     string            `json:"environment,omitempty"`
+	EnvironmentRef  EnvironmentRefDTO `json:"environmentRef"`
 	TargetNamespace string            `json:"targetNamespace,omitempty"`
-	// EffectiveTargetNamespace is the namespace the Order deploys into, and
-	// TargetNamespaceSource what sets it: order, product, or namespace, the
-	// Order's own.
+	// EffectiveTargetNamespace is the namespace the Order deploys into on
+	// every cluster, and TargetNamespaceSource what sets it: order, product,
+	// or namespace, the Order's own.
 	EffectiveTargetNamespace string              `json:"effectiveTargetNamespace"`
 	TargetNamespaceSource    string              `json:"targetNamespaceSource"`
 	ProductRef               ProductRefDTO       `json:"productRef"`
@@ -377,7 +378,7 @@ type CreateOrderRequest struct {
 	Namespace       string              `json:"namespace"`
 	Name            string              `json:"name"`
 	ProductRef      ProductRefDTO       `json:"productRef"`
-	Environment     string              `json:"environment,omitempty"`
+	EnvironmentRef  EnvironmentRefDTO   `json:"environmentRef"`
 	TargetNamespace string              `json:"targetNamespace,omitempty"`
 	Values          json.RawMessage     `json:"values,omitempty"`
 	Destination     *OCIDestinationDTO  `json:"destination,omitempty"`
@@ -392,9 +393,8 @@ type CreateOrderRequest struct {
 }
 
 // UpdateOrderRequest is the body for PUT /api/v1/orders/{namespace}/{name}.
-// The Product of an Order cannot be changed.
+// The Product and the Environment of an Order cannot be changed.
 type UpdateOrderRequest struct {
-	Environment     string              `json:"environment,omitempty"`
 	TargetNamespace string              `json:"targetNamespace,omitempty"`
 	Values          json.RawMessage     `json:"values,omitempty"`
 	Destination     *OCIDestinationDTO  `json:"destination,omitempty"`
@@ -429,12 +429,12 @@ type ServingDTO struct {
 	// DeployedVulnerabilities sums the latest scans of the deployed
 	// Preparation's images.
 	DeployedVulnerabilities *VulnerabilitySummaryDTO `json:"deployedVulnerabilities,omitempty"`
-	// ApplicationName is the Argo CD Application that deploys the Order, so
-	// that the naming rule lives only in internal/argocd.
-	ApplicationName string         `json:"applicationName"`
-	State           string         `json:"state"`
-	Conditions      []ConditionDTO `json:"conditions,omitempty"`
-	CreatedAt       *time.Time     `json:"createdAt,omitempty"`
+	// Clusters counts the clusters the Serving deploys to by the state of
+	// their deployment.
+	Clusters   *DeploymentClustersDTO `json:"clusters,omitempty"`
+	State      string                 `json:"state"`
+	Conditions []ConditionDTO         `json:"conditions,omitempty"`
+	CreatedAt  *time.Time             `json:"createdAt,omitempty"`
 }
 
 // DeploymentEntryDTO is the data-transfer representation of a
@@ -784,4 +784,56 @@ type ComparedFindingDTO struct {
 	vulnerability.Finding
 	// Image is the image of the Preparation that has it.
 	Image string `json:"image"`
+}
+
+// DeploymentTargetDTO is a cluster a Serving deploys to, with what Argo CD
+// reports on its deployment there.
+type DeploymentTargetDTO struct {
+	Cluster  string `json:"cluster"`
+	Server   string `json:"server,omitempty"`
+	Revision string `json:"revision,omitempty"`
+	// State is the reason of the target's Ready condition, such as Healthy,
+	// Progressing or Degraded.
+	State string `json:"state"`
+	// Ready reports whether the cluster runs the deployed Preparation
+	// healthily; false while it progresses or is held.
+	Ready   bool       `json:"ready"`
+	Message string     `json:"message,omitempty"`
+	Since   *time.Time `json:"since,omitempty"`
+	// ApplicationName is the Argo CD Application that deploys there.
+	ApplicationName string `json:"applicationName"`
+}
+
+// DeploymentClustersDTO counts the clusters a Serving deploys to by the
+// state of their deployment.
+type DeploymentClustersDTO struct {
+	Selected    int32 `json:"selected"`
+	Healthy     int32 `json:"healthy"`
+	Progressing int32 `json:"progressing"`
+	Degraded    int32 `json:"degraded"`
+	Held        int32 `json:"held"`
+}
+
+// EnvironmentRefDTO is the Environment, in the Order's namespace, an Order
+// deploys to.
+type EnvironmentRefDTO struct {
+	Name string `json:"name"`
+}
+
+// EnvironmentDTO is the data-transfer representation of an Environment: its
+// spec as the API has it, with what its status reports.
+type EnvironmentDTO struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	deliveryv1alpha1.EnvironmentSpec
+	// SelectedClusters and ReadyClusters count the Clusters of its
+	// namespace it selects, and those of them that are Ready.
+	SelectedClusters int32          `json:"selectedClusters"`
+	ReadyClusters    int32          `json:"readyClusters"`
+	State            string         `json:"state"`
+	Conditions       []ConditionDTO `json:"conditions,omitempty"`
+	// Ensured reports the Environment local Kokumi keeps in its own
+	// namespace, which comes back when deleted.
+	Ensured   bool       `json:"ensured,omitempty"`
+	CreatedAt *time.Time `json:"createdAt,omitempty"`
 }

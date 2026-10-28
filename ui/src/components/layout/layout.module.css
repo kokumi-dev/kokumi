@@ -172,6 +172,15 @@
   container-type: inline-size;
 }
 
+/* Below a table that shows only its first rows: how many, and more. */
+.tableMore {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 10px 16px;
+}
+
 /* Scrolls sideways only where the table is wider than its container. */
 .tableScroll {
   overflow-x: auto;

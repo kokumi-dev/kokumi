@@ -33,11 +33,8 @@ const (
 	// in its own namespace.
 	LabelServingNamespace = "delivery.kokumi.dev/serving-namespace"
 
-	// LabelEnvironment groups the Orders of a Product that form one
-	// environment of its promotion pipeline, such as the regional variants of
-	// int or prod. Users set it; the UI draws an environment as one column of
-	// the pipeline. It is metadata, not intent: changing it renders nothing.
-	LabelEnvironment = "delivery.kokumi.dev/environment"
+	// LabelCluster names the Cluster an Argo CD Application deploys to.
+	LabelCluster = "delivery.kokumi.dev/cluster"
 
 	// LabelInCluster marks a Cluster that connects in-cluster, so that
 	// Environments, such as local, select the cluster Kokumi runs in by
@@ -54,10 +51,11 @@ const (
 	AnnotationCommitMessage = "delivery.kokumi.dev/commit-message"
 
 	// AnnotationAllowedOrder marks an Argo CD Application as opt-in to being
-	// managed (updated) by a kokumi Order. The annotation value is the name of
-	// the Order that is allowed to update the Application. Kokumi sets this
-	// annotation when it creates an Application, and refuses to update any
-	// pre-existing Application that does not carry a matching value.
+	// managed (updated and deleted) by a kokumi Order. The annotation value
+	// is <namespace>/<name> of the Order that is allowed to manage the
+	// Application. Kokumi sets this annotation when it creates an
+	// Application, and refuses to change or delete any pre-existing
+	// Application that does not carry a matching value.
 	AnnotationAllowedOrder = "delivery.kokumi.dev/allowed-order"
 )
 
@@ -77,6 +75,9 @@ const (
 	// Preparations every Order of a Product rendered from one Product change.
 	FieldProductRevision = "spec.productRevision"
 
+	// FieldEnvironmentName selects Orders by spec.environmentRef.name.
+	FieldEnvironmentName = "spec.environmentRef.name"
+
 	// FieldKubeconfigSecretName indexes Clusters by the Secret that holds
 	// their kubeconfig.
 	FieldKubeconfigSecretName = "spec.kubeconfig.secretRef.name"
@@ -85,9 +86,9 @@ const (
 // Finalizer names registered on kokumi-managed resources.
 const (
 	// Finalizer is added to Orders, Preparations, Recipes, Servings,
-	// Environments and Clusters. The Serving controller deletes the Serving's
-	// Argo CD Application, which lives in another namespace, before it
-	// removes it.
+	// Environments and Clusters. The Serving controller deletes the
+	// Serving's Argo CD Applications, which live in another namespace,
+	// before it removes it.
 	Finalizer = "delivery.kokumi.dev/finalizer"
 
 	// FinalizerProductProtection keeps a Product from being deleted while

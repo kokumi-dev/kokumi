@@ -20,6 +20,7 @@
     "healthyTime": "2026-11-04T10:00:00Z",
     "targets": [
       {
+        "cluster": "in-cluster",
         "server": "https://kubernetes.default.svc",
         "namespace": "shop"
       }

@@ -194,7 +194,7 @@ var _ = Describe("Scan Controller", func() {
 		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Order{
 			Name:      scanOrderName,
 			Namespace: scanNamespace,
-			Spec:      deliveryv1alpha1.OrderSpec{ProductRef: deliveryv1alpha1.ProductRef{Name: scanProductName}},
+			Spec:      deliveryv1alpha1.OrderSpec{EnvironmentRef: localEnvironment, ProductRef: deliveryv1alpha1.ProductRef{Name: scanProductName}},
 		})).To(Succeed())
 
 		prep := &deliveryv1alpha1.Preparation{

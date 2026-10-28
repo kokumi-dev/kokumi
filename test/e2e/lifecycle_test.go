@@ -66,7 +66,7 @@ var _ = Describe("Order deletion", Label("lifecycle"), func() {
 
 		BeforeAll(func() {
 			ns = framework.CreateNamespace("foreign-app")
-			name := framework.ApplicationKey(ns, "podinfo").Name
+			name := framework.ApplicationKey(ns, "podinfo", framework.InCluster).Name
 			framework.ApplyTestdata(framework.ArgoCDNamespace, "lifecycle/foreign-application.yaml",
 				map[string]string{"NAMESPACE": ns, "NAME": name})
 			DeferCleanup(func() {
@@ -129,7 +129,7 @@ var _ = Describe("Manager restart", Label("lifecycle"), Serial, func() {
 				return app.GetUID(), nil
 			}, 45*time.Second, time.Second).Should(Equal(uid), "the Application is neither deleted nor replaced")
 			Expect(framework.Serving(ns, "podinfo")()).NotTo(
-				framework.HaveConditionReason(deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonArgoCDNotInstalled))
+				framework.HaveConditionReason(deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonProjectNotFound))
 		})
 	})
 })

@@ -1,5 +1,5 @@
 # An Environment of the cluster Kokumi runs in whose AppProject does not
-# admit its namespace (see projects.yaml).
+# admit its namespace (see projects.yaml), and an Order for it.
 apiVersion: delivery.kokumi.dev/v1alpha1
 kind: Environment
 metadata:
@@ -12,3 +12,26 @@ spec:
     type: ArgoCD
     argoCD:
       project: ${NAMESPACE}-restricted
+---
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Product
+metadata:
+  name: podinfo-restricted
+spec:
+  source:
+    url: oci://ghcr.io/stefanprodan/charts/podinfo
+    version: "6.14.1"
+  render:
+    helm: {}
+---
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Order
+metadata:
+  name: podinfo-restricted
+spec:
+  productRef:
+    name: podinfo-restricted
+  environmentRef:
+    name: restricted
+  promotion:
+    mode: Automatic

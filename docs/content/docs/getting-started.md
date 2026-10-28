@@ -78,11 +78,32 @@ what the Product's `overrides` allow (see
 Order pushes its Preparations to the bundled registry, below its namespace,
 unless it names another `spec.destination`.
 
-Apply both to a new namespace, straight from the repository:
+The Order deploys to the Environment `local` of its namespace: the cluster
+Kokumi runs in. Kokumi keeps one in its own namespace, `kokumi`. Give a new
+namespace its own, and let Argo CD's default project accept the namespace's
+Environments in its `sourceNamespaces` (see
+[Environments](../operator-guide/environments/#who-may-deploy-where)). A
+fresh Argo CD's default project has none, so set the list:
 
 ```bash
 kubectl create namespace shop
+kubectl -n argocd patch appproject default --type=merge -p '{"spec":{"sourceNamespaces":["shop"]}}'
 ```
+
+Where the project lists namespaces already, add `shop` instead of replacing
+them:
+
+```bash
+kubectl -n argocd patch appproject default --type=json \
+  -p '[{"op":"add","path":"/spec/sourceNamespaces/-","value":"shop"}]'
+```
+
+A development cluster set up with `make argocd` admits every namespace
+(`["*"]`) and needs neither.
+
+{{< apply-example name="local" >}}
+
+Then apply both, straight from the repository:
 
 {{< apply-example name="getting-started" >}}
 
@@ -193,12 +214,8 @@ its promotion checks, and its approvals. To require reviews, add
 Once activated, Kokumi creates an Argo CD `Application` in the `argocd`
 namespace and Argo CD syncs the manifests into the cluster. The Application
 is named `kokumi-<namespace>-<order>-<hash>`, where the hash tells apart
-Orders whose names hyphens would join. To find it from the command line:
-
-```bash
-kubectl -n argocd get applications \
-  -l delivery.kokumi.dev/serving-namespace=<namespace>,delivery.kokumi.dev/serving=<order>
-```
+Orders whose names hyphens would join, and the clusters an Order deploys to;
+see [Deploy to Several Clusters](../user-guide/environments/).
 
 > **Opt-in update protection.** Kokumi will only update or delete an Argo CD
 > `Application` it did not create if the `Application` is annotated with
@@ -207,17 +224,18 @@ kubectl -n argocd get applications \
 > this annotation is added automatically. If a pre-existing `Application` of
 > that name is missing the annotation (or has a different value), Kokumi
 > refuses to modify it and surfaces the failure on the Serving's status
-> condition. Deleting the Serving deletes its `Application` only if it
-> carries the matching annotation; any other `Application` is kept.
+> condition with reason `OptInRequired` for its cluster. Deleting the Serving
+> deletes its `Application` only if it carries the matching annotation; any
+> other `Application` is kept.
 
 ```bash
 kubectl get servings -n shop
 # NAME      ORDER     TARGET                 READY   REASON     APPROVED              VERIFIED             AGE
 # podinfo   podinfo   podinfo-d7ce0c46a686   True    Deployed   ApprovalNotRequired   SignaturesVerified   10s
 
-kubectl get applications -n argocd
-# NAME      SYNC STATUS   HEALTH STATUS
-# podinfo   Synced        Healthy
+kubectl get applications -n argocd -l delivery.kokumi.dev/serving=podinfo,delivery.kokumi.dev/serving-namespace=shop
+# NAME                              SYNC STATUS   HEALTH STATUS
+# kokumi-shop-podinfo-3f9a1c2e      Synced        Healthy
 ```
 
 To roll back, promote any previous Preparation. No re-rendering required.

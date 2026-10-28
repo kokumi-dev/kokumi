@@ -60,8 +60,10 @@ type environmentAdmitter interface {
 }
 
 // EnvironmentReconciler counts the Clusters of its namespace an Environment
-// selects, and reports whether it selects any and its engine admits it. It
-// keeps the Environment local in Kokumi's own namespace.
+// selects, and reports whether Orders can deploy to it: whether it selects
+// any, and its engine admits it. The Servings decide that again whenever
+// they deploy; the Environment's status is for people. It keeps the
+// Environment local in Kokumi's own namespace.
 type EnvironmentReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -81,7 +83,7 @@ type EnvironmentReconciler struct {
 // +kubebuilder:rbac:groups=argoproj.io,resources=appprojects,verbs=get;list;watch
 
 // Reconcile resolves the Clusters of the Environment and reports whether
-// its engine admits it.
+// Orders can deploy to it.
 func (r *EnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, err error) {
 	logger := log.FromContext(ctx)
 	logger.Info("Reconciling Environment", "namespace", req.Namespace, "name", req.Name)
@@ -122,8 +124,8 @@ func (r *EnvironmentReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 }
 
 // reconcileEnvironment counts the Clusters the Environment selects and
-// records in Ready whether it selects any and its engine admits it. Each
-// Cluster reports on its own whether Kokumi reaches it.
+// records in Ready whether Orders can deploy to it. Each Cluster reports on
+// its own whether Orders can deploy to it.
 func (r *EnvironmentReconciler) reconcileEnvironment(ctx context.Context, env *deliveryv1alpha1.Environment) error {
 	clusters := &deliveryv1alpha1.ClusterList{}
 	if err := r.List(ctx, clusters, client.InNamespace(env.Namespace), client.UnsafeDisableDeepCopy); err != nil {
@@ -171,7 +173,7 @@ func (r *EnvironmentReconciler) admitter(env *deliveryv1alpha1.Environment) envi
 }
 
 // reconcileDelete removes the finalizer: Environments own nothing outside
-// their status.
+// their status. The Servings deploying to one stop once it is gone.
 func (r *EnvironmentReconciler) reconcileDelete(ctx context.Context, env *deliveryv1alpha1.Environment) (ctrl.Result, error) {
 	log.FromContext(ctx).Info("Handling deletion of Environment")
 	if controllerutil.RemoveFinalizer(env, deliveryv1alpha1.Finalizer) {

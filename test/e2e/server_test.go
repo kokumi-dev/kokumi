@@ -38,7 +38,8 @@ var _ = Describe("API server", Label("server"), Serial, func() {
 
 		order := func(name string) map[string]any {
 			return map[string]any{
-				"namespace": ns, "name": name, "productRef": map[string]string{"name": "podinfo"}, "mode": "Manual",
+				framework.KeyNamespace: ns, framework.KeyName: name, "productRef": map[string]string{framework.KeyName: "podinfo"},
+				"environmentRef": map[string]string{framework.KeyName: "local"}, "mode": "Manual",
 			}
 		}
 

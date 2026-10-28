@@ -1,5 +1,5 @@
 import { Outlet, useParams } from 'react-router'
-import { useServings } from '../../hooks/useServings'
+import { useServingTargets, useServings } from '../../hooks/useServings'
 import { argoAppURL, useArgoCDBase } from '../../hooks/useArgoCDBase'
 import PageHeader from '../../components/layout/PageHeader'
 import ResourceNotFound from '../../components/layout/ResourceNotFound'
@@ -16,6 +16,7 @@ export default function ServingLayout() {
   const argoBase = useArgoCDBase()
 
   const serving = servings?.find((s) => s.namespace === namespace && s.name === name)
+  const targets = useServingTargets(serving)
   if (!serving) {
     return (
       <ResourceNotFound
@@ -29,8 +30,10 @@ export default function ServingLayout() {
     )
   }
 
-  const argoURL = argoAppURL(argoBase, serving.applicationName)
-  const ctx: ServingContext = { serving }
+  // A Serving of one cluster links its Application here; the Overview lists every cluster's.
+  const only = targets.data?.length === 1 ? targets.data[0] : undefined
+  const argoURL = only && argoAppURL(argoBase, only.applicationName)
+  const ctx: ServingContext = { serving, targets, argoBase }
 
   return (
     <div className={layout.page}>

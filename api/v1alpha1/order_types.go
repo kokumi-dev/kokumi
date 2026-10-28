@@ -276,14 +276,33 @@ type OrderSpec struct {
 	// +optional
 	Promotion *PromotionSpec `json:"promotion,omitempty"`
 
-	// targetNamespace is the namespace the Order deploys into, overriding
-	// the Product's. When neither sets it, it is the Order's namespace. It
-	// is part of what is rendered: Helm renders into it, and resources
-	// without a namespace are deployed there.
+	// environmentRef references the Environment, in the Order's namespace,
+	// the Order deploys to: every cluster it selects. It decides where
+	// Preparations run, not what they are. It cannot be changed after
+	// creation, so that an Order never reaches an Environment without
+	// passing its gates: another Environment is another Order.
+	// +required
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="environmentRef is immutable: create a new Order to deploy to another Environment"
+	EnvironmentRef EnvironmentRef `json:"environmentRef"`
+
+	// targetNamespace is the namespace the Order deploys into on every
+	// cluster of its Environment, overriding the Product's. When neither
+	// sets it, it is the Order's namespace. It is part of what is
+	// rendered: Helm renders into it, and resources without a namespace
+	// are deployed there.
 	// +optional
 	// +kubebuilder:validation:MaxLength=63
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	TargetNamespace string `json:"targetNamespace,omitempty"`
+}
+
+// EnvironmentRef references the Environment an Order deploys to.
+type EnvironmentRef struct {
+	// name is the name of the Environment, in the Order's namespace.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	Name string `json:"name"`
 }
 
 // PromotionSpec defines how new Preparations are promoted to active Servings.
@@ -468,13 +487,16 @@ type OrderStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:categories=kokumi
+// +kubebuilder:validation:XValidation:rule="self.metadata.name.size() <= 63",message="the name of an Order is at most 63 characters: it is a label value of its Preparations and Applications"
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].status`
 // +kubebuilder:printcolumn:name="Reason",type=string,JSONPath=`.status.conditions[?(@.type=='Ready')].reason`
 // +kubebuilder:printcolumn:name="Product",type=string,JSONPath=`.spec.productRef.name`
+// +kubebuilder:printcolumn:name="Environment",type=string,JSONPath=`.spec.environmentRef.name`
 // +kubebuilder:printcolumn:name="Latest Preparation",type=string,JSONPath=`.status.latestPreparationName`
 // +kubebuilder:printcolumn:name="Promotion",type=string,JSONPath=`.spec.promotion.mode`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 // +kubebuilder:selectablefield:JSONPath=`.spec.productRef.name`
+// +kubebuilder:selectablefield:JSONPath=`.spec.environmentRef.name`
 // +kubebuilder:validation:XValidation:rule="!has(self.spec.promotion) || !has(self.spec.promotion.after) || self.spec.promotion.after.all(s, s.order != self.metadata.name)",message="an Order cannot run after itself"
 
 // Order is the Schema for the orders API.

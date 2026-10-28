@@ -42,6 +42,7 @@ const (
 	eventProducts     = "products"
 	eventRegistries   = "registries"
 	eventRepositories = "repositories"
+	eventEnvironments = "environments"
 	// eventHeartbeat carries no data; it only shows the stream is alive.
 	eventHeartbeat = "heartbeat"
 )
@@ -143,6 +144,7 @@ func startK8sWatcher(
 	productInformer := informers.product
 	registryInformer := informers.registry
 	repositoryInformer := informers.repository
+	environmentInformer := informers.environment
 	kitchenInformer := informers.kitchen
 	secretInformer := informers.secret
 	saInformer := informers.sa
@@ -200,6 +202,12 @@ func startK8sWatcher(
 			return
 		}
 
+		environmentList := &deliveryv1alpha1.EnvironmentList{}
+		if err := k8sCache.List(ctx, environmentList); err != nil {
+			logger.Error(err, "Failed to list Environments from cache")
+			return
+		}
+
 		// Lists are published before the lists that refer to them: Orders name
 		// their Product and active Preparation; Repositories, Products and
 		// Orders name Registries. A client that applies events in arrival
@@ -211,6 +219,7 @@ func startK8sWatcher(
 		}{
 			{eventRegistries, registriesToDTO(registryList.Items)},
 			{eventRepositories, repositoriesToDTO(repositoryList.Items)},
+			{eventEnvironments, environmentsToDTO(environmentList.Items, installNamespace)},
 			{eventProducts, productsToDTO(productList.Items)},
 			{eventPreparations, enrichPreparations(prepList.Items, servingList.Items)},
 			{eventServings, servingsToDTO(servingList.Items)},
@@ -255,7 +264,7 @@ func startK8sWatcher(
 
 	if err := registerWatchers(
 		orderInformer, prepInformer, servingInformer, productInformer, registryInformer, repositoryInformer,
-		kitchenInformer, secretInformer, saInformer,
+		environmentInformer, kitchenInformer, secretInformer, saInformer,
 		scheduleRefresh, kitchenHandler, secretHandler,
 	); err != nil {
 		return nil, err
@@ -340,7 +349,7 @@ func newAuthSecretHandler(mgr *authManager, ctx context.Context, isAuthSecret fu
 // registerWatchers wires the SSE-refresh handler onto resource informers and the
 // auth handlers onto Kitchen/Secret informers (split out to keep startK8sWatcher small).
 func registerWatchers(
-	order, prep, serving, product, registryInformer, repositoryInformer, kitchen, secret, sa cache.Informer,
+	order, prep, serving, product, registryInformer, repositoryInformer, environment, kitchen, secret, sa cache.Informer,
 	scheduleRefresh func(),
 	kitchenHandler, secretHandler toolscache.ResourceEventHandlerFuncs,
 ) error {
@@ -363,6 +372,7 @@ func registerWatchers(
 		{product, sseHandler, "Product"},
 		{registryInformer, sseHandler, "Registry"},
 		{repositoryInformer, sseHandler, "Repository"},
+		{environment, sseHandler, "Environment"},
 		{kitchen, kitchenHandler, "Kitchen"},
 		{secret, secretHandler, "Secret"},
 		{sa, noopHandler, "ServiceAccount"},
@@ -376,15 +386,16 @@ func registerWatchers(
 
 // informers bundles the informers the server watches.
 type informers struct {
-	order      cache.Informer
-	prep       cache.Informer
-	serving    cache.Informer
-	product    cache.Informer
-	registry   cache.Informer
-	repository cache.Informer
-	kitchen    cache.Informer
-	secret     cache.Informer
-	sa         cache.Informer
+	order       cache.Informer
+	prep        cache.Informer
+	serving     cache.Informer
+	product     cache.Informer
+	registry    cache.Informer
+	repository  cache.Informer
+	environment cache.Informer
+	kitchen     cache.Informer
+	secret      cache.Informer
+	sa          cache.Informer
 }
 
 // getInformers registers and returns the informers the server needs (split out to keep startK8sWatcher small).
@@ -408,6 +419,9 @@ func getInformers(ctx context.Context, c cache.Cache) (informers, error) {
 	}
 	if out.repository, err = c.GetInformer(ctx, &deliveryv1alpha1.Repository{}); err != nil {
 		return out, fmt.Errorf("getting Repository informer: %w", err)
+	}
+	if out.environment, err = c.GetInformer(ctx, &deliveryv1alpha1.Environment{}); err != nil {
+		return out, fmt.Errorf("getting Environment informer: %w", err)
 	}
 	if out.kitchen, err = c.GetInformer(ctx, &deliveryv1alpha1.Kitchen{}); err != nil {
 		return out, fmt.Errorf("getting Kitchen informer: %w", err)

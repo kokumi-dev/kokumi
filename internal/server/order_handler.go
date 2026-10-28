@@ -8,7 +8,6 @@ import (
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/namespace"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -109,29 +108,29 @@ func handleCreateOrder(deps *apiDeps) http.HandlerFunc {
 			respondError(w, http.StatusBadRequest, "productRef.name is required")
 			return
 		}
+		if req.EnvironmentRef.Name == "" {
+			respondError(w, http.StatusBadRequest, "environmentRef.name is required")
+			return
+		}
 
 		order := &deliveryv1alpha1.Order{
 			Name:      req.Name,
 			Namespace: req.Namespace,
 			Spec: deliveryv1alpha1.OrderSpec{
-				ProductRef:      deliveryv1alpha1.ProductRef{Name: req.ProductRef.Name},
-				TargetNamespace: req.TargetNamespace,
-				Values:          valuesFromDTO(req.Values),
-				Destination:     destinationFromDTO(req.Destination),
-				Patches:         patchesFromDTO(req.Patches),
-				Edits:           patchesFromDTO(req.Edits),
+				ProductRef:  deliveryv1alpha1.ProductRef{Name: req.ProductRef.Name},
+				Values:      valuesFromDTO(req.Values),
+				Destination: destinationFromDTO(req.Destination),
+				Patches:     patchesFromDTO(req.Patches),
+				Edits:       patchesFromDTO(req.Edits),
 				Promotion: &deliveryv1alpha1.PromotionSpec{
 					Mode:      deliveryv1alpha1.PromotionMode(req.Mode),
 					Approvals: approvalPolicyFromDTO(req.Approvals),
 					After:     upstreamStagesFromDTO(req.After),
 					Checks:    checksFromDTO(req.Checks),
 				},
+				EnvironmentRef:  deliveryv1alpha1.EnvironmentRef{Name: req.EnvironmentRef.Name},
+				TargetNamespace: req.TargetNamespace,
 			},
-		}
-
-		if err := setEnvironment(order, req.Environment); err != nil {
-			respondError(w, http.StatusBadRequest, err.Error())
-			return
 		}
 
 		if req.CommitMessage != nil {
@@ -189,10 +188,6 @@ func handleUpdateOrder(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		if err := setEnvironment(order, req.Environment); err != nil {
-			respondError(w, http.StatusBadRequest, err.Error())
-			return
-		}
 		order.Spec.TargetNamespace = req.TargetNamespace
 		order.Spec.Values = valuesFromDTO(req.Values)
 		order.Spec.Destination = destinationFromDTO(req.Destination)
@@ -220,23 +215,6 @@ func handleUpdateOrder(deps *apiDeps) http.HandlerFunc {
 
 		respondJSON(w, http.StatusOK, orderToDTO(*order, "", productOfOrder(r, uc, order)))
 	}
-}
-
-// setEnvironment sets the environment label of order to environment, or
-// removes it when environment is empty, and leaves the other labels alone.
-func setEnvironment(order *deliveryv1alpha1.Order, environment string) error {
-	if environment == "" {
-		delete(order.Labels, deliveryv1alpha1.LabelEnvironment)
-		return nil
-	}
-	if errs := validation.IsValidLabelValue(environment); len(errs) > 0 {
-		return fmt.Errorf("environment %q is not a valid label value: %s", environment, errs[0])
-	}
-	if order.Labels == nil {
-		order.Labels = map[string]string{}
-	}
-	order.Labels[deliveryv1alpha1.LabelEnvironment] = environment
-	return nil
 }
 
 // UpdateOrderEditsRequest is the body for PUT /api/v1/orders/{namespace}/{name}/edits.

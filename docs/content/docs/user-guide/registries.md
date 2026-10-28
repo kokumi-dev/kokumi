@@ -213,8 +213,8 @@ it.
 
 A Registry lends its credentials to every Product and Order in its namespace
 that lists it, and Kokumi reads them with its own identity. The admission
-policy `registry-secret-access` therefore only admits a Registry that names a
-Secret its author may `get`. Changing only other fields of an existing
+policy `kokumi-registry-secret-access` therefore only admits a Registry that
+names a Secret its author may `get`. Changing only other fields of an existing
 Registry needs no Secret access; changing its `url` or `scheme` does, because
 both send the credentials somewhere else.
 

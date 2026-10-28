@@ -3,6 +3,7 @@ import type { Serving } from '../../api/types'
 import { useServings } from '../../hooks/useServings'
 import { useOrders } from '../../hooks/useOrders'
 import { servingQueue } from '../../utils/promotion'
+import { targetsSummary, targetsTitle } from '../../utils/clusters'
 import { stateTone } from '../../utils/state'
 import { matchesFilter, useFilterParam } from '../../hooks/useFilterParam'
 import PageHeader from '../../components/layout/PageHeader'
@@ -83,6 +84,13 @@ export default function ServingsList() {
                 title: (s) => (manual(s) && servingQueue(s)?.message) || s.targetPreparation || s.desiredPreparation,
                 truncate: true,
                 cell: (s) => syncLabel(s, manual(s)),
+              },
+              {
+                header: 'Clusters',
+                width: '14%',
+                truncate: true,
+                title: (s) => targetsTitle(s.clusters),
+                cell: (s) => targetsSummary(s.clusters) ?? <span className={layout.muted}>—</span>,
               },
               {
                 header: 'Findings',

@@ -1,12 +1,17 @@
 import { Link } from 'react-router'
-import type { Condition } from '../../api/types'
+import type { Condition, DeploymentTarget } from '../../api/types'
+import { argoAppURL } from '../../hooks/useArgoCDBase'
 import Section from '../../components/layout/Section'
 import PropertyList from '../../components/layout/PropertyList'
 import ConditionList from '../../components/layout/ConditionList'
+import DataTable from '../../components/layout/DataTable'
+import EmptyState from '../../components/layout/EmptyState'
+import StatusIndicator from '../../components/shared/StatusIndicator'
 import RelativeTime from '../../components/shared/RelativeTime'
 import VulnerabilityCounts from '../../components/vulnerability/VulnerabilityCounts'
 import { paths } from '../../routes/paths'
-import { formatDate } from '../../utils/format'
+import { formatDate, shortDigest } from '../../utils/format'
+import { targetTone, unhealthyCounts } from '../../utils/clusters'
 import { deployedEntry, servingQueue, shortRevision } from '../../utils/promotion'
 import { useOrders } from '../../hooks/useOrders'
 import { useServingContext } from './servingContext'
@@ -19,7 +24,7 @@ function gateText(condition: Condition | undefined, passed: string): string {
 }
 
 export default function ServingOverview() {
-  const { serving } = useServingContext()
+  const { serving, targets, argoBase } = useServingContext()
   const orders = useOrders()
   const manual = orders?.find((o) => o.namespace === serving.namespace && o.name === serving.order)?.mode === 'Manual'
   const queued = manual ? servingQueue(serving) : undefined
@@ -31,6 +36,8 @@ export default function ServingOverview() {
   const verified = condition('Verified')
   const upstream = condition('UpstreamDeployed')
   const checks = condition('ChecksPassed')
+  const counts = serving.clusters
+  const unhealthy = counts ? unhealthyCounts(counts) : ''
 
   const prepLink = (prepName?: string) =>
     prepName ? (
@@ -87,6 +94,83 @@ export default function ServingOverview() {
             { label: 'Created', value: formatDate(serving.createdAt) },
           ]}
         />
+      </Section>
+
+      <Section
+        title="Clusters"
+        description={
+          counts?.selected
+            ? `${counts.healthy} of ${counts.selected} ${counts.selected === 1 ? 'cluster runs' : 'clusters run'} ${serving.deployedPreparation ?? 'the deployed Preparation'} healthily${unhealthy ? `; ${unhealthy}` : ''}. One Argo CD Application per cluster.`
+            : 'One Argo CD Application per cluster, and what Argo CD reports on each'
+        }
+        flush
+      >
+        {targets.error ? (
+          <EmptyState text={`Could not read the clusters: ${targets.error}`} />
+        ) : targets.data === null ? (
+          <EmptyState text="Loading…" />
+        ) : targets.data.length === 0 ? (
+          <EmptyState text="No clusters yet: they are listed once a Preparation is promoted." />
+        ) : (
+          <DataTable<DeploymentTarget>
+            rows={targets.data}
+            rowKey={(t) => t.cluster}
+            columns={[
+              {
+                header: 'Cluster',
+                width: '24%',
+                cell: (t) => (
+                  <>
+                    <span title={t.cluster}>{t.cluster}</span>
+                    {t.server && <span className={layout.secondaryText} title={t.server}>{t.server}</span>}
+                  </>
+                ),
+              },
+              {
+                header: 'State',
+                wrap: true,
+                cell: (t) => (
+                  <>
+                    <StatusIndicator state={t.state} tone={targetTone(t)} />
+                    {t.message && <span className={layout.secondaryText}>{t.message}</span>}
+                  </>
+                ),
+              },
+              {
+                header: 'Revision',
+                width: '180px',
+                title: (t) => t.revision,
+                cell: (t) =>
+                  t.revision ? (
+                    <span className={layout.mono} title={t.revision}>
+                      {shortDigest(t.revision)}
+                      {serving.deployedDigest && t.revision !== serving.deployedDigest && <span className={layout.muted}> (previous)</span>}
+                    </span>
+                  ) : (
+                    <span className={layout.muted}>—</span>
+                  ),
+              },
+              { header: 'Since', width: '110px', cell: (t) => <RelativeTime iso={t.since} /> },
+              {
+                header: <span className={layout.visuallyHidden}>Argo CD</span>,
+                width: '120px',
+                alignEnd: true,
+                truncate: true,
+                title: (t) => t.applicationName,
+                cell: (t) => {
+                  const url = argoAppURL(argoBase, t.applicationName)
+                  return url ? (
+                    <a className={layout.inlineLink} href={url} target="_blank" rel="noopener noreferrer" aria-label={`Open ${t.applicationName} in Argo CD`}>
+                      Argo CD ↗
+                    </a>
+                  ) : (
+                    <span className={`${layout.mono} ${layout.muted}`}>{t.applicationName}</span>
+                  )
+                },
+              },
+            ]}
+          />
+        )}
       </Section>
 
       <Section title="Conditions">

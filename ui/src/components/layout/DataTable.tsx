@@ -1,6 +1,6 @@
 import { Fragment, useId, useState, type MouseEvent, type ReactNode } from 'react'
 import { useNavigate } from 'react-router'
-import { Chevron, IconButton } from '../ui'
+import { Button, Chevron, IconButton } from '../ui'
 import styles from './layout.module.css'
 
 export interface Column<T> {
@@ -40,6 +40,9 @@ export interface RowExpansion<T> {
   connected?: boolean
 }
 
+/** How many rows a table shows at first, and adds per "Show more". */
+const defaultPageSize = 100
+
 interface Props<T> {
   rows: T[]
   columns: Column<T>[]
@@ -51,15 +54,23 @@ interface Props<T> {
   /** Highlights the selected row. */
   isRowSelected?: (row: T) => boolean
   expand?: RowExpansion<T>
+  /**
+   * How many rows it shows at first, and adds per "Show more", so that a
+   * list of thousands does not render all of them at once.
+   */
+  pageSize?: number
 }
 
-export default function DataTable<T>({ rows, columns, rowKey, rowHref, onRowClick, isRowSelected, expand }: Props<T>) {
+export default function DataTable<T>({ rows, columns, rowKey, rowHref, onRowClick, isRowSelected, expand, pageSize = defaultPageSize }: Props<T>) {
   const navigate = useNavigate()
   const regionId = useId()
   // Rows the user has just opened. Their open animations run only while they
   // are listed here, so React re-inserting a row's nodes when the rows change
   // order does not replay them.
   const [opening, setOpening] = useState<ReadonlySet<string>>(() => new Set())
+  const [shown, setShown] = useState(pageSize)
+  const visible = rows.length > shown ? rows.slice(0, shown) : rows
+  const more = Math.min(pageSize, rows.length - visible.length)
 
   function setRowOpening(key: string, on: boolean) {
     setOpening((prev) => {
@@ -95,7 +106,7 @@ export default function DataTable<T>({ rows, columns, rowKey, rowHref, onRowClic
             </tr>
           </thead>
           {/* Each row has its own body, so the rows it opens form the next one. */}
-          {rows.map((row, index) => {
+          {visible.map((row, index) => {
             const key = rowKey(row)
             const open = expand?.isOpen(row) ?? false
             const animate = open && opening.has(key)
@@ -158,6 +169,12 @@ export default function DataTable<T>({ rows, columns, rowKey, rowHref, onRowClic
           })}
         </table>
       </div>
+      {more > 0 && (
+        <div className={styles.tableMore}>
+          <span className={styles.muted}>Showing {visible.length} of {rows.length}</span>
+          <Button variant="ghost" size="sm" onClick={() => setShown((n) => n + pageSize)}>Show {more} more</Button>
+        </div>
+      )}
     </div>
   )
 }

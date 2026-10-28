@@ -37,7 +37,7 @@ func TestRecordVerifier(t *testing.T) {
 	h := deployed(nil, candidate(app1, revision1), t0, record1)
 	h, _ = h.Observe(Observation{Revision: h[0].Digest, Health: HealthHealthy}, t0.Add(time.Minute))
 	e := h[0]
-	record, err := PushDeployment(ctx, client, signer, stagingKey, e, []Target{{Server: "https://kubernetes.default.svc", Namespace: "shop"}})
+	record, err := PushDeployment(ctx, client, signer, stagingKey, e, []Target{{Cluster: "in-cluster", Server: "https://kubernetes.default.svc", Namespace: "shop"}})
 	require.NoError(t, err)
 	e.DeploymentRecord = record
 
