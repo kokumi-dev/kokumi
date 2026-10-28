@@ -9,10 +9,23 @@ its namespace: a group of clusters an admin set up. It deploys every
 Preparation it promotes to each cluster of the Environment, through an Argo CD
 Application per cluster.
 
-Every example's Order names one, `local` unless it shows Environments, as
-the getting-started Order does:
+The multi-cluster example deploys podinfo to the Environment `edge` of the
+workspace `platform`. An admin registers the clusters and creates the
+Environment in the namespace first; see
+[Clusters](../../operator-guide/clusters/):
 
-{{< example file="getting-started/order.yaml" >}}
+{{< tabs >}}
+{{< tab name="order.yaml" >}}
+{{< example file="multi-cluster/order.yaml" >}}
+{{< /tab >}}
+{{< tab name="product.yaml" >}}
+{{< example file="multi-cluster/product.yaml" >}}
+{{< /tab >}}
+{{< /tabs >}}
+
+Apply it to the same namespace:
+
+{{< apply-example name="multi-cluster" namespace="platform" >}}
 
 ## Where an Order deploys
 
@@ -41,7 +54,8 @@ stages of other Environments first; see
 An Order deploys into its **target namespace** on every cluster:
 
 1. its own `spec.targetNamespace`, if set;
-2. else its Product's `spec.targetNamespace`, the application's home;
+2. else its Product's `spec.targetNamespace`, the application's home, such as
+   `podinfo` in the example;
 3. else the Order's namespace.
 
 The target namespace is part of what is rendered: Helm renders into it, and
@@ -63,12 +77,12 @@ healthy cluster is only counted, so that the status stays small however many
 clusters there are; its Argo CD Application says the rest:
 
 ```bash
-kubectl get serving podinfo -n <namespace> -o wide
-# NAME      ORDER     ...   CLUSTERS   HEALTHY   READY   REASON     ...
-# podinfo   podinfo   ...   1          1         True    Deployed   ...
-kubectl get serving podinfo -n <namespace> \
+kubectl get serving podinfo-edge -n <namespace> -o wide
+# NAME           ORDER          ...   CLUSTERS   HEALTHY   READY   REASON     ...
+# podinfo-edge   podinfo-edge   ...   2          2         True    Deployed   ...
+kubectl get serving podinfo-edge -n <namespace> \
   -o jsonpath='{range .status.targets[*]}{.cluster}{"\t"}{.conditions[0].reason}{"\t"}{.revision}{"\n"}{end}'
-kubectl -n argocd get applications -l delivery.kokumi.dev/serving=podinfo,delivery.kokumi.dev/serving-namespace=<namespace>
+kubectl -n argocd get applications -l delivery.kokumi.dev/serving=podinfo-edge,delivery.kokumi.dev/serving-namespace=<namespace>
 ```
 
 - **A Preparation is deployed** (`Ready=True`, reason `Deployed`) once every
@@ -102,7 +116,7 @@ The kubelet of every cluster pulls the images of what runs there. The bundled
 registry is reachable only from the cluster Kokumi runs in, so an Order whose
 images it vendors into the bundled registry deploys to no other cluster: the
 Serving lists those clusters with reason `RegistryUnreachable`. Pin images
-where they are published, or vendor them into a
+where they are published, as the example does, or vendor them into a
 registry every cluster reaches; see [Container Images](../images/).
 
 ## In the UI

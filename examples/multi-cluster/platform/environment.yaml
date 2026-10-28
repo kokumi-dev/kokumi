@@ -1,0 +1,16 @@
+# The Clusters of this namespace labeled fleet: edge, deployed to through
+# Argo CD's project default. Outside Kokumi's own namespace, the project must
+# admit the namespace in its sourceNamespaces.
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Environment
+metadata:
+  name: edge
+spec:
+  description: Edge clusters
+  clusterSelector:
+    matchLabels:
+      fleet: edge
+  deployer:
+    type: ArgoCD
+    argoCD:
+      project: default

@@ -31,11 +31,13 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
+	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/argocd"
 	"github.com/kokumi-dev/kokumi/internal/cluster"
 )
 
@@ -55,27 +57,16 @@ func testKubeconfig(server, token string) []byte {
 	return data
 }
 
-// kubeconfigCluster returns a Cluster name of namespace that reaches its
-// cluster with the kubeconfig in the Secret secretName.
-func kubeconfigCluster(namespace, name, secretName string) *deliveryv1alpha1.Cluster {
-	return &deliveryv1alpha1.Cluster{
-		Name: name, Namespace: namespace,
-		Spec: deliveryv1alpha1.ClusterSpec{
-			Connection: deliveryv1alpha1.ClusterConnectionKubeconfig,
-			Kubeconfig: &deliveryv1alpha1.ClusterKubeconfig{SecretRef: deliveryv1alpha1.KubeconfigSecretReference{Name: secretName}},
-		},
-	}
-}
-
 var _ = Describe("Cluster Controller", Ordered, func() {
 	const (
-		spoke  = "cl-spoke"
-		secret = "cl-spoke-kubeconfig"
-		server = "https://spoke.example:6443"
+		spoke   = "cl-spoke"
+		secret  = "cl-spoke-kubeconfig"
+		server  = "https://spoke.example:6443"
+		envName = "cl-edge"
+		fleet   = "cl-fleet"
 	)
 	ctx := context.Background()
 	key := types.NamespacedName{Namespace: testWorkspace, Name: spoke}
-	healthy := cluster.Health{Healthy: true, Message: "The control plane is ready", Version: "v1.37.0"}
 	var (
 		r      *ClusterReconciler
 		prober *fakeProber
@@ -101,14 +92,44 @@ var _ = Describe("Cluster Controller", Ordered, func() {
 		}
 		Expect(k8sClient.Update(ctx, s)).To(Succeed())
 	}
+	createKubeconfigCluster := func(namespace, name, secretName string) {
+		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Cluster{
+			Name: name, Namespace: namespace, Labels: map[string]string{fleet: testEdge},
+			Spec: deliveryv1alpha1.ClusterSpec{
+				Connection: deliveryv1alpha1.ClusterConnectionKubeconfig,
+				Kubeconfig: &deliveryv1alpha1.ClusterKubeconfig{SecretRef: deliveryv1alpha1.KubeconfigSecretReference{Name: secretName}},
+			},
+		})).To(Succeed())
+	}
+	createEnvironment := func(namespace string) {
+		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Environment{
+			Name: envName, Namespace: namespace,
+			Spec: deliveryv1alpha1.EnvironmentSpec{
+				ClusterSelector: metav1.LabelSelector{MatchLabels: map[string]string{fleet: testEdge}},
+				Deployer:        deliveryv1alpha1.Deployer{Type: deliveryv1alpha1.DeployerTypeArgoCD, ArgoCD: &deliveryv1alpha1.ArgoCDDeployer{Project: "default"}},
+			},
+		})).To(Succeed())
+	}
+	// registration returns the Argo CD cluster Secret that registers the
+	// Cluster name of namespace, NotFound when there is none.
+	registration := func(namespace, name string) (*corev1.Secret, error) {
+		secrets := &corev1.SecretList{}
+		Expect(k8sClient.List(ctx, secrets, client.InNamespace(argoNamespace),
+			client.MatchingLabels(argocd.RegistrationLabels(namespace, name)))).To(Succeed())
+		if len(secrets.Items) == 0 {
+			return nil, apierrors.NewNotFound(corev1.Resource("secrets"), name)
+		}
+		Expect(secrets.Items).To(HaveLen(1), "one registration per Cluster")
+		return &secrets.Items[0], nil
+	}
 
 	BeforeAll(func() {
-		prober = &fakeProber{health: healthy}
+		prober = &fakeProber{health: cluster.Health{Healthy: true, Message: "The control plane is ready", Version: "v1.37.0"}}
 		r = &ClusterReconciler{
-			Client: k8sClient, Scheme: k8sClient.Scheme(),
+			Client: k8sClient, Scheme: k8sClient.Scheme(), Recorder: events.NewFakeRecorder(20),
 			Namespace: testKokumiNamespace, LocalConfig: cfg, clusters: prober,
 		}
-		Expect(k8sClient.Create(ctx, kubeconfigCluster(testWorkspace, spoke, secret))).To(Succeed())
+		createKubeconfigCluster(testWorkspace, spoke, secret)
 	})
 
 	AfterAll(func() {
@@ -121,8 +142,14 @@ var _ = Describe("Cluster Controller", Ordered, func() {
 				_ = k8sClient.Update(ctx, c)
 				_ = k8sClient.Delete(ctx, c)
 			}
+			environments := &deliveryv1alpha1.EnvironmentList{}
+			Expect(k8sClient.List(ctx, environments, client.InNamespace(namespace))).To(Succeed())
+			for i := range environments.Items {
+				_ = k8sClient.Delete(ctx, &environments.Items[i])
+			}
 			_ = k8sClient.DeleteAllOf(ctx, &corev1.Secret{}, client.InNamespace(namespace))
 		}
+		_ = k8sClient.DeleteAllOf(ctx, &corev1.Secret{}, client.InNamespace(argoNamespace))
 	})
 
 	It("reports a missing kubeconfig Secret", func() {
@@ -146,7 +173,7 @@ var _ = Describe("Cluster Controller", Ordered, func() {
 		Expect(ready(c)).To(HaveField("Reason", deliveryv1alpha1.ReasonSecretInvalid))
 	})
 
-	It("reports the server, version and readiness of the cluster", func() {
+	It("reports the server, version and readiness of a cluster no Environment selects, without registering it", func() {
 		writeKubeconfig(testWorkspace, secret, testKubeconfig(server, "token"))
 
 		result, c := reconcileCluster(key)
@@ -155,12 +182,14 @@ var _ = Describe("Cluster Controller", Ordered, func() {
 		Expect(c.Status.Server).To(Equal(server))
 		Expect(c.Status.KubernetesVersion).To(Equal("v1.37.0"))
 		Expect(ready(c)).To(HaveField("Status", metav1.ConditionTrue))
+		_, err := registration(testWorkspace, spoke)
+		Expect(apierrors.IsNotFound(err)).To(BeTrue())
 	})
 
 	It("reports a control plane that rejects the credential", func() {
 		prober.health = cluster.Health{Unauthorized: true, Message: "rejected"}
 		DeferCleanup(func() {
-			prober.health = healthy
+			prober.health = cluster.Health{Healthy: true, Message: "The control plane is ready", Version: "v1.37.0"}
 		})
 
 		_, c := reconcileCluster(key)
@@ -168,23 +197,93 @@ var _ = Describe("Cluster Controller", Ordered, func() {
 		Expect(c.Status.KubernetesVersion).To(Equal("v1.37.0"), "the version it read before stays")
 	})
 
-	It("reports a control plane that cannot be reached", func() {
-		prober.health = cluster.Health{Message: "The control plane is not ready or cannot be reached"}
-		DeferCleanup(func() {
-			prober.health = healthy
-		})
+	It("registers the cluster with Argo CD once an Argo CD Environment of its namespace selects it", func() {
+		createEnvironment(testWorkspace)
 
 		_, c := reconcileCluster(key)
-		Expect(ready(c)).To(HaveField("Reason", deliveryv1alpha1.ReasonUnreachable))
+		Expect(ready(c)).To(HaveField("Status", metav1.ConditionTrue))
+		Expect(ready(c).Message).To(ContainSubstring("registered with Argo CD"))
+		registered, err := registration(testWorkspace, spoke)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(registered.Name).To(Equal(argocd.ClusterSecretName(server)), "named after its server")
+		Expect(registered.Labels).To(HaveKeyWithValue(argocd.LabelSecretType, argocd.SecretTypeCluster))
+		Expect(string(registered.Data[keyServer])).To(Equal(server))
+		Expect(string(registered.Data["config"])).To(ContainSubstring(`"bearerToken":"token"`))
 	})
 
-	It("removes the finalizer of a deleted Cluster", func() {
+	It("copies a new credential when the kubeconfig changes", func() {
+		writeKubeconfig(testWorkspace, secret, testKubeconfig(server, "rotated"))
+
+		reconcileCluster(key)
+		registered, err := registration(testWorkspace, spoke)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(registered.Data["config"])).To(ContainSubstring(`"bearerToken":"rotated"`))
+	})
+
+	It("leaves a server alone that another Cluster registered", func() {
+		other := types.NamespacedName{Namespace: testKokumiNamespace, Name: spoke}
+		writeKubeconfig(testKokumiNamespace, secret, testKubeconfig(server, "other"))
+		createKubeconfigCluster(testKokumiNamespace, spoke, secret)
+		createEnvironment(testKokumiNamespace)
+
+		_, c := reconcileCluster(other)
+		Expect(ready(c)).To(HaveField("Reason", deliveryv1alpha1.ReasonClusterConflict))
+		Expect(ready(c).Message).To(ContainSubstring("the Cluster " + testWorkspace + "/" + spoke))
+		_, err := registration(testKokumiNamespace, spoke)
+		Expect(apierrors.IsNotFound(err)).To(BeTrue())
+	})
+
+	It("refuses a kubeconfig of the cluster Argo CD runs in", func() {
+		other := types.NamespacedName{Namespace: testKokumiNamespace, Name: spoke}
+		writeKubeconfig(testKokumiNamespace, secret, testKubeconfig(cluster.InClusterServer+"/", "other"))
+
+		_, c := reconcileCluster(other)
+		Expect(ready(c)).To(HaveField("Reason", deliveryv1alpha1.ReasonClusterConflict))
+		Expect(ready(c).Message).To(ContainSubstring("connect in-cluster instead"))
+		_, err := registration(testKokumiNamespace, spoke)
+		Expect(apierrors.IsNotFound(err)).To(BeTrue(), "Argo CD keeps its own connection to its cluster")
+	})
+
+	It("leaves a server alone that Argo CD knows from a Secret Kokumi does not manage", func() {
+		const taken = "https://taken.example:6443"
+		Expect(k8sClient.Create(ctx, &corev1.Secret{
+			Name: "hand-made", Namespace: argoNamespace, Labels: map[string]string{argocd.LabelSecretType: argocd.SecretTypeCluster},
+			StringData: map[string]string{keyName: "taken", keyServer: taken},
+		})).To(Succeed())
+		other := types.NamespacedName{Namespace: testKokumiNamespace, Name: spoke}
+		writeKubeconfig(testKokumiNamespace, secret, testKubeconfig(taken, "other"))
+
+		_, c := reconcileCluster(other)
+		Expect(ready(c)).To(HaveField("Reason", deliveryv1alpha1.ReasonClusterConflict))
+		Expect(ready(c).Message).To(ContainSubstring("the Secret hand-made"))
+	})
+
+	It("unregisters the cluster once no Environment selects it", func() {
 		c := &deliveryv1alpha1.Cluster{}
 		Expect(k8sClient.Get(ctx, key, c)).To(Succeed())
-		Expect(k8sClient.Delete(ctx, c)).To(Succeed())
+		c.Labels[fleet] = testRetired
+		Expect(k8sClient.Update(ctx, c)).To(Succeed())
 
-		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		_, c = reconcileCluster(key)
+		Expect(ready(c)).To(HaveField("Status", metav1.ConditionTrue))
+		_, err := registration(testWorkspace, spoke)
+		Expect(apierrors.IsNotFound(err)).To(BeTrue())
+	})
+
+	It("unregisters a deleted Cluster and removes its finalizer", func() {
+		c := &deliveryv1alpha1.Cluster{}
+		Expect(k8sClient.Get(ctx, key, c)).To(Succeed())
+		c.Labels[fleet] = testEdge
+		Expect(k8sClient.Update(ctx, c)).To(Succeed())
+		reconcileCluster(key)
+		_, err := registration(testWorkspace, spoke)
 		Expect(err).NotTo(HaveOccurred())
+
+		Expect(k8sClient.Delete(ctx, c)).To(Succeed())
+		_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		_, err = registration(testWorkspace, spoke)
+		Expect(apierrors.IsNotFound(err)).To(BeTrue())
 		Expect(apierrors.IsNotFound(k8sClient.Get(ctx, key, c))).To(BeTrue())
 	})
 
@@ -198,11 +297,11 @@ var _ = Describe("Cluster Controller", Ordered, func() {
 		Expect(c.Status.Server).To(Equal(cluster.InClusterServer))
 		Expect(ready(c)).To(HaveField("Status", metav1.ConditionTrue))
 
-		c.Labels["stage"] = "edge"
+		c.Labels[fleet] = testEdge
 		delete(c.Labels, deliveryv1alpha1.LabelInCluster)
 		Expect(k8sClient.Update(ctx, c)).To(Succeed())
 		_, c = reconcileCluster(inCluster)
-		Expect(c.Labels).To(SatisfyAll(HaveKeyWithValue("stage", "edge"), Not(HaveKey(deliveryv1alpha1.LabelInCluster))),
+		Expect(c.Labels).To(SatisfyAll(HaveKeyWithValue(fleet, testEdge), Not(HaveKey(deliveryv1alpha1.LabelInCluster))),
 			"Kokumi leaves the labels it is given")
 
 		c.SetFinalizers(nil)
@@ -224,6 +323,44 @@ var _ = Describe("Cluster Controller", Ordered, func() {
 		_, c := reconcileCluster(local)
 		Expect(c.Labels).NotTo(HaveKey(deliveryv1alpha1.LabelInCluster), "only the Cluster Kokumi keeps is created with it")
 		Expect(ready(c)).To(HaveField("Status", metav1.ConditionTrue))
+	})
+
+	It("registers the first of two Clusters for the same server, and hands the server over once it is gone", func() {
+		const raceSecret = "cl-race-kubeconfig"
+		first := types.NamespacedName{Namespace: testKokumiNamespace, Name: "cl-race-b"}
+		second := types.NamespacedName{Namespace: testKokumiNamespace, Name: "cl-race-a"}
+		writeKubeconfig(testKokumiNamespace, raceSecret, testKubeconfig("https://race.example:6443", "token"))
+		createKubeconfigCluster(first.Namespace, first.Name, raceSecret)
+		createKubeconfigCluster(second.Namespace, second.Name, raceSecret)
+
+		_, c := reconcileCluster(first)
+		Expect(ready(c)).To(HaveField("Status", metav1.ConditionTrue))
+		_, c = reconcileCluster(second)
+		Expect(ready(c)).To(HaveField("Reason", deliveryv1alpha1.ReasonClusterConflict))
+		Expect(ready(c).Message).To(ContainSubstring("the Cluster " + first.String()))
+		_, err := registration(second.Namespace, second.Name)
+		Expect(apierrors.IsNotFound(err)).To(BeTrue())
+
+		By("deleting the first one")
+		Expect(k8sClient.Delete(ctx, &deliveryv1alpha1.Cluster{Name: first.Name, Namespace: first.Namespace})).To(Succeed())
+		_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: first})
+		Expect(err).NotTo(HaveOccurred())
+
+		_, c = reconcileCluster(second)
+		Expect(ready(c)).To(HaveField("Status", metav1.ConditionTrue))
+		_, err = registration(second.Namespace, second.Name)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("moves its registration when the server of its kubeconfig changes", func() {
+		key := types.NamespacedName{Namespace: testKokumiNamespace, Name: "cl-race-a"}
+		writeKubeconfig(testKokumiNamespace, "cl-race-kubeconfig", testKubeconfig("https://moved.example:6443", "token"))
+
+		_, c := reconcileCluster(key)
+		Expect(ready(c)).To(HaveField("Status", metav1.ConditionTrue))
+		registered, err := registration(key.Namespace, key.Name)
+		Expect(err).NotTo(HaveOccurred(), "one registration, of the new server")
+		Expect(registered.Name).To(Equal(argocd.ClusterSecretName("https://moved.example:6443")))
 	})
 })
 
@@ -247,15 +384,35 @@ var _ = Describe("Cluster probes and mapping", func() {
 	})
 
 	It("maps a kubeconfig Secret to the Clusters of its namespace that name it", func() {
+		named := func(namespace, name, secretName string) *deliveryv1alpha1.Cluster {
+			return &deliveryv1alpha1.Cluster{Name: name, Namespace: namespace, Spec: deliveryv1alpha1.ClusterSpec{
+				Connection: deliveryv1alpha1.ClusterConnectionKubeconfig,
+				Kubeconfig: &deliveryv1alpha1.ClusterKubeconfig{SecretRef: deliveryv1alpha1.KubeconfigSecretReference{Name: secretName}},
+			}}
+		}
 		r := &ClusterReconciler{Client: fake.NewClientBuilder().WithScheme(scheme.Scheme).
 			WithIndex(&deliveryv1alpha1.Cluster{}, deliveryv1alpha1.FieldKubeconfigSecretName, clusterKubeconfigSecret).
 			WithObjects(
-				kubeconfigCluster(testWorkspace, "eu", "eu-kubeconfig"),
-				kubeconfigCluster(testWorkspace, "us", "us-kubeconfig"),
-				kubeconfigCluster(testKokumiNamespace, "eu", "eu-kubeconfig"),
+				named(testWorkspace, "eu", "eu-kubeconfig"),
+				named(testWorkspace, "us", "us-kubeconfig"),
+				named(testKokumiNamespace, "eu", "eu-kubeconfig"),
 			).Build()}
 		secret := &corev1.Secret{Name: "eu-kubeconfig", Namespace: testWorkspace}
 
 		Expect(r.clustersOfSecret(ctx, secret)).To(ConsistOf(HaveField("NamespacedName", types.NamespacedName{Namespace: testWorkspace, Name: "eu"})))
+	})
+
+	It("maps an Environment to the Clusters of its namespace it selects", func() {
+		labeled := func(name, namespace, value string) *deliveryv1alpha1.Cluster {
+			return &deliveryv1alpha1.Cluster{Name: name, Namespace: namespace, Labels: map[string]string{testFleet: value}}
+		}
+		r := &ClusterReconciler{Client: fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(
+			labeled("eu", testWorkspace, testEdge), labeled("old", testWorkspace, testRetired), labeled("other", testKokumiNamespace, testEdge),
+		).Build()}
+		env := &deliveryv1alpha1.Environment{Name: testEdge, Namespace: testWorkspace, Spec: deliveryv1alpha1.EnvironmentSpec{
+			ClusterSelector: metav1.LabelSelector{MatchLabels: map[string]string{testFleet: testEdge}},
+		}}
+
+		Expect(r.clustersOfEnvironment(ctx, env)).To(ConsistOf(HaveField("NamespacedName", types.NamespacedName{Namespace: testWorkspace, Name: "eu"})))
 	})
 })

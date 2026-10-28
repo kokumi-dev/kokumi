@@ -338,6 +338,7 @@ func main() {
 	if err := (&controller.ClusterReconciler{
 		Client:      mgr.GetClient(),
 		Scheme:      mgr.GetScheme(),
+		Recorder:    mgr.GetEventRecorder("kokumi-cluster-controller"),
 		Namespace:   installNamespace,
 		LocalConfig: mgr.GetConfig(),
 	}).SetupWithManager(mgr); err != nil {

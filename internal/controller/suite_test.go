@@ -158,6 +158,7 @@ const testFleet = "fleet"
 
 // Keys of the Argo CD objects the tests write as Argo CD or its users would.
 const (
+	keyName      = "name"
 	keyServer    = "server"
 	keyNamespace = "namespace"
 	keyRevision  = "revision"

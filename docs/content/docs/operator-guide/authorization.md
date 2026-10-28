@@ -217,16 +217,17 @@ of different trust levels in different namespaces.
 
 ## Cluster credentials
 
-A [Cluster](../clusters/) names the Secret that holds its kubeconfig, and the
-controller reads it with its own identity to connect to the cluster. The
-admission policy `kokumi-cluster-secret-access` therefore admits a Cluster that
-names a kubeconfig Secret only when its author may `get` that Secret. An update
+A [Cluster](../clusters/) lends the credential in its kubeconfig Secret to
+every Order of the Environments that select it: the controller reads it with
+its own identity and hands it to Argo CD. The admission policy
+`kokumi-cluster-secret-access` therefore admits a Cluster that names a
+kubeconfig Secret only when its author may `get` that Secret. An update
 that keeps the Secret's name and key needs no Secret access; changing either
 does, because another key could hold another credential.
 
 The built-in admin role creates Clusters in every namespace but grants no
 Secret access. Bind the `kokumi-cluster-credentials` ClusterRole (`get`,
-`create` and `patch` on `secrets`) with a RoleBinding in each namespace that
+`create` and `patch` on `secrets`) with a RoleBinding in each workspace that
 holds Clusters with a kubeconfig:
 
 ```bash

@@ -1,7 +1,8 @@
 // Package argocd builds what Argo CD needs to deploy the artifact of the
-// Preparation a Serving serves: one Application per target cluster. It
-// reads the state Argo CD reports on an Application. Kokumi never applies
-// manifests itself: Argo CD syncs them from the artifact.
+// Preparation a Serving serves: one Application per target cluster, and a
+// cluster Secret per cluster it deploys to beyond its own. It reads the
+// state Argo CD reports on an Application. Kokumi never applies manifests
+// itself: Argo CD syncs them from the artifact.
 package argocd
 
 import (
@@ -21,7 +22,8 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/oci"
 )
 
-// Namespace holds the Applications of all Servings.
+// Namespace holds the Applications of all Servings and the cluster Secrets
+// Kokumi manages.
 const Namespace = "argocd"
 
 // DefaultProject is Argo CD's own AppProject, which the Environment Kokumi

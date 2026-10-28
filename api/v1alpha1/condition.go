@@ -345,7 +345,13 @@ const (
 	// selector.
 	ReasonInvalidSelector = "InvalidSelector"
 
-	// ReasonClusterConflict reports on a target of a Serving a Cluster that
-	// connects to the same server as another target of the Serving.
+	// ReasonClusterConflict reports on a Cluster that the engine already
+	// knows its server: as the cluster it runs in, from a registration
+	// Kokumi does not manage, or from another Cluster's registration. On a
+	// target of a Serving it reports a Cluster that connects to the same
+	// server as another target of the Serving.
 	ReasonClusterConflict = "ClusterConflict"
+	// ReasonRegistrationFailed reports on a Cluster that Kokumi could not
+	// register it with the engine of an Environment that selects it.
+	ReasonRegistrationFailed = "RegistrationFailed"
 )

@@ -1,7 +1,7 @@
 ---
 title: Clusters
 weight: 6
-description: Register clusters as Clusters with a kubeconfig Secret, and see whether Kokumi reaches them.
+description: Register the clusters Kokumi deploys to as Clusters with a kubeconfig Secret, and hand them to Argo CD.
 ---
 
 Kokumi deploys to **Clusters**: one object per cluster, in the namespace whose
@@ -17,6 +17,9 @@ A Cluster reaches its cluster in one of two ways:
 - **`InCluster`**: the cluster Kokumi runs in, with Kokumi's own connection. It
   needs no Secret.
 
+Kokumi still never applies manifests itself: it registers each Cluster an
+Environment selects with Argo CD, and Argo CD deploys there.
+
 ## Workspaces
 
 Every reference stays inside one namespace, as all of Kokumi's do: an Order
@@ -30,8 +33,13 @@ Products, Orders, Environments and Clusters is a workspace:
   Orders of the teams that deploy there.
 - **Team namespaces** with clusters of their own.
 
-A Cluster's name is at most 63 characters: Kokumi puts it into the labels of
-the Argo CD Applications it writes for the cluster.
+One physical cluster is one Cluster: Argo CD knows a cluster by its server and
+holds one credential for it. Teams that deploy to the same cluster share the
+workspace that holds it. Of two Clusters for the same server, the first to
+register it holds it and the other waits; see [Conflicts](#conflicts).
+
+A Cluster's name is at most 63 characters: Kokumi puts it into labels of the
+Argo CD Secrets and Applications it writes for the cluster.
 
 ## Register a cluster
 
@@ -82,26 +90,22 @@ kubectl create secret generic spoke-kubeconfig -n <namespace> --from-file=value=
 
 And create the Cluster, with the labels Environments select it by:
 
-```yaml
-apiVersion: delivery.kokumi.dev/v1alpha1
-kind: Cluster
-metadata:
-  name: spoke
-  labels:
-    fleet: edge
-spec:
-  description: The spoke cluster of the platform team
-  connection: Kubeconfig
-  kubeconfig:
-    secretRef:
-      name: spoke-kubeconfig
-```
+{{< example file="multi-cluster/platform/cluster.yaml" >}}
+
+The multi-cluster example applies it with the Environment that selects it; see
+[Environments](../environments/):
+
+{{< apply-example name="multi-cluster/platform" namespace="platform" >}}
+
+For a local try, `make kind-spoke` creates a second Kind cluster, writes its
+kubeconfig into the Secret `spoke-kubeconfig` of the namespace `platform`
+(`KIND_SPOKE_NAMESPACE`), and prints the Cluster to apply.
 
 A Cluster may only name a Secret its author may read: the admission policy
-`kokumi-cluster-secret-access` refuses it otherwise, since Kokumi reads the
-Secret with its own identity. An update that keeps the Secret and its key
-needs no access to the Secret; changing either does, since another key could
-hold another credential.
+`kokumi-cluster-secret-access` refuses it otherwise, since the Cluster lends
+the credential to every Order of its Environments. An update that keeps the
+Secret and its key needs no access to the Secret; changing either does, since
+another key could hold another credential.
 
 ### Secrets of Clusters
 
@@ -138,18 +142,20 @@ A Cluster has one condition, **`Ready`**: whether Orders can deploy to it.
 Kokumi checks every Cluster about once a minute, each a little later than the
 minute at random so that the checks of many Clusters spread out, eight at a
 time, and gives each check 10 seconds. A Cluster that reconciles for another
-reason in between reuses its last check while it is less than half a minute
-old and the kubeconfig Secret is unchanged. All in-cluster Clusters share one check of the
-cluster Kokumi runs in. The status changes only when what the check finds
-changes.
+reason in between, such as a label change, reuses its last check while it is
+less than half a minute old and the kubeconfig Secret is unchanged. All
+in-cluster Clusters share one check of the cluster Kokumi runs in. The status
+changes only when what the check finds changes.
 
 | Reason | Meaning |
 |---|---|
-| `Ready` | The control plane answers ready at `/readyz`. |
+| `Ready` | The control plane answers ready at `/readyz`, and the Cluster is registered with Argo CD while an Environment selects it. |
 | `SecretNotFound` | The kubeconfig Secret does not exist. |
 | `SecretInvalid` | The Secret holds no self-contained kubeconfig under its key. |
 | `Unreachable` | The control plane cannot be reached, or does not answer ready. |
 | `Unauthorized` | The control plane rejects the credential. |
+| `ClusterConflict` | Argo CD already knows its server: from another Cluster that registered it first, from a Secret Kokumi does not manage, or as the cluster Argo CD runs in; see [Conflicts](#conflicts). |
+| `RegistrationFailed` | Kokumi could not write its registration in Argo CD's namespace. |
 
 `status.server` and `status.kubernetesVersion` say where the cluster is and
 what it runs.
@@ -164,22 +170,71 @@ otherwise: label `in-cluster` and edit `local` as you need. To stop Orders in
 than deleting it.
 
 When Kokumi creates the Cluster `in-cluster`, it labels it
-`delivery.kokumi.dev/in-cluster: "true"`, and the Environment `local` selects
-it by that label. Kokumi sets the label on no other Cluster, and never removes
-it. Other workspaces that deploy to the cluster Kokumi runs in get a Cluster of
-their own, with the label, as the example `local` adds one:
+`delivery.kokumi.dev/in-cluster: "true"`, and `local` selects it by that
+label. Kokumi sets the label on no other Cluster, and never removes it. Other workspaces that deploy
+to the cluster Kokumi runs in get a Cluster of their own, with the label, as
+the example `local` adds one:
 
 {{< example file="local/cluster.yaml" >}}
 
-## Clusters Argo CD deploys to
+## Conflicts
 
-Argo CD deploys to a `Kubeconfig` Cluster only once it knows the cluster:
-until then it refuses the Application, and the Serving holds that target with
-`Rejected` and Argo CD's message. `InCluster` Clusters need nothing: Argo CD
-knows its own cluster.
+One cluster is one Cluster: Argo CD holds one credential per server, so one
+server is one registration. Kokumi keeps it that way:
 
-Of two Ready Clusters of one Environment that connect to the same server,
-such as two in-cluster Clusters, only the first by name deploys; the Serving
-holds the other's target with `ClusterConflict`.
+- **The first Cluster to register a server holds it.** The cluster Secret is
+  named after the server, so only one Cluster, of any namespace, can create
+  it. Another Cluster that reaches the same server reports `ClusterConflict`,
+  naming the Cluster that holds it, and is not registered. Once the holder
+  lets go, because it is deleted, no Environment selects it any more, or its
+  kubeconfig points at another server or cannot be used, a waiting Cluster
+  takes the server over at once.
+- **Kokumi does not take over clusters Argo CD already knows.** A cluster
+  Secret in `argocd` that Kokumi did not write, with the same name or server,
+  is left alone, and the Cluster reports `ClusterConflict`.
+- **Argo CD's own cluster connects in-cluster.** A `Kubeconfig` Cluster whose
+  server is `https://kubernetes.default.svc` reports `ClusterConflict`: its
+  registration would replace the connection Argo CD uses for its own cluster,
+  for every Application. Use `connection: InCluster` instead.
+
+A Serving deploys to no Cluster that reports `ClusterConflict`: its target
+there is held with `ClusterNotReady`. Of two Ready Clusters of one
+Environment that connect to the same server, such as two in-cluster Clusters,
+only the first by name deploys; the Serving holds the other's target with
+`ClusterConflict`.
+
+## How Kokumi hands a cluster to Argo CD
+
+While an Environment that deploys through Argo CD selects a `Kubeconfig`
+Cluster, Kokumi registers it with Argo CD in a declarative cluster Secret in
+`argocd`, and deletes the Secret once no Environment selects the Cluster, or
+when the Cluster is deleted. `InCluster` Clusters need none: Argo CD knows its
+own cluster.
+
+- **The Secret is named after the server:** `kokumi-<hash>`, the first 16 hex
+  digits of the SHA-256 of the server URL without a trailing slash. It is
+  labeled `app.kubernetes.io/managed-by: kokumi`, `delivery.kokumi.dev/cluster`
+  and `delivery.kokumi.dev/cluster-namespace`, and Argo CD lists the cluster as
+  `kokumi-<namespace>-<name>-<hash>`. When the kubeconfig points at another
+  server, the registration moves to that server's Secret.
+- **The credential is copied** from the kubeconfig: the token or client
+  certificate, with the CA. Kokumi copies it again when the kubeconfig Secret
+  changes. Whoever may read Secrets in Argo CD's namespace may read it, as
+  with every cluster Argo CD knows.
+- **Kokumi writes Secrets in Argo CD's namespace** with the ClusterRole
+  `kokumi-argocd-cluster-registrar`: create, update and delete, nothing else.
+  RBAC cannot limit that to Kokumi's Secrets by name, so the admission policy
+  `kokumi-argocd-secret-integrity` does: in `argocd`, the controller may only
+  create, change and delete Secrets labeled `app.kubernetes.io/managed-by: kokumi`
+  and `argocd.argoproj.io/secret-type: cluster`, before and after. The last
+  document of `install.yaml` binds the role in `argocd` only, so the
+  installation needs Argo CD installed first; see
+  [Installation](../../installation/#argo-cd).
+- **Conflicts** are held; see [Conflicts](#conflicts).
+- Kokumi's cluster Secrets are not scoped to an AppProject: several
+  Environments with different projects may select one Cluster. Restrict where
+  each project deploys with its destinations: Argo CD refuses an Application
+  whose destination its project does not permit, and the Serving holds that
+  target with `Rejected`.
 
 Both Kokumi's manager and Argo CD must reach the API server of every cluster.

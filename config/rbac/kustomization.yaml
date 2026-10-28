@@ -14,6 +14,8 @@ resources:
 # Bound per tenant namespace by platform admins; see the files.
 - registry_credentials_role.yaml
 - cluster_credentials_role.yaml
+# Bound in Argo CD's namespace by config/argocd, applied once Argo CD exists.
+- argocd_cluster_registrar_role.yaml
 # The following RBAC configurations are used to protect
 # the metrics endpoint with authn/authz. These configurations
 # ensure that only authorized users and service accounts

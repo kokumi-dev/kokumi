@@ -1,0 +1,20 @@
+---
+# Registering clusters with Argo CD: the controller writes a declarative
+# cluster Secret into Argo CD's namespace for every cluster an Argo CD
+# Environment selects, and reads them with the Secret access of its own role.
+# Argo CD may be installed after Kokumi, so this role is bound in config/argocd,
+# which the end of dist/install.yaml and make argocd apply once Argo CD exists.
+# Bound there only, it grants nothing outside that namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: argocd-cluster-registrar
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - create
+  - update
+  - delete

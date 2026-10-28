@@ -1,0 +1,18 @@
+# A cluster Orders of this namespace deploy to, reached with the kubeconfig
+# in the Secret spoke-kubeconfig of the same namespace, under the key value.
+# Kokumi reports whether it is reachable and its Kubernetes version, and
+# registers it with Argo CD while an Environment selects it. Environments
+# select it by its labels.
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Cluster
+metadata:
+  name: spoke
+  labels:
+    fleet: edge
+    topology.kubernetes.io/region: eu
+spec:
+  description: Spoke cluster
+  connection: Kubeconfig
+  kubeconfig:
+    secretRef:
+      name: spoke-kubeconfig

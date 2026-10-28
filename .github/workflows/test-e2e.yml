@@ -16,14 +16,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Every feature but the slow scanning and the second Kind cluster,
+          # including environments.
           - name: Features
-            labels: "!slow"
+            labels: "!slow && !clusters"
             argocd: ""
           - name: Vulnerability scanning
             labels: "slow"
             argocd: ""
           - name: Promotion with Argo CD
             labels: "promotion"
+            argocd: "real"
+          # Creates a second Kind cluster that Argo CD deploys to.
+          - name: Clusters with Argo CD
+            labels: "clusters"
             argocd: "real"
     steps:
       - name: Clone the code

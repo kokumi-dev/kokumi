@@ -23,6 +23,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -89,6 +90,29 @@ var _ = Describe("Argo CD engine", func() {
 		removed, err := engine.Remove(ctx, serving, nil)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(removed).To(BeEmpty())
+	})
+
+	It("maps a cluster Secret it manages to its Cluster and the Clusters waiting for its server, and no other Secret", func() {
+		const server = "https://spoke.example:6443"
+		waiting := &deliveryv1alpha1.Cluster{Name: "waiting", Namespace: testKokumiNamespace,
+			Status: deliveryv1alpha1.ClusterStatus{Server: server + "/"}}
+		elsewhere := &deliveryv1alpha1.Cluster{Name: "elsewhere", Namespace: testKokumiNamespace,
+			Status: deliveryv1alpha1.ClusterStatus{Server: "https://other.example:6443"}}
+		reader := fake.NewClientBuilder().WithScheme(scheme.Scheme).
+			WithIndex(&deliveryv1alpha1.Cluster{}, deliveryv1alpha1.FieldClusterServer, clusterServer).
+			WithObjects(waiting, elsewhere).Build()
+		registration := &corev1.Secret{Name: argocd.ClusterSecretName(server), Namespace: argocd.Namespace,
+			Labels: argocd.RegistrationLabels(testWorkspace, "spoke"), Data: map[string][]byte{"server": []byte(server)}}
+
+		reqs, ok := clustersOfArgoCDSecret(ctx, reader, registration)
+		Expect(ok).To(BeTrue())
+		Expect(reqs).To(ConsistOf(
+			HaveField("NamespacedName", client.ObjectKey{Namespace: testWorkspace, Name: "spoke"}),
+			HaveField("NamespacedName", client.ObjectKeyFromObject(waiting)),
+		))
+
+		_, ok = clustersOfArgoCDSecret(ctx, reader, &corev1.Secret{Name: "kubeconfig", Namespace: testWorkspace})
+		Expect(ok).To(BeFalse(), "a kubeconfig Secret is mapped by the Clusters that name it")
 	})
 
 	It("starts an optional watch once the CRD of its kind is installed, and says so", func() {
