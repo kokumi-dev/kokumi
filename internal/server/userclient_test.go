@@ -2,18 +2,30 @@ package server
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
+	"github.com/kokumi-dev/kokumi/internal/oci"
 )
 
 // Test fixtures for the union tests.
@@ -107,4 +119,80 @@ func TestUserClientGetAnySA(t *testing.T) {
 	err := uc.get(context.Background(), types.NamespacedName{Namespace: nsB, Name: "order-b"}, got)
 	require.NoError(t, err)
 	assert.Equal(t, "order-b", got.Name)
+}
+
+// orderKind is the kind of the Orders the API server refuses as Invalid.
+var orderKind = schema.GroupKind{Group: deliveryv1alpha1.GroupVersion.Group, Kind: "Order"}
+
+func TestRespondForbiddenOrError(t *testing.T) {
+	orders := schema.GroupResource{Group: deliveryv1alpha1.GroupVersion.Group, Resource: "orders"}
+	invalid := apierrors.NewInvalid(orderKind, "web",
+		field.ErrorList{field.Invalid(field.NewPath("spec", "productRef"), "shop", "productRef is immutable")})
+
+	tests := []struct {
+		name    string
+		err     error
+		code    int
+		message string
+	}{
+		{name: "RBAC denial", err: apierrors.NewForbidden(orders, "web", errors.New("RBAC refuses it")), code: http.StatusForbidden},
+		{name: "no mapping", err: errNoMapping, code: http.StatusForbidden},
+		{name: "taken name", err: apierrors.NewAlreadyExists(orders, "web"), code: http.StatusConflict, message: `orders.delivery.kokumi.dev "web" already exists`},
+		{name: "invalid spec", err: invalid, code: http.StatusUnprocessableEntity, message: "productRef is immutable"},
+		{name: "stale write", err: apierrors.NewConflict(orders, "web", errors.New("the object has been modified")), code: http.StatusConflict},
+		{name: "missing object", err: apierrors.NewNotFound(orders, "web"), code: http.StatusNotFound},
+		{name: "wrapped status", err: fmt.Errorf("failed to get Order: %w", apierrors.NewNotFound(orders, "web")), code: http.StatusNotFound},
+		{name: "the server's own credentials", err: apierrors.NewUnauthorized("token expired"), code: http.StatusInternalServerError, message: "failed to get order: "},
+		{name: "API server failure", err: apierrors.NewInternalError(errors.New("etcd is down")), code: http.StatusInternalServerError},
+		{name: "other error", err: errors.New("boom"), code: http.StatusInternalServerError, message: "failed to get order: boom"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			respondForbiddenOrError(rec, tt.err, "failed to get order")
+			assert.Equal(t, tt.code, rec.Code, rec.Body.String())
+			var body struct {
+				Error string `json:"error"`
+			}
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+			assert.Contains(t, body.Error, tt.message)
+		})
+	}
+}
+
+// TestHandlersAnswerTheAPIStatus checks that the API server's verdict on a
+// write reaches the client with its status.
+func TestHandlersAnswerTheAPIStatus(t *testing.T) {
+	create := `{"namespace":"` + nsA + `","name":"` + webOrder + `","productRef":{"name":"web"},"environmentRef":{"name":"local"},"mode":"Manual"}`
+
+	t.Run("a taken name is 409", func(t *testing.T) {
+		backend := testBackend{registry: oci.NewFakeClient(nil), cluster: adminCluster(t)}
+		rec := serveAsAdminWith(t, httptest.NewRequest(http.MethodPost, "/api/v1/orders", strings.NewReader(create)), backend)
+		require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+
+		rec = serveAsAdminWith(t, httptest.NewRequest(http.MethodPost, "/api/v1/orders", strings.NewReader(create)), backend)
+		assert.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+		assert.Contains(t, rec.Body.String(), "already exists")
+	})
+
+	t.Run("an invalid spec is 422", func(t *testing.T) {
+		cluster := fake.NewClientBuilder().WithScheme(unionScheme(t)).WithObjects(newOrder(webOrder, nsA)).WithInterceptorFuncs(interceptor.Funcs{
+			Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+				if review, ok := obj.(*authorizationv1.SelfSubjectAccessReview); ok {
+					review.Status.Allowed = true
+					return nil
+				}
+				return c.Create(ctx, obj, opts...)
+			},
+			Update: func(_ context.Context, _ client.WithWatch, obj client.Object, _ ...client.UpdateOption) error {
+				return apierrors.NewInvalid(orderKind, obj.GetName(),
+					field.ErrorList{field.Invalid(field.NewPath("spec", "promotion", "after"), webOrder, "an Order cannot run after itself")})
+			},
+		}).Build()
+		backend := testBackend{registry: oci.NewFakeClient(nil), cluster: cluster}
+
+		rec := serveAsAdminWith(t, httptest.NewRequest(http.MethodPut, "/api/v1/orders/"+nsA+"/"+webOrder, strings.NewReader(`{"mode":"Manual"}`)), backend)
+		assert.Equal(t, http.StatusUnprocessableEntity, rec.Code, rec.Body.String())
+		assert.Contains(t, rec.Body.String(), "an Order cannot run after itself")
+	})
 }
