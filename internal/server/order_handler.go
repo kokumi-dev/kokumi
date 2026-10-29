@@ -117,11 +117,12 @@ func handleCreateOrder(deps *apiDeps) http.HandlerFunc {
 			Name:      req.Name,
 			Namespace: req.Namespace,
 			Spec: deliveryv1alpha1.OrderSpec{
-				ProductRef:  deliveryv1alpha1.ProductRef{Name: req.ProductRef.Name},
-				Values:      valuesFromDTO(req.Values),
-				Destination: destinationFromDTO(req.Destination),
-				Patches:     patchesFromDTO(req.Patches),
-				Edits:       patchesFromDTO(req.Edits),
+				ProductRef:   deliveryv1alpha1.ProductRef{Name: req.ProductRef.Name},
+				Values:       valuesFromDTO(req.Values),
+				Destination:  destinationFromDTO(req.Destination),
+				RegistryRefs: registryRefsFromDTO(req.RegistryRefs),
+				Patches:      patchesFromDTO(req.Patches),
+				Edits:        patchesFromDTO(req.Edits),
 				Promotion: &deliveryv1alpha1.PromotionSpec{
 					Mode:      deliveryv1alpha1.PromotionMode(req.Mode),
 					Approvals: approvalPolicyFromDTO(req.Approvals),
@@ -191,6 +192,7 @@ func handleUpdateOrder(deps *apiDeps) http.HandlerFunc {
 		order.Spec.TargetNamespace = req.TargetNamespace
 		order.Spec.Values = valuesFromDTO(req.Values)
 		order.Spec.Destination = destinationFromDTO(req.Destination)
+		order.Spec.RegistryRefs = registryRefsFromDTO(req.RegistryRefs)
 		order.Spec.Patches = patchesFromDTO(req.Patches)
 		order.Spec.Edits = patchesFromDTO(req.Edits)
 		order.Spec.Promotion = &deliveryv1alpha1.PromotionSpec{
