@@ -1858,3 +1858,196 @@ var _ = Describe("The Order's watch of its Preparations", func() {
 		Expect(watched.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: deleting})).To(BeTrue(), "the start of a deletion changes the generation")
 	})
 })
+
+// laggingReader reads objects as an API server that holds a newer version
+// than the cache does.
+type laggingReader struct{ client.Reader }
+
+func (r laggingReader) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if err := r.Reader.Get(ctx, key, obj, opts...); err != nil {
+		return err
+	}
+	obj.SetResourceVersion(obj.GetResourceVersion() + "0")
+	return nil
+}
+
+var _ = Describe("Order renders that fail", func() {
+	const ns = testNamespace
+	ctx := context.Background()
+
+	// reconcilers returns an OrderReconciler whose renders fail, since its
+	// pipeline cannot write, and one whose renders succeed.
+	reconcilers := func() (failing, working *OrderReconciler) {
+		fake := oci.NewFakeClient(afero.NewMemMapFs())
+		failing = newTestOrderReconciler(fake)
+		failing.Pipeline = artifact.NewPipeline(artifact.NewStore(fake, afero.NewReadOnlyFs(afero.NewMemMapFs()), ""))
+
+		fs := afero.NewMemMapFs()
+		pulls := oci.NewFakeClient(fs)
+		working = newTestOrderReconciler(pulls)
+		working.Pipeline = artifact.NewPipeline(artifact.NewStore(pulls, fs, ""))
+		return failing, working
+	}
+
+	// create creates the Order name of the test Product, and deletes it
+	// with its Preparations afterwards.
+	create := func(name string) types.NamespacedName {
+		createTestProduct(ctx, testProductName, deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion})
+		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Order{Name: name, Namespace: ns, Spec: deliveryv1alpha1.OrderSpec{
+			EnvironmentRef: localEnvironment,
+			ProductRef:     deliveryv1alpha1.ProductRef{Name: testProductName},
+			Promotion:      &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
+		}})).To(Succeed())
+		DeferCleanup(func() {
+			order := &deliveryv1alpha1.Order{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, order); err == nil {
+				order.SetFinalizers(nil)
+				_ = k8sClient.Update(ctx, order)
+				_ = k8sClient.Delete(ctx, order)
+			}
+			Expect(k8sClient.DeleteAllOf(ctx, &deliveryv1alpha1.Preparation{}, client.InNamespace(ns),
+				client.MatchingLabels{deliveryv1alpha1.LabelOrder: name})).To(Succeed())
+		})
+		return types.NamespacedName{Namespace: ns, Name: name}
+	}
+
+	get := func(key types.NamespacedName) *deliveryv1alpha1.Order {
+		order := &deliveryv1alpha1.Order{}
+		Expect(k8sClient.Get(ctx, key, order)).To(Succeed())
+		return order
+	}
+	readyReason := func(key types.NamespacedName) string {
+		ready := meta.FindStatusCondition(get(key).Status.Conditions, deliveryv1alpha1.ConditionTypeReady)
+		Expect(ready).NotTo(BeNil())
+		return ready.Reason
+	}
+
+	It("records the render, retries it without reporting Processing again, and clears the record once it renders", func() {
+		key := create("order-render-fails")
+		failing, working := reconcilers()
+
+		_, err := failing.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred(), "the first pass records the render")
+		Expect(get(key).Status.Render).NotTo(BeNil())
+		hash := get(key).Status.Render.ConfigHash
+		Expect(readyReason(key)).To(Equal(deliveryv1alpha1.ReasonProcessing))
+
+		for range 2 {
+			_, err = failing.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+			Expect(err).To(HaveOccurred(), "a failure is returned, so that it is retried with back-off")
+			Expect(stderrors.Is(err, reconcile.TerminalError(nil))).To(BeFalse())
+			Expect(readyReason(key)).To(Equal(deliveryv1alpha1.ReasonProcessingFailed), "a retry keeps the failure")
+			Expect(get(key).Status.Render).To(Equal(&deliveryv1alpha1.OrderRender{ConfigHash: hash}))
+			Expect(get(key).Status.LatestConfigHash).To(BeEmpty())
+		}
+
+		_, err = working.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(get(key).Status.LatestConfigHash).To(Equal(hash))
+		Expect(get(key).Status.Render).To(BeNil())
+		Expect(readyReason(key)).To(Equal(deliveryv1alpha1.ReasonReady))
+	})
+
+	It("starts over for a new intent, and drops a failed render once its intent is rendered again", func() {
+		key := create("order-render-new-intent")
+		failing, working := reconcilers()
+		Expect(settleOrder(ctx, working, key)).To(Succeed())
+		rendered := get(key).Status.LatestConfigHash
+
+		By("failing to render another target namespace")
+		order := get(key)
+		order.Spec.TargetNamespace = "render-retargeted"
+		Expect(k8sClient.Update(ctx, order)).To(Succeed())
+		_, err := failing.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		failed := get(key).Status.Render.ConfigHash
+		Expect(failed).NotTo(Equal(rendered))
+		_, err = failing.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).To(HaveOccurred())
+
+		By("changing the intent once more")
+		order = get(key)
+		order.Spec.TargetNamespace = "render-retargeted-again"
+		Expect(k8sClient.Update(ctx, order)).To(Succeed())
+		_, err = failing.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred(), "a new intent goes through the first pass again")
+		Expect(get(key).Status.Render.ConfigHash).NotTo(Equal(failed))
+		Expect(readyReason(key)).To(Equal(deliveryv1alpha1.ReasonProcessing))
+
+		By("going back to the rendered intent")
+		order = get(key)
+		order.Spec.TargetNamespace = ""
+		Expect(k8sClient.Update(ctx, order)).To(Succeed())
+		_, err = failing.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(get(key).Status.Render).To(BeNil(), "the latest Preparation renders this intent")
+		Expect(readyReason(key)).To(Equal(deliveryv1alpha1.ReasonReady))
+	})
+
+	It("postpones a render while the cache lags behind the Order", func() {
+		key := create("order-render-lagging")
+		_, working := reconcilers()
+		_, err := working.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+
+		working.APIReader = laggingReader{Reader: k8sClient}
+		result, err := working.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.RequeueAfter).To(Equal(orderCacheRetryInterval), "no event follows a status write")
+		Expect(get(key).Status.LatestPreparationName).To(BeEmpty())
+	})
+})
+
+var _ = Describe("renderStarted", func() {
+	order := func(render string) *deliveryv1alpha1.Order {
+		o := &deliveryv1alpha1.Order{Name: "order-watched", Namespace: testNamespace}
+		if render != "" {
+			o.Status.Render = &deliveryv1alpha1.OrderRender{ConfigHash: render}
+		}
+		return o
+	}
+
+	DescribeTable("passes the updates that record a new render",
+		func(old, updated string, passes bool) {
+			Expect(renderStarted.Update(event.UpdateEvent{ObjectOld: order(old), ObjectNew: order(updated)})).To(Equal(passes))
+		},
+		Entry("a render starts", "", "sha256:a", true),
+		Entry("a render of another intent starts", "sha256:a", "sha256:b", true),
+		Entry("the render goes on, or fails", "sha256:a", "sha256:a", false),
+		Entry("the render completes", "sha256:a", "", false),
+		Entry("no render", "", "", false),
+	)
+})
+
+var _ = Describe("productChanged", func() {
+	product := func() *deliveryv1alpha1.Product {
+		p := &deliveryv1alpha1.Product{Name: "product-watched", Namespace: testNamespace, Generation: 2}
+		p.Status.ConfigHash = "sha256:product"
+		p.Status.Source = &deliveryv1alpha1.ProductSourceStatus{URL: testOCIRef, Version: testVersion, Digest: oci.FakeDigest}
+		p.Status.Conditions = []metav1.Condition{{
+			Type: deliveryv1alpha1.ConditionTypeReady, Status: metav1.ConditionTrue, Reason: testReadyReason, ObservedGeneration: 2,
+		}}
+		return p
+	}
+
+	DescribeTable("passes the updates that change what its Orders read",
+		func(change func(*deliveryv1alpha1.Product), passes bool) {
+			updated := product()
+			change(updated)
+			Expect(productChanged.Update(event.UpdateEvent{ObjectOld: product(), ObjectNew: updated})).To(Equal(passes))
+		},
+		Entry("its spec", func(p *deliveryv1alpha1.Product) { p.Generation++ }, true),
+		Entry("the start of its deletion", func(p *deliveryv1alpha1.Product) { p.DeletionTimestamp = new(metav1.Now()) }, true),
+		Entry("its source", func(p *deliveryv1alpha1.Product) { p.Status.Source.Digest = "sha256:moved" }, true),
+		Entry("its config hash", func(p *deliveryv1alpha1.Product) { p.Status.ConfigHash = "sha256:changed" }, true),
+		Entry("its readiness", func(p *deliveryv1alpha1.Product) { p.Status.Conditions[0].Status = metav1.ConditionFalse }, true),
+		Entry("the generation Ready describes", func(p *deliveryv1alpha1.Product) { p.Status.Conditions[0].ObservedGeneration = 1 }, true),
+		Entry("the message of Ready", func(p *deliveryv1alpha1.Product) { p.Status.Conditions[0].Message = "verified" }, true),
+		Entry("its scan results", func(p *deliveryv1alpha1.Product) {
+			p.Status.Vulnerabilities = &deliveryv1alpha1.ProductVulnerabilities{}
+		}, false),
+		Entry("another condition", func(p *deliveryv1alpha1.Product) {
+			p.Status.Conditions = append(p.Status.Conditions, metav1.Condition{Type: "Scanned", Status: metav1.ConditionTrue})
+		}, false),
+	)
+})

@@ -61,6 +61,10 @@ const (
 	// a worker forever. A retry resumes vendoring where it stopped, since
 	// copies skip what the destination holds already.
 	renderTimeout = 30 * time.Minute
+	// orderCacheRetryInterval is how soon an Order whose render found the
+	// cache behind the API server reconciles again. Status writes do not
+	// reconcile an Order, so no event would.
+	orderCacheRetryInterval = time.Second
 	// maxRegistryAccess is the most registry locations an Order lists, the
 	// MaxItems of status.registryAccess.
 	maxRegistryAccess = 32
@@ -222,7 +226,7 @@ func (r *OrderReconciler) reconcileOrder(ctx context.Context, order *deliveryv1a
 	}
 	specHash := resolve.CalculateSpecHash(intent)
 
-	if order.Status.LatestConfigHash == specHash && order.Status.LatestPreparationName != "" {
+	if order.Status.LatestConfigHash == specHash {
 		return ctrl.Result{}, r.reconcileUpToDate(ctx, order, effective, conns)
 	}
 
@@ -238,9 +242,13 @@ func (r *OrderReconciler) reconcileOrder(ctx context.Context, order *deliveryv1a
 		return ctrl.Result{}, nil
 	}
 
-	// A render can take minutes, so the Order reports that it is processing
-	// first. That status write triggers the reconcile that renders.
-	if !conditions.HasReason(order, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonProcessing) {
+	// A render can take minutes, so the Order records it and reports that it
+	// is processing first; that write passes renderStarted and starts the
+	// reconcile that renders. A recorded render of this intent that failed is
+	// retried at once, after the back-off of the returned error, and keeps
+	// reporting its failure meanwhile.
+	if render := order.Status.Render; render == nil || render.ConfigHash != specHash {
+		order.Status.Render = &deliveryv1alpha1.OrderRender{ConfigHash: specHash}
 		conditions.MarkUnknown(order, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonProcessing, "Processing component configuration")
 		return ctrl.Result{}, nil
 	}
@@ -340,6 +348,8 @@ func (r *OrderReconciler) reconcileUpToDate(
 	ctx context.Context, order *deliveryv1alpha1.Order, effective *resolve.EffectiveSpec, conns orderConnections,
 ) error {
 	log.FromContext(ctx).V(4).Info("Configuration is up-to-date, skipping render")
+	// A render of another intent that failed is not wanted any longer.
+	order.Status.Render = nil
 
 	latest, err := r.latestPreparation(ctx, order)
 	if err != nil {
@@ -357,15 +367,15 @@ func (r *OrderReconciler) render(
 	logger := log.FromContext(ctx)
 
 	// A cache that lags behind the status of the previous render would
-	// render it again, without its parent and image locks. The watch event
-	// of the newer Order reconciles it again.
+	// render it again, without its parent and image locks. Status writes do
+	// not reconcile the Order, so it checks again shortly.
 	latest, err := r.isLatest(ctx, order)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 	if !latest {
-		logger.Info("Skipping render until the cache holds the latest Order")
-		return ctrl.Result{}, nil
+		logger.Info("Postponing render until the cache holds the latest Order")
+		return ctrl.Result{RequeueAfter: orderCacheRetryInterval}, nil
 	}
 
 	spec, err := effective.ToArtifactSpec()
@@ -436,6 +446,7 @@ func (r *OrderReconciler) render(
 	order.Status.LatestConfigHash = specHash
 	order.Status.LatestPreparationName = preparation.Name
 	order.Status.LatestArtifactDigest = result.DestRef.Digest
+	order.Status.Render = nil
 	r.markUpToDate(ctx, order, effective, conns, preparation)
 	return ctrl.Result{}, nil
 }
@@ -896,6 +907,68 @@ var pipelineChanged = predicate.Funcs{
 	GenericFunc: func(event.GenericEvent) bool { return false },
 }
 
+// renderStarted passes the Order updates that record a new render in
+// status.render, so that the reconcile after the one that recorded it
+// renders. Other status writes, a failed render's included, do not reconcile
+// the Order: a failure is retried after the back-off of its error.
+var renderStarted = predicate.Funcs{
+	UpdateFunc: func(e event.UpdateEvent) bool {
+		started := renderHash(e.ObjectNew)
+		return started != "" && started != renderHash(e.ObjectOld)
+	},
+	GenericFunc: func(event.GenericEvent) bool { return false },
+}
+
+// renderHash returns the config hash of the render obj, an Order, records
+// in progress, "" when it records none.
+func renderHash(obj client.Object) string {
+	if order, ok := obj.(*deliveryv1alpha1.Order); ok && order.Status.Render != nil {
+		return order.Status.Render.ConfigHash
+	}
+	return ""
+}
+
+// productChanged passes the Product events after which its Orders may
+// render something else or report another state: creates, deletes, spec
+// changes, the start of a deletion, and changes of what the Orders read of
+// its status, the source, the config hash and the Ready condition. The
+// Product's scan results, written often, do not pass: they would retry a
+// failed render ahead of its back-off.
+var productChanged = predicate.Funcs{
+	UpdateFunc: func(e event.UpdateEvent) bool {
+		oldProduct, okOld := e.ObjectOld.(*deliveryv1alpha1.Product)
+		newProduct, okNew := e.ObjectNew.(*deliveryv1alpha1.Product)
+		if !okOld || !okNew {
+			return false
+		}
+		return oldProduct.Generation != newProduct.Generation ||
+			!oldProduct.DeletionTimestamp.Equal(newProduct.DeletionTimestamp) ||
+			oldProduct.Status.ConfigHash != newProduct.Status.ConfigHash ||
+			!equality.Semantic.DeepEqual(oldProduct.Status.Source, newProduct.Status.Source) ||
+			readinessOf(oldProduct) != readinessOf(newProduct)
+	},
+	GenericFunc: func(event.GenericEvent) bool { return false },
+}
+
+// productReadiness is what an Order reads of its Product's Ready condition:
+// the status, the generation it describes, and the reason and message it
+// repeats while it waits.
+type productReadiness struct {
+	status             metav1.ConditionStatus
+	observedGeneration int64
+	reason, message    string
+}
+
+// readinessOf returns the productReadiness of p, the zero value while it
+// has no Ready condition.
+func readinessOf(p *deliveryv1alpha1.Product) productReadiness {
+	ready := meta.FindStatusCondition(p.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)
+	if ready == nil {
+		return productReadiness{}
+	}
+	return productReadiness{status: ready.Status, observedGeneration: ready.ObservedGeneration, reason: ready.Reason, message: ready.Message}
+}
+
 // enqueueOrderOfServing maps a Serving to its Order, whose name it carries.
 func enqueueOrderOfServing(_ context.Context, obj client.Object) []reconcile.Request {
 	return []reconcile.Request{{NamespacedName: client.ObjectKeyFromObject(obj)}}
@@ -940,12 +1013,20 @@ func (r *OrderReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&deliveryv1alpha1.Order{}).
+		// The Order's own status writes do not reconcile it, except the one
+		// that starts a render.
+		For(&deliveryv1alpha1.Order{}, builder.WithPredicates(predicate.Or[client.Object](
+			predicate.GenerationChangedPredicate{},
+			predicate.AnnotationChangedPredicate{}, // the commit message
+			renderStarted,
+		))).
 		Owns(&deliveryv1alpha1.Preparation{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&deliveryv1alpha1.Order{},
 			handler.EnqueueRequestsFromMapFunc(r.enqueueDownstreamOrders),
 			builder.WithPredicates(pipelineChanged)).
-		Watches(&deliveryv1alpha1.Product{}, handler.EnqueueRequestsFromMapFunc(r.enqueueOrdersForProduct)).
+		Watches(&deliveryv1alpha1.Product{},
+			handler.EnqueueRequestsFromMapFunc(r.enqueueOrdersForProduct),
+			builder.WithPredicates(productChanged)).
 		Watches(&deliveryv1alpha1.Registry{}, handler.EnqueueRequestsFromMapFunc(r.enqueueOrdersForRegistry)).
 		Watches(&deliveryv1alpha1.Serving{},
 			handler.EnqueueRequestsFromMapFunc(enqueueOrderOfServing),

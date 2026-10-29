@@ -439,6 +439,16 @@ type ApprovalPolicy struct {
 	AllowedGroups []string `json:"allowedGroups"`
 }
 
+// OrderRender is a render of an Order in progress.
+type OrderRender struct {
+	// configHash is the hash of the intent being rendered, which becomes
+	// latestConfigHash once the render completes.
+	// +required
+	// +kubebuilder:validation:MaxLength=71
+	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]+$`
+	ConfigHash string `json:"configHash"`
+}
+
 // OrderStatus defines the observed state of Order.
 type OrderStatus struct {
 	// observedGeneration is the most recent generation observed by the controller
@@ -460,9 +470,15 @@ type OrderStatus struct {
 	// latestConfigHash is a SHA-256 hash of the intent: the resolved source and
 	// destination OCI URLs plus version, render, patches, edits, image
 	// handling and promotion gates after merging the Order over its Product,
-	// and the Product revision.
+	// and the Product revision. It is the intent latestPreparationName was
+	// rendered from, written once its render completed.
 	// +optional
 	LatestConfigHash string `json:"latestConfigHash,omitempty"`
+
+	// render is the render in progress: recorded before it starts, kept
+	// while it fails and is retried, and removed once it completes.
+	// +optional
+	Render *OrderRender `json:"render,omitempty"`
 
 	// registryAccess lists the registry locations the Order needs: where
 	// Kokumi pushes the Preparation and through which Registry, where Argo
