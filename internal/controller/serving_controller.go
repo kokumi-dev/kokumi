@@ -312,7 +312,9 @@ func (r *ServingReconciler) promote(
 // history and, once it is healthy, its deployment record and the summary
 // of its scans. Ready describes what runs; held, what holds the Preparation
 // the Serving converges to, is added to its message, and is its message
-// while nothing runs. It returns how soon to reconcile again.
+// while nothing runs. A deployed Preparation that was deleted holds the
+// Serving and leaves what runs as it is. It returns how soon to reconcile
+// again.
 func (r *ServingReconciler) deploy(
 	ctx context.Context, serving *deliveryv1alpha1.Serving, order *deliveryv1alpha1.Order, held string,
 ) (time.Duration, error) {
@@ -326,13 +328,21 @@ func (r *ServingReconciler) deploy(
 		}
 		return 0, nil
 	}
-	defer func() {
-		if ready := meta.FindStatusCondition(serving.Status.Conditions, deliveryv1alpha1.ConditionTypeReady); ready != nil && held != "" {
-			conditions.Set(serving, ready.Type, ready.Status, ready.Reason, ready.Message+". "+held)
-		}
-	}()
 
-	env, targets, reason, msg, err := r.targets(ctx, serving, order, deployed)
+	preparation := &deliveryv1alpha1.Preparation{}
+	if err := r.Get(ctx, client.ObjectKey{Namespace: serving.Namespace, Name: deployed.Preparation}, preparation); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return 0, fmt.Errorf("failed to get Preparation %q: %w", deployed.Preparation, err)
+		}
+		// Argo CD keeps syncing the artifact, which outlives the object,
+		// until another Preparation is promoted.
+		conditions.MarkFalse(serving, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonPreparationNotFound,
+			fmt.Sprintf("Preparation %s, which is deployed, was deleted; promote another Preparation", deployed.Preparation))
+		markHeld(serving, held)
+		return 0, nil
+	}
+
+	env, targets, reason, msg, err := r.targets(ctx, serving, order, preparation)
 	if err != nil {
 		return 0, err
 	}
@@ -345,17 +355,20 @@ func (r *ServingReconciler) deploy(
 		}
 		setTargets(serving, deployed, nil, nil)
 		conditions.MarkFalse(serving, deliveryv1alpha1.ConditionTypeReady, reason, msg)
+		markHeld(serving, held)
 		return 0, nil
 	}
 	deployer := r.deployer(env)
 	states, err := r.applyTargets(ctx, deployer, env, serving, deployed, targets)
 	if err != nil {
 		markDeploymentFailed(serving, "failed to deploy: "+err.Error())
+		markHeld(serving, held)
 		return 0, fmt.Errorf("failed to deploy: %w", err)
 	}
 	setTargets(serving, deployed, targets, states)
 	observation := observationOf(deployed, targets, states)
 	markDeployment(serving, deployed, targets, observation)
+	markHeld(serving, held)
 
 	// A time goes into the status a pass before the record that contains it
 	// goes into the registry, so that a retry pushes equal bytes.
@@ -390,14 +403,14 @@ type deployTarget struct {
 }
 
 // targets returns the Environment of the Serving's Order and the clusters
-// the Serving deploys the deployed Preparation to: every Cluster the
+// the Serving deploys preparation, the deployed one, to: every Cluster the
 // Environment selects, into the Preparation's target namespace. The engine
 // of the Environment admits it each time, so that a change of the
 // Environment or of what the engine allows counts at once. A target that
 // cannot be deployed to is held, with the reason and why. When the Order
 // may not deploy at all, it returns no target, with the reason and why.
 func (r *ServingReconciler) targets(
-	ctx context.Context, serving *deliveryv1alpha1.Serving, order *deliveryv1alpha1.Order, deployed *promotion.Entry,
+	ctx context.Context, serving *deliveryv1alpha1.Serving, order *deliveryv1alpha1.Order, preparation *deliveryv1alpha1.Preparation,
 ) (*deliveryv1alpha1.Environment, []deployTarget, string, string, error) {
 	name := order.Spec.EnvironmentRef.Name
 	env := &deliveryv1alpha1.Environment{}
@@ -430,10 +443,6 @@ func (r *ServingReconciler) targets(
 		return env, nil, admitted.reason, fmt.Sprintf("Environment %s: %s", name, admitted.message), nil
 	}
 
-	preparation := &deliveryv1alpha1.Preparation{}
-	if err := r.Get(ctx, client.ObjectKey{Namespace: serving.Namespace, Name: deployed.Preparation}, preparation); err != nil {
-		return nil, nil, "", "", fmt.Errorf("failed to get Preparation %q: %w", deployed.Preparation, err)
-	}
 	bundled := r.bundledPull(preparation)
 	servers := map[string]string{}
 	targets := make([]deployTarget, 0, len(selected))
@@ -661,8 +670,11 @@ func (r *ServingReconciler) targetPreparation(
 		}
 		preparation := &deliveryv1alpha1.Preparation{}
 		if err := r.Get(ctx, client.ObjectKey{Namespace: serving.Namespace, Name: serving.Spec.PreparationName}, preparation); err != nil {
-			markDeploymentFailed(serving, fmt.Sprintf("preparation not found: %v", err))
-			return order, nil, "", fmt.Errorf("failed to get Preparation %q: %w", serving.Spec.PreparationName, err)
+			if !apierrors.IsNotFound(err) {
+				return order, nil, "", fmt.Errorf("failed to get Preparation %q: %w", serving.Spec.PreparationName, err)
+			}
+			// The Preparation watch reconciles again once it is created.
+			return order, nil, fmt.Sprintf("Waiting for Preparation %q", serving.Spec.PreparationName), nil
 		}
 		return order, preparation, "", nil
 	}
@@ -672,7 +684,6 @@ func (r *ServingReconciler) targetPreparation(
 		client.InNamespace(serving.Namespace),
 		client.MatchingFields{deliveryv1alpha1.FieldOrderName: serving.Spec.OrderName},
 	); err != nil {
-		markDeploymentFailed(serving, fmt.Sprintf("failed to list preparations: %v", err))
 		return order, nil, "", fmt.Errorf("failed to list Preparations: %w", err)
 	}
 
@@ -1336,6 +1347,18 @@ func markDeployment(serving *deliveryv1alpha1.Serving, deployed *promotion.Entry
 // markPending marks the Serving as waiting for a prerequisite.
 func markPending(serving *deliveryv1alpha1.Serving, msg string) {
 	conditions.MarkUnknown(serving, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonPending, msg)
+}
+
+// markHeld adds held, what holds the Preparation the Serving converges to,
+// to the Ready condition this pass set. Only a fresh condition gets it: the
+// one an earlier pass left carries it already.
+func markHeld(serving *deliveryv1alpha1.Serving, held string) {
+	if held == "" {
+		return
+	}
+	if ready := meta.FindStatusCondition(serving.Status.Conditions, deliveryv1alpha1.ConditionTypeReady); ready != nil {
+		conditions.Set(serving, ready.Type, ready.Status, ready.Reason, ready.Message+". "+held)
+	}
 }
 
 // markDeploymentFailed marks the Serving as not deployed, for msg.
