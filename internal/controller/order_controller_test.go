@@ -40,6 +40,7 @@ import (
 	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
@@ -1824,4 +1825,36 @@ var _ = Describe("pipelineChanged", func() {
 		Entry("staying an invalid stage", invalid(1, true), invalid(1, true), false),
 		Entry("a status write", invalid(1, false), invalid(1, false), false),
 	)
+})
+
+var _ = Describe("The Order's watch of its Preparations", func() {
+	It("passes the start of a deletion, and not a status write", func() {
+		ctx := context.Background()
+		const digest = "sha256:0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+		watched := predicate.GenerationChangedPredicate{}
+		prep := createTestPreparation(ctx, "watched-0f0f0f0f0f0f", "watched", digest, nil)
+		prep.Finalizers = []string{deliveryv1alpha1.Finalizer}
+		Expect(k8sClient.Update(ctx, prep)).To(Succeed())
+		DeferCleanup(func() {
+			current := &deliveryv1alpha1.Preparation{}
+			if err := k8sClient.Get(ctx, client.ObjectKeyFromObject(prep), current); err == nil {
+				current.Finalizers = nil
+				Expect(k8sClient.Update(ctx, current)).To(Succeed())
+			}
+		})
+
+		old := prep.DeepCopy()
+		meta.SetStatusCondition(&prep.Status.Conditions, metav1.Condition{
+			Type: deliveryv1alpha1.ConditionTypeSigned, Status: metav1.ConditionTrue, Reason: testReadyReason,
+		})
+		Expect(k8sClient.Status().Update(ctx, prep)).To(Succeed())
+		Expect(watched.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: prep})).To(BeFalse(), "a status write changes no generation")
+
+		old = prep.DeepCopy()
+		Expect(k8sClient.Delete(ctx, prep)).To(Succeed())
+		deleting := &deliveryv1alpha1.Preparation{}
+		Expect(k8sClient.Get(ctx, client.ObjectKeyFromObject(prep), deleting)).To(Succeed())
+		Expect(deleting.DeletionTimestamp).NotTo(BeNil())
+		Expect(watched.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: deleting})).To(BeTrue(), "the start of a deletion changes the generation")
+	})
 })
