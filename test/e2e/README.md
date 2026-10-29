@@ -67,7 +67,7 @@ also exports the logs of the Kind nodes, their kubelet and every container to
 | `clusters_test.go` | `clusters`: registering a second Kind cluster, deploying to the clusters of an Environment, clusters joining and leaving. |
 | `environments_test.go` | `environments`: what an Environment's Argo CD project allows, and who may name a Secret in a Cluster; no second cluster. |
 | `approvals_test.go` | `approvals`: required approvals through OIDC sign-in. |
-| `lifecycle_test.go` | `lifecycle`: deleting an Order. |
+| `lifecycle_test.go` | `lifecycle`: deleting an Order, restarting the manager, and a manager that starts before Argo CD is installed. |
 | `signing_test.go` | `signing`: signatures and provenance of Preparations. |
 | `source_verification_test.go` | `source-verification`: keyless, by key, and required by the Kitchen. |
 | `images_test.go` | `images`: vendoring. |

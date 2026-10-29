@@ -19,6 +19,8 @@ limitations under the License.
 package e2e
 
 import (
+	"strconv"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -130,6 +132,87 @@ var _ = Describe("Manager restart", Label("lifecycle"), Serial, func() {
 			}, 45*time.Second, time.Second).Should(Equal(uid), "the Application is neither deleted nor replaced")
 			Expect(framework.Serving(ns, "podinfo")()).NotTo(
 				framework.HaveConditionReason(deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonProjectNotFound))
+		})
+	})
+})
+
+var _ = Describe("Manager without Argo CD", Label("lifecycle"), Serial, func() {
+	Context("of a manager that starts before Argo CD is installed", Ordered, func() {
+		const manager = "deployment/kokumi-controller-manager"
+		var ns string
+		var digest string
+		// started is when the manager restarted without Argo CD's CRDs.
+		var started time.Time
+
+		// managerRestarts returns how often the containers of the manager's
+		// Pods restarted.
+		managerRestarts := func() (int, error) {
+			out, err := framework.Kubectl("get", "pods", "-n", framework.InstallNamespace,
+				"-l", "control-plane=controller-manager",
+				"-o", "jsonpath={.items[*].status.containerStatuses[*].restartCount}")
+			if err != nil {
+				return 0, err
+			}
+			restarts := 0
+			for count := range strings.FieldsSeq(out) {
+				n, err := strconv.Atoi(count)
+				if err != nil {
+					return 0, err
+				}
+				restarts += n
+			}
+			return restarts, nil
+		}
+
+		BeforeAll(func() {
+			if framework.RealArgoCD() {
+				Skip("removing Argo CD's CRDs would remove the real Argo CD's Applications")
+			}
+			framework.RemoveSimulatedArgoCD()
+
+			_, err := framework.Kubectl("rollout", "restart", manager, "-n", framework.InstallNamespace)
+			Expect(err).NotTo(HaveOccurred())
+			_, err = framework.Kubectl("rollout", "status", manager, "-n", framework.InstallNamespace, "--timeout=3m")
+			Expect(err).NotTo(HaveOccurred())
+			started = time.Now()
+
+			ns = framework.CreateNamespace("without-argocd")
+			framework.ApplyExample(ns, "getting-started")
+		})
+
+		// Whatever happens, the specs after this one find Argo CD again. An
+		// AfterAll, since SimulateArgoCD writes a temporary file, whose
+		// cleanup a DeferCleanup callback cannot register.
+		AfterAll(func() {
+			if !framework.RealArgoCD() {
+				framework.SimulateArgoCD()
+			}
+		})
+
+		It("renders Orders", func() {
+			preparation := framework.LatestPreparation(ns, "podinfo")
+			digest = preparation.Spec.Artifact.Digest
+			framework.Promote(ns, "podinfo", preparation.Name)
+		})
+
+		It("holds a promoted Preparation, and says that Argo CD is missing", func() {
+			Eventually(framework.Serving(ns, "podinfo")).Should(
+				framework.HaveConditionReason(deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonArgoCDNotInstalled))
+			framework.ExpectNoApplication(ns, "podinfo")
+		})
+
+		It("keeps running, past the time a watch waits for its kind", func() {
+			Consistently(managerRestarts, max(time.Until(started.Add(3*time.Minute)), time.Second), 5*time.Second).
+				Should(BeZero(), "the manager does not restart without Argo CD's CRDs")
+		})
+
+		It("deploys once Argo CD is installed, without a restart", func() {
+			framework.SimulateArgoCD()
+			framework.WaitForDeployment(ns, "podinfo", digest)
+			framework.SyncHealthy(ns, "podinfo", digest)
+			Eventually(framework.Serving(ns, "podinfo")).Should(
+				framework.HaveConditionReason(deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonDeployed))
+			Expect(managerRestarts()).To(BeZero())
 		})
 	})
 })
