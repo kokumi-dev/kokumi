@@ -451,6 +451,58 @@ var _ = Describe("Serving Controller", func() {
 			Expect(errors.IsNotFound(k8sClient.Get(ctx, appKey(orderName), app))).To(BeTrue())
 		})
 
+		It("holds when its deployed Preparation was deleted, keeps what runs, and keeps Ready's message as it is", func() {
+			r := newReconciler()
+			_, err := settleServing(ctx, r, typeNamespacedName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(getServing().DeployedPreparationName()).To(Equal(preparationName))
+
+			By("pointing the Serving at a Preparation that does not exist yet, and deleting the deployed one")
+			s := getServing()
+			s.Spec.PreparationName = "next-preparation"
+			Expect(k8sClient.Update(ctx, s)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, &deliveryv1alpha1.Preparation{Name: preparationName, Namespace: testNamespace})).To(Succeed())
+
+			messages := make([]string, 0, 3)
+			for range 3 {
+				_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+				Expect(err).NotTo(HaveOccurred())
+				cond := apimeta.FindStatusCondition(getServing().Status.Conditions, deliveryv1alpha1.ConditionTypeReady)
+				Expect(cond).NotTo(BeNil())
+				Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+				Expect(cond.Reason).To(Equal(deliveryv1alpha1.ReasonPreparationNotFound))
+				messages = append(messages, cond.Message)
+			}
+			Expect(messages[0]).To(ContainSubstring(`Waiting for Preparation "next-preparation"`))
+			Expect(messages).To(HaveEach(messages[0]), "each pass adds what holds the Serving once")
+			Expect(getApp()).NotTo(BeNil(), "the Application keeps the deployed artifact running")
+		})
+
+		It("waits for a Manual Preparation that does not exist yet, and deploys it once it is created", func() {
+			preparation := &deliveryv1alpha1.Preparation{}
+			preparationKey := types.NamespacedName{Name: preparationName, Namespace: testNamespace}
+			Expect(k8sClient.Get(ctx, preparationKey, preparation)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, preparation)).To(Succeed())
+
+			r := newReconciler()
+			_, err := settleServing(ctx, r, typeNamespacedName)
+			Expect(err).NotTo(HaveOccurred())
+			cond := apimeta.FindStatusCondition(getServing().Status.Conditions, deliveryv1alpha1.ConditionTypeReady)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Reason).To(Equal(deliveryv1alpha1.ReasonPending))
+			Expect(cond.Message).To(Equal(fmt.Sprintf("Waiting for Preparation %q", preparationName)))
+
+			By("creating the Preparation")
+			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Preparation{
+				Name: preparationName, Namespace: testNamespace, Labels: preparation.Labels, Spec: preparation.Spec,
+			})).To(Succeed())
+			markPreparationReady(ctx, registry, preparationKey)
+
+			_, err = settleServing(ctx, r, typeNamespacedName)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(getServing().DeployedPreparationName()).To(Equal(preparationName))
+		})
+
 		It("holds a Preparation whose Registry is missing, and verifies it once a Registry event brings it back", func() {
 			const registryName = "late-registry"
 			order := &deliveryv1alpha1.Order{}

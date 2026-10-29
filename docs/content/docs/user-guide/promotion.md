@@ -145,10 +145,12 @@ kubectl get servings -n shop
 
 | Reason | Meaning |
 |---|---|
+| `Pending` | Nothing is deployed yet; the message says what the Serving waits for, such as the Preparation `spec.preparationName` names. |
 | `Deploying` | Not every target on a Ready Cluster runs the deployed Preparation healthily yet. |
 | `Deployed` | Every target on a Ready Cluster, and at least one, reports `Healthy`, synced to the deployed digest. |
 | `DeploymentFailed` | A target is degraded at the deployed digest or held, or none of the Environment's Clusters is Ready. |
 | `EnvironmentNotFound`, `InvalidSelector`, `NoClusters`, `ProjectNotFound`, `ProjectNotPermitted`, `ArgoCDNotInstalled` | The Order may not deploy at all. The Serving deletes its Applications. |
+| `PreparationNotFound` | The deployed Preparation was deleted. The Serving keeps its Applications, which run the artifact from the registry, until another Preparation is promoted. |
 
 While a newer Preparation waits for a gate, the message of `Ready` says what
 holds it. How each cluster is counted and reported is in
