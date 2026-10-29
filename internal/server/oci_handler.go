@@ -11,7 +11,8 @@ import (
 // connect to it through the Registries named in the comma-separated
 // registryRefs query parameter, in the namespace named by the namespace
 // parameter, as the user: a user who may not get a Registry's Secret gets
-// 403, never an anonymous read.
+// 403, never an anonymous read. Without registryRefs they connect
+// anonymously, but still only for a user mapped to a ServiceAccount.
 
 // handleGetDefaultRegistry handles GET /api/v1/oci/default.
 // It returns the base URL of the in-cluster OCI registry so the UI can

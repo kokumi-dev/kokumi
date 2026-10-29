@@ -416,7 +416,7 @@ func handleGetPreparationIntent(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		if err := authorizeIntent(r.Context(), uc, prep); err != nil {
+		if err := authorizeOrderContent(r.Context(), uc, prep); err != nil {
 			respondForbiddenOrError(w, err, "failed to get order")
 			return
 		}
@@ -450,11 +450,12 @@ func handleGetPreparationIntent(deps *apiDeps) http.HandlerFunc {
 	}
 }
 
-// authorizeIntent reports whether the caller may read the intent of prep.
-// The intent repeats the Order's configuration, so the caller must also be
-// allowed to read the Order. A deleted Order no longer protects anything; its
+// authorizeOrderContent reports whether the caller may read what the
+// artifact of prep repeats of its Order: the intent and the rendered files
+// carry the Order's configuration, so the caller must also be allowed to
+// read the Order. A deleted Order no longer protects anything; its
 // Preparations stay readable to whoever may read them.
-func authorizeIntent(ctx context.Context, getter objectGetter, prep *deliveryv1alpha1.Preparation) error {
+func authorizeOrderContent(ctx context.Context, getter objectGetter, prep *deliveryv1alpha1.Preparation) error {
 	order := &deliveryv1alpha1.Order{}
 	key := types.NamespacedName{Namespace: prep.Namespace, Name: prep.Spec.OrderName}
 

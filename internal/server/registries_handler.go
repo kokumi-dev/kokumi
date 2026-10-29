@@ -205,17 +205,11 @@ func handleUpdateRegistry(deps *apiDeps) http.HandlerFunc {
 		reg.Spec.Scheme = deliveryv1alpha1.RegistryScheme(req.Scheme)
 		setRegistryRefs(reg, req.SecretRef, req.CertSecretRef)
 
-		credentials := req.Username != "" && req.Password != ""
-		if credentials {
+		var secret *corev1.Secret
+		if req.Username != "" && req.Password != "" {
 			reg.Spec.SecretRef = &corev1.LocalObjectReference{Name: reg.Name + credentialsSecretSuffix}
-			secret, err := credentialsSecret(reg, req.Username, req.Password)
-			if err == nil {
-				secret.OwnerReferences = []metav1.OwnerReference{registryOwnerReference(reg)}
-				err = writeCredentialSecret(r.Context(), uc, secret)
-			}
-			if err != nil {
-				deps.logger.Error(err, "Failed to store Registry credentials", "name", reg.Name)
-				respondSecretError(w, err)
+			if secret, err = credentialsSecret(reg, req.Username, req.Password); err != nil {
+				respondError(w, http.StatusBadRequest, err.Error())
 				return
 			}
 		}
@@ -225,10 +219,26 @@ func handleUpdateRegistry(deps *apiDeps) http.HandlerFunc {
 			respondForbiddenOrError(w, err, "failed to update registry")
 			return
 		}
+		// The Registry comes first, as on create: a refused patch leaves the
+		// Secret as it was.
+		if secret != nil {
+			if err := checkCredentialSecret(r.Context(), uc, reg.Namespace, secret.Name); err != nil {
+				respondSecretError(w, err)
+				return
+			}
+		}
 		if err := writer.Patch(r.Context(), reg, patch); err != nil {
 			deps.logger.Error(err, "Failed to update Registry", "name", reg.Name)
 			respondForbiddenOrError(w, err, "failed to update registry")
 			return
+		}
+		if secret != nil {
+			secret.OwnerReferences = []metav1.OwnerReference{registryOwnerReference(reg)}
+			if err := writeCredentialSecret(r.Context(), uc, secret); err != nil {
+				deps.logger.Error(err, "Failed to store Registry credentials", "name", reg.Name)
+				respondSecretError(w, err)
+				return
+			}
 		}
 
 		respondJSON(w, http.StatusOK, registryToDTO(*reg))

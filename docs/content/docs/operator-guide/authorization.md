@@ -56,7 +56,8 @@ Matching rules:
   Writes are performed as the first ServiceAccount authorized for the
   operation.
 - Users who match no ServiceAccount are authenticated but authorized for
-  nothing (every operation returns 403).
+  nothing: every operation returns 403, browsing registries and previews
+  included.
 
 Map by `sub` or by group rather than by email. The provider assigns the
 subject and the groups, while some providers let users set their own email
@@ -198,9 +199,9 @@ it. Three things guard that:
   Repository, a Product's source or a Preparation's artifact, and previews,
   connect through the Registries of the object with the user's own `get` on
   their Secrets. Without it the server answers 403 and names the Registry and
-  the Secret; it never falls back to an anonymous read. The server's pull
-  cache serves only content the caller could resolve with their own
-  credentials.
+  the Secret; it never falls back to an anonymous read. Without Registries it
+  connects anonymously, and only for a mapped user. The server's pull cache
+  serves only content the caller could resolve with their own credentials.
 - **The UI stores credentials as the user.** A Registry saved with a username
   and password gets a `kubernetes.io/dockerconfigjson` Secret
   `<registry>-credentials`, created after the Registry and owned by it. The
@@ -368,7 +369,9 @@ credentials of each scan with the request, and signs what it returns. See
 ## UI and kubectl parity
 
 Because authorization is plain Kubernetes RBAC on the mapped ServiceAccount,
-the same view is available from kubectl:
+the same view is available from kubectl. One check goes beyond the object
+itself: a Preparation's rendered files and intent carry its Order's values, so
+reading them needs `get` on the Order too, as long as the Order exists.
 
 ```bash
 kubectl auth can-i list orders \
