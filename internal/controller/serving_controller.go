@@ -902,8 +902,8 @@ func (r *ServingReconciler) verify(ctx context.Context, serving *deliveryv1alpha
 		conditions.MarkFalse(serving, deliveryv1alpha1.ConditionTypeVerified, rejected.Reason, preparation.Name+": "+err.Error())
 		return false, nil
 	case registry.Reason(err, "") != "":
-		// The Registry watch of the Order reconciles again once the
-		// Registries change.
+		// The Registry watch reconciles again once the Registries
+		// change.
 		conditions.MarkFalse(serving, deliveryv1alpha1.ConditionTypeVerified, registry.Reason(err, ""), preparation.Name+": "+err.Error())
 		return false, nil
 	case err != nil:
@@ -1571,6 +1571,25 @@ var productScansChanged = predicate.Funcs{
 	GenericFunc: func(event.GenericEvent) bool { return false },
 }
 
+// enqueueServingsOfRegistry enqueues every Serving in the namespace of a
+// Registry. A Serving reads through the Registry recorded with its
+// Preparation, its Order's, its Product's and those of its upstream stages'
+// records, so no index covers them all; references stay in one namespace.
+// A fixed Secret reaches the Serving here too, through the Registry's Ready.
+func (r *ServingReconciler) enqueueServingsOfRegistry(ctx context.Context, obj client.Object) []ctrl.Request {
+	servings := &deliveryv1alpha1.ServingList{}
+	if err := r.List(ctx, servings, client.InNamespace(obj.GetNamespace())); err != nil {
+		log.FromContext(ctx).Error(err, "Failed to list Servings of Registry", "registry", obj.GetName())
+		return nil
+	}
+
+	reqs := make([]ctrl.Request, 0, len(servings.Items))
+	for i := range servings.Items {
+		reqs = append(reqs, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&servings.Items[i])})
+	}
+	return reqs
+}
+
 // enqueueAllServings enqueues every Serving, so that their targets are
 // verified again against changed trust.
 func (r *ServingReconciler) enqueueAllServings(ctx context.Context, _ client.Object) []ctrl.Request {
@@ -1698,6 +1717,8 @@ func (r *ServingReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&deliveryv1alpha1.Cluster{},
 			handler.EnqueueRequestsFromMapFunc(r.enqueueServingsOfCluster),
 			builder.WithPredicates(clusterChanged)).
+		// A Registry that comes, goes or turns Ready may release a hold.
+		Watches(&deliveryv1alpha1.Registry{}, handler.EnqueueRequestsFromMapFunc(r.enqueueServingsOfRegistry)).
 		WatchesRawSource(source.Channel(r.signingChanges(), handler.EnqueueRequestsFromMapFunc(r.enqueueAllServings))).
 		WatchesRawSource(source.Channel(applications.Started(), handler.EnqueueRequestsFromMapFunc(r.enqueueAllServings))).
 		WatchesRawSource(source.Channel(appProjects.Started(), handler.EnqueueRequestsFromMapFunc(r.enqueueAllServings))).
