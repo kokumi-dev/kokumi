@@ -1,7 +1,6 @@
 package scan
 
 import (
-	"cmp"
 	"fmt"
 	"maps"
 	"slices"
@@ -9,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/promotion"
 )
 
 // RecentReleases is how many of an Order's newest Ready releases stay
@@ -20,21 +20,17 @@ const maxListedFailures = 3
 
 // Release is a rendered release whose vendored images may be in use.
 type Release struct {
-	Name    string
-	Created time.Time
-	Ready   bool
+	promotion.Release
 	// Images are the vendored images the release runs, by digest.
 	Images []oci.Reference
 }
 
 // InUse returns the images of an Order's releases in use, by digest: the
-// RecentReleases newest Ready releases and the releases named, such as the
-// one deployed.
+// RecentReleases newest Ready releases, in the order Automatic promotion
+// picks the newest by, and the releases named, such as the one deployed.
 func InUse(releases []Release, named ...string) map[string]oci.Reference {
 	ready := slices.DeleteFunc(slices.Clone(releases), func(r Release) bool { return !r.Ready })
-	slices.SortFunc(ready, func(a, b Release) int {
-		return cmp.Or(b.Created.Compare(a.Created), strings.Compare(b.Name, a.Name))
-	})
+	slices.SortFunc(ready, func(a, b Release) int { return promotion.NewestFirst(a.Release, b.Release) })
 	keep := map[string]bool{}
 	for _, r := range ready[:min(RecentReleases, len(ready))] {
 		keep[r.Name] = true
