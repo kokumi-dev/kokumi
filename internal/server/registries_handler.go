@@ -8,7 +8,6 @@ import (
 	"net/http"
 
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -150,10 +149,6 @@ func handleCreateRegistry(deps *apiDeps) http.HandlerFunc {
 			}
 		}
 		if err := writer.Create(r.Context(), reg); err != nil {
-			if apierrors.IsAlreadyExists(err) {
-				respondError(w, http.StatusConflict, fmt.Sprintf("registry %q already exists", req.Name))
-				return
-			}
 			deps.logger.Error(err, "Failed to create Registry", "name", req.Name)
 			respondForbiddenOrError(w, err, "failed to create registry")
 			return

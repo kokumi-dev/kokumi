@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -101,10 +100,6 @@ func handleCreateRepository(deps *apiDeps) http.HandlerFunc {
 			Spec:      repositorySpec(req.URL, req.RegistryRef, req.Description),
 		}
 		if err := uc.create(r.Context(), repo, repositoriesResource); err != nil {
-			if apierrors.IsAlreadyExists(err) {
-				respondError(w, http.StatusConflict, fmt.Sprintf("repository %q already exists", req.Name))
-				return
-			}
 			deps.logger.Error(err, "Failed to create Repository", "name", req.Name)
 			respondForbiddenOrError(w, err, "failed to create repository")
 			return

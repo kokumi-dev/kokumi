@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -98,10 +97,6 @@ func handleCreateEnvironment(deps *apiDeps) http.HandlerFunc {
 		}
 		env := &deliveryv1alpha1.Environment{Name: req.Name, Namespace: req.Namespace, Spec: req.EnvironmentSpec}
 		if err := uc.create(r.Context(), env, environmentsResource); err != nil {
-			if apierrors.IsAlreadyExists(err) {
-				respondError(w, http.StatusConflict, fmt.Sprintf("environment %s/%s already exists", req.Namespace, req.Name))
-				return
-			}
 			deps.logger.Error(err, "Failed to create Environment", "namespace", req.Namespace, "name", req.Name)
 			respondForbiddenOrError(w, err, "failed to create environment")
 			return

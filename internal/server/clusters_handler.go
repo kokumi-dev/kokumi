@@ -8,7 +8,6 @@ import (
 	"slices"
 
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -283,10 +282,6 @@ func handleCreateCluster(deps *apiDeps) http.HandlerFunc {
 			}
 		}
 		if err := uc.create(r.Context(), c, clustersResource); err != nil {
-			if apierrors.IsAlreadyExists(err) {
-				respondError(w, http.StatusConflict, fmt.Sprintf("cluster %s/%s already exists", req.Namespace, req.Name))
-				return
-			}
 			deps.logger.Error(err, "Failed to create Cluster", "namespace", req.Namespace, "name", req.Name)
 			respondForbiddenOrError(w, err, "failed to create cluster")
 			return

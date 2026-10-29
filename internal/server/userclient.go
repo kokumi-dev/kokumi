@@ -201,12 +201,22 @@ func (u *userClient) readerFor(ctx context.Context, verb, resource, namespace st
 }
 
 // respondForbiddenOrError maps operation errors to HTTP responses: RBAC
-// denials and no-mapping errors become 403; other errors use the provided
-// fallback status.
+// denials and no-mapping errors become 403. The API server's other verdicts
+// on the request, such as 404, 409 and 422, keep their status and message,
+// as kubectl shows them. Everything else is a 500 that names op.
 func respondForbiddenOrError(w http.ResponseWriter, err error, op string) {
 	if isDenied(err) {
 		respondError(w, http.StatusForbidden, err.Error())
 		return
+	}
+	// A 401 from the API server rejects the server's own credentials, not
+	// the user's, so it stays a 500 like the API server's own failures.
+	var status apierrors.APIStatus
+	if errors.As(err, &status) {
+		if s := status.Status(); s.Code >= 400 && s.Code < 500 && s.Code != http.StatusUnauthorized {
+			respondError(w, int(s.Code), s.Message)
+			return
+		}
 	}
 	respondError(w, http.StatusInternalServerError, fmt.Sprintf("%s: %s", op, err))
 }
