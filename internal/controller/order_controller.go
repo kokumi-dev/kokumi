@@ -941,7 +941,7 @@ func (r *OrderReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&deliveryv1alpha1.Order{}).
-		Owns(&deliveryv1alpha1.Preparation{}).
+		Owns(&deliveryv1alpha1.Preparation{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&deliveryv1alpha1.Order{},
 			handler.EnqueueRequestsFromMapFunc(r.enqueueDownstreamOrders),
 			builder.WithPredicates(pipelineChanged)).
