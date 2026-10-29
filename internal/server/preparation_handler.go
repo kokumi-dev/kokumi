@@ -52,7 +52,8 @@ func handleListPreparations(deps *apiDeps) http.HandlerFunc {
 
 // handleGetPreparationManifest handles GET /api/v1/preparations/{namespace}/{name}/manifest.
 // It returns the files of the Preparation's OCI artifact in their layout. A
-// single rendered manifest is one file, manifest.yaml.
+// single rendered manifest is one file, manifest.yaml. The files carry the
+// Order's values, so the caller must be allowed to read the Order too.
 func handleGetPreparationManifest(deps *apiDeps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if deps == nil {
@@ -60,22 +61,13 @@ func handleGetPreparationManifest(deps *apiDeps) http.HandlerFunc {
 			return
 		}
 
-		namespace := r.PathValue("namespace")
-		name := r.PathValue("name")
-
-		uc, err := deps.resolveUserClient(r)
-		if err != nil {
-			respondForbiddenOrError(w, err, "failed to resolve identity")
+		prep, uc := preparationFromRequest(deps, w, r)
+		if prep == nil {
 			return
 		}
 
-		prep := &deliveryv1alpha1.Preparation{}
-		if err := uc.get(r.Context(), types.NamespacedName{Namespace: namespace, Name: name}, prep); err != nil {
-			if client.IgnoreNotFound(err) == nil {
-				respondError(w, http.StatusNotFound, fmt.Sprintf("preparation %s/%s not found", namespace, name))
-				return
-			}
-			respondForbiddenOrError(w, err, "failed to get preparation")
+		if err := authorizeOrderContent(r.Context(), uc, prep); err != nil {
+			respondForbiddenOrError(w, err, "failed to get order")
 			return
 		}
 
@@ -88,7 +80,7 @@ func handleGetPreparationManifest(deps *apiDeps) http.HandlerFunc {
 		result, err := deps.store.Inspect(r.Context(), prep.Spec.Artifact.OCIRef, conn.Client)
 		if err != nil {
 			deps.logger.Error(err, "Failed to fetch manifest from OCI",
-				"namespace", namespace, "name", name,
+				"namespace", prep.Namespace, "name", prep.Name,
 				"ociRef", prep.Spec.Artifact.OCIRef)
 			respondError(w, http.StatusBadGateway, fmt.Sprintf("failed to fetch manifest from OCI: %s", err))
 			return

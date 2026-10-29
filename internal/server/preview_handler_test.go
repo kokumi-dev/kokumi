@@ -49,6 +49,8 @@ type testBackend struct {
 	// cluster is what the admin reads and writes, built from the objects
 	// passed along when nil.
 	cluster client.Client
+	// identity signs the request in, adminLogin when nil.
+	identity *Identity
 }
 
 // serveAsAdminWith serves req as the admin, with objs in the cluster and
@@ -83,10 +85,15 @@ func serveAsAdminWith(t *testing.T, req *http.Request, backend testBackend, objs
 		},
 	}
 
+	identity := backend.identity
+	if identity == nil {
+		identity = adminLogin
+	}
+
 	mux := http.NewServeMux()
 	addRoutes(mux, nil, deps, nil, capsInstallNamespace)
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req.WithContext(withIdentity(req.Context(), adminLogin)))
+	mux.ServeHTTP(rec, req.WithContext(withIdentity(req.Context(), identity)))
 	return rec
 }
 
@@ -134,6 +141,38 @@ func TestHandlePreview(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, tt.path, strings.NewReader(tt.body))
 			requireFiles(t, serveAsAdmin(t, req, product), fakeManifestFile)
+		})
+	}
+}
+
+// TestOCIReadsNeedAMappedUser checks that the server connects to no OCI
+// location for a signed-in user no ServiceAccount is mapped to, also
+// without registryRefs, where it would connect anonymously.
+func TestOCIReadsNeedAMappedUser(t *testing.T) {
+	const ref = "oci://registry.example.com/charts/web"
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+	}{
+		{name: "tags", method: http.MethodGet, path: "/api/v1/oci/tags?ref=" + ref},
+		{name: "artifact", method: http.MethodGet, path: "/api/v1/oci/artifact?ref=" + ref + "&version=1.0.0"},
+		{name: "chart info", method: http.MethodGet, path: "/api/v1/oci/chart-info?ref=" + ref + "&version=1.0.0"},
+		{
+			name:   "Product preview",
+			method: http.MethodPost,
+			path:   "/api/v1/products/preview",
+			body:   `{"namespace":"` + nsA + `","name":"web","source":{"url":"` + ref + `","version":"1.0.0"},"images":{}}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fs := afero.NewMemMapFs()
+			backend := testBackend{fs: fs, registry: oci.NewFakeClient(fs), identity: personalLogin}
+
+			rec := serveAsAdminWith(t, httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body)), backend)
+			require.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
 		})
 	}
 }

@@ -69,11 +69,9 @@ func (deps *apiDeps) resolverFor(uc *userClient) *registry.Resolver {
 }
 
 // scopeFor returns the Scope of an object in namespace that lists refs, for
-// the user of r. Without refs it reads nothing, so it needs no identity.
+// the user of r. Only a mapped user gets one, with or without refs: the
+// server connects to no location for an identity RBAC does not know.
 func (deps *apiDeps) scopeFor(r *http.Request, namespace string, refs []corev1.LocalObjectReference) (registry.Scope, error) {
-	if len(refs) == 0 {
-		return deps.registries.Scope(nil), nil
-	}
 	uc, err := deps.resolveUserClient(r)
 	if err != nil {
 		return registry.Scope{}, err

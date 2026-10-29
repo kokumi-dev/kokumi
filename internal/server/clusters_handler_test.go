@@ -40,6 +40,11 @@ const (
 	webOrder     = "web"
 	kokumiNS     = "kokumi"
 	platformNS   = "platform"
+	// ghcr, ghcrURL and ghcrPassword are the Registry the registry tests
+	// save.
+	ghcr         = "ghcr"
+	ghcrURL      = "oci://ghcr.io/kokumi-dev"
+	ghcrPassword = "secret"
 )
 
 func TestKubeconfigOf(t *testing.T) {
@@ -392,9 +397,64 @@ func TestHandleCreateRegistryStoresNoSecretWithoutItsRegistry(t *testing.T) {
 	}).Build()
 
 	rec := serveClusters(t, http.MethodPost, "/api/v1/registries", CreateRegistryRequest{
-		Namespace: platformNS, Name: "ghcr", URL: "oci://ghcr.io/kokumi-dev", Username: "robot", Password: "secret",
+		Namespace: platformNS, Name: ghcr, URL: ghcrURL, Username: "robot", Password: ghcrPassword,
 	}, admin)
 	assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
-	err := admin.Get(context.Background(), types.NamespacedName{Namespace: platformNS, Name: "ghcr" + credentialsSecretSuffix}, &corev1.Secret{})
+	err := admin.Get(context.Background(), types.NamespacedName{Namespace: platformNS, Name: ghcr + credentialsSecretSuffix}, &corev1.Secret{})
 	assert.True(t, apierrors.IsNotFound(err), "no Secret outlives a Registry that was not created")
+}
+
+func TestHandleUpdateRegistryStoresTheSecretAfterItsRegistry(t *testing.T) {
+	registry := func() *deliveryv1alpha1.Registry {
+		return &deliveryv1alpha1.Registry{Name: ghcr, Namespace: platformNS, Spec: deliveryv1alpha1.RegistrySpec{URL: ghcrURL}}
+	}
+	request := UpdateRegistryRequest{URL: ghcrURL, Username: "robot", Password: ghcrPassword}
+	path := "/api/v1/registries/" + platformNS + "/" + ghcr
+	secretKey := types.NamespacedName{Namespace: platformNS, Name: ghcr + credentialsSecretSuffix}
+
+	t.Run("stores the credentials in a Secret the Registry owns", func(t *testing.T) {
+		admin := adminCluster(t, registry())
+
+		rec := serveClusters(t, http.MethodPut, path, request, admin)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		secret := &corev1.Secret{}
+		require.NoError(t, admin.Get(context.Background(), secretKey, secret))
+		require.Len(t, secret.OwnerReferences, 1)
+		assert.Equal(t, "Registry", secret.OwnerReferences[0].Kind)
+	})
+
+	t.Run("stores no Secret when the Registry cannot be patched", func(t *testing.T) {
+		admin := fake.NewClientBuilder().WithScheme(unionScheme(t)).WithObjects(registry()).WithInterceptorFuncs(interceptor.Funcs{
+			Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+				if review, ok := obj.(*authorizationv1.SelfSubjectAccessReview); ok {
+					review.Status.Allowed = true
+					return nil
+				}
+				return c.Create(ctx, obj, opts...)
+			},
+			Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+				if _, ok := obj.(*deliveryv1alpha1.Registry); ok {
+					return apierrors.NewForbidden(schema.GroupResource{Group: deliveryv1alpha1.GroupVersion.Group, Resource: registriesResource}, obj.GetName(),
+						errors.New("the registry-secret-access policy refuses it"))
+				}
+				return c.Patch(ctx, obj, patch, opts...)
+			},
+		}).Build()
+
+		rec := serveClusters(t, http.MethodPut, path, request, admin)
+		assert.Equal(t, http.StatusForbidden, rec.Code, rec.Body.String())
+		err := admin.Get(context.Background(), secretKey, &corev1.Secret{})
+		assert.True(t, apierrors.IsNotFound(err), "a refused edit stores no Secret")
+	})
+
+	t.Run("refuses a Secret Kokumi did not create, and leaves the Registry as it was", func(t *testing.T) {
+		foreign := &corev1.Secret{Name: secretKey.Name, Namespace: platformNS}
+		admin := adminCluster(t, registry(), foreign)
+
+		rec := serveClusters(t, http.MethodPut, path, request, admin)
+		assert.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+		stored := &deliveryv1alpha1.Registry{}
+		require.NoError(t, admin.Get(context.Background(), types.NamespacedName{Namespace: platformNS, Name: ghcr}, stored))
+		assert.Nil(t, stored.Spec.SecretRef, "the Registry does not name the foreign Secret")
+	})
 }
