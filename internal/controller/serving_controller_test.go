@@ -451,6 +451,48 @@ var _ = Describe("Serving Controller", func() {
 			Expect(errors.IsNotFound(k8sClient.Get(ctx, appKey(orderName), app))).To(BeTrue())
 		})
 
+		It("holds a Preparation whose Registry is missing, and verifies it once a Registry event brings it back", func() {
+			const registryName = "late-registry"
+			order := &deliveryv1alpha1.Order{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: orderName}, order)).To(Succeed())
+			order.Spec.RegistryRefs = []corev1.LocalObjectReference{{Name: registryName}}
+			Expect(k8sClient.Update(ctx, order)).To(Succeed())
+			// The Order may outlive this test, held by a finalizer another
+			// test left, so later tests must not find its Registry.
+			DeferCleanup(func() {
+				order := &deliveryv1alpha1.Order{}
+				if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: orderName}, order); err == nil {
+					order.Spec.RegistryRefs = nil
+					Expect(k8sClient.Update(ctx, order)).To(Succeed())
+				}
+			})
+
+			r := newReconciler()
+			_, err := settleServing(ctx, r, typeNamespacedName)
+			Expect(err).NotTo(HaveOccurred())
+			cond := apimeta.FindStatusCondition(getServing().Status.Conditions, deliveryv1alpha1.ConditionTypeVerified)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Reason).To(Equal(deliveryv1alpha1.ReasonRegistryNotFound))
+
+			By("creating the Registry, whose event enqueues the Servings of its namespace")
+			reg := &deliveryv1alpha1.Registry{
+				Name:      registryName,
+				Namespace: testNamespace,
+				Spec:      deliveryv1alpha1.RegistrySpec{URL: "oci://registry.kokumi.svc.cluster.local:5000/preparation"},
+			}
+			Expect(k8sClient.Create(ctx, reg)).To(Succeed())
+			DeferCleanup(func() { _ = k8sClient.Delete(ctx, reg) })
+			Expect(r.enqueueServingsOfRegistry(ctx, reg)).To(ContainElement(ctrl.Request{NamespacedName: typeNamespacedName}))
+			Expect(r.enqueueServingsOfRegistry(ctx, &deliveryv1alpha1.Registry{Name: registryName, Namespace: "elsewhere"})).
+				NotTo(ContainElement(ctrl.Request{NamespacedName: typeNamespacedName}), "only the Servings of the Registry's namespace")
+
+			_, err = settleServing(ctx, r, typeNamespacedName)
+			Expect(err).NotTo(HaveOccurred())
+			cond = apimeta.FindStatusCondition(getServing().Status.Conditions, deliveryv1alpha1.ConditionTypeVerified)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionTrue), cond.Message)
+		})
+
 		It("marks the Serving as failed when the Application reports Degraded", func() {
 			_, err := settleServing(ctx, newReconciler(), typeNamespacedName)
 			Expect(err).NotTo(HaveOccurred())
