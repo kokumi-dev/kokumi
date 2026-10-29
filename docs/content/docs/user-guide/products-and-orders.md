@@ -116,7 +116,10 @@ While its Product is missing, not `Ready`, or being deleted, an Order reports
 `Ready=False` with reason `ProductNotFound`, `ProductNotReady` or
 `ProductDeleting` and waits; the UI shows it as **Waiting**. An Order that
 sets what its Product does not allow, or whose render fails, reports
-`ProcessingFailed` with the reason in the message.
+`ProcessingFailed` with the reason in the message. A failed render is
+retried at growing intervals, up to about 17 minutes apart, and keeps
+reporting its failure meanwhile; a change of the Order, its Product or its
+Registries renders at once.
 
 ### Describing a change
 

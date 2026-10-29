@@ -446,7 +446,8 @@ spec:
                   latestConfigHash is a SHA-256 hash of the intent: the resolved source and
                   destination OCI URLs plus version, render, patches, edits, image
                   handling and promotion gates after merging the Order over its Product,
-                  and the Product revision.
+                  and the Product revision. It is the intent latestPreparationName was
+                  rendered from, written once its render completed.
                 type: string
               latestPreparationName:
                 description: |-
@@ -509,6 +510,21 @@ spec:
                 - operation
                 - client
                 x-kubernetes-list-type: map
+              render:
+                description: |-
+                  render is the render in progress: recorded before it starts, kept
+                  while it fails and is retried, and removed once it completes.
+                properties:
+                  configHash:
+                    description: |-
+                      configHash is the hash of the intent being rendered, which becomes
+                      latestConfigHash once the render completes.
+                    maxLength: 71
+                    pattern: ^sha256:[a-f0-9]+$
+                    type: string
+                required:
+                - configHash
+                type: object
             type: object
         required:
         - spec
