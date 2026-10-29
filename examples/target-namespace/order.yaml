@@ -1,0 +1,15 @@
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Order
+metadata:
+  name: storefront
+spec:
+  productRef:
+    name: storefront
+  environmentRef:
+    name: local
+
+  # No targetNamespace: the Order deploys into the Product's, storefront.
+
+  # Every Ready Preparation deploys at once.
+  promotion:
+    mode: Automatic

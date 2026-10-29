@@ -1,0 +1,17 @@
+apiVersion: delivery.kokumi.dev/v1alpha1
+kind: Order
+metadata:
+  name: storefront-review
+spec:
+  productRef:
+    name: storefront
+  environmentRef:
+    name: local
+
+  # An Order may always pick its own target namespace, here one next to the
+  # Product's. The target namespace is part of the intent: changing it renders
+  # a new Preparation, and deploying that one moves the workload.
+  targetNamespace: storefront-review
+
+  promotion:
+    mode: Automatic

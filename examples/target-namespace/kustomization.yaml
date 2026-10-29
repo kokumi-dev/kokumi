@@ -1,0 +1,11 @@
+# A Product that deploys into a namespace of its own, wherever its Orders
+# live, and two Orders of it: one keeps the Product's target namespace, one
+# picks its own. Apply it to a namespace of your choice:
+#
+#   kubectl apply -n <namespace> -k examples/target-namespace
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+- product.yaml
+- order.yaml
+- order-review.yaml

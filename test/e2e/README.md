@@ -63,6 +63,7 @@ also exports the logs of the Kind nodes, their kubelet and every container to
 | `overrides_test.go` | `overrides`: what a Product lets its Orders change. |
 | `promotion_test.go` | `promotion`: Manual promotion and rollback. |
 | `pipeline_test.go` | `promotion`: stages, soak, signed records, Environments a stage must run after. |
+| `target_namespace_test.go` | `target-namespace`: Orders deploying into the Product's target namespace or their own, on the cluster Kokumi runs in. |
 | `clusters_test.go` | `clusters`: registering a second Kind cluster, deploying to the clusters of an Environment, clusters joining and leaving. |
 | `environments_test.go` | `environments`: what an Environment's Argo CD project allows, and who may name a Secret in a Cluster; no second cluster. |
 | `approvals_test.go` | `approvals`: required approvals through OIDC sign-in. |
