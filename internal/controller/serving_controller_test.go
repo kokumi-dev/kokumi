@@ -867,6 +867,35 @@ var _ = Describe("Serving Controller", func() {
 			Expect(getServing().Spec.PreparationName).To(Equal(prepOlder), "the controller never writes the Serving spec")
 		})
 
+		It("names only its current target, so that a vote for a former target is not sealed", func() {
+			older := readyPreparation(prepOlder, digestOlder)
+			Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Serving{
+				Name:      orderName,
+				Namespace: testNamespace,
+				Spec:      deliveryv1alpha1.ServingSpec{OrderName: orderName, PreparationName: prepOlder},
+			})).To(Succeed())
+			reconcileServing()
+			Expect(getServing().Status.TargetPreparationName).To(Equal(prepOlder))
+
+			By("promoting a Preparation that is not Ready yet")
+			createTestPreparation(ctx, prepNewer, orderName, digestNewer, policy)
+			s := getServing()
+			s.Spec.PreparationName = prepNewer
+			Expect(k8sClient.Update(ctx, s)).To(Succeed())
+			reconcileServing()
+			Expect(getServing().Status.TargetPreparationName).To(BeEmpty())
+
+			createTestApproval(ctx, older, "alice", release, deliveryv1alpha1.ApprovalDecisionApprove)
+			target, err := (&PreparationReconciler{Client: k8sClient}).isPromotionTarget(ctx, older)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(target).To(BeFalse(), "the Preparation controller seals only the target's votes")
+
+			By("the new Preparation turning Ready")
+			markPreparationReady(ctx, registry, types.NamespacedName{Namespace: testNamespace, Name: prepNewer})
+			reconcileServing()
+			Expect(getServing().Status.TargetPreparationName).To(Equal(prepNewer))
+		})
+
 		It("keeps Automatic promotion waiting on the newest Preparation", func() {
 			order := &deliveryv1alpha1.Order{}
 			Expect(k8sClient.Get(ctx, key, order)).To(Succeed())

@@ -389,8 +389,7 @@ func scanReleaseOf(prep deliveryv1alpha1.Preparation) scan.Release {
 	release := scan.Release{
 		Name:    prep.Name,
 		Created: prep.CreationTimestamp.Time,
-		Ready:   meta.IsStatusConditionTrue(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeReady),
-	}
+		Ready:   meta.IsStatusConditionTrue(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)}
 	for _, img := range prep.Spec.Images {
 		if img.Vendored == "" || img.Digest == "" {
 			continue

@@ -204,6 +204,7 @@ func (r *ServingReconciler) reconcileServing(ctx context.Context, serving *deliv
 		wait, held, err = r.promote(ctx, serving, order, candidate)
 	} else if err == nil {
 		setHistory(serving, historyOf(serving).Drop())
+		serving.Status.TargetPreparationName = ""
 	}
 
 	next, derr := r.deploy(ctx, serving, order, held)
@@ -247,6 +248,7 @@ func (r *ServingReconciler) promote(
 	// modes. The Preparation watch triggers the next reconcile.
 	if !meta.IsStatusConditionTrue(candidate.Status.Conditions, deliveryv1alpha1.ConditionTypeReady) {
 		logger.Info("Preparation not ready, waiting", "preparation", candidate.Name)
+		serving.Status.TargetPreparationName = ""
 		return hold(fmt.Sprintf("Waiting for Preparation %q to become ready", candidate.Name), 0)
 	}
 
@@ -687,18 +689,18 @@ func (r *ServingReconciler) targetPreparation(
 		return order, nil, "", fmt.Errorf("failed to list Preparations: %w", err)
 	}
 
-	var latest *deliveryv1alpha1.Preparation
+	// The newest Ready Preparation, picked as the scanner keeps it scanned.
+	releases := make([]promotion.Release, 0, len(preparations.Items))
 	for i := range preparations.Items {
 		prep := &preparations.Items[i]
-		if !meta.IsStatusConditionTrue(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeReady) {
-			continue
-		}
-		if latest == nil || prep.CreationTimestamp.After(latest.CreationTimestamp.Time) {
-			latest = prep
-		}
+		releases = append(releases, promotion.Release{
+			Name:    prep.Name,
+			Created: prep.CreationTimestamp.Time,
+			Ready:   meta.IsStatusConditionTrue(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeReady),
+		})
 	}
-
-	if latest == nil {
+	newest, ok := promotion.NewestReady(releases)
+	if !ok {
 		// The Preparation watch reconciles again once one is ready.
 		msg := "Waiting for ready preparation"
 		if len(preparations.Items) == 0 {
@@ -706,7 +708,8 @@ func (r *ServingReconciler) targetPreparation(
 		}
 		return order, nil, msg, nil
 	}
-	return order, latest, "", nil
+	i := slices.IndexFunc(preparations.Items, func(p deliveryv1alpha1.Preparation) bool { return p.Name == newest })
+	return order, &preparations.Items[i], "", nil
 }
 
 // gate reports whether preparation passes its approval gate, under both
@@ -725,6 +728,9 @@ func (r *ServingReconciler) gate(
 	}
 
 	if !target {
+		// Only the target gets its votes sealed: a Preparation that was the
+		// target before and no longer passes is not.
+		serving.Status.TargetPreparationName = ""
 		res := approval.Evaluate(preparation, approvals.Items)
 		status := metav1.ConditionFalse
 		if res.Approved {

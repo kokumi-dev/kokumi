@@ -37,7 +37,10 @@ func digests(images map[string]oci.Reference) []string {
 
 func TestInUse(t *testing.T) {
 	release := func(name string, created time.Duration, ready bool, image int) Release {
-		return Release{Name: name, Created: t0.Add(created), Ready: ready, Images: []oci.Reference{imageRef(t, image)}}
+		return Release{
+			Name: name, Created: t0.Add(created), Ready: ready,
+			Images: []oci.Reference{imageRef(t, image)},
+		}
 	}
 	releases := []Release{
 		release("a", 0, true, 1),

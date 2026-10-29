@@ -4195,7 +4195,9 @@ spec:
                   once it is approved and its evidence verifies: spec.preparationName
                   for Manual promotion, or the newest Ready Preparation of the Order for
                   Automatic promotion, after it passed its upstream stages and checks.
-                  Its approvals are sealed when it becomes the target.
+                  Its approvals are sealed when it becomes the target. It is empty
+                  while the Preparation the Serving converges to has not passed them,
+                  or is not Ready.
                 type: string
               targets:
                 description: |-

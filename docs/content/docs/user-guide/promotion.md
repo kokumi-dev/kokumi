@@ -40,8 +40,9 @@ A promoted Preparation deploys once it passes every gate, in this order:
 
 The Preparation becomes the Serving's target
 (`status.targetPreparationName`) once it passes its upstream stages and
-checks, which seals its approvals. Each condition explains what still holds
-it.
+checks, which seals its approvals. It stops being the target once the Serving
+converges to another Preparation, or once it no longer passes; a vote cast for
+it after that is not sealed. Each condition explains what still holds it.
 
 When it passes, the Serving records the promotion: a new entry in
 `status.history`, and a signed promotion record attached to the artifact that
