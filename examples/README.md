@@ -24,6 +24,7 @@ what its docs say.
 | [multi-file-manifests](multi-file-manifests/) | Manifests in several files, kept apart | Products and Orders | `rendering_test.go` |
 | [kustomize](kustomize/) | A Kustomize source | Products and Orders | `rendering_test.go` |
 | [promotion-pipeline](promotion-pipeline/) | dev, staging and prod stages in Environments of their own, with a soak and pinned images | Promotion Pipelines, Environments | `pipeline_test.go` |
+| [target-namespace](target-namespace/) | A Product that deploys into a namespace of its own, and an Order that picks another one | Products and Orders | `target_namespace_test.go` |
 | [multi-cluster](multi-cluster/) | One Order deployed to every cluster of an Environment, into the Product's target namespace; a spoke cluster registered as a Cluster | Deploy to Several Clusters, Clusters | `clusters_test.go` |
 | [approvals](approvals/) | Two required approvals from a group | Approvals | `approvals_test.go` |
 | [image-vendoring](image-vendoring/) | Images copied into the bundled registry | Images | `images_test.go` |

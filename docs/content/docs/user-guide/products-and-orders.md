@@ -204,6 +204,15 @@ same namespace wherever it is promoted. Changing it renders a new
 Preparation, and deploying that one moves the workload: Argo CD deletes it in
 the old namespace.
 
+In the example `target-namespace`, the Product deploys into `storefront`, one
+Order keeps that namespace, and the other picks its own:
+
+{{< example file="target-namespace/product.yaml" >}}
+{{< example file="target-namespace/order.yaml" >}}
+{{< example file="target-namespace/order-review.yaml" >}}
+
+{{< apply-example name="target-namespace" >}}
+
 ## What renders a new Preparation
 
 Kokumi merges an Order over its Product into the **intent**, the effective
