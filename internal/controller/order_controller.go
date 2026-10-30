@@ -49,6 +49,7 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/oci"
 	"github.com/kokumi-dev/kokumi/internal/promotion"
 	"github.com/kokumi-dev/kokumi/internal/registry"
+	"github.com/kokumi-dev/kokumi/internal/renderer"
 	"github.com/kokumi-dev/kokumi/internal/resolve"
 	"github.com/kokumi-dev/kokumi/internal/resources"
 )
@@ -246,7 +247,8 @@ func (r *OrderReconciler) reconcileOrder(ctx context.Context, order *deliveryv1a
 	// is processing first; that write passes renderStarted and starts the
 	// reconcile that renders. A recorded render of this intent that failed is
 	// retried at once, after the back-off of the returned error, and keeps
-	// reporting its failure meanwhile.
+	// reporting its failure meanwhile; a patch that does not apply is not
+	// retried (see renderFailed).
 	if render := order.Status.Render; render == nil || render.ConfigHash != specHash {
 		order.Status.Render = &deliveryv1alpha1.OrderRender{ConfigHash: specHash}
 		conditions.MarkUnknown(order, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonProcessing, "Processing component configuration")
@@ -390,7 +392,7 @@ func (r *OrderReconciler) render(
 
 	parentDigest := order.Status.LatestArtifactDigest
 	commitMessage := resolve.CommitMessage(order.Annotations, parentDigest == "")
-	renderer := resolve.Renderer(effective.Render, r.BuilderID)
+	rendererID := resolve.Renderer(effective.Render, r.BuilderID)
 
 	renderCtx, cancel := context.WithTimeout(ctx, renderTimeout)
 	defer cancel()
@@ -409,7 +411,7 @@ func (r *OrderReconciler) render(
 		Description:  commitMessage,
 		ParentDigest: parentDigest,
 		ArtifactType: oci.PreparationArtifactType,
-		Config:       resolve.ArtifactConfig(order, effective, intent, specHash, renderer),
+		Config:       resolve.ArtifactConfig(order, effective, intent, specHash, rendererID),
 	})
 	if err != nil {
 		if reason := registry.Reason(err, ""); reason != "" {
@@ -428,7 +430,7 @@ func (r *OrderReconciler) render(
 		RegistryName:    conns.destConn.RegistryName(),
 		Git:             deliveryv1alpha1.GitSource{Repo: result.SCM.Repo, Tag: result.SCM.Tag, CommitHash: result.SCM.CommitHash},
 		Images:          result.Images,
-		Renderer:        renderer,
+		Renderer:        rendererID,
 		ConfigHash:      specHash,
 		ProductRevision: effective.ProductRevision,
 		TargetNamespace: effective.TargetNamespace,
@@ -481,8 +483,13 @@ func (r *OrderReconciler) markUpToDate(
 }
 
 // renderFailed records that the intent of the Order could not be rendered
-// and returns err to be retried.
+// and returns err to be retried. A patch or edit that does not apply fails
+// the same way until the Order or its Product changes, so it is not retried.
 func renderFailed(order *deliveryv1alpha1.Order, err error) (ctrl.Result, error) {
+	if _, ok := errors.AsType[*renderer.PatchError](err); ok {
+		conditions.MarkFalse(order, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonPatchFailed, err.Error())
+		return ctrl.Result{}, reconcile.TerminalError(err)
+	}
 	conditions.MarkFalse(order, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonProcessingFailed, err.Error())
 	return ctrl.Result{}, err
 }

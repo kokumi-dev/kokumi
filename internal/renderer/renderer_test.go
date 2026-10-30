@@ -20,6 +20,8 @@ import (
 
 const (
 	kindDeployment = "Deployment"
+	webName        = "web"
+	imageValue     = "nginx:1.28"
 	replicasPath   = ".spec.replicas"
 )
 
@@ -70,11 +72,11 @@ spec:
 `
 
 func TestProcess_normalizesWithoutPatches(t *testing.T) {
-	out, err := renderer.Process(t.Context(), []byte(deployments), nil)
+	out, err := renderer.NewPatcher(nil).Process(t.Context(), []byte(deployments))
 	require.NoError(t, err)
 	assert.Equal(t, normalizedDeployments, string(out))
 
-	again, err := renderer.Process(t.Context(), out, nil)
+	again, err := renderer.NewPatcher(nil).Process(t.Context(), out)
 	require.NoError(t, err)
 	assert.Equal(t, string(out), string(again), "normalized output stays as it is")
 }
@@ -112,49 +114,124 @@ func TestProcess_matchesOneEncoderForTheWholeStream(t *testing.T) {
 			}
 			require.NoError(t, encoder.Close())
 
-			got, err := renderer.Process(t.Context(), []byte(content), nil)
+			got, err := renderer.NewPatcher(nil).Process(t.Context(), []byte(content))
 			require.NoError(t, err)
 			assert.Equal(t, want.String(), string(got))
 		})
 	}
 }
 
-func TestProcess_patchesThatMatchNothingStillNormalize(t *testing.T) {
-	out, err := renderer.Process(t.Context(), []byte(deployments), []renderer.Patch{
-		{Target: renderer.PatchTarget{Kind: kindDeployment, Name: "missing"}, Set: map[string]string{replicasPath: "3"}},
-		{Target: renderer.PatchTarget{Kind: kindDeployment, Name: "web", Namespace: "other"}, Set: map[string]string{replicasPath: "3"}},
+func TestProcess_recordsTargetsThatMatchNothing(t *testing.T) {
+	missing := renderer.PatchTarget{Kind: kindDeployment, Name: "missing"}
+	otherNamespace := renderer.PatchTarget{Kind: kindDeployment, Name: webName, Namespace: "other"}
+	patcher := renderer.NewPatcher([]renderer.Patch{
+		{Target: missing, Set: map[string]string{replicasPath: "3"}},
+		{Target: renderer.PatchTarget{Kind: kindDeployment, Name: "worker"}, Set: map[string]string{replicasPath: "3"}},
+		{Target: otherNamespace, Set: map[string]string{replicasPath: "3"}},
 	})
+
+	out, err := patcher.Process(t.Context(), []byte(normalizedDeployments))
+	require.NoError(t, err, "a target that matches nothing in one manifest may match in the next")
+	assert.Contains(t, string(out), "name: worker\n  namespace: shop\nspec:\n  replicas: 3\n")
+
+	unmatched := patcher.Unmatched()
+	require.Len(t, unmatched, 2)
+	assert.Equal(t, missing, unmatched[0].Target)
+	assert.EqualError(t, unmatched[0], "target Deployment/missing matches no resource")
+	assert.EqualError(t, unmatched[1], "target other/Deployment/web matches no resource")
+
+	_, err = patcher.Process(t.Context(), []byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: missing\n"))
 	require.NoError(t, err)
-	assert.Equal(t, normalizedDeployments, string(out))
+	assert.Len(t, patcher.Unmatched(), 1, "matches add up across manifests")
 }
 
 func TestProcess_appliesPatchesToTheirTargets(t *testing.T) {
-	out, err := renderer.Process(t.Context(), []byte(deployments), []renderer.Patch{
+	patcher := renderer.NewPatcher([]renderer.Patch{
 		{
-			Target: renderer.PatchTarget{Kind: kindDeployment, Name: "web", Namespace: "shop"},
+			Target: renderer.PatchTarget{Kind: kindDeployment, Name: webName, Namespace: "shop"},
 			Set: map[string]string{
 				replicasPath: "3",
-				".spec.template.spec.containers[0].image":  "nginx:1.28",
-				".spec.template.spec.containers[5].image":  "out-of-bounds",
+				".spec.template.spec.containers[0].image":  imageValue,
 				".spec.template.spec.nodeSelector.example": "true",
 			},
 		},
 	})
+	out, err := patcher.Process(t.Context(), []byte(deployments))
 	require.NoError(t, err)
+	assert.Empty(t, patcher.Unmatched())
 
 	web, worker, found := strings.Cut(string(out), "---\n")
 	require.True(t, found)
 	assert.Contains(t, web, "  replicas: 3\n")
-	assert.Contains(t, web, "image: nginx:1.28\n")
+	assert.Contains(t, web, "image: "+imageValue+"\n")
 	assert.Contains(t, web, "nodeSelector:\n        example: true\n")
-	assert.NotContains(t, web, "out-of-bounds")
 	assert.Contains(t, worker, "  replicas: 1\n", "patches change only their target")
+}
+
+func TestProcess_failsOnAPathThatCannotBeSet(t *testing.T) {
+	tests := map[string]struct {
+		set  map[string]string
+		path string
+		want string
+	}{
+		"index out of bounds": {
+			set:  map[string]string{".spec.template.spec.containers[5].image": imageValue},
+			path: ".spec.template.spec.containers[5].image",
+			want: "index 5 is out of bounds for containers, which has 1 items",
+		},
+		"through a scalar": {
+			set:  map[string]string{".spec.replicas.count": "1"},
+			path: ".spec.replicas.count",
+			want: `cannot set "count" in a scalar, only in a mapping`,
+		},
+		"through a list": {
+			set:  map[string]string{".spec.template.spec.containers.image": imageValue},
+			path: ".spec.template.spec.containers.image",
+			want: `cannot set "image" in a list, only in a mapping`,
+		},
+		"index into a mapping": {
+			set:  map[string]string{".spec.template[0]": "x"},
+			path: ".spec.template[0]",
+			want: "field template is a mapping, not a list",
+		},
+		"index into a missing list": {
+			set:  map[string]string{".spec.template.spec.volumes[0].name": "data"},
+			path: ".spec.template.spec.volumes[0].name",
+			want: "list volumes not found",
+		},
+		"malformed index": {
+			set:  map[string]string{".spec.template.spec.containers[first].image": imageValue},
+			path: ".spec.template.spec.containers[first].image",
+			want: `non-integer array index in "containers[first]"`,
+		},
+		"conflicting paths, in sorted order": {
+			set:  map[string]string{".spec.replicas.max": "2", replicasPath: "1"},
+			path: ".spec.replicas.max",
+			want: `cannot set "max" in a scalar, only in a mapping`,
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			target := renderer.PatchTarget{Kind: kindDeployment, Name: webName}
+
+			out, err := renderer.NewPatcher([]renderer.Patch{{Target: target, Set: tt.set}}).Process(t.Context(), []byte(deployments))
+			require.Error(t, err)
+			assert.Nil(t, out, "a manifest whose patch does not apply is never returned")
+
+			patchErr, ok := errors.AsType[*renderer.PatchError](err)
+			require.True(t, ok, "%v is a PatchError", err)
+			assert.Equal(t, target, patchErr.Target)
+			assert.Equal(t, 1, patchErr.Document)
+			assert.Equal(t, tt.path, patchErr.Path)
+			assert.Contains(t, err.Error(), fmt.Sprintf("document 1 (Deployment/web): path %q: %s", tt.path, tt.want))
+		})
+	}
 }
 
 func TestProcess_failsOnASyntaxErrorWithTheDocumentIndex(t *testing.T) {
 	content := deployments + "---\nkind: [unclosed\n---\napiVersion: v1\nkind: ConfigMap\n"
 
-	out, err := renderer.Process(t.Context(), []byte(content), nil)
+	out, err := renderer.NewPatcher(nil).Process(t.Context(), []byte(content))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "document 3:")
 	assert.Nil(t, out, "a manifest that does not parse is never returned truncated")
@@ -162,7 +239,7 @@ func TestProcess_failsOnASyntaxErrorWithTheDocumentIndex(t *testing.T) {
 
 func TestProcess_withoutDocuments(t *testing.T) {
 	for _, content := range []string{"", "# Only a comment\n"} {
-		out, err := renderer.Process(t.Context(), []byte(content), nil)
+		out, err := renderer.NewPatcher(nil).Process(t.Context(), []byte(content))
 		require.NoError(t, err)
 		assert.Empty(t, out)
 	}
@@ -279,7 +356,7 @@ func BenchmarkProcess(b *testing.B) {
 	report := trackPeakHeap(b)
 
 	for b.Loop() {
-		if _, err := renderer.Process(b.Context(), content, patches); err != nil {
+		if _, err := renderer.NewPatcher(patches).Process(b.Context(), content); err != nil {
 			b.Fatal(err)
 		}
 	}

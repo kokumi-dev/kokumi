@@ -1050,6 +1050,8 @@ const (
 	// testProductName is the Product the Orders of createTestOrder render from.
 	testProductName = "test-product"
 
+	// testDeploymentKind and testDeploymentName name the Deployment that
+	// oci.FakeClient pulls, which patches and edits can target.
 	testDeploymentKind = "Deployment"
 	testDeploymentName = "app"
 	testReplicasPath   = ".spec.replicas"
@@ -1627,8 +1629,12 @@ var _ = Describe("Order pipelines", func() {
 	)
 
 	BeforeEach(func() {
-		fake = oci.NewFakeClient(afero.NewMemMapFs())
+		// The pipeline reads what the fake pulls, so that patches find the
+		// Deployment the fake writes.
+		fs := afero.NewMemMapFs()
+		fake = oci.NewFakeClient(fs)
 		r = newTestOrderReconciler(fake)
+		r.Pipeline = artifact.NewPipeline(artifact.NewStore(fake, fs, ""))
 	})
 
 	// createStage creates a Manual Order of product that runs after the
@@ -1982,6 +1988,46 @@ var _ = Describe("Order renders that fail", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(get(key).Status.Render).To(BeNil(), "the latest Preparation renders this intent")
 		Expect(readyReason(key)).To(Equal(deliveryv1alpha1.ReasonReady))
+	})
+
+	It("reports a patch that does not apply, renders nothing and waits for a change", func() {
+		key := create("order-patch-fails")
+		_, working := reconcilers()
+		Expect(settleOrder(ctx, working, key)).To(Succeed())
+		rendered := get(key).Status.LatestPreparationName
+		preparations := func() []deliveryv1alpha1.Preparation {
+			list := &deliveryv1alpha1.PreparationList{}
+			Expect(k8sClient.List(ctx, list, client.InNamespace(ns), client.MatchingLabels{deliveryv1alpha1.LabelOrder: key.Name})).To(Succeed())
+			return list.Items
+		}
+
+		By("patching a Deployment the source does not have")
+		order := get(key)
+		order.Spec.Patches = []deliveryv1alpha1.Patch{{
+			Target: deliveryv1alpha1.PatchTarget{Kind: testDeploymentKind, Name: "does-not-exist"},
+			Set:    map[string]string{testReplicasPath: "3"},
+		}}
+		Expect(k8sClient.Update(ctx, order)).To(Succeed())
+		_, err := working.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred(), "the first pass records the render")
+		_, err = working.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(stderrors.Is(err, reconcile.TerminalError(nil))).To(BeTrue(), "a retry would fail the same way")
+
+		ready := meta.FindStatusCondition(get(key).Status.Conditions, deliveryv1alpha1.ConditionTypeReady)
+		Expect(ready.Status).To(Equal(metav1.ConditionFalse))
+		Expect(ready.Reason).To(Equal(deliveryv1alpha1.ReasonPatchFailed))
+		Expect(ready.Message).To(Equal("patch target Deployment/does-not-exist matches no resource"))
+		Expect(get(key).Status.LatestPreparationName).To(Equal(rendered))
+		Expect(preparations()).To(HaveLen(1), "no Preparation claims a patch it does not contain")
+
+		By("removing the patch")
+		order = get(key)
+		order.Spec.Patches = nil
+		Expect(k8sClient.Update(ctx, order)).To(Succeed())
+		Expect(settleOrder(ctx, working, key)).To(Succeed())
+		Expect(readyReason(key)).To(Equal(deliveryv1alpha1.ReasonReady))
+		Expect(get(key).Status.Render).To(BeNil())
+		Expect(preparations()).To(HaveLen(1), "the latest Preparation renders the Order as it is again")
 	})
 
 	It("postpones a render while the cache lags behind the Order", func() {

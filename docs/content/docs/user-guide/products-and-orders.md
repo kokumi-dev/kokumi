@@ -95,7 +95,7 @@ Preparation back to its commit, see
 | `environmentRef` | The [Environment](../environments/) the Order deploys to, in its namespace. Required, and it cannot be changed: another Environment is another Order. |
 | `values` | Helm values deep-merged over the Product's `render.helm.values`; the Order wins. Only valid for a Helm source. |
 | `patches` | [Patches](#patches) merged over the Product's, per target; on the same path the Order wins. |
-| `edits` | Patches the UI writes when you edit a rendered file, applied after `patches`. |
+| `edits` | Patches the UI writes when you edit a rendered file, applied after `patches`. They change rendered resources; the editor refuses added or renamed ones. |
 | `targetNamespace` | Where the workload lands on the clusters. See [The target namespace](#the-target-namespace). |
 | `destination` | Where Preparations are pushed. Defaults to `<bundled registry>/<namespace>/<order>`. |
 | `registryRefs` | The Registries that authenticate the destination, and only the destination. |
@@ -119,7 +119,9 @@ sets what its Product does not allow, or whose render fails, reports
 `ProcessingFailed` with the reason in the message. A failed render is
 retried at growing intervals, up to about 17 minutes apart, and keeps
 reporting its failure meanwhile; a change of the Order, its Product or its
-Registries renders at once.
+Registries renders at once. An Order whose [patches](#patches) or edits do
+not apply reports `PatchFailed` instead, and is not retried: it renders
+again once the Order or its Product changes.
 
 ### Describing a change
 
@@ -150,7 +152,15 @@ spec:
 ```
 
 - A path is dot-separated, with `[n]` for a list index. Missing fields are
-  created.
+  created; a missing list, an index out of bounds, or a path through a
+  scalar or a list without an index fails.
+- A patch that does not apply fails the render: a path that cannot be set,
+  or a target that matches no resource in any file of the source. The Order
+  reports `PatchFailed`, naming the target and the path, and no Preparation
+  is made; its earlier Preparations and its Serving stay. The same holds for
+  edits, so an edit whose resource a new Product version renamed shows up,
+  and you drop it from the Order. A Product patch on a resource an Order
+  turns off through its values fails that Order too.
 - Values are strings in the Order, and are written as booleans or numbers
   when they read as one: `"3"` becomes `3`, `"true"` becomes `true`.
 - Every document is written back with 2-space indentation, whether a patch

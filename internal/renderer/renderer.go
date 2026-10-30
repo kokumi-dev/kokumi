@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -32,14 +34,80 @@ type Patch struct {
 	Set map[string]string
 }
 
-// Process normalizes YAML content and applies patches to it, one document at a
-// time: it decodes a document, applies the patches that target it, encodes it
-// with 2-space indentation and drops it before decoding the next. Memory
-// follows the largest document instead of the whole content. Every output is
-// formatted the same way, whether patches matched or not, so the same source
-// always yields the same bytes. A document that does not parse fails with its
-// 1-based index.
-func Process(ctx context.Context, content []byte, patches []Patch) ([]byte, error) {
+// String returns the target as Kind/name, prefixed with its namespace when it
+// names one.
+func (t PatchTarget) String() string {
+	if t.Namespace == "" {
+		return t.Kind + "/" + t.Name
+	}
+	return t.Namespace + "/" + t.Kind + "/" + t.Name
+}
+
+// PatchError reports a patch that does not apply: a path that cannot be set
+// in a document the patch targets, or a target that matches no document.
+type PatchError struct {
+	// Target is the target of the patch.
+	Target PatchTarget
+	// Document is the 1-based index of the document the path failed in, or
+	// 0 when the target matches no document.
+	Document int
+	// Path is the path that failed, empty when the target matches no
+	// document.
+	Path string
+	// Err says why the path failed.
+	Err error
+}
+
+func (e *PatchError) Error() string {
+	if e.Document == 0 {
+		return fmt.Sprintf("target %s matches no resource", e.Target)
+	}
+	return fmt.Sprintf("document %d (%s): path %q: %v", e.Document, e.Target, e.Path, e.Err)
+}
+
+func (e *PatchError) Unwrap() error {
+	return e.Err
+}
+
+// Patcher applies patches to the documents of one or more manifests and
+// records which patches matched a document, so that a render can fail on a
+// target that matches nothing in any of its manifests. A Patcher is not safe
+// for concurrent use.
+type Patcher struct {
+	patches []Patch
+	matched []bool
+}
+
+// NewPatcher returns a Patcher that applies patches.
+func NewPatcher(patches []Patch) *Patcher {
+	return &Patcher{patches: patches, matched: make([]bool, len(patches))}
+}
+
+// Len returns the number of patches the Patcher applies.
+func (p *Patcher) Len() int {
+	return len(p.patches)
+}
+
+// Unmatched returns a PatchError for every patch whose target matched no
+// document Process was given, in the order of the patches.
+func (p *Patcher) Unmatched() []*PatchError {
+	var errs []*PatchError
+	for i, patch := range p.patches {
+		if !p.matched[i] {
+			errs = append(errs, &PatchError{Target: patch.Target})
+		}
+	}
+	return errs
+}
+
+// Process normalizes YAML content and applies the patches to it, one document
+// at a time: it decodes a document, applies the patches that target it,
+// encodes it with 2-space indentation and drops it before decoding the next.
+// Memory follows the largest document instead of the whole content. Every
+// output is formatted the same way, whether patches matched or not, so the
+// same source always yields the same bytes. A document that does not parse
+// fails with its 1-based index, a path that cannot be set with a PatchError.
+func (p *Patcher) Process(ctx context.Context, content []byte) ([]byte, error) {
 	decoder := yaml.NewDecoder(bytes.NewReader(content))
 
 	var out bytes.Buffer
@@ -52,7 +120,9 @@ func Process(ctx context.Context, content []byte, patches []Patch) ([]byte, erro
 			return nil, fmt.Errorf("document %d: %w", i, err)
 		}
 
-		applyPatchesToNode(ctx, &doc, patches)
+		if err := p.apply(ctx, &doc, i); err != nil {
+			return nil, err
+		}
 
 		if i > 1 {
 			out.WriteString("---\n")
@@ -82,15 +152,18 @@ func encodeDocument(w io.Writer, doc *yaml.Node) error {
 	return nil
 }
 
-// applyPatchesToNode applies the patches that target a single YAML document.
-func applyPatchesToNode(ctx context.Context, docNode *yaml.Node, patches []Patch) {
-	if len(patches) == 0 || docNode.Kind != yaml.DocumentNode || len(docNode.Content) == 0 {
-		return
+// apply applies the patches that target docNode, the document at the 1-based
+// index of its content, and records that they matched. It sets the paths of a
+// patch in sorted order, so that paths that conflict fail the same way on
+// every render.
+func (p *Patcher) apply(ctx context.Context, docNode *yaml.Node, index int) error {
+	if len(p.patches) == 0 || docNode.Kind != yaml.DocumentNode || len(docNode.Content) == 0 {
+		return nil
 	}
 
 	root := docNode.Content[0]
 	if root.Kind != yaml.MappingNode {
-		return
+		return nil
 	}
 
 	kind := getYAMLNodeField(root, "kind")
@@ -98,12 +171,12 @@ func applyPatchesToNode(ctx context.Context, docNode *yaml.Node, patches []Patch
 	namespace := getYAMLNodeField(root, "metadata", "namespace")
 
 	if kind == "" || name == "" {
-		return
+		return nil
 	}
 
 	log := logf.FromContext(ctx)
 
-	for _, patch := range patches {
+	for i, patch := range p.patches {
 		if patch.Target.Kind != kind || patch.Target.Name != name {
 			continue
 		}
@@ -112,19 +185,20 @@ func applyPatchesToNode(ctx context.Context, docNode *yaml.Node, patches []Patch
 			continue
 		}
 
+		p.matched[i] = true
 		log.Info("Applying patch", "kind", kind, "name", name, "sets", len(patch.Set))
 
-		for jsonPath, value := range patch.Set {
-			parsedValue := parseValue(value)
-
-			if err := setYAMLNodeFieldByPath(root, jsonPath, parsedValue); err != nil {
-				log.Error(err, "Failed to apply patch", "path", jsonPath, "value", value)
-				continue
+		for _, path := range slices.Sorted(maps.Keys(patch.Set)) {
+			value := patch.Set[path]
+			if err := setYAMLNodeFieldByPath(root, path, parseValue(value)); err != nil {
+				return &PatchError{Target: patch.Target, Document: index, Path: path, Err: err}
 			}
 
-			log.Info("Applied patch", "path", jsonPath, "value", value)
+			log.Info("Applied patch", "path", path, "value", value)
 		}
 	}
+
+	return nil
 }
 
 // getYAMLNodeField retrieves a scalar value from a YAML mapping node by path.
@@ -174,7 +248,7 @@ func setYAMLNodeField(node *yaml.Node, parts []string, value any) error {
 	}
 
 	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("expected mapping node, got kind %v", node.Kind)
+		return fmt.Errorf("cannot set %q in %s, only in a mapping", parts[0], describeNode(node))
 	}
 
 	key := parts[0]
@@ -229,11 +303,11 @@ func setYAMLNodeFieldWithArray(node *yaml.Node, parts []string, value any) error
 		valueNode := node.Content[i+1]
 
 		if valueNode.Kind != yaml.SequenceNode {
-			return fmt.Errorf("field %s is not a sequence", arrayName)
+			return fmt.Errorf("field %s is %s, not a list", arrayName, describeNode(valueNode))
 		}
 
 		if index < 0 || index >= len(valueNode.Content) {
-			return fmt.Errorf("array index %d out of bounds for %s (len=%d)", index, arrayName, len(valueNode.Content))
+			return fmt.Errorf("index %d is out of bounds for %s, which has %d items", index, arrayName, len(valueNode.Content))
 		}
 
 		if len(parts) == 1 {
@@ -244,7 +318,21 @@ func setYAMLNodeFieldWithArray(node *yaml.Node, parts []string, value any) error
 		return setYAMLNodeField(valueNode.Content[index], parts[1:], value)
 	}
 
-	return fmt.Errorf("field %s not found", arrayName)
+	return fmt.Errorf("list %s not found", arrayName)
+}
+
+// describeNode names the kind of node for an error.
+func describeNode(node *yaml.Node) string {
+	switch node.Kind {
+	case yaml.MappingNode:
+		return "a mapping"
+	case yaml.SequenceNode:
+		return "a list"
+	case yaml.AliasNode:
+		return "an alias"
+	default:
+		return "a scalar"
+	}
 }
 
 // createYAMLNode creates a scalar yaml.Node from a Go value.

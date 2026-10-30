@@ -169,7 +169,7 @@ spec:
 }
 
 func TestManifest_rewriteKeepsTheFormattingOfTheRenderPipeline(t *testing.T) {
-	normalized, err := renderer.Process(t.Context(), []byte(workloads), nil)
+	normalized, err := renderer.NewPatcher(nil).Process(t.Context(), []byte(workloads))
 	require.NoError(t, err)
 
 	manifest, err := ParseManifest(normalized, nil)

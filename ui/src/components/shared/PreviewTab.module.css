@@ -19,4 +19,5 @@
   color: var(--color-danger);
   font-size: 0.875rem;
   padding: 8px 0;
+  white-space: pre-line;
 }

@@ -95,7 +95,12 @@ func NewFakeClient(fs afero.Fs) *FakeClient {
 	return &FakeClient{fs: fs}
 }
 
-// Pull records the reference and writes a minimal stub manifest.yaml into
+// fakeManifest is the manifest.yaml FakeClient.Pull writes: one Deployment,
+// app, for patches and edits to target, since a render fails on a target
+// that matches nothing.
+const fakeManifest = "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: app\n"
+
+// Pull records the reference and writes fakeManifest as manifest.yaml into
 // targetDir so that callers that expect a manifest after pulling an artifact
 // do not fail. It returns FakeDigest and the Annotations configured on the
 // client (may be nil).
@@ -103,7 +108,7 @@ func (c *FakeClient) Pull(ctx context.Context, ref Reference, targetDir string) 
 	c.Pulls = append(c.Pulls, ref)
 
 	manifestPath := filepath.Join(targetDir, "manifest.yaml")
-	if err := afero.WriteFile(c.fs, manifestPath, []byte("---\n"), 0600); err != nil {
+	if err := afero.WriteFile(c.fs, manifestPath, []byte(fakeManifest), 0600); err != nil {
 		return "", "", nil, err
 	}
 

@@ -143,6 +143,16 @@ func TestHandlePreview(t *testing.T) {
 			requireFiles(t, serveAsAdmin(t, req, product), fakeManifestFile)
 		})
 	}
+
+	t.Run("a patch that does not apply", func(t *testing.T) {
+		body := `{"namespace":"` + nsA + `","name":"web","source":{"url":"` + source + `","version":"1.0.0"},"images":{},` +
+			`"patches":[{"target":{"kind":"Deployment","name":"missing"},"set":{".spec.replicas":"3"}}]}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/products/preview", strings.NewReader(body))
+
+		rec := serveAsAdmin(t, req, product)
+		require.Equal(t, http.StatusUnprocessableEntity, rec.Code, rec.Body.String())
+		require.JSONEq(t, `{"error":"patch target Deployment/missing matches no resource"}`, rec.Body.String())
+	})
 }
 
 // TestOCIReadsNeedAMappedUser checks that the server connects to no OCI

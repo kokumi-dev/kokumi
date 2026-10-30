@@ -37,6 +37,11 @@ function targetKey(t: PatchTarget): string {
   return `${t.kind}/${t.name}${t.namespace ? `/${t.namespace}` : ''}`
 }
 
+/** Names a target as the server does: Kind/name, prefixed with its namespace. */
+function describeTarget(t: PatchTarget): string {
+  return `${t.namespace ? `${t.namespace}/` : ''}${t.kind}/${t.name}`
+}
+
 /**
  * Recursively walks two objects and collects changed scalar values as
  * dot-separated jsonPaths (e.g. ".spec.replicas").
@@ -76,6 +81,17 @@ function findChangedScalars(
   }
 }
 
+/** The edits of an edited manifest, and the resources no edit can express. */
+export interface ComputedEdits {
+  edits: Patch[]
+  /**
+   * Resources of the edited manifest that the rendered one does not have,
+   * such as added or renamed ones. An edit changes a rendered resource, so
+   * the render would fail on its target.
+   */
+  added: string[]
+}
+
 /**
  * Computes structured Patch edits from the diff between an original rendered
  * manifest and the user's edited version. Merges with any existing edits so
@@ -85,20 +101,15 @@ export function computeEdits(
   originalManifest: string,
   editedManifest: string,
   existingEdits: Patch[],
-): Patch[] {
+): ComputedEdits {
   const origDocs = splitDocuments(originalManifest).map((d) => load(d))
   const editedDocs = splitDocuments(editedManifest).map((d) => load(d))
 
   // Index original docs by target key
   const origMap = new Map<string, unknown>()
-  const targetMap = new Map<string, PatchTarget>()
   for (const doc of origDocs) {
     const target = identifyTarget(doc)
-    if (target) {
-      const key = targetKey(target)
-      origMap.set(key, doc)
-      targetMap.set(key, target)
-    }
+    if (target) origMap.set(targetKey(target), doc)
   }
 
   // Start with existing edits indexed by target key → (path → value)
@@ -112,13 +123,17 @@ export function computeEdits(
   }
 
   // Find changes in each edited document
+  const added: string[] = []
   for (const editedDoc of editedDocs) {
     const target = identifyTarget(editedDoc)
     if (!target) continue
 
     const key = targetKey(target)
-    const origDoc = origMap.get(key) ?? {}
-    targetMap.set(key, target)
+    const origDoc = origMap.get(key)
+    if (origDoc === undefined) {
+      added.push(describeTarget(target))
+      continue
+    }
 
     const changes: Record<string, string> = {}
     findChangedScalars(origDoc, editedDoc, '', changes)
@@ -134,16 +149,16 @@ export function computeEdits(
   }
 
   // Convert back to Patch[]
-  const result: Patch[] = []
+  const edits: Patch[] = []
   for (const entry of editMap.values()) {
     if (entry.set.size > 0) {
-      result.push({
+      edits.push({
         target: entry.target,
         set: Object.fromEntries(entry.set),
       })
     }
   }
-  return result
+  return { edits, added }
 }
 
 /**

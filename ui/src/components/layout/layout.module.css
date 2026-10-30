@@ -482,6 +482,8 @@
   font-size: 0.82rem;
   color: var(--color-text-muted-light);
   word-break: break-word;
+  /* Joined errors, such as every patch target that matches nothing, keep a line each. */
+  white-space: pre-line;
 }
 
 /* ── Misc ── */
