@@ -2,6 +2,7 @@ package artifact_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -11,6 +12,7 @@ import (
 
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/oci"
+	"github.com/kokumi-dev/kokumi/internal/renderer"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
@@ -214,7 +216,15 @@ func TestPipeline_Render_PatchesThenEdits(t *testing.T) {
 func TestPipeline_Render_processesEveryDocument(t *testing.T) {
 	const indented = "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n    name: web\nspec:\n    replicas: 1\n"
 
-	t.Run("patches that match nothing still normalize", func(t *testing.T) {
+	t.Run("documents without patches are normalized", func(t *testing.T) {
+		p, client := newFilesPipeline(map[string]string{testManifestFile: indented})
+
+		_, err := p.Render(context.Background(), baseRenderRequest())
+		require.NoError(t, err)
+		assert.Equal(t, "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec:\n  replicas: 1\n", client.lastPushedFiles[testManifestFile])
+	})
+
+	t.Run("a patch that matches nothing fails the render", func(t *testing.T) {
 		p, client := newFilesPipeline(map[string]string{testManifestFile: indented})
 
 		req := baseRenderRequest()
@@ -223,8 +233,10 @@ func TestPipeline_Render_processesEveryDocument(t *testing.T) {
 		}
 
 		_, err := p.Render(context.Background(), req)
-		require.NoError(t, err)
-		assert.Equal(t, "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec:\n  replicas: 1\n", client.lastPushedFiles[testManifestFile])
+		require.EqualError(t, err, "patch target Deployment/missing matches no resource")
+		_, ok := errors.AsType[*renderer.PatchError](err)
+		assert.True(t, ok, "the caller can tell a patch that does not apply from other failures")
+		assert.Nil(t, client.lastPushedFiles, "an artifact that differs from its intent is never pushed")
 	})
 
 	t.Run("a syntax error in a later document fails the render", func(t *testing.T) {
@@ -234,6 +246,53 @@ func TestPipeline_Render_processesEveryDocument(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to process manifest.yaml: document 2:")
 		assert.Nil(t, client.lastPushedFiles, "a truncated manifest is never pushed")
+	})
+}
+
+// TestPipeline_patchesAcrossFiles pins that a target has to match in one of
+// the files only, and that the render fails on every target that matches in
+// none of them, patches and edits alike.
+func TestPipeline_patchesAcrossFiles(t *testing.T) {
+	preview := func(t *testing.T, patches, edits []artifact.PatchSpec) ([]artifact.File, error) {
+		t.Helper()
+		p, _ := newFilesPipeline(map[string]string{testDeploymentFile: testDeploymentYAML, testServiceFile: testServiceYAML})
+		return p.Preview(context.Background(), artifact.PreviewRequest{
+			Source:  artifact.Source{OCI: multiFileOCI, Version: testVersion},
+			Render:  &artifact.RenderSpec{Manifest: &artifact.ManifestSpec{Layout: artifact.LayoutMulti}},
+			Patches: patches,
+			Edits:   edits,
+		})
+	}
+	patch := func(kind, name, path, value string) artifact.PatchSpec {
+		return artifact.PatchSpec{Target: artifact.PatchTargetSpec{Kind: kind, Name: name}, Set: map[string]string{path: value}}
+	}
+
+	t.Run("each target matches in one of the files", func(t *testing.T) {
+		files, err := preview(t,
+			[]artifact.PatchSpec{patch(kindDeployment, testReleaseName, replicasPatchPath, "3")},
+			[]artifact.PatchSpec{patch("Service", testReleaseName, ".spec.port", "8080")})
+		require.NoError(t, err)
+		require.Equal(t, []string{testDeploymentFile, testServiceFile}, filePaths(files))
+		assert.Contains(t, files[0].Content, "replicas: 3")
+		assert.Contains(t, files[1].Content, "port: 8080")
+	})
+
+	t.Run("every target that matches in no file is listed", func(t *testing.T) {
+		_, err := preview(t,
+			[]artifact.PatchSpec{
+				patch(kindDeployment, testReleaseName, replicasPatchPath, "3"),
+				patch("ConfigMap", testReleaseName, ".data.key", "value"),
+			},
+			[]artifact.PatchSpec{patch("Service", "other", ".spec.port", "8080")})
+		require.EqualError(t, err, "patch target ConfigMap/my-app matches no resource\nedit target Service/other matches no resource")
+	})
+
+	t.Run("an edit whose path fails names its file", func(t *testing.T) {
+		_, err := preview(t, nil, []artifact.PatchSpec{patch("Service", testReleaseName, ".spec.port.number", "8080")})
+		require.EqualError(t, err,
+			`failed to apply edits to service.yaml: document 1 (Service/my-app): path ".spec.port.number": cannot set "number" in a scalar, only in a mapping`)
+		_, ok := errors.AsType[*renderer.PatchError](err)
+		assert.True(t, ok)
 	})
 }
 

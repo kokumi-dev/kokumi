@@ -27,6 +27,7 @@ export default function ManifestPanel({ preparation: prep, order }: Props) {
   const [editing, setEditing] = useState(false)
   const [editedContent, setEditedContent] = useState('')
   const [pendingEdits, setPendingEdits] = useState<Patch[] | null>(null)
+  const [editError, setEditError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -53,16 +54,29 @@ export default function ManifestPanel({ preparation: prep, order }: Props) {
     setEditing(false)
     setEditedContent('')
     setPendingEdits(null)
+    setEditError(null)
+  }
+
+  /** Stages the edits of edited, unless it has resources no edit can express. */
+  function review(original: string, edited: string) {
+    if (!order) return
+    const { edits, added } = computeEdits(original, edited, order.edits ?? [])
+    if (added.length > 0) {
+      setEditError(`Edits only change rendered resources, and the render has no ${added.join(', ')}.`)
+      return
+    }
+    setEditError(null)
+    setPendingEdits(edits)
   }
 
   function reviewEdits() {
-    if (!order || displayContent === null) return
-    setPendingEdits(computeEdits(displayContent, editedContent, order.edits ?? []))
+    if (displayContent === null) return
+    review(displayContent, editedContent)
   }
 
   function handleFileSave(editedFiles: ArtifactFile[]) {
-    if (!order || content === null) return
-    setPendingEdits(computeEdits(content, joinFiles(editedFiles), order.edits ?? []))
+    if (content === null) return
+    review(content, joinFiles(editedFiles))
   }
 
   async function commit(message: string) {
@@ -119,6 +133,8 @@ export default function ManifestPanel({ preparation: prep, order }: Props) {
       ) : (
         <YamlEditor value={displayContent} readOnly tall />
       )}
+
+      {editError && <p className={layout.error}>{editError}</p>}
 
       {pendingEdits !== null && (
         <CommitBox

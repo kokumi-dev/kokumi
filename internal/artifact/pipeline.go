@@ -3,6 +3,7 @@ package artifact
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"time"
@@ -338,19 +339,31 @@ func (p *Pipeline) renderToDir(ctx context.Context, dir string, render *RenderSp
 
 // processManifestFiles applies patches and edits to the manifest files in
 // dir (see manifestFiles), preserving the artifact's original file layout.
+// It fails with a renderer.PatchError on a patch or edit that does not apply:
+// a path that cannot be set, or a target that matches no document in any of
+// the files.
 func (p *Pipeline) processManifestFiles(ctx context.Context, dir string, patches, edits []PatchSpec) error {
 	paths, err := manifestFiles(p.store.fs, dir)
 	if err != nil {
 		return err
 	}
 
+	patcher := renderer.NewPatcher(toRendererPatches(patches))
+	editor := renderer.NewPatcher(toRendererPatches(edits))
 	for _, path := range paths {
-		if err := p.processManifestFile(ctx, path, patches, edits); err != nil {
+		if err := p.processManifestFile(ctx, path, patcher, editor); err != nil {
 			return err
 		}
 	}
 
-	return nil
+	var unmatched []error
+	for _, perr := range patcher.Unmatched() {
+		unmatched = append(unmatched, fmt.Errorf("patch %w", perr))
+	}
+	for _, perr := range editor.Unmatched() {
+		unmatched = append(unmatched, fmt.Errorf("edit %w", perr))
+	}
+	return errors.Join(unmatched...)
 }
 
 // manifestFiles returns the paths of the manifest files in dir: only
@@ -443,16 +456,25 @@ func (p *Pipeline) processImages(ctx context.Context, dir string, opts ImageOpti
 	return found, nil
 }
 
-// processManifestFile applies patches and edits to a single file in place.
-func (p *Pipeline) processManifestFile(ctx context.Context, path string, patches, edits []PatchSpec) error {
+// processManifestFile normalizes a single file in place and applies the
+// patches, then the edits on top, one document at a time.
+func (p *Pipeline) processManifestFile(ctx context.Context, path string, patcher, editor *renderer.Patcher) error {
 	content, err := afero.ReadFile(p.store.fs, path)
 	if err != nil {
 		return fmt.Errorf("failed to read manifest: %w", err)
 	}
 
-	processed, err := p.processManifest(ctx, content, patches, edits)
+	processed, err := patcher.Process(ctx, content)
 	if err != nil {
 		return fmt.Errorf("failed to process %s: %w", filepath.Base(path), err)
+	}
+
+	// The patches normalized the content already.
+	if editor.Len() > 0 {
+		processed, err = editor.Process(ctx, processed)
+		if err != nil {
+			return fmt.Errorf("failed to apply edits to %s: %w", filepath.Base(path), err)
+		}
 	}
 
 	if err := afero.WriteFile(p.store.fs, path, processed, 0600); err != nil {
@@ -460,26 +482,6 @@ func (p *Pipeline) processManifestFile(ctx context.Context, path string, patches
 	}
 
 	return nil
-}
-
-// processManifest normalizes content and applies patches, then edits on top,
-// one document at a time.
-func (p *Pipeline) processManifest(ctx context.Context, content []byte, patches, edits []PatchSpec) ([]byte, error) {
-	processed, err := renderer.Process(ctx, content, toRendererPatches(patches))
-	if err != nil {
-		return nil, err
-	}
-
-	if len(edits) == 0 {
-		return processed, nil
-	}
-
-	processed, err = renderer.Process(ctx, processed, toRendererPatches(edits))
-	if err != nil {
-		return nil, fmt.Errorf("failed to apply edits: %w", err)
-	}
-
-	return processed, nil
 }
 
 // toRendererPatches converts pipeline patch specs to renderer patches.

@@ -63,6 +63,10 @@ const (
 	// ReasonProcessingFailed reports on an Order that its intent could not
 	// be rendered.
 	ReasonProcessingFailed = "ProcessingFailed"
+	// ReasonPatchFailed reports on an Order that a patch or edit does not
+	// apply to the rendered manifests: a path cannot be set, or a target
+	// matches no resource.
+	ReasonPatchFailed = "PatchFailed"
 
 	// ReasonResolved reports on a Product that its source is resolved to a
 	// digest.

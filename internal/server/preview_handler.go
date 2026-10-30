@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/images"
 	"github.com/kokumi-dev/kokumi/internal/namespace"
 	"github.com/kokumi-dev/kokumi/internal/registry"
+	"github.com/kokumi-dev/kokumi/internal/renderer"
 	"github.com/kokumi-dev/kokumi/internal/resolve"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -100,6 +102,11 @@ func handlePreview(deps *apiDeps, resolvePreview resolvePreviewFunc) http.Handle
 		if err != nil {
 			if isDenied(err) || registry.Reason(err, "") != "" {
 				respondConnectError(w, err)
+				return
+			}
+			// The request asks for a patch or edit the source cannot take.
+			if _, ok := errors.AsType[*renderer.PatchError](err); ok {
+				respondError(w, http.StatusUnprocessableEntity, err.Error())
 				return
 			}
 			deps.logger.Error(err, "Failed to render preview", "namespace", p.namespace, "name", p.name)
