@@ -16,4 +16,4 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: ./.github/workflows/image.yml
+    uses: $/.github/workflows/image.yml
