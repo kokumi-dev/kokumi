@@ -315,8 +315,8 @@ func TestTrivy_lock(t *testing.T) {
 	<-again
 }
 
-// gatedClient holds every layer extraction until gate closes, and counts
-// them.
+// gatedClient counts the layer extractions it starts and holds each until
+// gate closes.
 type gatedClient struct {
 	layoutClient
 	gate      <-chan struct{}
@@ -324,8 +324,8 @@ type gatedClient struct {
 }
 
 func (c gatedClient) ExtractLayers(ctx context.Context, ref oci.Reference, dir string) (oci.Descriptor, error) {
-	<-c.gate
 	c.extracted.Add(1)
+	<-c.gate
 	return c.layoutClient.ExtractLayers(ctx, ref, dir)
 }
 
@@ -347,6 +347,8 @@ func TestTrivy_database_outlivesRequest(t *testing.T) {
 	cancel()
 	_, _, err := engine.database(ctx, db, dbDir, "db", "trivy.db")
 	require.ErrorIs(t, err, context.Canceled, "a request that ends stops waiting")
+	require.Eventually(t, func() bool { return extracted.Load() == 1 }, 5*time.Second, time.Millisecond,
+		"the download goes on after the request ends")
 
 	close(gate)
 	dir, updated, err := engine.database(context.Background(), db, dbDir, "db", "trivy.db")
