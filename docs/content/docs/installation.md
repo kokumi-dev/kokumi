@@ -60,6 +60,9 @@ kubectl apply -f \
     https://github.com/kokumi-dev/kokumi/releases/download/{{< param kokumiVersion >}}/install.yaml
 ```
 
+To check the release before you apply it, see
+[Release Verification](../operator-guide/release-verification/).
+
 This installs:
 
 - The Kokumi CRDs. `kubectl get kokumi -A` lists every Kokumi object: all its

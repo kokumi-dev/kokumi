@@ -12,13 +12,15 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
     uses: $/.github/workflows/image.yml
 
   installer:
     needs: image
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
 
     steps:
       - name: Checkout
@@ -34,13 +36,51 @@ jobs:
 
       - name: Build installer
         env:
-          IMG: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+          IMG: ghcr.io/${{ github.repository }}:${{ github.ref_name }}@${{ needs.image.outputs.digest }}
         run: |
           make build-installer IMG=$IMG
+
+      - name: Upload install.yaml
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: install.yaml
+          path: dist/install.yaml
+          retention-days: 1
+          if-no-files-found: error
+
+  attest-installer:
+    needs: installer
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Download install.yaml
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: install.yaml
+
+      - name: Attest the provenance of install.yaml
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: install.yaml
+
+  publish:
+    needs: attest-installer
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download install.yaml
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: install.yaml
 
       - name: Upload install.yaml to release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
-          files: dist/install.yaml
+          files: install.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
