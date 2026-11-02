@@ -8,10 +8,10 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
-	"github.com/go-logr/logr"
 	"github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"golang.org/x/oauth2"
 	corev1 "k8s.io/api/core/v1"
@@ -26,14 +26,23 @@ const (
 	oidcStateTTL = 10 * time.Minute
 	// secretKeyClientSecret is the key within the OIDC Secret that holds the client secret.
 	secretKeyClientSecret = "client-secret"
+	// oidcDiscoveryTimeout bounds one discovery request to the issuer.
+	oidcDiscoveryTimeout = 15 * time.Second
+	// oidcDiscoveryRetryInterval is how long a failed discovery is reported
+	// without asking the issuer again, so sign-ins during an issuer outage do
+	// not each wait for it.
+	oidcDiscoveryRetryInterval = 5 * time.Second
+	// ssoErrorUnavailable is the sso_error code for an issuer that cannot be
+	// reached; the login page turns it into a message.
+	ssoErrorUnavailable = "unavailable"
 )
 
 // oidcProvider implements IdentityProvider via the OIDC authorization-code flow
 // (PKCE). It verifies the issuer ID token and mints kokumi session tokens using
 // the shared authenticator's signing key, so OIDC and admin sessions share one trust root.
 type oidcProvider struct {
-	verifier      *oidc.IDTokenVerifier
-	oauth         oauth2.Config
+	issuer        *oidcIssuer
+	oauth         oauth2.Config // without Endpoint, which comes from discovery
 	usernameClaim string
 	emailClaim    string
 	groupsClaim   string
@@ -42,9 +51,48 @@ type oidcProvider struct {
 
 var _ IdentityProvider = (*oidcProvider)(nil)
 
-// buildOIDCProvider reads the client secret and performs OIDC discovery. Returns
-// (nil, nil) when unconfigured; an error on incomplete config or discovery failure
-// (logged by the caller so a transient issuer outage doesn't disable admin login).
+// oidcIssuer discovers an issuer on first use and keeps the result. A failure
+// is not kept: a use after oidcDiscoveryRetryInterval asks the issuer again,
+// so an issuer that was down when the server started is picked up once it can
+// be reached.
+type oidcIssuer struct {
+	url string
+
+	mu       sync.Mutex
+	provider *oidc.Provider // nil until a discovery succeeds
+	err      error          // the last failure, reported until the retry interval has passed
+	failedAt time.Time
+}
+
+// discover returns the issuer's discovered metadata, asking the issuer when
+// there is none yet. Concurrent callers share one request.
+func (i *oidcIssuer) discover(ctx context.Context) (*oidc.Provider, error) {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if i.provider != nil {
+		return i.provider, nil
+	}
+	if i.err != nil && time.Since(i.failedAt) < oidcDiscoveryRetryInterval {
+		return nil, i.err
+	}
+	// The result is shared with every caller, so one caller going away must
+	// not cancel the request.
+	discoverCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), oidcDiscoveryTimeout)
+	defer cancel()
+	provider, err := oidc.NewProvider(discoverCtx, i.url)
+	if err != nil {
+		i.err = fmt.Errorf("oidc discovery for %s: %w", i.url, err)
+		i.failedAt = time.Now()
+		return nil, i.err
+	}
+	i.provider, i.err = provider, nil
+	return provider, nil
+}
+
+// buildOIDCProvider reads the client secret. It does not contact the issuer;
+// discovery happens on first use. Returns (nil, nil) when unconfigured and an
+// error on incomplete config (logged by the caller so a broken OIDC config
+// doesn't disable admin login).
 func buildOIDCProvider(
 	ctx context.Context,
 	reader client.Reader,
@@ -72,23 +120,14 @@ func buildOIDCProvider(
 		return nil, fmt.Errorf("oidc secret %s/%s missing %q", namespace, cfg.ClientSecretRef.Name, secretKeyClientSecret)
 	}
 
-	// Discovery must succeed; a short timeout keeps startup responsive if the issuer is down.
-	discoverCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	provider, err := oidc.NewProvider(discoverCtx, cfg.IssuerURL)
-	if err != nil {
-		return nil, fmt.Errorf("oidc discovery for %s: %w", cfg.IssuerURL, err)
-	}
-
 	oauth := oauth2.Config{
 		ClientID:     cfg.ClientID,
 		ClientSecret: clientSecret,
-		Endpoint:     provider.Endpoint(),
 		Scopes:       cfg.Scopes,
 	}
 
 	return &oidcProvider{
-		verifier:      provider.Verifier(&oidc.Config{ClientID: cfg.ClientID}),
+		issuer:        &oidcIssuer{url: cfg.IssuerURL},
 		oauth:         oauth,
 		usernameClaim: cfg.UsernameClaim,
 		emailClaim:    defaultString(cfg.EmailClaim, "email"),
@@ -103,6 +142,21 @@ func defaultString(v, fallback string) string {
 		return fallback
 	}
 	return v
+}
+
+// oauthConfig returns a copy of the OAuth2 config with the discovered endpoints
+// and the redirect URI of r, so requests never write to the shared struct.
+func (p *oidcProvider) oauthConfig(r *http.Request, provider *oidc.Provider) oauth2.Config {
+	oauth := p.oauth
+	oauth.Endpoint = provider.Endpoint()
+	oauth.RedirectURL = redirectURI(r)
+	return oauth
+}
+
+// redirectSSOError sends the browser back to the login page with an sso_error
+// code, which the page shows as a message.
+func redirectSSOError(w http.ResponseWriter, r *http.Request, code string) {
+	http.Redirect(w, r, "/?sso_error="+url.QueryEscape(code), http.StatusFound)
 }
 
 // redirectURI derives the callback URL from the request, honoring X-Forwarded-Proto.
@@ -146,12 +200,19 @@ func (p *oidcProvider) issueSession(id *Identity) (*Session, error) {
 }
 
 // handleOIDCStart generates a CSRF state + PKCE verifier, stores them in a cookie,
-// and redirects to the issuer's authorization endpoint.
+// and redirects to the issuer's authorization endpoint. An issuer that cannot be
+// reached sends the browser back to the login page.
 func handleOIDCStart(m *authManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p := m.getOIDC()
 		if p == nil {
 			respondError(w, http.StatusServiceUnavailable, "oidc is not configured")
+			return
+		}
+		provider, err := p.issuer.discover(r.Context())
+		if err != nil {
+			m.logger.Error(err, "Could not discover OIDC issuer")
+			redirectSSOError(w, r, ssoErrorUnavailable)
 			return
 		}
 		state, err := randomToken(32)
@@ -174,9 +235,7 @@ func handleOIDCStart(m *authManager) http.HandlerFunc {
 			SameSite: http.SameSiteLaxMode,
 			MaxAge:   int(oidcStateTTL.Seconds()),
 		})
-		// Copy the oauth config and set the per-request redirect URL to avoid a data race on the shared struct.
-		oauth := p.oauth
-		oauth.RedirectURL = redirectURI(r)
+		oauth := p.oauthConfig(r, provider)
 		opts := []oauth2.AuthCodeOption{
 			oauth2.S256ChallengeOption(verifier),
 		}
@@ -226,14 +285,17 @@ func handleOIDCCallback(m *authManager) http.HandlerFunc {
 			MaxAge:   -1,
 		})
 
-		// Copy the oauth config and set the per-request redirect URL to avoid a data race on the shared struct.
-		oauth := p.oauth
-		oauth.RedirectURL = redirectURI(r)
+		provider, err := p.issuer.discover(r.Context())
+		if err != nil {
+			m.logger.Error(err, "Could not discover OIDC issuer")
+			redirectSSOError(w, r, ssoErrorUnavailable)
+			return
+		}
+		oauth := p.oauthConfig(r, provider)
 		token, err := oauth.Exchange(r.Context(), code, oauth2.VerifierOption(parts[1]))
 		if err != nil {
 			// Log the underlying error but do not echo it to the client.
-			log := logr.FromContextOrDiscard(r.Context())
-			log.Error(err, "OIDC token exchange failed")
+			m.logger.Error(err, "OIDC token exchange failed")
 			respondError(w, http.StatusBadRequest, "oidc token exchange failed")
 			return
 		}
@@ -242,10 +304,9 @@ func handleOIDCCallback(m *authManager) http.HandlerFunc {
 			respondError(w, http.StatusBadRequest, "oidc response missing id_token")
 			return
 		}
-		idToken, err := p.verifier.Verify(r.Context(), rawID)
+		idToken, err := provider.Verifier(&oidc.Config{ClientID: oauth.ClientID}).Verify(r.Context(), rawID)
 		if err != nil {
-			log := logr.FromContextOrDiscard(r.Context())
-			log.Error(err, "OIDC id token invalid")
+			m.logger.Error(err, "OIDC id token invalid")
 			respondError(w, http.StatusBadRequest, "oidc id token invalid")
 			return
 		}
@@ -262,8 +323,7 @@ func handleOIDCCallback(m *authManager) http.HandlerFunc {
 		id.Issuer = idToken.Issuer
 		session, err := p.issueSession(id)
 		if err != nil {
-			log := logr.FromContextOrDiscard(r.Context())
-			log.Error(err, "Failed to issue OIDC session")
+			m.logger.Error(err, "Failed to issue OIDC session")
 			respondError(w, http.StatusInternalServerError, "failed to issue session")
 			return
 		}

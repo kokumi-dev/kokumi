@@ -188,8 +188,20 @@ func (m *authManager) reload(ctx context.Context, kitchen *deliveryv1alpha1.Kitc
 	// A provider that fails to (re)build keeps last-known-good state so the API
 	// fails closed; an intentionally disabled provider (nil, nil) is applied as-is.
 	m.mu.Lock()
-	m.apply(auth, adminCfg, adminErr, oidc, oidcCfg, oidcErr, tokenSecretName)
+	issuer := m.apply(auth, adminCfg, adminErr, oidc, oidcCfg, oidcErr, tokenSecretName)
 	m.mu.Unlock()
+
+	// Discover a new issuer now instead of at the first sign-in, so a wrong
+	// issuerURL shows in the log and the first sign-in does not wait. It runs
+	// in the background to keep informer handlers fast; a failure is retried
+	// by the next sign-in.
+	if issuer != nil {
+		go func() {
+			if _, err := issuer.discover(ctx); err != nil {
+				m.logger.Error(err, "Could not discover OIDC issuer")
+			}
+		}()
+	}
 
 	switch {
 	case m.disabled:
@@ -206,7 +218,8 @@ func (m *authManager) reload(ctx context.Context, kitchen *deliveryv1alpha1.Kitc
 // apply swaps the freshly built providers into the manager state. Callers must
 // hold m.mu. A provider that fails to (re)build keeps last-known-good state so
 // the API fails closed; an intentionally disabled provider (nil, nil) is
-// applied as-is.
+// applied as-is. It returns the OIDC issuer it introduced, or nil when the
+// issuer is unchanged or OIDC is off.
 func (m *authManager) apply(
 	auth *authenticator,
 	adminCfg *deliveryv1alpha1.AdminUserConfig,
@@ -215,7 +228,8 @@ func (m *authManager) apply(
 	oidcCfg *deliveryv1alpha1.OIDCConfig,
 	oidcErr error,
 	tokenSecretName string,
-) {
+) *oidcIssuer {
+	var newIssuer *oidcIssuer
 	prevAuth := m.auth
 	if auth != nil {
 		// A transient admin-credentials error must not wipe the last-known-good
@@ -239,6 +253,13 @@ func (m *authManager) apply(
 		m.secret = ""
 	}
 	if oidc != nil || oidcErr == nil {
+		// The same issuer keeps what was discovered, so a reload neither asks
+		// the issuer again nor loses it while the issuer is down.
+		if oidc != nil && m.oidc != nil && m.oidc.issuer.url == oidc.issuer.url {
+			oidc.issuer = m.oidc.issuer
+		} else if oidc != nil {
+			newIssuer = oidc.issuer
+		}
 		m.oidc = oidc
 		if oidcCfg != nil && oidcCfg.ClientSecretRef != nil {
 			m.oidcSecret = oidcCfg.ClientSecretRef.Name
@@ -251,6 +272,7 @@ func (m *authManager) apply(
 	// or last-known-good authenticator keeps auth enabled so a transient error
 	// fails closed rather than opening the API.
 	m.disabled = !m.adminLogin && m.oidc == nil
+	return newIssuer
 }
 
 // refresh reads the latest Kitchen singleton and rebuilds the providers.

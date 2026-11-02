@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/oauth2"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -271,8 +273,9 @@ func TestAuthManagerReloadWithKitchenOIDC(t *testing.T) {
 		},
 	}
 	m.reload(context.Background(), kitchen)
-	// Admin resolves; OIDC fails discovery (fake issuer) so only admin is active and auth stays enabled.
-	assert.ElementsMatch(t, []string{providerAdmin}, m.providers())
+	// Both resolve: discovery happens at sign-in, so an issuer that cannot be
+	// reached does not hide SSO.
+	assert.ElementsMatch(t, []string{providerAdmin, providerOIDC}, m.providers())
 	assert.False(t, m.disabled)
 
 	// Disable admin and point OIDC at a reachable test OP to confirm it can be the sole provider.
@@ -410,10 +413,10 @@ func TestHandleLoginForbiddenWhenAdminDisabled(t *testing.T) {
 		},
 	}
 	m.reload(context.Background(), kitchen)
-	// Admin disabled (token-only authenticator); OIDC discovery fails so auth is off but login returns 403.
-	assert.NotContains(t, m.providers(), "admin")
+	// Admin disabled (token-only authenticator); OIDC is the only provider, so login returns 403.
+	assert.Equal(t, []string{providerOIDC}, m.providers())
 	assert.False(t, m.adminLoginEnabled())
-	assert.True(t, m.disabled)
+	assert.False(t, m.disabled)
 
 	handler := handleLogin(m)
 	r := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/v1/auth/login", strings.NewReader(`{"username":"admin","password":"x"}`))
@@ -423,4 +426,157 @@ func TestHandleLoginForbiddenWhenAdminDisabled(t *testing.T) {
 
 	assert.Equal(t, http.StatusForbidden, w.Code)
 	assert.Contains(t, w.Body.String(), "admin login is disabled")
+}
+
+// flakyIssuer is an in-process OIDC test OP that answers 503 while down is set
+// and counts discovery requests.
+type flakyIssuer struct {
+	url         string
+	down        atomic.Bool
+	discoveries atomic.Int32
+}
+
+func newFlakyIssuer(t *testing.T) *flakyIssuer {
+	t.Helper()
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	op := &oidctest.Server{
+		PublicKeys: []oidctest.PublicKey{
+			{PublicKey: priv.Public(), KeyID: "test-key", Algorithm: oidc.RS256},
+		},
+	}
+	f := &flakyIssuer{}
+	httpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/openid-configuration" {
+			f.discoveries.Add(1)
+		}
+		if f.down.Load() {
+			http.Error(w, "down", http.StatusServiceUnavailable)
+			return
+		}
+		op.ServeHTTP(w, r)
+	}))
+	t.Cleanup(httpSrv.Close)
+	op.SetIssuer(httpSrv.URL)
+	f.url = httpSrv.URL
+	return f
+}
+
+// TestOIDCIssuerRetriesFailedDiscovery verifies an issuer that is down at first
+// is discovered once it is up, without asking it again within the retry interval.
+func TestOIDCIssuerRetriesFailedDiscovery(t *testing.T) {
+	f := newFlakyIssuer(t)
+	f.down.Store(true)
+	issuer := &oidcIssuer{url: f.url}
+	ctx := context.Background()
+
+	_, err := issuer.discover(ctx)
+	require.Error(t, err)
+	_, err = issuer.discover(ctx)
+	require.Error(t, err, "a failure is reported until the retry interval has passed")
+	assert.Equal(t, int32(1), f.discoveries.Load(), "the issuer must not be asked again within the retry interval")
+
+	f.down.Store(false)
+	issuer.failedAt = issuer.failedAt.Add(-oidcDiscoveryRetryInterval)
+	provider, err := issuer.discover(ctx)
+	require.NoError(t, err, "the issuer must be asked again once the retry interval has passed")
+	assert.True(t, strings.HasPrefix(provider.Endpoint().AuthURL, f.url))
+
+	again, err := issuer.discover(ctx)
+	require.NoError(t, err)
+	assert.Same(t, provider, again, "a discovered issuer is kept")
+	assert.Equal(t, int32(2), f.discoveries.Load())
+}
+
+// TestOIDCStartRedirectsWhenIssuerUnreachable verifies an issuer outage sends the
+// browser back to the login page instead of rendering an error body.
+func TestOIDCStartRedirectsWhenIssuerUnreachable(t *testing.T) {
+	f := newFlakyIssuer(t)
+	f.down.Store(true)
+	p := &oidcProvider{
+		issuer: &oidcIssuer{url: f.url},
+		oauth:  oauth2.Config{ClientID: testClientID},
+		auth:   newAuthenticator("", nil, []byte("test-signing-key-do-not-use-in-prod")),
+	}
+	mgr := &authManager{oidc: p}
+
+	r := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/v1/auth/oidc/start", nil)
+	w := httptest.NewRecorder()
+	handleOIDCStart(mgr).ServeHTTP(w, r)
+
+	require.Equal(t, http.StatusFound, w.Code)
+	assert.Equal(t, "/?sso_error="+ssoErrorUnavailable, w.Header().Get("Location"))
+	assert.Empty(t, w.Result().Cookies(), "no flow starts, so no state cookie")
+
+	// Once the issuer is up, the next sign-in after the retry interval starts the flow.
+	f.down.Store(false)
+	p.issuer.failedAt = p.issuer.failedAt.Add(-oidcDiscoveryRetryInterval)
+	w = httptest.NewRecorder()
+	handleOIDCStart(mgr).ServeHTTP(w, r)
+	require.Equal(t, http.StatusFound, w.Code)
+	assert.True(t, strings.HasPrefix(w.Header().Get("Location"), f.url), "the flow must redirect to the issuer")
+}
+
+// TestOIDCCallbackRedirectsWhenIssuerUnreachable verifies the callback sends the
+// browser back to the login page when the issuer cannot be discovered.
+func TestOIDCCallbackRedirectsWhenIssuerUnreachable(t *testing.T) {
+	f := newFlakyIssuer(t)
+	f.down.Store(true)
+	mgr := &authManager{oidc: &oidcProvider{
+		issuer: &oidcIssuer{url: f.url},
+		oauth:  oauth2.Config{ClientID: testClientID},
+	}}
+
+	req := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/v1/auth/oidc/callback?state=s&code=c", nil)
+	req.AddCookie(&http.Cookie{Name: oidcStateCookie, Value: "s.verifier"})
+	rec := httptest.NewRecorder()
+	handleOIDCCallback(mgr).ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusFound, rec.Code)
+	assert.Equal(t, "/?sso_error="+ssoErrorUnavailable, rec.Header().Get("Location"))
+}
+
+// TestAuthManagerReloadKeepsDiscoveredIssuer verifies a reload with the same
+// issuer keeps its discovery, and a new issuer starts over.
+func TestAuthManagerReloadKeepsDiscoveredIssuer(t *testing.T) {
+	client := fake.NewClientBuilder().WithObjects(&corev1.Secret{
+		Name: deliveryv1alpha1.DefaultTokenSigningKeySecretName, Namespace: testNS,
+		Data: map[string][]byte{secretKeySigningKey: []byte("test-signing-key-do-not-use-in-prod")},
+	}, &corev1.Secret{
+		Name: testOIDCSecret, Namespace: testNS,
+		Data: map[string][]byte{secretKeyClientSecret: []byte(testClientSec)},
+	}).Build()
+	m := &authManager{reader: client, apiReader: client, ns: testNS, logger: logr.Discard()}
+	kitchen := func(issuerURL string, scopes ...string) *deliveryv1alpha1.Kitchen {
+		return &deliveryv1alpha1.Kitchen{
+			Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS,
+			Spec: deliveryv1alpha1.KitchenSpec{Auth: &deliveryv1alpha1.KitchenAuth{
+				OIDC: &deliveryv1alpha1.OIDCConfig{
+					IssuerURL:       issuerURL,
+					ClientID:        testClientID,
+					ClientSecretRef: &corev1.LocalObjectReference{Name: testOIDCSecret},
+					Scopes:          scopes,
+				},
+			}},
+		}
+	}
+	f := newFlakyIssuer(t)
+	ctx := context.Background()
+
+	m.reload(ctx, kitchen(f.url))
+	first := m.getOIDC().issuer
+	_, err := first.discover(ctx)
+	require.NoError(t, err)
+
+	// The issuer goes down; a reload with the same issuer keeps the discovery,
+	// and takes the rest of the new config.
+	f.down.Store(true)
+	m.reload(ctx, kitchen(f.url, "openid", "groups"))
+	assert.Same(t, first, m.getOIDC().issuer)
+	assert.Equal(t, []string{"openid", "groups"}, m.getOIDC().oauth.Scopes)
+	_, err = m.getOIDC().issuer.discover(ctx)
+	require.NoError(t, err, "sign-in must keep working while the issuer is down")
+
+	m.reload(ctx, kitchen("https://other-issuer.example"))
+	assert.NotSame(t, first, m.getOIDC().issuer, "a new issuer must be discovered on its own")
 }

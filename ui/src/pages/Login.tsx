@@ -1,8 +1,20 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type SubmitEvent } from 'react'
 import styles from './Login.module.css'
 import logo from '../assets/logo.png'
 import { login } from '../api/auth'
 import { Button } from '../components/ui'
+
+// Messages for the sso_error codes the server's OIDC flow redirects back with.
+const ssoErrorMessages: Record<string, string> = {
+  unavailable: 'The identity provider could not be reached. Try again in a moment.',
+}
+
+/** Returns the message for the sso_error in the URL, or null when there is none. */
+function ssoErrorMessage(): string | null {
+  const code = new URLSearchParams(window.location.search).get('sso_error')
+  if (code === null) return null
+  return ssoErrorMessages[code] ?? 'Single sign-on failed. Try again.'
+}
 
 interface Props {
   /** Called after a successful login so the parent can render the app. */
@@ -17,6 +29,16 @@ export default function Login({ onSuccess, operatorVersion, authProviders }: Pro
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [ssoError] = useState(ssoErrorMessage)
+
+  // Strip the sso_error once it is shown, so a reload does not show it again.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (!params.has('sso_error')) return
+    params.delete('sso_error')
+    const query = params.toString()
+    history.replaceState(null, '', window.location.pathname + (query ? `?${query}` : '') + window.location.hash)
+  }, [])
 
   // Render only the providers the server advertises. An empty list means no
   // login method is configured; undefined (no /info response yet) falls back
@@ -26,7 +48,7 @@ export default function Login({ onSuccess, operatorVersion, authProviders }: Pro
   const showOIDC = providers.includes('oidc')
   const noProvider = providers.length === 0
 
-  async function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault()
     setError(null)
     setSubmitting(true)
@@ -66,6 +88,8 @@ export default function Login({ onSuccess, operatorVersion, authProviders }: Pro
             Sign in with SSO
           </Button>
         )}
+
+        {ssoError && <div className={styles.error}>{ssoError}</div>}
 
         {showOIDC && showAdmin && (
           <div className={styles.divider}>
