@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"sync"
-	"time"
 
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,7 +32,7 @@ type authManager struct {
 	reader      client.Reader  // informer cache, used for the Kitchen singleton
 	apiReader   client.Reader  // direct API client, used for live Secret reads
 	ns          string
-	tokenTTL    time.Duration
+	lifetimes   tokenLifetimes
 	logger      logr.Logger
 }
 
@@ -43,14 +42,14 @@ func newAuthManager(
 	reader client.Reader,
 	apiReader client.Reader,
 	ns string,
-	tokenTTL time.Duration,
+	lifetimes tokenLifetimes,
 ) *authManager {
 	logger := log.FromContext(ctx)
 	m := &authManager{
 		reader:    reader,
 		apiReader: apiReader,
 		ns:        ns,
-		tokenTTL:  tokenTTL,
+		lifetimes: lifetimes,
 		logger:    logger,
 	}
 	m.reload(ctx, nil)
@@ -150,7 +149,7 @@ func (m *authManager) reload(ctx context.Context, kitchen *deliveryv1alpha1.Kitc
 
 	// Shared trust root: signing key from the dedicated token Secret. Errors
 	// keep last-known-good state.
-	auth, authErr := buildTokenAuthenticator(ctx, m.apiReader, m.ns, tokenSecretName, m.tokenTTL)
+	auth, authErr := buildTokenAuthenticator(ctx, m.apiReader, m.ns, tokenSecretName, m.lifetimes)
 	if authErr != nil {
 		m.logger.Info("Token signing key not available", "reason", authErr.Error())
 	}

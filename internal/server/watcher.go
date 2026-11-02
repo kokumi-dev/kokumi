@@ -121,15 +121,13 @@ func startK8sWatcher(
 	// ServiceAccount so Kubernetes RBAC is the single source of truth.
 	deps.impersonator = newImpersonator(cfg, scheme, installNamespace)
 
-	var tokenTTL time.Duration
-	if v := strings.TrimSpace(getenv("KOKUMI_TOKEN_TTL")); v != "" {
-		if d, err := time.ParseDuration(v); err == nil && d > 0 {
-			tokenTTL = d
-		}
+	lifetimes := tokenLifetimes{
+		access:  durationEnv(getenv, "KOKUMI_TOKEN_TTL"),
+		session: durationEnv(getenv, "KOKUMI_SESSION_TTL"),
 	}
 
 	// Build the auth manager up front so it is never nil when cache handlers fire.
-	deps.authMgr = newAuthManager(ctx, k8sCache, writer, installNamespace, tokenTTL)
+	deps.authMgr = newAuthManager(ctx, k8sCache, writer, installNamespace, lifetimes)
 
 	informers, err := getInformers(ctx, k8sCache)
 	if err != nil {
@@ -448,4 +446,14 @@ func getInformers(ctx context.Context, c cache.Cache) (informers, error) {
 		return out, fmt.Errorf("getting ServiceAccount informer: %w", err)
 	}
 	return out, nil
+}
+
+// durationEnv returns the positive Go duration in the environment variable
+// name, or zero when it is unset or invalid.
+func durationEnv(getenv func(string) string, name string) time.Duration {
+	d, err := time.ParseDuration(strings.TrimSpace(getenv(name)))
+	if err != nil || d <= 0 {
+		return 0
+	}
+	return d
 }

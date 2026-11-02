@@ -111,8 +111,20 @@ func handleEventsStream(h *hub, deps *apiDeps, heartbeat time.Duration) http.Han
 		ticker := time.NewTicker(heartbeat)
 		defer ticker.Stop()
 
+		// The stream ends with the access token it was opened with, so a
+		// copied token does not stream beyond its expiry. The UI reopens it
+		// with each renewed token.
+		var expired <-chan time.Time
+		if expires, ok := tokenExpiry(r.Context()); ok {
+			timer := time.NewTimer(time.Until(expires))
+			defer timer.Stop()
+			expired = timer.C
+		}
+
 		for {
 			select {
+			case <-expired:
+				return
 			case <-ticker.C:
 				if _, err := fmt.Fprintf(w, "event: %s\ndata: {}\n\n", eventHeartbeat); err != nil {
 					return

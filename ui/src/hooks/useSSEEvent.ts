@@ -44,6 +44,9 @@ const STALE_AFTER_MS = 40_000
 // types on one connection, in a fixed order, so a single stream delivers
 // related lists in step and costs one connection instead of one per hook.
 let source: EventSource | null = null
+// The access token the stream was opened with; the server ends the stream
+// when it expires.
+let sourceToken: string | null = null
 let closeTimer: ReturnType<typeof setTimeout> | undefined
 // Set from a stream error until the reconnect, so subscribers that mount in
 // between wait for it instead of connecting on their own.
@@ -101,6 +104,7 @@ function connect(): void {
   // as a query parameter, which the server also accepts.
   const es = new EventSource(withAccessToken(ENDPOINT))
   source = es
+  sourceToken = getToken()
   lastSeen = Date.now()
   watch(es)
 
@@ -167,9 +171,17 @@ function disconnect(): void {
   types.forEach(notify)
 }
 
-// Logging out ends the stream and drops data visible to the previous user.
+// Logging out ends the stream and drops data visible to the previous user. A
+// renewed token reopens the stream before the server ends it with the old
+// one; the server replays its snapshots, so the values stay.
 onAuthChange(() => {
-  if (!getToken()) disconnect()
+  const token = getToken()
+  if (!token) {
+    disconnect()
+  } else if (source && token !== sourceToken) {
+    source.close()
+    connect()
+  }
 })
 
 function subscribe(type: SSEEventType, listener: () => void): () => void {
