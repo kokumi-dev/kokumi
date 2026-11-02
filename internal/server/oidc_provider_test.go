@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -29,6 +31,7 @@ const (
 	testOIDCSecret = "kokumi-server-oidc"
 	testClientID   = "kokumi-client"
 	testClientSec  = "kokumi-client-secret"
+	testKeyID      = "test-key"
 )
 
 // newTestOIDCProvider spins up an in-process OIDC test OP and returns a provider + server.
@@ -38,13 +41,19 @@ func newTestOIDCProvider(t *testing.T) (*oidcProvider, *httptest.Server) {
 	require.NoError(t, err)
 	srv := &oidctest.Server{
 		PublicKeys: []oidctest.PublicKey{
-			{PublicKey: priv.Public(), KeyID: "test-key", Algorithm: oidc.RS256},
+			{PublicKey: priv.Public(), KeyID: testKeyID, Algorithm: oidc.RS256},
 		},
 	}
 	httpSrv := httptest.NewServer(srv)
 	t.Cleanup(httpSrv.Close)
 	srv.SetIssuer(httpSrv.URL)
+	return newOIDCProviderFor(t, httpSrv.URL), httpSrv
+}
 
+// newOIDCProviderFor returns a provider for the issuer at issuerURL, with
+// the client testClientID.
+func newOIDCProviderFor(t *testing.T, issuerURL string) *oidcProvider {
+	t.Helper()
 	client := fake.NewClientBuilder().WithObjects(&corev1.Secret{
 		Name: testOIDCSecret, Namespace: testNS,
 		Data: map[string][]byte{secretKeyClientSecret: []byte(testClientSec)},
@@ -54,14 +63,14 @@ func newTestOIDCProvider(t *testing.T) (*oidcProvider, *httptest.Server) {
 	}).Build()
 
 	cfg := &deliveryv1alpha1.OIDCConfig{
-		IssuerURL:       httpSrv.URL,
+		IssuerURL:       issuerURL,
 		ClientID:        testClientID,
 		ClientSecretRef: &corev1.LocalObjectReference{Name: testOIDCSecret},
 	}
 	p, err := buildOIDCProvider(context.Background(), client, testNS, cfg, newAuthenticator("", nil, []byte("test-signing-key-do-not-use-in-prod")))
 	require.NoError(t, err)
 	require.NotNil(t, p)
-	return p, httpSrv
+	return p
 }
 
 func TestBuildOIDCProviderDisabled(t *testing.T) {
@@ -347,9 +356,9 @@ func TestRefreshPreservesSubject(t *testing.T) {
 		Groups:   []string{"devops"},
 		Provider: providerOIDC,
 	}
-	access, _, err := auth.issueAccessTokenFor(now, origID)
+	access, _, err := auth.issueAccessTokenFor(now, origID, now.Add(defaultSessionTTL))
 	require.NoError(t, err)
-	refresh, err := auth.issueRefreshToken(now, origID)
+	refresh, err := auth.issueRefreshToken(now, origID, now.Add(defaultSessionTTL))
 	require.NoError(t, err)
 
 	// Simulate a refresh request carrying the refresh cookie.
@@ -364,7 +373,7 @@ func TestRefreshPreservesSubject(t *testing.T) {
 	// The refresh handler re-mints using the refresh token's identity.
 	session, err := provider.Refresh(r)
 	require.NoError(t, err)
-	newID, err := parseIdentityToken(auth, session.AccessToken)
+	newID, _, err := parseIdentityToken(auth, session.AccessToken)
 	require.NoError(t, err)
 	assert.Equal(t, origID, newID, "refresh must preserve the full OIDC identity")
 }
@@ -442,7 +451,7 @@ func newFlakyIssuer(t *testing.T) *flakyIssuer {
 	require.NoError(t, err)
 	op := &oidctest.Server{
 		PublicKeys: []oidctest.PublicKey{
-			{PublicKey: priv.Public(), KeyID: "test-key", Algorithm: oidc.RS256},
+			{PublicKey: priv.Public(), KeyID: testKeyID, Algorithm: oidc.RS256},
 		},
 	}
 	f := &flakyIssuer{}
@@ -579,4 +588,148 @@ func TestAuthManagerReloadKeepsDiscoveredIssuer(t *testing.T) {
 
 	m.reload(ctx, kitchen("https://other-issuer.example"))
 	assert.NotSame(t, first, m.getOIDC().issuer, "a new issuer must be discovered on its own")
+}
+
+// newFakeIssuer starts an OIDC provider whose token endpoint answers every
+// code with a signed ID token for user@example.com. With endSession it
+// advertises RP-initiated logout at /logout.
+func newFakeIssuer(t *testing.T, endSession bool) *httptest.Server {
+	t.Helper()
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	op := &oidctest.Server{
+		PublicKeys: []oidctest.PublicKey{{PublicKey: priv.Public(), KeyID: testKeyID, Algorithm: oidc.RS256}},
+	}
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/token":
+			now := time.Now()
+			claims := fmt.Sprintf(`{"iss":%q,"aud":%q,"sub":"user-1","email":"user@example.com","iat":%d,"exp":%d}`,
+				srv.URL, testClientID, now.Unix(), now.Add(time.Hour).Unix())
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"access_token": "upstream-access-token", "token_type": "Bearer", "expires_in": 3600,
+				"id_token": oidctest.SignIDToken(priv, testKeyID, oidc.RS256, claims),
+			})
+		case r.URL.Path == "/.well-known/openid-configuration" && endSession:
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"issuer": srv.URL, "authorization_endpoint": srv.URL + "/auth", "token_endpoint": srv.URL + "/token",
+				"jwks_uri": srv.URL + "/keys", "end_session_endpoint": srv.URL + "/logout",
+				"id_token_signing_alg_values_supported": []string{oidc.RS256},
+			})
+		default:
+			op.ServeHTTP(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	op.SetIssuer(srv.URL)
+	return srv
+}
+
+// signInOIDC runs the sign-in flow against mgr with the browser's cookies
+// and returns the cookies the callback sets.
+func signInOIDC(t *testing.T, mgr *authManager, cookies ...*http.Cookie) []*http.Cookie {
+	t.Helper()
+	start := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/v1/auth/oidc/start", nil)
+	for _, c := range cookies {
+		start.AddCookie(c)
+	}
+	startRec := httptest.NewRecorder()
+	handleOIDCStart(mgr).ServeHTTP(startRec, start)
+	require.Equal(t, http.StatusFound, startRec.Code)
+	loc, err := url.Parse(startRec.Header().Get("Location"))
+	require.NoError(t, err)
+
+	cb := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/v1/auth/oidc/callback?code=c&state="+loc.Query().Get("state"), nil)
+	cb.AddCookie(cookieNamed(t, startRec.Result().Cookies(), oidcStateCookie))
+	cbRec := httptest.NewRecorder()
+	handleOIDCCallback(mgr).ServeHTTP(cbRec, cb)
+	require.Equal(t, http.StatusFound, cbRec.Code, cbRec.Body.String())
+	assert.Contains(t, cbRec.Header().Get("Location"), "/#access_token=")
+	return cbRec.Result().Cookies()
+}
+
+// signOut posts a sign-out with cookies and returns the response.
+func signOut(mgr *authManager, cookies ...*http.Cookie) *httptest.ResponseRecorder {
+	r := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/v1/auth/logout", nil)
+	for _, c := range cookies {
+		r.AddCookie(c)
+	}
+	w := httptest.NewRecorder()
+	handleLogout(mgr).ServeHTTP(w, r)
+	return w
+}
+
+func TestOIDCSignOutEndsTheSessionAtTheProvider(t *testing.T) {
+	issuer := newFakeIssuer(t, true)
+	p := newOIDCProviderFor(t, issuer.URL)
+	mgr := &authManager{auth: p.auth, oidc: p, logger: logr.Discard()}
+
+	signedIn := signInOIDC(t, mgr)
+	refresh := cookieNamed(t, signedIn, refreshCookieName)
+	assert.InDelta(t, defaultSessionTTL.Seconds(), refresh.MaxAge, 2, "the session lasts sessionTTL")
+	idToken := cookieNamed(t, signedIn, oidcIDTokenCookie)
+	assert.Equal(t, oidcIDTokenCookiePath, idToken.Path, "only the sign-out reads the ID token")
+	assert.True(t, idToken.HttpOnly)
+
+	w := signOut(mgr, refresh, idToken)
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp logoutResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	endSession, err := url.Parse(resp.EndSessionURL)
+	require.NoError(t, err)
+	assert.Equal(t, issuer.URL+"/logout", endSession.Scheme+"://"+endSession.Host+endSession.Path)
+	assert.Equal(t, url.Values{
+		"id_token_hint":            {idToken.Value},
+		"client_id":                {testClientID},
+		"post_logout_redirect_uri": {"http://localhost:8080/"},
+	}, endSession.Query())
+
+	cookies := w.Result().Cookies()
+	assert.Equal(t, -1, cookieNamed(t, cookies, refreshCookieName).MaxAge)
+	assert.Equal(t, -1, cookieNamed(t, cookies, oidcIDTokenCookie).MaxAge)
+	assert.Positive(t, cookieNamed(t, cookies, oidcPromptCookie).MaxAge,
+		"the next sign-in asks for credentials, in case the user stays signed in at the provider")
+}
+
+func TestOIDCSignOutWithoutProviderLogoutAsksForLoginNextTime(t *testing.T) {
+	issuer := newFakeIssuer(t, false)
+	p := newOIDCProviderFor(t, issuer.URL)
+	mgr := &authManager{auth: p.auth, oidc: p, logger: logr.Discard()}
+
+	start := httptest.NewRecorder()
+	handleOIDCStart(mgr).ServeHTTP(start, httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/v1/auth/oidc/start", nil))
+	assert.NotContains(t, start.Header().Get("Location"), "prompt=", "a first sign-in uses the provider's session")
+
+	// An ID token too large for a cookie leaves only the refresh cookie to
+	// tell the session came from OIDC.
+	refresh := cookieNamed(t, signInOIDC(t, mgr), refreshCookieName)
+	w := signOut(mgr, refresh)
+	require.Equal(t, http.StatusNoContent, w.Code, "the provider offers no end_session_endpoint")
+	prompt := cookieNamed(t, w.Result().Cookies(), oidcPromptCookie)
+	assert.Equal(t, oidcCookiePath, prompt.Path)
+
+	start = httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/v1/auth/oidc/start", nil)
+	r.AddCookie(prompt)
+	handleOIDCStart(mgr).ServeHTTP(start, r)
+	loc, err := url.Parse(start.Header().Get("Location"))
+	require.NoError(t, err)
+	assert.Equal(t, "login", loc.Query().Get("prompt"))
+
+	assert.Equal(t, -1, cookieNamed(t, signInOIDC(t, mgr, prompt), oidcPromptCookie).MaxAge,
+		"signing in again is done with the sign-out")
+}
+
+func TestAdminSignOutStaysLocalWithOIDCConfigured(t *testing.T) {
+	issuer := newFakeIssuer(t, true)
+	p := newOIDCProviderFor(t, issuer.URL)
+	mgr := &authManager{auth: p.auth, oidc: p, logger: logr.Discard()}
+	s, err := newAdminProvider(p.auth).issue(&Identity{Subject: testUsername, Provider: providerAdmin}, time.Now().Add(time.Hour))
+	require.NoError(t, err)
+
+	w := signOut(mgr, &http.Cookie{Name: refreshCookieName, Value: s.RefreshToken})
+	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.Nil(t, findCookie(w.Result().Cookies(), oidcPromptCookie))
 }

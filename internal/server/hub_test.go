@@ -117,3 +117,19 @@ func TestEventsStream_sendsHeartbeatsAndNothingUnreadable(t *testing.T) {
 	require.NoError(t, scanner.Err())
 	assert.Equal(t, []string{eventHeartbeat, eventHeartbeat, eventHeartbeat}, events)
 }
+
+func TestEventsStream_endsWithItsAccessToken(t *testing.T) {
+	ctx := withTokenExpiry(t.Context(), time.Now().Add(50*time.Millisecond))
+	r := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/events", nil)
+	done := make(chan struct{})
+	go func() {
+		handleEventsStream(newHub(), nil, time.Hour).ServeHTTP(httptest.NewRecorder(), r)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stream must end when the access token it was opened with expires")
+	}
+}

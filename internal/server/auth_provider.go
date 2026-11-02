@@ -11,9 +11,12 @@ import (
 // access_token query param for SSE); the refresh token is delivered to the
 // client as an HttpOnly cookie.
 type Session struct {
-	AccessToken      string
-	AccessExpiresAt  time.Time
-	RefreshToken     string
+	AccessToken     string
+	AccessExpiresAt time.Time
+	RefreshToken    string
+	// ExpiresAt is when the session ends: the refresh token and its cookie
+	// expire then, and refreshing does not move it.
+	ExpiresAt        time.Time
 	SetRefreshCookie bool
 }
 

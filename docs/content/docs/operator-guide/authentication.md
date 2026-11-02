@@ -40,8 +40,8 @@ kubectl -n kokumi patch secret kokumi-server-auth \
   -p "{\"stringData\":{\"password-hash\":\"$(htpasswd -nbB admin 'your-new-password' | cut -d: -f2)\"}}"
 ```
 
-A new password does not end sessions that are already signed in. Replace the
-[token signing key](#token-signing-key) to end them.
+A new password does not end sessions that are already signed in; see
+[Sessions and signing out](#sessions-and-signing-out).
 
 To change the username from the default `admin`, set
 `spec.auth.adminUser.username` on the Kitchen (see below).
@@ -80,20 +80,9 @@ key must be at least 32 bytes long.
         name: my-gitops-managed-key
   ```
 
-A sign-in issues an access token, valid for one hour, and a refresh token in
-the HttpOnly cookie `kokumi.refresh`, valid for seven days. The UI exchanges
-the refresh token for new access tokens, and every exchange issues a new
-refresh token, so a session that is used at least once a week does not expire.
-To change the lifetime of access tokens, set the environment variable
-`KOKUMI_TOKEN_TTL` of the `kokumi-server` Deployment to a Go duration, such as
-`15m`. The cookie is marked `Secure` only when the request arrived over TLS or
-carries `X-Forwarded-Proto: https`.
-
-Disabling the admin account, changing its password, or removing a user at the
-OIDC provider does not end sessions that are already signed in. Replacing the
-signing key does: the server rejects every token signed with the old key, and
-every user signs in again. Delete the Secret, and the controller generates a
-new key:
+Replacing the signing key ends every session at once: the server rejects
+every token signed with the old key, and every user signs in again. Delete the
+Secret, and the controller generates a new key:
 
 ```bash
 kubectl -n kokumi delete secret kokumi-server-tokens
@@ -101,6 +90,49 @@ kubectl -n kokumi delete secret kokumi-server-tokens
 
 For a Secret you manage yourself, for example through GitOps, replace its
 `signing-key` instead.
+
+## Sessions and signing out
+
+A sign-in starts a session that lasts 24 hours. It issues an access token,
+valid for five minutes, and a refresh token in the HttpOnly cookie
+`kokumi.refresh`, which expires with the session. The UI exchanges the refresh
+token for a new access token before the old one expires. Every exchange issues
+a new refresh token, but none extends the session: 24 hours after signing in,
+the user signs in again. The cookies are marked `Secure` only when the request
+arrived over TLS or carries `X-Forwarded-Proto: https`.
+
+To change the lifetimes, set these environment variables of the
+`kokumi-server` Deployment to a Go duration, such as `15m` or `8h`:
+
+| Variable | Default | Lifetime of |
+| -------- | ------- | ----------- |
+| `KOKUMI_TOKEN_TTL` | `5m` | An access token. It never outlives its session. |
+| `KOKUMI_SESSION_TTL` | `24h` | A session, counted from the sign-in. |
+
+Disabling the admin account, changing its password, or removing a user or a
+group at the OIDC provider does not end sessions that are already signed in.
+They end with their session at the latest. To end them at once, replace the
+[token signing key](#token-signing-key).
+
+"Sign out" in the UI ends the session in this browser, in all of its tabs:
+
+- The server expires the refresh cookie. It does not revoke tokens: an access
+  token copied before the sign-out works until it expires, which is why access
+  tokens are short-lived.
+- An OIDC session also ends at the provider when the provider supports
+  [RP-initiated logout](https://openid.net/specs/openid-connect-rpinitiated-1_0.html),
+  that is, when its discovery document has an `end_session_endpoint`. The
+  browser goes there, and the provider sends it back to the UI. Register the
+  post-logout redirect URI described in
+  [OIDC single sign-on](#oidc-single-sign-on).
+- The next "Sign in with SSO" in this browser asks the provider to
+  authenticate the user again (`prompt=login`). A provider session that
+  outlives the sign-out, for example at a provider without RP-initiated
+  logout such as Dex, then does not sign the user back in without asking.
+
+Another site cannot sign a user in or out: the server refuses state-changing
+requests that a browser sends from another origin. A reverse proxy in front of
+the server must pass the original `Host` header.
 
 ## Configuring the admin user
 
@@ -139,7 +171,7 @@ spec:
 The server watches the Secret and the `Kitchen` resource, so credential and
 configuration changes are picked up automatically; no restart is needed.
 Sessions that are already signed in stay valid; see
-[Token signing key](#token-signing-key).
+[Sessions and signing out](#sessions-and-signing-out).
 
 The admin login always acts as the `kokumi-admin` ServiceAccount, which has
 full access to Kokumi resources. See [Authorization](../authorization/).
@@ -162,8 +194,8 @@ spec:
 ```
 
 New admin logins are refused at once. Sessions that are already signed in as
-the admin keep working; replace the [token signing key](#token-signing-key) to
-end them.
+the admin keep working until their session ends; replace the
+[token signing key](#token-signing-key) to end them at once.
 
 ## OIDC-only (no admin account)
 
@@ -206,8 +238,9 @@ stored on the server.
 
 The session keeps the subject, email and groups of the ID token. Refreshing it
 does not contact the provider again, so a change at the provider, such as a
-removed group, takes effect at the next sign-in. A change to the
-ServiceAccount mapping takes effect at the next request.
+removed group, takes effect at the next sign-in, at the latest when the
+session ends (see [Sessions and signing out](#sessions-and-signing-out)). A
+change to the ServiceAccount mapping takes effect at the next request.
 
 > **Authorization.** OIDC only authenticates. What a user may do is decided by
 > the ServiceAccounts their identity maps to, by subject, email or groups. A
@@ -218,6 +251,14 @@ Register this redirect URI with the provider:
 
 ```text
 https://<kokumi host>/api/v1/auth/oidc/callback
+```
+
+If the provider supports RP-initiated logout, also register the UI's root as a
+post-logout redirect URI, which some providers call a sign-out redirect URI.
+The provider sends the browser there after signing the user out:
+
+```text
+https://<kokumi host>/
 ```
 
 The server builds the redirect URI from the `Host` header of the request, and

@@ -20,10 +20,27 @@ import (
 )
 
 const (
+	// oidcCookiePath scopes the cookies of the sign-in flow to its endpoints.
+	oidcCookiePath = "/api/v1/auth/oidc"
 	// oidcStateCookie holds the CSRF state + PKCE verifier for the flow; short-lived, HttpOnly.
 	oidcStateCookie = "kokumi.oidc.state"
 	// oidcStateTTL bounds how long an in-flight authorization request stays valid.
 	oidcStateTTL = 10 * time.Minute
+	// oidcIDTokenCookie holds the provider's ID token for the session, sent as
+	// id_token_hint when the user signs out at the provider.
+	oidcIDTokenCookie = "kokumi.oidc.id_token"
+	// oidcIDTokenCookiePath scopes the ID token cookie to the sign-out.
+	oidcIDTokenCookiePath = "/api/v1/auth/logout"
+	// maxIDTokenCookieLen is the longest ID token kept in a cookie; browsers
+	// drop cookies larger than 4096 bytes.
+	maxIDTokenCookieLen = 4000
+	// oidcPromptCookie is set by a sign-out and makes the next sign-in ask
+	// the provider to authenticate the user again (prompt=login), instead of
+	// signing them back in with the provider's own session.
+	oidcPromptCookie = "kokumi.oidc.prompt"
+	// oidcPromptCookieMaxAge keeps the prompt cookie until the next sign-in;
+	// 400 days is the longest lifetime browsers allow.
+	oidcPromptCookieMaxAge = 400 * 24 * 60 * 60
 	// secretKeyClientSecret is the key within the OIDC Secret that holds the client secret.
 	secretKeyClientSecret = "client-secret"
 	// oidcDiscoveryTimeout bounds one discovery request to the issuer.
@@ -161,11 +178,55 @@ func redirectSSOError(w http.ResponseWriter, r *http.Request, code string) {
 
 // redirectURI derives the callback URL from the request, honoring X-Forwarded-Proto.
 func redirectURI(r *http.Request) string {
+	return externalURL(r, "/api/v1/auth/oidc/callback")
+}
+
+// postLogoutRedirectURI is where the provider sends the browser back to after
+// signing the user out: the UI's root.
+func postLogoutRedirectURI(r *http.Request) string {
+	return externalURL(r, "/")
+}
+
+// externalURL returns the URL of path as the browser reaches the server,
+// derived from the request's host and X-Forwarded-Proto.
+func externalURL(r *http.Request, path string) string {
 	scheme := "http"
 	if isHTTPS(r) {
 		scheme = "https"
 	}
-	return fmt.Sprintf("%s://%s/api/v1/auth/oidc/callback", scheme, r.Host)
+	return fmt.Sprintf("%s://%s%s", scheme, r.Host, path)
+}
+
+// endSessionURL returns the URL that signs the user out at the provider and
+// sends the browser back to the UI (OIDC RP-Initiated Logout 1.0), or "" when
+// the provider advertises no end_session_endpoint. idToken, when not empty,
+// is sent as id_token_hint.
+func (p *oidcProvider) endSessionURL(r *http.Request, idToken string) (string, error) {
+	provider, err := p.issuer.discover(r.Context())
+	if err != nil {
+		return "", err
+	}
+	var metadata struct {
+		EndSessionEndpoint string `json:"end_session_endpoint"`
+	}
+	if err := provider.Claims(&metadata); err != nil {
+		return "", fmt.Errorf("reading oidc provider metadata: %w", err)
+	}
+	if metadata.EndSessionEndpoint == "" {
+		return "", nil
+	}
+	endpoint, err := url.Parse(metadata.EndSessionEndpoint)
+	if err != nil {
+		return "", fmt.Errorf("parsing oidc end_session_endpoint: %w", err)
+	}
+	q := endpoint.Query()
+	q.Set("client_id", p.oauth.ClientID)
+	q.Set("post_logout_redirect_uri", postLogoutRedirectURI(r))
+	if idToken != "" {
+		q.Set("id_token_hint", idToken)
+	}
+	endpoint.RawQuery = q.Encode()
+	return endpoint.String(), nil
 }
 
 // Login is unused for OIDC (flow is Start + Callback); satisfies the interface.
@@ -178,30 +239,18 @@ func (p *oidcProvider) Refresh(_ *http.Request) (*Session, error) {
 	return nil, fmt.Errorf("oidc refresh uses the shared refresh cookie")
 }
 
-// issueSession mints a kokumi access + refresh token pair carrying the OIDC
-// identity claims (sub, email, groups) used for ServiceAccount mapping;
-// minting errors are returned.
+// issueSession mints a new kokumi session carrying the OIDC identity claims
+// (sub, email, groups) used for ServiceAccount mapping; minting errors are
+// returned.
 func (p *oidcProvider) issueSession(id *Identity) (*Session, error) {
 	now := time.Now()
-	access, expires, err := p.auth.issueAccessTokenFor(now, id)
-	if err != nil {
-		return nil, fmt.Errorf("issuing access token: %w", err)
-	}
-	refresh, err := p.auth.issueRefreshToken(now, id)
-	if err != nil {
-		return nil, fmt.Errorf("issuing refresh token: %w", err)
-	}
-	return &Session{
-		AccessToken:      access,
-		AccessExpiresAt:  expires,
-		RefreshToken:     refresh,
-		SetRefreshCookie: true,
-	}, nil
+	return p.auth.issueSession(now, id, now.Add(p.auth.sessionTTL))
 }
 
 // handleOIDCStart generates a CSRF state + PKCE verifier, stores them in a cookie,
-// and redirects to the issuer's authorization endpoint. An issuer that cannot be
-// reached sends the browser back to the login page.
+// and redirects to the issuer's authorization endpoint, with prompt=login after
+// a sign-out. An issuer that cannot be reached sends the browser back to the
+// login page.
 func handleOIDCStart(m *authManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p := m.getOIDC()
@@ -226,18 +275,13 @@ func handleOIDCStart(m *authManager) http.HandlerFunc {
 			return
 		}
 		// Store state + PKCE verifier in a cookie so the callback validates without server state.
-		http.SetCookie(w, &http.Cookie{
-			Name:     oidcStateCookie,
-			Value:    state + "." + verifier,
-			Path:     "/api/v1/auth/oidc",
-			HttpOnly: true,
-			Secure:   isHTTPS(r),
-			SameSite: http.SameSiteLaxMode,
-			MaxAge:   int(oidcStateTTL.Seconds()),
-		})
+		setCookie(w, r, oidcStateCookie, state+"."+verifier, oidcCookiePath, int(oidcStateTTL.Seconds()))
 		oauth := p.oauthConfig(r, provider)
 		opts := []oauth2.AuthCodeOption{
 			oauth2.S256ChallengeOption(verifier),
+		}
+		if _, err := r.Cookie(oidcPromptCookie); err == nil {
+			opts = append(opts, oauth2.SetAuthURLParam("prompt", "login"))
 		}
 		http.Redirect(w, r, oauth.AuthCodeURL(state, opts...), http.StatusFound)
 	}
@@ -275,15 +319,7 @@ func handleOIDCCallback(m *authManager) http.HandlerFunc {
 			return
 		}
 		// Consume the state cookie immediately to prevent reuse.
-		http.SetCookie(w, &http.Cookie{
-			Name:     oidcStateCookie,
-			Value:    "",
-			Path:     "/api/v1/auth/oidc",
-			HttpOnly: true,
-			Secure:   isHTTPS(r),
-			SameSite: http.SameSiteLaxMode,
-			MaxAge:   -1,
-		})
+		clearCookie(w, r, oidcStateCookie, oidcCookiePath)
 
 		provider, err := p.issuer.discover(r.Context())
 		if err != nil {
@@ -328,7 +364,16 @@ func handleOIDCCallback(m *authManager) http.HandlerFunc {
 			return
 		}
 		// Set the refresh cookie now; the access token is delivered via the fragment for the SPA to hold in memory.
-		p.auth.setRefreshCookie(w, r, session.RefreshToken)
+		setRefreshCookie(w, r, session.RefreshToken, session.ExpiresAt)
+		// Keep the ID token as the hint of the sign-out at the provider. One
+		// too large for a cookie is left out; the sign-out then names only the client.
+		if len(rawID) <= maxIDTokenCookieLen {
+			setCookie(w, r, oidcIDTokenCookie, rawID, oidcIDTokenCookiePath, maxAgeUntil(session.ExpiresAt))
+		} else {
+			clearCookie(w, r, oidcIDTokenCookie, oidcIDTokenCookiePath)
+		}
+		// The user has signed in at the provider, so a sign-out before this one is done with.
+		clearCookie(w, r, oidcPromptCookie, oidcCookiePath)
 		// Redirect to the app root with the access token in the fragment (never sent to the server).
 		target := "/#access_token=" + url.QueryEscape(session.AccessToken)
 		http.Redirect(w, r, target, http.StatusFound)

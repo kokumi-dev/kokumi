@@ -6,8 +6,28 @@
 
 const TOKEN_KEY = 'kokumi.token'
 
+// SIGN_OUT_KEY is set in localStorage from a sign-out until the server has
+// expired the refresh cookie. Every tab sees it change and signs out too, and
+// while it is set no tab resumes the session from the cookie.
+const SIGN_OUT_KEY = 'kokumi.signOut'
+
 let token: string | null = sessionStorage.getItem(TOKEN_KEY)
 const listeners = new Set<() => void>()
+
+// A sign-out in another tab ends the session in this one too.
+window.addEventListener('storage', (event) => {
+  if (event.key === SIGN_OUT_KEY && event.newValue !== null) setToken(null)
+})
+
+function signOutPending(): boolean {
+  return localStorage.getItem(SIGN_OUT_KEY) !== null
+}
+
+/** Stores the token of a new sign-in, which ends a pending sign-out. */
+function startSession(next: string): void {
+  localStorage.removeItem(SIGN_OUT_KEY)
+  setToken(next)
+}
 
 export function getToken(): string | null {
   return token
@@ -131,7 +151,7 @@ export async function login(username: string, password: string): Promise<void> {
   }
 
   const data = (await res.json()) as { token: string }
-  setToken(data.token)
+  startSession(data.token)
 }
 
 /**
@@ -144,9 +164,16 @@ export async function login(username: string, password: string): Promise<void> {
  * 401 retry path) share a single in-flight refresh via refreshInFlight, so a
  * token expiry that triggers several refreshes at once results in exactly one
  * POST /api/v1/auth/refresh rather than a burst.
+ *
+ * After a sign-out no session is resumed: while the server has not confirmed
+ * the sign-out, a refresh retries it instead, e.g. on the next page load.
  */
 let refreshInFlight: Promise<boolean> | null = null
 export async function refresh(): Promise<boolean> {
+  if (signOutPending()) {
+    await finishSignOut()
+    return false
+  }
   if (!refreshInFlight) {
     refreshInFlight = doRefresh().finally(() => {
       refreshInFlight = null
@@ -169,6 +196,9 @@ async function doRefresh(): Promise<boolean> {
       return false
     }
     const data = (await res.json()) as { token: string }
+    // A sign-out started while this refresh was on its way: the new token
+    // must not resume the session.
+    if (signOutPending()) return false
     setToken(data.token)
     return true
   } catch {
@@ -180,17 +210,38 @@ async function doRefresh(): Promise<boolean> {
   }
 }
 
-/** Clears the stored token and notifies the server to expire its refresh cookie. */
+/**
+ * Signs out: ends the session in every tab at once, then has the server
+ * expire the refresh cookie. For an OIDC session the server may answer with
+ * the provider's end-session URL, and the browser goes there to sign out of
+ * the provider too. A sign-out the server does not confirm stays pending and
+ * is retried by the next refresh, so a reload does not resume the session.
+ */
 export async function logout(): Promise<void> {
+  localStorage.setItem(SIGN_OUT_KEY, String(Date.now()))
+  setToken(null)
+  // A refresh on its way may still set a new refresh cookie. Waiting for it
+  // lets the sign-out response expire the cookie last.
+  await refreshInFlight
+  await finishSignOut()
+}
+
+/** Asks the server to expire the refresh cookie and follows its end-session URL, if any. */
+async function finishSignOut(): Promise<void> {
+  let res: Response
   try {
-    await fetch('/api/v1/auth/logout', {
+    res = await fetch('/api/v1/auth/logout', {
       method: 'POST',
       credentials: 'same-origin',
     })
   } catch {
-    // best-effort; the cookie is cleared server-side regardless
+    return // the server cannot be reached; the sign-out stays pending
   }
-  setToken(null)
+  if (!res.ok) return
+  localStorage.removeItem(SIGN_OUT_KEY)
+  if (res.status !== 200) return
+  const data = (await res.json().catch(() => ({}))) as { endSessionURL?: string }
+  if (data.endSessionURL) window.location.assign(data.endSessionURL)
 }
 
 /**
@@ -205,7 +256,7 @@ export function consumeFragmentToken(): boolean {
   const params = new URLSearchParams(hash.slice(1))
   const t = params.get('access_token')
   if (t) {
-    setToken(t)
+    startSession(t)
     // Strip the fragment so the token is not persisted in history or sent on later navigations.
     history.replaceState(null, '', window.location.pathname + window.location.search)
     return true

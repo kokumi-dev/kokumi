@@ -35,7 +35,14 @@ func NewServer(
 	if authMgr != nil {
 		handler = authMgr.middleware(handler)
 	}
-	return handler
+	// Browsers may only send state-changing requests from the UI's own
+	// origin, so another site cannot sign a user in or out (CSRF). Clients
+	// that send no browser headers, such as scripts, pass.
+	protection := http.NewCrossOriginProtection()
+	protection.SetDenyHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		respondError(w, http.StatusForbidden, "cross-origin request refused")
+	}))
+	return protection.Handler(handler)
 }
 
 func Run(
