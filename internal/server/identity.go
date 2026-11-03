@@ -131,10 +131,15 @@ func newIdentityClaims(registered jwt.RegisteredClaims, tokenType string, id *Id
 	}
 }
 
-// claimAtPath resolves a claim by name, supporting dotted paths for nested
-// claims (e.g. "realm_access.roles"). Unlike extractClaim it returns the raw
-// value so list-typed claims can be read.
+// claimAtPath resolves a claim by name. A top-level claim of exactly that name
+// wins, so names with dots such as "https://example.com/groups" work;
+// otherwise the name is a dotted path into nested claims (e.g.
+// "realm_access.roles"). Unlike extractClaim it returns the raw value so
+// list-typed claims can be read.
 func claimAtPath(claims map[string]any, name string) (any, bool) {
+	if v, ok := claims[name]; ok {
+		return v, true
+	}
 	var cur any = claims
 	for seg := range strings.SplitSeq(name, ".") {
 		m, ok := cur.(map[string]any)

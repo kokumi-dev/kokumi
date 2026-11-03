@@ -182,9 +182,13 @@ func TestOIDCCallbackMissingState(t *testing.T) {
 }
 
 func TestExtractClaim(t *testing.T) {
-	const testEmailClaim = "email"
+	const (
+		testEmailClaim  = "email"
+		namespacedEmail = "https://kokumi.example.com/email"
+	)
 	claims := map[string]any{
-		testEmailClaim: "a@b.com",
+		testEmailClaim:  "a@b.com",
+		namespacedEmail: "c@d.com",
 		testRealm: map[string]any{
 			testRoles: []any{providerAdmin, "user"},
 		},
@@ -192,6 +196,10 @@ func TestExtractClaim(t *testing.T) {
 	v, err := extractClaim(claims, testEmailClaim)
 	require.NoError(t, err)
 	assert.Equal(t, "a@b.com", v)
+
+	v, err = extractClaim(claims, namespacedEmail)
+	require.NoError(t, err, "a top-level claim name with dots must resolve")
+	assert.Equal(t, "c@d.com", v)
 
 	_, err = extractClaim(claims, "realm_access.roles")
 	require.Error(t, err, "non-string nested claim must error")

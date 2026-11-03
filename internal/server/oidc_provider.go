@@ -380,19 +380,12 @@ func handleOIDCCallback(m *authManager) http.HandlerFunc {
 	}
 }
 
-// extractClaim reads a claim by name, supporting nested dotted paths (e.g. "email", "realm_access.roles").
+// extractClaim reads a non-empty string claim by name or dotted path (see
+// claimAtPath).
 func extractClaim(claims map[string]any, name string) (string, error) {
-	segments := strings.Split(name, ".")
-	var cur any = claims
-	for _, seg := range segments {
-		m, ok := cur.(map[string]any)
-		if !ok {
-			return "", fmt.Errorf("oidc claim %q not found", name)
-		}
-		cur, ok = m[seg]
-		if !ok {
-			return "", fmt.Errorf("oidc claim %q not found", name)
-		}
+	cur, ok := claimAtPath(claims, name)
+	if !ok {
+		return "", fmt.Errorf("oidc claim %q not found", name)
 	}
 	if s, ok := cur.(string); ok && s != "" {
 		return s, nil
