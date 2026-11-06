@@ -57,6 +57,7 @@ type oidcDTO struct {
 	EmailClaim      string        `json:"emailClaim,omitempty"`
 	GroupsClaim     string        `json:"groupsClaim,omitempty"`
 	Scopes          []string      `json:"scopes,omitempty"`
+	ProviderSignOut string        `json:"providerSignOut,omitempty"`
 }
 
 // authDTO mirrors spec.auth of the Kitchen singleton.
@@ -306,6 +307,7 @@ func authToDTO(auth *deliveryv1alpha1.KitchenAuth) *authDTO {
 			EmailClaim:      auth.OIDC.EmailClaim,
 			GroupsClaim:     auth.OIDC.GroupsClaim,
 			Scopes:          auth.OIDC.Scopes,
+			ProviderSignOut: string(auth.OIDC.ProviderSignOut),
 		}
 	}
 	return out
@@ -354,6 +356,7 @@ func applyAuth(auth *deliveryv1alpha1.KitchenAuth, dto *authDTO) {
 			EmailClaim:      dto.OIDC.EmailClaim,
 			GroupsClaim:     dto.OIDC.GroupsClaim,
 			Scopes:          dto.OIDC.Scopes,
+			ProviderSignOut: deliveryv1alpha1.ProviderSignOut(dto.OIDC.ProviderSignOut),
 		}
 	} else {
 		auth.OIDC = nil

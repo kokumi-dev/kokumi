@@ -49,4 +49,14 @@ func TestAuthSettings(t *testing.T) {
 		require.NoError(t, err)
 		assert.JSONEq(t, `{"adminUser":{"enabled":true,"username":"admin","secretRef":{"name":"kokumi-server-auth"}}}`, string(out))
 	})
+
+	t.Run("providerSignOut round-trips", func(t *testing.T) {
+		auth := apply(t, `{"oidc":{"issuerURL":"https://sso.example.com","clientID":"kokumi","providerSignOut":"Always"}}`)
+		require.NotNil(t, auth.OIDC)
+		assert.Equal(t, deliveryv1alpha1.ProviderSignOutAlways, auth.OIDC.ProviderSignOut)
+
+		out, err := json.Marshal(authToDTO(auth).OIDC)
+		require.NoError(t, err)
+		assert.JSONEq(t, `{"issuerURL":"https://sso.example.com","clientID":"kokumi","providerSignOut":"Always"}`, string(out))
+	})
 }

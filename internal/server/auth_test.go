@@ -976,7 +976,7 @@ func TestHandleLogoutClearsCookiesWithoutAuthenticator(t *testing.T) {
 	cookies := w.Result().Cookies()
 	assert.Equal(t, -1, cookieNamed(t, cookies, refreshCookieName).MaxAge)
 	assert.Equal(t, -1, cookieNamed(t, cookies, oidcIDTokenCookie).MaxAge)
-	assert.Nil(t, findCookie(cookies, oidcPromptCookie), "no OIDC provider, no prompt")
+	assert.Nil(t, findCookie(cookies, oidcReauthCookie), "no OIDC provider, no re-authentication")
 }
 
 func TestServerRefusesCrossOriginRequests(t *testing.T) {

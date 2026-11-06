@@ -48,12 +48,12 @@ func newTestOIDCProvider(t *testing.T) (*oidcProvider, *httptest.Server) {
 	httpSrv := httptest.NewServer(srv)
 	t.Cleanup(httpSrv.Close)
 	srv.SetIssuer(httpSrv.URL)
-	return newOIDCProviderFor(t, httpSrv.URL), httpSrv
+	return newOIDCProviderFor(t, httpSrv.URL, deliveryv1alpha1.ProviderSignOutNever), httpSrv
 }
 
 // newOIDCProviderFor returns a provider for the issuer at issuerURL, with
-// the client testClientID.
-func newOIDCProviderFor(t *testing.T, issuerURL string) *oidcProvider {
+// the client testClientID and the providerSignOut mode signOut.
+func newOIDCProviderFor(t *testing.T, issuerURL string, signOut deliveryv1alpha1.ProviderSignOut) *oidcProvider {
 	t.Helper()
 	client := fake.NewClientBuilder().WithObjects(&corev1.Secret{
 		Name: testOIDCSecret, Namespace: testNS,
@@ -67,6 +67,7 @@ func newOIDCProviderFor(t *testing.T, issuerURL string) *oidcProvider {
 		IssuerURL:       issuerURL,
 		ClientID:        testClientID,
 		ClientSecretRef: &corev1.LocalObjectReference{Name: testOIDCSecret},
+		ProviderSignOut: signOut,
 	}
 	p, err := buildOIDCProvider(context.Background(), client, testNS, cfg, newAuthenticator("", nil, []byte("test-signing-key-do-not-use-in-prod")))
 	require.NoError(t, err)
@@ -629,7 +630,7 @@ func signOut(mgr *authManager, cookies ...*http.Cookie) *httptest.ResponseRecord
 
 func TestOIDCSignOutEndsTheSessionAtTheProvider(t *testing.T) {
 	issuer := newFakeIssuer(t, true)
-	p := newOIDCProviderFor(t, issuer.URL)
+	p := newOIDCProviderFor(t, issuer.URL, deliveryv1alpha1.ProviderSignOutAlways)
 	mgr := &authManager{auth: p.auth, oidc: p, logger: logr.Discard()}
 
 	signedIn := signInOIDC(t, mgr)
@@ -655,47 +656,76 @@ func TestOIDCSignOutEndsTheSessionAtTheProvider(t *testing.T) {
 	cookies := w.Result().Cookies()
 	assert.Equal(t, -1, cookieNamed(t, cookies, refreshCookieName).MaxAge)
 	assert.Equal(t, -1, cookieNamed(t, cookies, oidcIDTokenCookie).MaxAge)
-	assert.Positive(t, cookieNamed(t, cookies, oidcPromptCookie).MaxAge,
-		"the next sign-in asks for credentials, in case the user stays signed in at the provider")
+	assert.Positive(t, cookieNamed(t, cookies, oidcReauthCookie).MaxAge,
+		"the next sign-in asks for credentials, in case the user cancels the sign-out at the provider")
 }
 
-func TestOIDCSignOutWithoutProviderLogoutAsksForLoginNextTime(t *testing.T) {
+func TestOIDCSignOutWithoutProviderLogoutAsksForReauthentication(t *testing.T) {
 	issuer := newFakeIssuer(t, false)
-	p := newOIDCProviderFor(t, issuer.URL)
+	p := newOIDCProviderFor(t, issuer.URL, deliveryv1alpha1.ProviderSignOutAlways)
 	mgr := &authManager{auth: p.auth, oidc: p, logger: logr.Discard()}
 
 	start := httptest.NewRecorder()
 	handleOIDCStart(mgr).ServeHTTP(start, httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/v1/auth/oidc/start", nil))
-	assert.NotContains(t, start.Header().Get("Location"), "prompt=", "a first sign-in uses the provider's session")
+	assert.NotContains(t, start.Header().Get("Location"), "max_age=", "a first sign-in uses the provider's session")
 
 	// An ID token too large for a cookie leaves only the refresh cookie to
 	// tell the session came from OIDC.
 	refresh := cookieNamed(t, signInOIDC(t, mgr), refreshCookieName)
 	w := signOut(mgr, refresh)
 	require.Equal(t, http.StatusNoContent, w.Code, "the provider offers no end_session_endpoint")
-	prompt := cookieNamed(t, w.Result().Cookies(), oidcPromptCookie)
-	assert.Equal(t, oidcCookiePath, prompt.Path)
+	reauth := cookieNamed(t, w.Result().Cookies(), oidcReauthCookie)
+	assert.Equal(t, oidcCookiePath, reauth.Path)
 
 	start = httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/v1/auth/oidc/start", nil)
-	r.AddCookie(prompt)
+	r.AddCookie(reauth)
 	handleOIDCStart(mgr).ServeHTTP(start, r)
 	loc, err := url.Parse(start.Header().Get("Location"))
 	require.NoError(t, err)
-	assert.Equal(t, "login", loc.Query().Get("prompt"))
+	assert.Equal(t, "0", loc.Query().Get("max_age"))
+	assert.False(t, loc.Query().Has("prompt"), "prompt=login is refused by some providers")
 
-	assert.Equal(t, -1, cookieNamed(t, signInOIDC(t, mgr, prompt), oidcPromptCookie).MaxAge,
+	assert.Equal(t, -1, cookieNamed(t, signInOIDC(t, mgr, reauth), oidcReauthCookie).MaxAge,
 		"signing in again is done with the sign-out")
+}
+
+func TestOIDCSignOutNeverLeavesTheProviderSession(t *testing.T) {
+	issuer := newFakeIssuer(t, true)
+	p := newOIDCProviderFor(t, issuer.URL, deliveryv1alpha1.ProviderSignOutNever)
+	mgr := &authManager{auth: p.auth, oidc: p, logger: logr.Discard()}
+
+	signedIn := signInOIDC(t, mgr)
+	w := signOut(mgr, cookieNamed(t, signedIn, refreshCookieName), cookieNamed(t, signedIn, oidcIDTokenCookie))
+	assert.Equal(t, http.StatusNoContent, w.Code, "no end-session URL, though the provider offers one")
+	cookies := w.Result().Cookies()
+	assert.Equal(t, -1, cookieNamed(t, cookies, refreshCookieName).MaxAge)
+	assert.Equal(t, -1, cookieNamed(t, cookies, oidcIDTokenCookie).MaxAge)
+	assert.Nil(t, findCookie(cookies, oidcReauthCookie), "the next sign-in uses the provider's session")
+}
+
+func TestOIDCCallbackErrorEndsReauthentication(t *testing.T) {
+	issuer := newFakeIssuer(t, false)
+	p := newOIDCProviderFor(t, issuer.URL, deliveryv1alpha1.ProviderSignOutAlways)
+	mgr := &authManager{auth: p.auth, oidc: p, logger: logr.Discard()}
+
+	r := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/v1/auth/oidc/callback?error=invalid_request", nil)
+	r.AddCookie(&http.Cookie{Name: oidcReauthCookie, Value: "1"})
+	w := httptest.NewRecorder()
+	handleOIDCCallback(mgr).ServeHTTP(w, r)
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, -1, cookieNamed(t, w.Result().Cookies(), oidcReauthCookie).MaxAge,
+		"a provider that refuses the request must not refuse every later sign-in")
 }
 
 func TestAdminSignOutStaysLocalWithOIDCConfigured(t *testing.T) {
 	issuer := newFakeIssuer(t, true)
-	p := newOIDCProviderFor(t, issuer.URL)
+	p := newOIDCProviderFor(t, issuer.URL, deliveryv1alpha1.ProviderSignOutAlways)
 	mgr := &authManager{auth: p.auth, oidc: p, logger: logr.Discard()}
 	s, err := p.auth.startSession(&Identity{Subject: testUsername, Provider: providerAdmin})
 	require.NoError(t, err)
 
 	w := signOut(mgr, &http.Cookie{Name: refreshCookieName, Value: s.RefreshToken})
 	assert.Equal(t, http.StatusNoContent, w.Code)
-	assert.Nil(t, findCookie(w.Result().Cookies(), oidcPromptCookie))
+	assert.Nil(t, findCookie(w.Result().Cookies(), oidcReauthCookie))
 }

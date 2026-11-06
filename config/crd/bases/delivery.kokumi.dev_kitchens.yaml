@@ -171,6 +171,20 @@ spec:
                         x-kubernetes-validations:
                         - message: must be a valid http or https URL
                           rule: isURL(self) && url(self).getScheme() in ['http', 'https']
+                      providerSignOut:
+                        default: Never
+                        description: |-
+                          providerSignOut says whether signing out of Kokumi also signs the user
+                          out of the provider. Never, the default, ends only the Kokumi session,
+                          so the user stays signed in to the provider and the other apps that use
+                          it, and the next sign-in uses that session. Always also ends the
+                          provider session, where the provider offers RP-initiated logout, and
+                          makes the next sign-in in that browser ask the provider to authenticate
+                          the user again.
+                        enum:
+                        - Never
+                        - Always
+                        type: string
                       scopes:
                         default:
                         - openid
