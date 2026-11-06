@@ -181,6 +181,9 @@ func (r *KitchenReconciler) validateAuth(ctx context.Context, kitchen *deliveryv
 	if err := r.ensureTokenSigningKeySecret(ctx, kitchen); err != nil {
 		return fmt.Errorf("ensuring token signing-key Secret: %w", err)
 	}
+	if err := r.ensureEndedSessionsConfigMap(ctx, kitchen.Namespace); err != nil {
+		return fmt.Errorf("ensuring the ConfigMap of ended sessions: %w", err)
+	}
 
 	// secretRefs are defaulted by CRD defaulting, so a missing ref is a
 	// configuration error.
@@ -328,6 +331,17 @@ func (r *KitchenReconciler) ensureTokenSigningKeySecret(ctx context.Context, kit
 		if len(secret.Data[resources.TokenSigningKey]) < minTokenSigningKeyLen {
 			return fmt.Errorf("token signing-key Secret %q created concurrently but lacks a valid %q", name, resources.TokenSigningKey)
 		}
+	}
+	return nil
+}
+
+// ensureEndedSessionsConfigMap creates the ConfigMap in which the server
+// records ended sessions, unless it exists. It creates without reading, so
+// the controller needs no access to ConfigMaps but create in the install
+// namespace.
+func (r *KitchenReconciler) ensureEndedSessionsConfigMap(ctx context.Context, namespace string) error {
+	if err := r.Create(ctx, resources.EndedSessionsConfigMap(namespace)); err != nil && !apierrors.IsAlreadyExists(err) {
+		return err
 	}
 	return nil
 }

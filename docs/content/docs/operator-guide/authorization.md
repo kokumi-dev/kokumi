@@ -327,7 +327,8 @@ denies it on the first load.
 ## The kokumi-server ServiceAccount
 
 The server's own ServiceAccount holds **one write permission on kokumi
-resources**: it creates Approvals. It can only:
+resources**: it creates Approvals. Besides that it writes only the record of
+ended sessions. It can only:
 
 - `impersonate` the identity ServiceAccounts in the install namespace, by
   default `kokumi-admin`, `kokumi-editor` and `kokumi-viewer` (see
@@ -342,6 +343,10 @@ resources**: it creates Approvals. It can only:
   the hub must be able to see all events in order to filter them per user
   (each connected user only receives events for resources their mapped
   ServiceAccounts may list),
+- `get`, `list`, `watch` and `patch` the ConfigMap
+  `kokumi-server-ended-sessions` in the install namespace and no other, through
+  the Role `kokumi-server-ended-sessions` (see
+  [Ended sessions](../authentication/#ended-sessions)),
 - `create` `approvals` in every namespace, through the ClusterRole
   `kokumi-server-approval-submitter`. The server records a vote with its own
   identity, after it checked that the voter's mapped ServiceAccount may

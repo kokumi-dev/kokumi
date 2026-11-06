@@ -9,7 +9,7 @@ resources:
 - role_binding.yaml
 - leader_election_role.yaml
 - leader_election_role_binding.yaml
-- secret_creator_role.yaml
+- creator_role.yaml
 - pod_reader_role.yaml
 # Bound per tenant namespace by platform admins; see the files.
 - registry_credentials_role.yaml

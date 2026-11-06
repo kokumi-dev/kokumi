@@ -34,6 +34,12 @@ const (
 	// admin password the Kitchen controller generated, to be read once and
 	// deleted.
 	InitialAdminSecretName = "kokumi-initial-admin"
+
+	// EndedSessionsConfigMapName is the ConfigMap in which the server records
+	// the sessions that ended before their tokens expire: at a sign-out, or
+	// when the OIDC provider ends them. The Kitchen controller creates it
+	// empty.
+	EndedSessionsConfigMapName = "kokumi-server-ended-sessions"
 )
 
 // The signing key lives in a namespace of its own under a fixed name, so that

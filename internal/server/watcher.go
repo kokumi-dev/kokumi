@@ -13,6 +13,7 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/registry"
 	"github.com/spf13/afero"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -97,6 +98,14 @@ func startK8sWatcher(
 					installNamespace: {},
 				},
 			},
+			// Only the record of ended sessions, which the server's Role
+			// grants by name.
+			&corev1.ConfigMap{}: {
+				Namespaces: map[string]cache.Config{
+					installNamespace: {},
+				},
+				Field: fields.OneTermEqualSelector("metadata.name", deliveryv1alpha1.EndedSessionsConfigMapName),
+			},
 		},
 	})
 	if err != nil {
@@ -128,7 +137,7 @@ func startK8sWatcher(
 	}
 
 	// Build the auth manager up front so it is never nil when cache handlers fire.
-	deps.authMgr = newAuthManager(ctx, k8sCache, writer, installNamespace, lifetimes)
+	deps.authMgr = newAuthManager(ctx, k8sCache, writer, installNamespace, lifetimes, newEndedSessions(writer, installNamespace))
 
 	informers, err := getInformers(ctx, k8sCache)
 	if err != nil {
@@ -278,6 +287,19 @@ func startK8sWatcher(
 	); err != nil {
 		return nil, err
 	}
+	// Every replica refuses the sessions that any of them recorded as ended.
+	updateEnded := func(obj any) {
+		if cm, ok := obj.(*corev1.ConfigMap); ok {
+			deps.authMgr.ended.update(cm)
+		}
+	}
+	if _, err := informers.configMap.AddEventHandler(toolscache.ResourceEventHandlerFuncs{
+		AddFunc:    updateEnded,
+		UpdateFunc: func(_, obj any) { updateEnded(obj) },
+	}); err != nil {
+		return nil, fmt.Errorf("adding ConfigMap event handler: %w", err)
+	}
+	go deps.authMgr.pruneEndedSessions(ctx)
 
 	// Start the cache in the background until ctx is cancelled.
 	go func() {
@@ -407,6 +429,7 @@ type informers struct {
 	kitchen     cache.Informer
 	secret      cache.Informer
 	sa          cache.Informer
+	configMap   cache.Informer
 }
 
 // getInformers registers and returns the informers the server needs (split out to keep startK8sWatcher small).
@@ -445,6 +468,9 @@ func getInformers(ctx context.Context, c cache.Cache) (informers, error) {
 	}
 	if out.sa, err = c.GetInformer(ctx, &corev1.ServiceAccount{}); err != nil {
 		return out, fmt.Errorf("getting ServiceAccount informer: %w", err)
+	}
+	if out.configMap, err = c.GetInformer(ctx, &corev1.ConfigMap{}); err != nil {
+		return out, fmt.Errorf("getting ConfigMap informer: %w", err)
 	}
 	return out, nil
 }

@@ -1,0 +1,36 @@
+# Namespaced object creation for the controller manager. The Kitchen
+# controller is the only component that creates objects in the install
+# namespace: the Secrets kokumi-server-tokens (token signing key),
+# kokumi-server-auth and kokumi-initial-admin (when the admin account is turned
+# on), and the ConfigMap kokumi-server-ended-sessions, in which the server
+# records ended sessions. The cluster-wide role.yaml keeps get/list/watch on
+# Secrets only, and this Role narrows creation to the install namespace. The
+# controller never reads the ConfigMap: it creates it and ignores
+# AlreadyExists.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: controller-manager-creator
+  namespace: system
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  - configmaps
+  verbs:
+  - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: controller-manager-creator
+  namespace: system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: controller-manager-creator
+subjects:
+- kind: ServiceAccount
+  name: controller-manager
+  namespace: system

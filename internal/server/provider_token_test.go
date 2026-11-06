@@ -26,6 +26,7 @@ import (
 // ID token for subject and groups, and rotates refresh tokens.
 type fakeProvider struct {
 	*httptest.Server
+	priv *rsa.PrivateKey
 
 	mu sync.Mutex
 	// endSession advertises RP-initiated logout at /logout.
@@ -39,6 +40,8 @@ type fakeProvider struct {
 	expiresIn int
 	subject   string
 	groups    []string
+	// sessionID, when set, is the sid of issued ID tokens.
+	sessionID string
 	// refreshError, when set, answers refresh grants with this error code
 	// and status 400; refreshStatus, when set, with this HTTP status.
 	refreshError  string
@@ -59,7 +62,7 @@ func newFakeProvider(t *testing.T, configure func(*fakeProvider)) *fakeProvider 
 	op := &oidctest.Server{
 		PublicKeys: []oidctest.PublicKey{{PublicKey: priv.Public(), KeyID: testKeyID, Algorithm: oidc.RS256}},
 	}
-	p := &fakeProvider{expiresIn: 3600, subject: "user-1"}
+	p := &fakeProvider{priv: priv, expiresIn: 3600, subject: "user-1"}
 	configure(p)
 	p.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p.mu.Lock()
@@ -112,8 +115,8 @@ func (p *fakeProvider) serveToken(w http.ResponseWriter, r *http.Request, priv *
 	}
 	now := time.Now()
 	groups, _ := json.Marshal(p.groups)
-	claims := fmt.Sprintf(`{"iss":%q,"aud":%q,"sub":%q,"email":"user@example.com","groups":%s,"iat":%d,"exp":%d}`,
-		p.URL, testClientID, p.subject, groups, now.Unix(), now.Add(time.Hour).Unix())
+	claims := fmt.Sprintf(`{"iss":%q,"aud":%q,"sub":%q,"sid":%q,"email":"user@example.com","groups":%s,"iat":%d,"exp":%d}`,
+		p.URL, testClientID, p.subject, p.sessionID, groups, now.Unix(), now.Add(time.Hour).Unix())
 	response := map[string]any{
 		"access_token": "upstream-access-token", "token_type": "Bearer", "expires_in": p.expiresIn,
 		"id_token": oidctest.SignIDToken(priv, testKeyID, oidc.RS256, claims),
@@ -124,6 +127,11 @@ func (p *fakeProvider) serveToken(w http.ResponseWriter, r *http.Request, priv *
 		response["refresh_token"] = p.refreshToken
 	}
 	_ = json.NewEncoder(w).Encode(response)
+}
+
+// sign signs claims, a JSON object, with the provider's key.
+func (p *fakeProvider) sign(claims string) string {
+	return oidctest.SignIDToken(p.priv, testKeyID, oidc.RS256, claims)
 }
 
 // set changes the provider under its lock.

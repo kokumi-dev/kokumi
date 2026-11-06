@@ -211,6 +211,16 @@ func TokenSigningKeySecret(namespace, name string, key []byte) *corev1.Secret {
 	}
 }
 
+// EndedSessionsConfigMap returns the empty ConfigMap in namespace in which the
+// server records ended sessions.
+func EndedSessionsConfigMap(namespace string) *corev1.ConfigMap {
+	return &corev1.ConfigMap{
+		Name:      deliveryv1alpha1.EndedSessionsConfigMapName,
+		Namespace: namespace,
+		Labels:    kitchenSecretLabels("server"),
+	}
+}
+
 // AdminSecret returns the Secret name in namespace that holds hash, the bcrypt
 // hash of the admin password.
 func AdminSecret(namespace, name string, hash []byte) *corev1.Secret {

@@ -158,6 +158,9 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 		_ = k8sClient.Delete(ctx, &corev1.Secret{
 			Name: initialAdminName, Namespace: testNamespace,
 		})
+		_ = k8sClient.Delete(ctx, &corev1.ConfigMap{
+			Name: deliveryv1alpha1.EndedSessionsConfigMapName, Namespace: testNamespace,
+		})
 	})
 
 	adminKitchen := func() *deliveryv1alpha1.Kitchen {
@@ -304,6 +307,24 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 		cond := readyCondition(getKitchen(ctx))
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+	})
+
+	It("creates the empty record of ended sessions and keeps what it holds", func() {
+		Expect(k8sClient.Create(ctx, adminKitchen())).To(Succeed())
+		reconcileSingleton(ctx)
+
+		record := &corev1.ConfigMap{}
+		key := types.NamespacedName{Name: deliveryv1alpha1.EndedSessionsConfigMapName, Namespace: testNamespace}
+		Expect(k8sClient.Get(ctx, key, record)).To(Succeed())
+		Expect(record.Data).To(BeEmpty())
+
+		By("keeping the entries the server recorded on the next reconcile")
+		record.Data = map[string]string{"ksid.0123": "2026-11-06T12:00:00Z"}
+		Expect(k8sClient.Update(ctx, record)).To(Succeed())
+		reconcileSingleton(ctx)
+		Expect(k8sClient.Get(ctx, key, record)).To(Succeed())
+		Expect(record.Data).To(HaveKey("ksid.0123"))
+		Expect(readyCondition(getKitchen(ctx)).Status).To(Equal(metav1.ConditionTrue))
 	})
 
 	It("does not rotate the token signing-key Secret on re-reconcile", func() {

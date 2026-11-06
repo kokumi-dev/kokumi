@@ -98,7 +98,7 @@ func TestEventsStream_sendsHeartbeatsAndNothingUnreadable(t *testing.T) {
 	require.NoError(t, h.publish(eventOrders, []string{"secret"}))
 
 	// Without deps the user may read nothing, so only heartbeats may arrive.
-	srv := httptest.NewServer(handleEventsStream(h, nil, 20*time.Millisecond))
+	srv := httptest.NewServer(handleEventsStream(h, nil, nil, 20*time.Millisecond))
 	defer srv.Close()
 
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
@@ -119,11 +119,11 @@ func TestEventsStream_sendsHeartbeatsAndNothingUnreadable(t *testing.T) {
 }
 
 func TestEventsStream_endsWithItsAccessToken(t *testing.T) {
-	ctx := withTokenExpiry(t.Context(), time.Now().Add(50*time.Millisecond))
-	r := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/events", nil)
+	token := &sessionToken{identity: &Identity{Subject: testUsername}, expires: time.Now().Add(50 * time.Millisecond)}
+	r := httptest.NewRequestWithContext(withSessionToken(t.Context(), token), http.MethodGet, "/api/v1/events", nil)
 	done := make(chan struct{})
 	go func() {
-		handleEventsStream(newHub(), nil, time.Hour).ServeHTTP(httptest.NewRecorder(), r)
+		handleEventsStream(newHub(), nil, nil, time.Hour).ServeHTTP(httptest.NewRecorder(), r)
 		close(done)
 	}()
 

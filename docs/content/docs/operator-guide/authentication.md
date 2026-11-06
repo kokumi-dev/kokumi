@@ -123,8 +123,10 @@ expires, and every exchange issues a new refresh token. A session ends:
   tab nobody uses keeps renewing its access token, so live views stay up to
   date, but it does not extend the session.
 - **24 hours after the sign-in**, however active the user is.
-- **When the OIDC provider ends it**, for an OIDC session that the provider
-  checks (see [OIDC single sign-on](#oidc-single-sign-on)).
+- **At a sign-out**, also for every copy of its tokens.
+- **When the OIDC provider ends it**: at a check of the session, or through
+  [back-channel logout](#back-channel-logout) (see
+  [OIDC single sign-on](#oidc-single-sign-on)).
 
 The refresh cookie expires when the session would end without further
 activity. The cookies are marked `Secure` only when the request arrived over
@@ -146,9 +148,9 @@ them at once, replace the [token signing key](#token-signing-key).
 
 "Sign out" in the UI ends the session in this browser, in all of its tabs:
 
-- The server expires the refresh cookie. It does not revoke Kokumi's tokens:
-  an access token copied before the sign-out works until it expires, which is
-  why access tokens are short-lived.
+- The server expires the refresh cookie and records the session as ended (see
+  [Ended sessions](#ended-sessions)), so an access token or a refresh cookie
+  copied before the sign-out stops working at once.
 - For an OIDC session that the provider checks, the server also revokes the
   provider's refresh token, if the provider offers token revocation
   ([RFC 7009](https://datatracker.ietf.org/doc/html/rfc7009)). A copy of the
@@ -175,6 +177,30 @@ them at once, replace the [token signing key](#token-signing-key).
 Another site cannot sign a user in or out: the server refuses state-changing
 requests that a browser sends from another origin. A reverse proxy in front of
 the server must pass the original `Host` header.
+
+### Ended sessions
+
+Kokumi's tokens are signed, and the server checks them without asking anyone.
+To end a session before its tokens expire, the server records it in the
+ConfigMap `kokumi-server-ended-sessions` in the install namespace, and refuses
+its tokens at their next request:
+
+- A sign-out records its session.
+- A [back-channel logout](#back-channel-logout) from the OIDC provider records
+  the provider session it names, or, without one, the user: their sessions
+  that signed in before the logout end.
+
+Every server replica watches the ConfigMap, so an entry takes effect on all of
+them within a moment, and live updates of an ended session stop. The entries
+are hashes of the session and user IDs and the time the session ended, nothing
+secret. The server drops an entry 24 hours (`KOKUMI_SESSION_TTL`) after its
+time, when every session it can match has ended anyway. The Kitchen controller
+creates the ConfigMap empty; the server may patch it and no other ConfigMap
+(see [Authorization](../authorization/#the-kokumi-server-serviceaccount)).
+
+If the server cannot write the record, a sign-out still ends the session in
+the browser, and a copy of its tokens then works until the access token
+expires and the refresh cookie's idle deadline passes.
 
 ## Configuring the admin user
 
@@ -358,3 +384,32 @@ spec:
       usernameClaim: email
       scopes: ["openid", "profile", "email", "groups", "offline_access"]
 ```
+
+### Back-channel logout
+
+When a user signs out at the provider, or an administrator ends their session
+there, the provider can tell Kokumi through
+[OpenID Connect Back-Channel Logout](https://openid.net/specs/openid-connect-backchannel-1_0.html).
+Kokumi then ends the sessions signed in with that provider session at their
+next request (see [Ended sessions](#ended-sessions)). To turn it on, register
+this URL with the provider as the client's back-channel logout URI:
+
+```text
+https://<kokumi host>/api/v1/auth/oidc/backchannel-logout
+```
+
+- The provider posts a signed logout token to it from its own servers, not
+  from the browser, so it must reach Kokumi through the network path it uses,
+  usually the same ingress as browsers.
+- Kokumi checks the token as the specification asks: the provider's signature,
+  issuer, audience, expiry, the logout event, and that it is not an ID token.
+  It answers 400 for a token that fails a check, and 500 when it cannot record
+  the logout, so that the provider may retry.
+- With the option that the provider includes the session ID in its tokens,
+  often called "backchannel logout session required", a logout ends only the
+  sessions signed in with that provider session. Without it, a logout ends
+  every Kokumi session of that user that signed in before it.
+
+Providers that send logout tokens include Keycloak, Zitadel and Auth0. Dex,
+Google and Microsoft Entra ID do not; with them a sign-out elsewhere reaches
+Kokumi only when the session ends by itself.

@@ -152,6 +152,26 @@ func (b *Browser) Refresh(active bool) int {
 	return resp.StatusCode
 }
 
+// SignOut signs the browser out, as the UI does, and returns the status of
+// the response.
+func (b *Browser) SignOut() int {
+	resp, err := b.client.Post("http://"+serverAddress+"/api/v1/auth/logout", "application/json", nil)
+	Expect(err).NotTo(HaveOccurred())
+	_ = resp.Body.Close()
+	return resp.StatusCode
+}
+
+// PostForm posts form to the API server, as an OIDC provider posts to it,
+// and returns the response and its body.
+func (s *Server) PostForm(path string, form url.Values) (*http.Response, []byte) {
+	resp, err := s.client().PostForm("http://"+serverAddress+path, form)
+	Expect(err).NotTo(HaveOccurred())
+	defer resp.Body.Close() //nolint:errcheck
+	data, err := io.ReadAll(resp.Body)
+	Expect(err).NotTo(HaveOccurred())
+	return resp, data
+}
+
 // SignInOIDC signs in through OIDC as a user of Dex's password database, as a
 // browser would: it starts the flow at the API server, submits the user's
 // credentials to Dex's login form and follows the redirects back to the API

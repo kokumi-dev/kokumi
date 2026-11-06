@@ -60,7 +60,7 @@ func handleInfo(authMgr *authManager) http.HandlerFunc {
 // A heartbeat event every heartbeat interval keeps a quiet stream alive
 // through proxies that close idle connections, and lets the client tell a
 // quiet stream from a dead one.
-func handleEventsStream(h *hub, deps *apiDeps, heartbeat time.Duration) http.HandlerFunc {
+func handleEventsStream(h *hub, deps *apiDeps, ended *endedSessions, heartbeat time.Duration) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
@@ -111,19 +111,27 @@ func handleEventsStream(h *hub, deps *apiDeps, heartbeat time.Duration) http.Han
 		defer ticker.Stop()
 
 		// The stream ends with the access token it was opened with, so a
-		// copied token does not stream beyond its expiry. The UI reopens it
-		// with each renewed token.
+		// copied token does not stream beyond its expiry, and with its
+		// session when that ends first, at a sign-out or by the OIDC provider.
+		// The UI reopens it with each renewed token.
 		var expired <-chan time.Time
-		if expires, ok := tokenExpiry(r.Context()); ok {
-			timer := time.NewTimer(time.Until(expires))
+		token := sessionTokenFrom(r.Context())
+		if token != nil {
+			timer := time.NewTimer(time.Until(token.expires))
 			defer timer.Stop()
 			expired = timer.C
 		}
+		endedChanged := ended.changes()
 
 		for {
 			select {
 			case <-expired:
 				return
+			case <-endedChanged:
+				if token != nil && ended.ended(token) {
+					return
+				}
+				endedChanged = ended.changes()
 			case <-ticker.C:
 				if _, err := fmt.Fprintf(w, "event: %s\ndata: {}\n\n", eventHeartbeat); err != nil {
 					return
