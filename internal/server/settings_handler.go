@@ -43,7 +43,7 @@ type secretRefDTO struct {
 
 // adminUserDTO mirrors spec.auth.adminUser of the Kitchen singleton.
 type adminUserDTO struct {
-	Enabled   *bool         `json:"enabled,omitempty"`
+	Enabled   bool          `json:"enabled,omitempty"`
 	Username  string        `json:"username,omitempty"`
 	SecretRef *secretRefDTO `json:"secretRef,omitempty"`
 }

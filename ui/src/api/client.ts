@@ -530,6 +530,7 @@ export interface SecretRef {
   name: string
 }
 
+/** The built-in admin account; it is off unless enabled. */
 export interface AdminUserSettings {
   enabled?: boolean
   username?: string

@@ -15,6 +15,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -35,9 +36,11 @@ const (
 	refreshTokenType = "refresh"
 
 	// Secret data keys.
-	secretKeyUsername     = "username"
 	secretKeyPasswordHash = "password-hash"
 	secretKeySigningKey   = "signing-key"
+
+	// defaultAdminUsername is the admin's username when the Kitchen sets none.
+	defaultAdminUsername = "admin"
 
 	// minSigningKeyLen is the minimum accepted HMAC signing-key length (bytes).
 	minSigningKeyLen = 32
@@ -125,51 +128,52 @@ func buildTokenAuthenticator(
 	return auth, nil
 }
 
-// applyAdminCredentials reads the admin credentials Secret and returns a copy
-// of the shared authenticator (which carries the signing key) with the admin
-// username/password hash applied. A disabled admin yields a token-only copy so
-// login is impossible; a missing/incomplete Secret fails closed. The input is
-// never mutated: authenticators are immutable once published.
-func applyAdminCredentials(
+// adminCredentials are the admin account's username and bcrypt password hash.
+type adminCredentials struct {
+	username     string
+	passwordHash []byte
+}
+
+// readAdminCredentials reads the admin account of cfg from its Secret. A
+// Secret that does not exist or holds no password hash is
+// errNoAdminCredentials; any other error means it could not be read.
+func readAdminCredentials(
 	ctx context.Context,
 	reader client.Reader,
 	namespace string,
 	cfg *v1alpha1.AdminUserConfig,
-	auth *authenticator,
-) (*authenticator, error) {
-	if cfg == nil || cfg.SecretRef == nil {
-		return nil, fmt.Errorf("admin secretRef not set")
+) (*adminCredentials, error) {
+	if cfg.SecretRef == nil {
+		return nil, fmt.Errorf("%w: admin secretRef not set", errNoAdminCredentials)
 	}
 	secret := &corev1.Secret{}
 	key := types.NamespacedName{Namespace: namespace, Name: cfg.SecretRef.Name}
 	if err := reader.Get(ctx, key, secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("%w: auth secret %s/%s not found", errNoAdminCredentials, namespace, cfg.SecretRef.Name)
+		}
 		return nil, fmt.Errorf("reading auth secret %s/%s: %w", namespace, cfg.SecretRef.Name, err)
 	}
-
-	// Disabled admin: no credentials; login is impossible.
-	withAdmin := *auth
-	if !cfg.IsEnabled() {
-		withAdmin.username, withAdmin.passwordHash = "", nil
-		return &withAdmin, nil
-	}
-
-	// Enabled admin: password hash is mandatory so credentials can be verified.
 	passwordHash := secret.Data[secretKeyPasswordHash]
 	if len(passwordHash) == 0 {
-		return nil, fmt.Errorf("auth secret %s/%s missing %q", namespace, cfg.SecretRef.Name, secretKeyPasswordHash)
+		return nil, fmt.Errorf("%w: auth secret %s/%s missing %q", errNoAdminCredentials, namespace, cfg.SecretRef.Name, secretKeyPasswordHash)
 	}
-
-	// Username from config, else Secret key, else "admin".
 	username := strings.TrimSpace(cfg.Username)
 	if username == "" {
-		username = strings.TrimSpace(string(secret.Data[secretKeyUsername]))
+		username = defaultAdminUsername
 	}
-	if username == "" {
-		username = "admin"
-	}
+	return &adminCredentials{username: username, passwordHash: passwordHash}, nil
+}
 
-	withAdmin.username, withAdmin.passwordHash = username, passwordHash
-	return &withAdmin, nil
+// withAdmin returns a copy of a that signs admin in, or no one when admin is
+// nil. a is never mutated: authenticators are immutable once published.
+func (a *authenticator) withAdmin(admin *adminCredentials) *authenticator {
+	out := *a
+	out.username, out.passwordHash = "", nil
+	if admin != nil {
+		out.username, out.passwordHash = admin.username, admin.passwordHash
+	}
+	return &out
 }
 
 // verifyCredentials checks username/password; bcrypt runs even on username
@@ -355,16 +359,10 @@ func (m *authManager) middleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		a, disabled := m.getState()
+		a := m.get()
 		if a == nil {
-			if disabled {
-				// Auth intentionally disabled: protected paths are open.
-				next.ServeHTTP(w, r)
-				return
-			}
-			// Auth is configured but currently unresolvable (e.g. the
-			// credentials Secret is missing). Fail closed rather than
-			// silently exposing protected endpoints.
+			// No token signing key yet, so no token can be valid: no login
+			// method is configured, or its Secrets cannot be read.
 			respondError(w, http.StatusServiceUnavailable, "authentication is not available")
 			return
 		}
@@ -419,18 +417,12 @@ type loginResponse struct {
 // handleLogin validates credentials and issues an access token + refresh cookie.
 func handleLogin(m *authManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		a, disabled := m.getState()
+		a := m.get()
 		if a == nil {
-			if disabled {
-				// Intentionally off: no login endpoint at all.
-				respondError(w, http.StatusServiceUnavailable, "authentication is disabled")
-			} else {
-				// Configured but unresolvable (e.g. Secret missing).
-				respondError(w, http.StatusServiceUnavailable, "authentication is not available")
-			}
+			respondError(w, http.StatusServiceUnavailable, "authentication is not available")
 			return
 		}
-		// Token-only (OIDC-only) mode: server healthy but rejects password logins.
+		// Without the admin account the server rejects password logins.
 		if !m.adminLoginEnabled() {
 			respondError(w, http.StatusForbidden, "admin login is disabled")
 			return
@@ -461,13 +453,9 @@ func handleLogin(m *authManager) http.HandlerFunc {
 // handleRefresh exchanges a valid refresh cookie for a new access token + rotated cookie.
 func handleRefresh(m *authManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		a, disabled := m.getState()
+		a := m.get()
 		if a == nil {
-			if disabled {
-				respondError(w, http.StatusServiceUnavailable, "authentication is disabled")
-			} else {
-				respondError(w, http.StatusServiceUnavailable, "authentication is not available")
-			}
+			respondError(w, http.StatusServiceUnavailable, "authentication is not available")
 			return
 		}
 		provider := newAdminProvider(a)
@@ -563,6 +551,10 @@ func randomTokenID() string {
 	}
 	return hex.EncodeToString(b)
 }
+
+// errNoAdminCredentials is returned when the admin Secret does not exist or
+// holds no password hash: admin login is off until it has one.
+var errNoAdminCredentials = errors.New("no admin credentials")
 
 // errInvalidCredentials is returned when username/password do not match.
 var errInvalidCredentials = fmt.Errorf("invalid username or password")

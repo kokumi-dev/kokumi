@@ -92,9 +92,16 @@ kubectl port-forward -n kokumi svc/kokumi-server 8080:80
 ```
 
 Sign in at [http://localhost:8080](http://localhost:8080) as `admin` with the
-password `admin`. Open the Order `podinfo`, look through the rendered files of
-its Preparation, and click **Promote**. The promotion creates the Order's
-**Serving**, which deploys the Preparation through an Argo CD Application:
+password the controller generated:
+
+```bash
+kubectl -n kokumi get secret kokumi-initial-admin \
+    -o jsonpath='{.data.password}' | base64 -d; echo
+```
+
+Open the Order `podinfo`, look through the rendered files of its Preparation,
+and click **Promote**. The promotion creates the Order's **Serving**, which
+deploys the Preparation through an Argo CD Application:
 
 ```bash
 kubectl get servings -n shop

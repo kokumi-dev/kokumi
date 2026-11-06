@@ -37,8 +37,8 @@ import (
 // Secret data keys expected by the server's authenticator builder.
 const (
 	secretName            = "kokumi-server-auth"
-	secretKeyUsername     = "username"
 	secretKeyPasswordHash = "password-hash"
+	initialAdminName      = deliveryv1alpha1.InitialAdminSecretName
 	secretKeySigningKey   = "signing-key"
 	tokenSecretName       = deliveryv1alpha1.DefaultTokenSigningKeySecretName
 	userTokenSecretName   = "my-gitops-key"
@@ -155,81 +155,105 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 		_ = k8sClient.Delete(ctx, &corev1.Secret{
 			Name: tokenSecretName, Namespace: testNamespace,
 		})
+		_ = k8sClient.Delete(ctx, &corev1.Secret{
+			Name: initialAdminName, Namespace: testNamespace,
+		})
 	})
 
-	It("reports Ready=False when the admin credentials Secret is missing", func() {
-		By("creating a Kitchen with adminUser enabled and no Secret")
-		kitchen := &deliveryv1alpha1.Kitchen{
+	adminKitchen := func() *deliveryv1alpha1.Kitchen {
+		return &deliveryv1alpha1.Kitchen{
 			Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace,
 			Spec: deliveryv1alpha1.KitchenSpec{
 				Auth: &deliveryv1alpha1.KitchenAuth{
-					AdminUser: &deliveryv1alpha1.AdminUserConfig{},
+					AdminUser: &deliveryv1alpha1.AdminUserConfig{Enabled: true},
 				},
 			},
 		}
-		Expect(k8sClient.Create(ctx, kitchen)).To(Succeed())
+	}
+
+	It("generates the admin password when the admin Secret is missing", func() {
+		Expect(k8sClient.Create(ctx, adminKitchen())).To(Succeed())
 
 		By("reconciling")
 		reconcileSingleton(ctx)
 
-		By("checking the Ready condition is False")
-		cond := readyCondition(getKitchen(ctx))
-		Expect(cond).NotTo(BeNil())
-		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Message).To(ContainSubstring(secretName))
+		By("checking the admin Secret holds the hash of the initial password")
+		password := getSecret(ctx, testNamespace, initialAdminName).Data["password"]
+		Expect(password).NotTo(BeEmpty())
+		hash := getSecret(ctx, testNamespace, secretName).Data[secretKeyPasswordHash]
+		Expect(bcrypt.CompareHashAndPassword(hash, password)).To(Succeed())
+
+		By("checking the Ready condition is True")
+		Expect(readyCondition(getKitchen(ctx)).Status).To(Equal(metav1.ConditionTrue))
 	})
 
-	It("recovers to Ready=True once the credentials Secret appears", func() {
-		By("creating a Kitchen with adminUser enabled and no Secret")
-		kitchen := &deliveryv1alpha1.Kitchen{
-			Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace,
-			Spec: deliveryv1alpha1.KitchenSpec{
-				Auth: &deliveryv1alpha1.KitchenAuth{
-					AdminUser: &deliveryv1alpha1.AdminUserConfig{},
-				},
-			},
-		}
-		Expect(k8sClient.Create(ctx, kitchen)).To(Succeed())
-		reconcileSingleton(ctx)
-		Expect(readyCondition(getKitchen(ctx)).Status).To(Equal(metav1.ConditionFalse))
-
-		By("creating the complete credentials Secret")
+	It("keeps an admin Secret brought by the user", func() {
 		hash, err := bcrypt.GenerateFromPassword([]byte("s3cret-passw0rd"), bcrypt.MinCost)
 		Expect(err).NotTo(HaveOccurred())
-		secret := &corev1.Secret{
+		Expect(k8sClient.Create(ctx, &corev1.Secret{
 			Name: secretName, Namespace: testNamespace,
-			Data: map[string][]byte{
-				secretKeyUsername:     []byte("admin"),
-				secretKeyPasswordHash: hash,
-			},
-		}
-		Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+			Data: map[string][]byte{secretKeyPasswordHash: hash},
+		})).To(Succeed())
+		Expect(k8sClient.Create(ctx, adminKitchen())).To(Succeed())
 
-		By("reconciling again (Secret watch triggers this in the running manager)")
 		reconcileSingleton(ctx)
 
-		By("checking the Ready condition is now True")
-		cond := readyCondition(getKitchen(ctx))
-		Expect(cond).NotTo(BeNil())
-		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(getSecret(ctx, testNamespace, secretName).Data[secretKeyPasswordHash]).To(Equal(hash))
+		err = k8sClient.Get(ctx, types.NamespacedName{Name: initialAdminName, Namespace: testNamespace}, &corev1.Secret{})
+		Expect(errors.IsNotFound(err)).To(BeTrue(), "no initial password for a Secret the user brought")
+		Expect(readyCondition(getKitchen(ctx)).Status).To(Equal(metav1.ConditionTrue))
+	})
+
+	It("does not bring back a deleted initial admin Secret", func() {
+		Expect(k8sClient.Create(ctx, adminKitchen())).To(Succeed())
+		reconcileSingleton(ctx)
+		hash := getSecret(ctx, testNamespace, secretName).Data[secretKeyPasswordHash]
+
+		By("deleting the initial admin Secret, as the docs advise once it is read")
+		Expect(k8sClient.Delete(ctx, getSecret(ctx, testNamespace, initialAdminName))).To(Succeed())
+		reconcileSingleton(ctx)
+
+		err := k8sClient.Get(ctx, types.NamespacedName{Name: initialAdminName, Namespace: testNamespace}, &corev1.Secret{})
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+		Expect(getSecret(ctx, testNamespace, secretName).Data[secretKeyPasswordHash]).To(Equal(hash))
+	})
+
+	It("hashes the initial password that is left when the admin Secret is missing", func() {
+		Expect(k8sClient.Create(ctx, &corev1.Secret{
+			Name: initialAdminName, Namespace: testNamespace,
+			Data: map[string][]byte{"password": []byte("left-over")},
+		})).To(Succeed())
+		Expect(k8sClient.Create(ctx, adminKitchen())).To(Succeed())
+
+		reconcileSingleton(ctx)
+
+		hash := getSecret(ctx, testNamespace, secretName).Data[secretKeyPasswordHash]
+		Expect(bcrypt.CompareHashAndPassword(hash, []byte("left-over"))).To(Succeed())
+	})
+
+	It("generates no admin Secret while the admin account is off", func() {
+		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Kitchen{
+			Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace,
+			Spec: deliveryv1alpha1.KitchenSpec{Auth: &deliveryv1alpha1.KitchenAuth{
+				AdminUser: &deliveryv1alpha1.AdminUserConfig{},
+			}},
+		})).To(Succeed())
+
+		reconcileSingleton(ctx)
+
+		for _, name := range []string{secretName, initialAdminName} {
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: testNamespace}, &corev1.Secret{})
+			Expect(errors.IsNotFound(err)).To(BeTrue(), "Secret %s must not be created", name)
+		}
+		Expect(readyCondition(getKitchen(ctx)).Status).To(Equal(metav1.ConditionTrue))
 	})
 
 	It("reports Ready=False when the Secret is incomplete", func() {
 		By("creating the Kitchen and an incomplete Secret (missing password-hash)")
-		kitchen := &deliveryv1alpha1.Kitchen{
-			Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace,
-			Spec: deliveryv1alpha1.KitchenSpec{
-				Auth: &deliveryv1alpha1.KitchenAuth{
-					AdminUser: &deliveryv1alpha1.AdminUserConfig{},
-				},
-			},
-		}
-		Expect(k8sClient.Create(ctx, kitchen)).To(Succeed())
+		Expect(k8sClient.Create(ctx, adminKitchen())).To(Succeed())
 		secret := &corev1.Secret{
 			Name: secretName, Namespace: testNamespace,
-			Data: map[string][]byte{
-				secretKeyUsername: []byte("admin"),
-			},
+			Data: map[string][]byte{"username": []byte("admin")},
 		}
 		Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 

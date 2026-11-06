@@ -18,11 +18,19 @@ import (
 	"github.com/kokumi-dev/kokumi/internal/signing"
 )
 
-// Keys of the token signing-key Secret.
+// Keys of the Secrets the Kitchen controller generates for the server.
 const (
 	// TokenSigningKey holds the HMAC key the server signs session tokens
 	// with.
 	TokenSigningKey = "signing-key"
+
+	// AdminPasswordHash holds the bcrypt hash of the admin password in the
+	// admin Secret.
+	AdminPasswordHash = "password-hash"
+
+	// InitialAdminPassword holds the generated admin password in the Secret
+	// deliveryv1alpha1.InitialAdminSecretName.
+	InitialAdminPassword = "password"
 )
 
 // Rendered is an artifact an Order rendered, as its Preparation records it.
@@ -200,6 +208,28 @@ func TokenSigningKeySecret(namespace, name string, key []byte) *corev1.Secret {
 		Namespace: namespace,
 		Labels:    kitchenSecretLabels("server"),
 		Data:      map[string][]byte{TokenSigningKey: key},
+	}
+}
+
+// AdminSecret returns the Secret name in namespace that holds hash, the bcrypt
+// hash of the admin password.
+func AdminSecret(namespace, name string, hash []byte) *corev1.Secret {
+	return &corev1.Secret{
+		Name:      name,
+		Namespace: namespace,
+		Labels:    kitchenSecretLabels("server"),
+		Data:      map[string][]byte{AdminPasswordHash: hash},
+	}
+}
+
+// InitialAdminSecret returns the Secret in namespace that holds the generated
+// admin password, for the admin to read once and delete.
+func InitialAdminSecret(namespace string, password []byte) *corev1.Secret {
+	return &corev1.Secret{
+		Name:      deliveryv1alpha1.InitialAdminSecretName,
+		Namespace: namespace,
+		Labels:    kitchenSecretLabels("server"),
+		Data:      map[string][]byte{InitialAdminPassword: password},
 	}
 }
 

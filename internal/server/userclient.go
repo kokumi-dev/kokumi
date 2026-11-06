@@ -40,8 +40,8 @@ func isDenied(err error) bool {
 func (deps *apiDeps) resolveUserClient(r *http.Request) (*userClient, error) {
 	id := identityFromRequest(r)
 	if id == nil {
-		// Auth disabled: no identity, no impersonation. This should not
-		// happen for protected paths; treat as unauthorized.
+		// No identity, no impersonation. The auth middleware lets no such
+		// request reach a protected path; treat it as unauthorized.
 		return nil, errNoMapping
 	}
 	sas := resolveServiceAccounts(deps.saList(), id)

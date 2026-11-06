@@ -19,6 +19,7 @@ package framework
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"html"
 	"io"
@@ -32,6 +33,7 @@ import (
 
 	. "github.com/onsi/gomega" //nolint:revive,staticcheck
 
+	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/test/utils"
 )
 
@@ -50,8 +52,9 @@ const (
 )
 
 // EnableOIDC adds Dex to the kokumi-server Pod and has the Kitchen sign users
-// in through it, as "make oidc" does for local development (see hack/oidc),
-// and restores the Kitchen's spec when the scenario ends. Dex's password
+// in through it and turn on the admin account, whose password AdminPassword
+// returns, as "make oidc" does for local development (see hack/oidc). It
+// restores the Kitchen's spec when the scenario ends. Dex's password
 // database holds admin, editor, viewer, approver1 and approver2, all
 // @kokumi.dev with the password "password"; the approvers are members of
 // release-approvers.
@@ -83,6 +86,23 @@ func ForwardServer() *Server {
 		g.Expect(resp.StatusCode).To(Equal(http.StatusOK))
 	}, time.Minute).Should(Succeed(), "The API server is not reachable through the port-forward")
 	return s
+}
+
+// AdminPassword returns the password the Kitchen controller generated for the
+// admin account once the Kitchen turns it on, from the Secret
+// kokumi-initial-admin.
+func AdminPassword() string {
+	var password string
+	Eventually(func(g Gomega) {
+		out, err := Kubectl("get", "secret", deliveryv1alpha1.InitialAdminSecretName, "-n", InstallNamespace,
+			"-o", "jsonpath={.data.password}")
+		g.Expect(err).NotTo(HaveOccurred())
+		decoded, err := base64.StdEncoding.DecodeString(out)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(decoded).NotTo(BeEmpty(), "The Kitchen controller generated no admin password")
+		password = string(decoded)
+	}).Should(Succeed())
+	return password
 }
 
 // Login signs in with a username and password, as the built-in admin user

@@ -29,6 +29,11 @@ const (
 	// the HMAC signing key for session tokens. The Kitchen controller creates
 	// this Secret with a generated key when it does not exist.
 	DefaultTokenSigningKeySecretName = "kokumi-server-tokens"
+
+	// InitialAdminSecretName is the Secret whose key "password" holds the
+	// admin password the Kitchen controller generated, to be read once and
+	// deleted.
+	InitialAdminSecretName = "kokumi-initial-admin"
 )
 
 // The signing key lives in a namespace of its own under a fixed name, so that
@@ -55,9 +60,9 @@ type KitchenSpec struct {
 	ArgoCDURL string `json:"argoCDURL,omitempty"`
 
 	// auth configures UI/API authentication. The built-in admin account
-	// (auth.adminUser) and an external OIDC provider (auth.oidc) can be enabled
-	// independently; both may be active at once. When Auth is unset, no identity
-	// provider is configured and the server runs without authentication.
+	// (auth.adminUser, when enabled) and an external OIDC provider (auth.oidc)
+	// may be active at once. With neither, no one can sign in and the API
+	// refuses every request.
 	// +optional
 	Auth *KitchenAuth `json:"auth,omitempty"`
 
@@ -252,13 +257,14 @@ type TrustedKey struct {
 
 // KitchenAuth groups the authentication configuration for the Kitchen server.
 type KitchenAuth struct {
-	// adminUser configures the built-in admin account used for UI login.
+	// adminUser configures the built-in admin account for UI login. It is off
+	// unless enabled.
 	// +optional
 	AdminUser *AdminUserConfig `json:"adminUser,omitempty"`
 
 	// oidc configures an external OpenID Connect identity provider for UI
 	// login. When set, the login page offers an SSO button alongside (or
-	// instead of) the admin account, depending on whether AdminUser is also
+	// instead of) the admin account, depending on whether adminUser is also
 	// enabled.
 	// +optional
 	OIDC *OIDCConfig `json:"oidc,omitempty"`
@@ -275,16 +281,14 @@ type KitchenAuth struct {
 }
 
 // AdminUserConfig configures the built-in admin account used for UI login.
-// Credentials are never stored in this object; they live in the referenced
-// Secret (see SecretRef). This keeps the admin login usable while allowing it
-// to be disabled (e.g. when an external OIDC provider takes over) or renamed.
+// Its password lives in the referenced Secret, never in this object.
 type AdminUserConfig struct {
-	// enabled toggles the admin account. When false, admin login is disabled and
-	// the server falls back to no authentication unless another identity
-	// provider (e.g. OIDC) is configured. Defaults to true.
-	// +kubebuilder:default=true
+	// enabled turns the admin account on. When its Secret does not exist, the
+	// controller then generates a password, writes its bcrypt hash into that
+	// Secret and the password into the Secret "kokumi-initial-admin".
+	// Defaults to false.
 	// +optional
-	Enabled *bool `json:"enabled,omitempty"`
+	Enabled bool `json:"enabled,omitempty"`
 
 	// username is the login name for the admin account. Defaults to "admin".
 	// +kubebuilder:validation:MaxLength=253
@@ -293,20 +297,13 @@ type AdminUserConfig struct {
 	// +optional
 	Username string `json:"username,omitempty"`
 
-	// secretRef points to the Secret holding the admin credentials. The Secret
-	// must reside in the same namespace as the Kitchen. The recognized key is
-	// "password-hash" (bcrypt hash); "username" may optionally override the
-	// configured username. Defaults to "kokumi-server-auth".
+	// secretRef points to the Secret, in the namespace of the Kitchen, whose
+	// key "password-hash" holds the bcrypt hash of the admin password. While
+	// the account is enabled, the controller creates it with a generated
+	// password when it does not exist. Defaults to "kokumi-server-auth".
 	// +kubebuilder:default={name:"kokumi-server-auth"}
 	// +optional
 	SecretRef *corev1.LocalObjectReference `json:"secretRef,omitempty"`
-}
-
-func (c *AdminUserConfig) IsEnabled() bool {
-	if c == nil {
-		return true
-	}
-	return c.Enabled == nil || *c.Enabled
 }
 
 // OIDCConfig configures an external OpenID Connect identity provider for UI

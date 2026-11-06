@@ -95,7 +95,7 @@ kubectl logs -n kokumi deployment/kokumi-controller-manager -c manager -f
 ## Turn on login
 
 A fresh installation has no login method: the UI says _No login method is
-configured_, and the API refuses every request. Enable the built-in admin
+configured_, and the API refuses every request. Turn on the built-in admin
 account on the Kitchen:
 
 ```bash
@@ -103,9 +103,15 @@ kubectl -n kokumi patch kitchen default --type=merge \
     -p '{"spec":{"auth":{"adminUser":{"enabled":true}}}}'
 ```
 
-The user is `admin` and the password `admin`, from the Secret
-`kokumi-server-auth` that `install.yaml` ships. Change the password, or sign
-in with OIDC instead, before any non-development use; see
+The controller generates a password for the user `admin`. Read it:
+
+```bash
+kubectl -n kokumi get secret kokumi-initial-admin \
+    -o jsonpath='{.data.password}' | base64 -d; echo
+```
+
+Then delete the Secret `kokumi-initial-admin`, or bring your own password, or
+sign in with OIDC instead; see
 [Authentication](../operator-guide/authentication/). The server picks up
 changes to the Kitchen and its Secrets without a restart.
 
