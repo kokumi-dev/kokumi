@@ -184,40 +184,58 @@ func (a *authenticator) verifyCredentials(username, password string) bool {
 	return userMatch && passMatch
 }
 
-// issueAccessToken mints a signed access JWT for the admin identity.
-func (a *authenticator) issueAccessToken(now time.Time) (string, time.Time, error) {
-	return a.issueAdminToken(now)
+// Session is a signed-in user's pair of tokens. The access token is
+// short-lived and presented as a Bearer header (or the access_token query
+// parameter for SSE); the refresh token travels in an HttpOnly cookie.
+type Session struct {
+	AccessToken     string
+	AccessExpiresAt time.Time
+	RefreshToken    string
+	// ExpiresAt is when the session ends: the refresh token and its cookie
+	// expire then, and refreshing does not move it.
+	ExpiresAt time.Time
+}
+
+// startSession mints the tokens of a new session for id, which lasts
+// sessionTTL from now.
+func (a *authenticator) startSession(id *Identity) (*Session, error) {
+	now := time.Now()
+	return a.issueSession(now, id, now.Add(a.sessionTTL))
 }
 
 // issueSession mints the access and refresh tokens of a session for id that
 // ends at expires. A refresh passes the end of the session it renews, so a
-// session lasts sessionTTL from sign-in however often it is refreshed.
+// session lasts sessionTTL from sign-in however often it is refreshed. The
+// access token expires accessTTL from now, or with the session if that is
+// sooner. Both tokens carry the whole identity, so a refreshed OIDC session
+// stays an OIDC session.
 func (a *authenticator) issueSession(now time.Time, id *Identity, expires time.Time) (*Session, error) {
-	access, accessExpires, err := a.issueAccessTokenFor(now, id, expires)
+	if id.Subject == "" {
+		return nil, errors.New("identity has no subject")
+	}
+	accessExpires := now.Add(a.accessTTL)
+	if expires.Before(accessExpires) {
+		accessExpires = expires
+	}
+	access, err := a.signToken(now, accessTokenType, id, accessExpires)
 	if err != nil {
 		return nil, fmt.Errorf("issuing access token: %w", err)
 	}
-	refresh, err := a.issueRefreshToken(now, id, expires)
+	refresh, err := a.signToken(now, refreshTokenType, id, expires)
 	if err != nil {
 		return nil, fmt.Errorf("issuing refresh token: %w", err)
 	}
 	return &Session{
-		AccessToken:      access,
-		AccessExpiresAt:  accessExpires,
-		RefreshToken:     refresh,
-		ExpiresAt:        expires,
-		SetRefreshCookie: true,
+		AccessToken:     access,
+		AccessExpiresAt: accessExpires,
+		RefreshToken:    refresh,
+		ExpiresAt:       expires,
 	}, nil
 }
 
-// issueAccessTokenFor mints an access JWT for an explicit identity (OIDC claims
-// or admin username); email/groups/provider are embedded for SA mapping. The
-// token expires accessTTL from now, or with its session if that is sooner.
-func (a *authenticator) issueAccessTokenFor(now time.Time, id *Identity, sessionExpires time.Time) (string, time.Time, error) {
-	expires := now.Add(a.accessTTL)
-	if sessionExpires.Before(expires) {
-		expires = sessionExpires
-	}
+// signToken mints a session JWT of tokenType for id that expires at expires.
+// Email, groups and provider are embedded for ServiceAccount mapping.
+func (a *authenticator) signToken(now time.Time, tokenType string, id *Identity, expires time.Time) (string, error) {
 	registered := jwt.RegisteredClaims{
 		Subject:   id.Subject,
 		Issuer:    tokenIssuer,
@@ -226,32 +244,7 @@ func (a *authenticator) issueAccessTokenFor(now time.Time, id *Identity, session
 		ExpiresAt: jwt.NewNumericDate(expires),
 		ID:        randomTokenID(),
 	}
-	claims := newIdentityClaims(registered, accessTokenType, id)
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signed, err := token.SignedString(a.signingKey)
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf("signing token: %w", err)
-	}
-	return signed, expires, nil
-}
-
-// issueRefreshToken mints a refresh JWT carrying the full identity so a
-// refresh preserves it (an OIDC login must not flip to the admin identity).
-// It expires with its session.
-func (a *authenticator) issueRefreshToken(now time.Time, id *Identity, expires time.Time) (string, error) {
-	if id.Subject == "" {
-		id = &Identity{Subject: a.username, Provider: providerAdmin}
-	}
-	registered := jwt.RegisteredClaims{
-		Subject:   id.Subject,
-		Issuer:    tokenIssuer,
-		IssuedAt:  jwt.NewNumericDate(now),
-		NotBefore: jwt.NewNumericDate(now),
-		ExpiresAt: jwt.NewNumericDate(expires),
-		ID:        randomTokenID(),
-	}
-	claims := newIdentityClaims(registered, refreshTokenType, id)
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, newIdentityClaims(registered, tokenType, id))
 	signed, err := token.SignedString(a.signingKey)
 	if err != nil {
 		return "", fmt.Errorf("signing token: %w", err)
@@ -259,34 +252,12 @@ func (a *authenticator) issueRefreshToken(now time.Time, id *Identity, expires t
 	return signed, nil
 }
 
-// issueAdminToken mints the admin session's access token with the admin
-// identity embedded (provider=admin so it maps to the admin ServiceAccount).
-func (a *authenticator) issueAdminToken(now time.Time) (string, time.Time, error) {
-	return a.issueAccessTokenFor(now, &Identity{Subject: a.username, Provider: providerAdmin}, now.Add(a.sessionTTL))
-}
-
-// parseToken verifies an access token.
-func (a *authenticator) parseToken(tokenString string) (*jwt.RegisteredClaims, error) {
-	claims, err := a.parseTypedToken(tokenString, accessTokenType)
-	if err != nil {
-		return nil, err
-	}
-	return &claims.RegisteredClaims, nil
-}
-
-// parseRefresh verifies a refresh token and returns the identity it carries
-// and the end of its session.
-func (a *authenticator) parseRefresh(tokenString string) (*Identity, time.Time, error) {
-	claims, err := a.parseTypedToken(tokenString, refreshTokenType)
-	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("%w: %v", errInvalidRefresh, err)
-	}
-	return claims.identity(), claims.ExpiresAt.Time, nil
-}
-
-// parseTypedToken verifies signature, algorithm, issuer, expiry, and type;
-// returns the full identity claims.
-func (a *authenticator) parseTypedToken(tokenString, wantType string) (*identityClaims, error) {
+// parseToken verifies a session token and returns the identity it carries
+// and when it expires. It accepts only an unexpired HS256 token signed with
+// the signing key, issued by tokenIssuer, of tokenType, with a subject. The
+// auth middleware checks access tokens with it, and a refresh checks refresh
+// tokens.
+func (a *authenticator) parseToken(tokenString, tokenType string) (*Identity, time.Time, error) {
 	claims := &identityClaims{}
 	_, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -299,12 +270,15 @@ func (a *authenticator) parseTypedToken(tokenString, wantType string) (*identity
 		jwt.WithExpirationRequired(),
 	)
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
-	if claims.TokenType != wantType {
-		return nil, fmt.Errorf("unexpected token type %q, want %q", claims.TokenType, wantType)
+	if claims.TokenType != tokenType {
+		return nil, time.Time{}, fmt.Errorf("unexpected token type %q, want %q", claims.TokenType, tokenType)
 	}
-	return claims, nil
+	if claims.Subject == "" {
+		return nil, time.Time{}, errors.New("token has no subject")
+	}
+	return claims.identity(), claims.ExpiresAt.Time, nil
 }
 
 // isHTTPS reports TLS (direct or via X-Forwarded-Proto). Cookies are only
@@ -343,7 +317,7 @@ func setRefreshCookie(w http.ResponseWriter, r *http.Request, refreshToken strin
 }
 
 // refreshTokenFromCookie returns the refresh token from the cookie, trimmed.
-func (a *authenticator) refreshTokenFromCookie(r *http.Request) string {
+func refreshTokenFromCookie(r *http.Request) string {
 	c, err := r.Cookie(refreshCookieName)
 	if err != nil {
 		return ""
@@ -371,7 +345,7 @@ func (m *authManager) middleware(next http.Handler) http.Handler {
 			respondError(w, http.StatusUnauthorized, "missing or malformed Authorization header")
 			return
 		}
-		id, expires, err := parseIdentityToken(a, token)
+		id, expires, err := a.parseToken(token, accessTokenType)
 		if err != nil {
 			respondError(w, http.StatusUnauthorized, "invalid or expired token")
 			return
@@ -427,18 +401,17 @@ func handleLogin(m *authManager) http.HandlerFunc {
 			respondError(w, http.StatusForbidden, "admin login is disabled")
 			return
 		}
-		provider := newAdminProvider(a)
-		session, err := provider.Login(r)
+		var req loginRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			respondError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if !a.verifyCredentials(req.Username, req.Password) {
+			respondError(w, http.StatusUnauthorized, "invalid username or password")
+			return
+		}
+		session, err := a.startSession(&Identity{Subject: a.username, Provider: providerAdmin})
 		if err != nil {
-			if errors.Is(err, errInvalidCredentials) {
-				status, msg := mapLoginError(err)
-				respondError(w, status, msg)
-				return
-			}
-			if errors.Is(err, errMalformedBody) {
-				respondError(w, http.StatusBadRequest, "invalid request body")
-				return
-			}
 			// Token minting failed (signing key problem); not the client's fault.
 			respondError(w, http.StatusInternalServerError, "failed to issue session")
 			return
@@ -458,14 +431,21 @@ func handleRefresh(m *authManager) http.HandlerFunc {
 			respondError(w, http.StatusServiceUnavailable, "authentication is not available")
 			return
 		}
-		provider := newAdminProvider(a)
-		session, err := provider.Refresh(r)
+		token := refreshTokenFromCookie(r)
+		if token == "" {
+			clearCookie(w, r, refreshCookieName, refreshCookiePath)
+			respondError(w, http.StatusUnauthorized, "missing refresh token")
+			return
+		}
+		id, expires, err := a.parseToken(token, refreshTokenType)
 		if err != nil {
-			if errors.Is(err, errMissingRefresh) || errors.Is(err, errInvalidRefresh) {
-				clearCookie(w, r, refreshCookieName, refreshCookiePath)
-				respondError(w, http.StatusUnauthorized, mapRefreshError(err))
-				return
-			}
+			clearCookie(w, r, refreshCookieName, refreshCookiePath)
+			respondError(w, http.StatusUnauthorized, "invalid or expired refresh token")
+			return
+		}
+		// The session keeps its identity and its end.
+		session, err := a.issueSession(time.Now(), id, expires)
+		if err != nil {
 			// Token minting failed (signing key problem); not the client's fault.
 			respondError(w, http.StatusInternalServerError, "failed to refresh session")
 			return
@@ -494,7 +474,7 @@ func handleLogout(m *authManager) http.HandlerFunc {
 		}
 		oidcSession := idToken != ""
 		if a := m.get(); a != nil && !oidcSession {
-			id, _, err := a.parseRefresh(a.refreshTokenFromCookie(r))
+			id, _, err := a.parseToken(refreshTokenFromCookie(r), refreshTokenType)
 			oidcSession = err == nil && id.Provider == providerOIDC
 		}
 		clearCookie(w, r, refreshCookieName, refreshCookiePath)
@@ -518,28 +498,10 @@ func handleLogout(m *authManager) http.HandlerFunc {
 	}
 }
 
-// writeSession sets the refresh cookie (when issued) and returns the access token.
+// writeSession sets the refresh cookie and returns the access token.
 func writeSession(w http.ResponseWriter, r *http.Request, s *Session) {
-	if s.SetRefreshCookie {
-		setRefreshCookie(w, r, s.RefreshToken, s.ExpiresAt)
-	}
+	setRefreshCookie(w, r, s.RefreshToken, s.ExpiresAt)
 	respondJSON(w, http.StatusOK, loginResponse{Token: s.AccessToken, ExpiresAt: s.AccessExpiresAt})
-}
-
-// mapLoginError maps provider errors to HTTP status + message.
-func mapLoginError(err error) (int, string) {
-	if errors.Is(err, errInvalidCredentials) {
-		return http.StatusUnauthorized, "invalid username or password"
-	}
-	return http.StatusBadRequest, err.Error()
-}
-
-// mapRefreshError maps provider refresh errors to an HTTP message.
-func mapRefreshError(err error) string {
-	if errors.Is(err, errMissingRefresh) {
-		return "missing refresh token"
-	}
-	return "invalid or expired refresh token"
 }
 
 // randomTokenID returns a random 128-bit hex string for use as a JWT ID.
@@ -555,24 +517,3 @@ func randomTokenID() string {
 // errNoAdminCredentials is returned when the admin Secret does not exist or
 // holds no password hash: admin login is off until it has one.
 var errNoAdminCredentials = errors.New("no admin credentials")
-
-// errInvalidCredentials is returned when username/password do not match.
-var errInvalidCredentials = fmt.Errorf("invalid username or password")
-
-// errMalformedBody is returned when the request body is not valid JSON.
-var errMalformedBody = fmt.Errorf("invalid request body")
-
-// errMissingRefresh is returned when no refresh cookie is present.
-var errMissingRefresh = fmt.Errorf("missing refresh token")
-
-// errInvalidRefresh is returned when the refresh cookie fails verification.
-var errInvalidRefresh = fmt.Errorf("invalid or expired refresh token")
-
-// decodeJSONBody decodes a JSON request body into v, returning a 400-style
-// error when the body is malformed.
-func decodeJSONBody(r *http.Request, v any) error {
-	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
-		return errMalformedBody
-	}
-	return nil
-}

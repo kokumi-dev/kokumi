@@ -354,7 +354,7 @@ func TestFirstAllowedSkipsFailingServiceAccounts(t *testing.T) {
 
 			sa, err := uc.imp.pickWriteSA(ctx, uc.sas, "create", "orders", "default")
 			allowed, authErr := uc.authorized(ctx, "create", "orders", "default", "")
-			reader, readerErr := uc.readerFor(ctx, "create", "orders", "default")
+			reader, readerErr := uc.readerForObject(ctx, "create", "orders", "default", "")
 
 			switch {
 			case tt.wantSA != "":

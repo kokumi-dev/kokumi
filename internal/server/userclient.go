@@ -184,22 +184,6 @@ func (u *userClient) authorized(ctx context.Context, verb, resource, namespace, 
 	return sa != "", err
 }
 
-// readerFor returns a client.Reader restricted to the first mapped SA that can
-// read the resource in the namespace (used for helper paths like credential
-// resolution). Returns errNotAuthorized when no mapped SA is permitted.
-func (u *userClient) readerFor(ctx context.Context, verb, resource, namespace string) (client.Reader, error) {
-	sa, err := firstAllowed(u.sas, func(saName string) (bool, error) {
-		return u.imp.authorizedFor(ctx, saName, verb, resource, namespace, "")
-	})
-	if err != nil {
-		return nil, err
-	}
-	if sa == "" {
-		return nil, fmt.Errorf("%w to %s %s", errNotAuthorized, verb, resource)
-	}
-	return u.imp.clientFor(sa)
-}
-
 // respondForbiddenOrError maps operation errors to HTTP responses: RBAC
 // denials and no-mapping errors become 403. The API server's other verdicts
 // on the request, such as 404, 409 and 422, keep their status and message,
@@ -222,9 +206,9 @@ func respondForbiddenOrError(w http.ResponseWriter, err error, op string) {
 }
 
 // readerForObject returns a client.Reader restricted to the first mapped SA
-// that may perform verb on the named object in the namespace. Unlike
-// readerFor it honors RBAC rules restricted to resource names. Returns
-// errNotAuthorized when no mapped SA is permitted.
+// that may perform verb on the named object in the namespace, so RBAC rules
+// restricted to resource names apply. Returns errNotAuthorized when no mapped
+// SA is permitted.
 func (u *userClient) readerForObject(ctx context.Context, verb, resource, namespace, name string) (client.Reader, error) {
 	sa, err := firstAllowed(u.sas, func(saName string) (bool, error) {
 		return u.imp.authorizedFor(ctx, saName, verb, resource, namespace, name)

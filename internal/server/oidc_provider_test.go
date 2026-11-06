@@ -209,22 +209,6 @@ func TestExtractClaim(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestIssueSessionFromOIDC(t *testing.T) {
-	p, httpSrv := newTestOIDCProvider(t)
-	defer httpSrv.Close()
-
-	const testOIDCUser = "admin@example.com"
-	session, err := p.issueSession(&Identity{Subject: testOIDCUser, Email: testOIDCUser, Provider: providerOIDC})
-	require.NoError(t, err)
-	require.NotEmpty(t, session.AccessToken)
-	require.True(t, session.SetRefreshCookie)
-
-	// The issued access token must verify against the shared authenticator with the OIDC subject.
-	claims, err := p.auth.parseToken(session.AccessToken)
-	require.NoError(t, err)
-	assert.Equal(t, "admin@example.com", claims.Subject)
-}
-
 func TestAuthManagerProviders(t *testing.T) {
 	a := newTestAuthenticator(t)
 	mgr := &authManager{auth: a, adminLogin: true, oidc: &oidcProvider{}}
@@ -329,7 +313,7 @@ func TestOIDCMiddlewareAcceptsIssuedToken(t *testing.T) {
 	handler := mgr.middleware(next)
 
 	const testOIDCUser = "admin@example.com"
-	session, err := p.issueSession(&Identity{Subject: testOIDCUser, Email: testOIDCUser, Provider: providerOIDC})
+	session, err := p.auth.startSession(&Identity{Subject: testOIDCUser, Email: testOIDCUser, Provider: providerOIDC})
 	require.NoError(t, err)
 	require.NotEmpty(t, session.AccessToken)
 
@@ -347,34 +331,24 @@ func TestOIDCMiddlewareAcceptsIssuedToken(t *testing.T) {
 // which would silently remap the user to the admin ServiceAccount).
 func TestRefreshPreservesSubject(t *testing.T) {
 	auth := newAuthenticator("admin", nil, []byte("test-signing-key-do-not-use-in-prod"))
-	provider := newAdminProvider(auth)
-
-	// Mint an initial session as an OIDC identity.
-	now := time.Now()
 	origID := &Identity{
 		Subject:  "admin@example.com",
 		Email:    "admin@example.com",
 		Groups:   []string{"devops"},
 		Provider: providerOIDC,
 	}
-	access, _, err := auth.issueAccessTokenFor(now, origID, now.Add(defaultSessionTTL))
-	require.NoError(t, err)
-	refresh, err := auth.issueRefreshToken(now, origID, now.Add(defaultSessionTTL))
+	signedIn, err := auth.startSession(origID)
 	require.NoError(t, err)
 
-	// Simulate a refresh request carrying the refresh cookie.
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", nil)
-	r.AddCookie(&http.Cookie{Name: refreshCookieName, Value: refresh})
+	r.AddCookie(&http.Cookie{Name: refreshCookieName, Value: signedIn.RefreshToken})
+	w := httptest.NewRecorder()
+	handleRefresh(&authManager{auth: auth}).ServeHTTP(w, r)
+	require.Equal(t, http.StatusOK, w.Code)
 
-	// Parse the original access token subject for comparison.
-	origClaims, err := auth.parseToken(access)
-	require.NoError(t, err)
-	assert.Equal(t, "admin@example.com", origClaims.Subject)
-
-	// The refresh handler re-mints using the refresh token's identity.
-	session, err := provider.Refresh(r)
-	require.NoError(t, err)
-	newID, _, err := parseIdentityToken(auth, session.AccessToken)
+	var resp loginResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	newID, _, err := auth.parseToken(resp.Token, accessTokenType)
 	require.NoError(t, err)
 	assert.Equal(t, origID, newID, "refresh must preserve the full OIDC identity")
 }
@@ -718,7 +692,7 @@ func TestAdminSignOutStaysLocalWithOIDCConfigured(t *testing.T) {
 	issuer := newFakeIssuer(t, true)
 	p := newOIDCProviderFor(t, issuer.URL)
 	mgr := &authManager{auth: p.auth, oidc: p, logger: logr.Discard()}
-	s, err := newAdminProvider(p.auth).issue(&Identity{Subject: testUsername, Provider: providerAdmin}, time.Now().Add(time.Hour))
+	s, err := p.auth.startSession(&Identity{Subject: testUsername, Provider: providerAdmin})
 	require.NoError(t, err)
 
 	w := signOut(mgr, &http.Cookie{Name: refreshCookieName, Value: s.RefreshToken})
