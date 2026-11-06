@@ -25,6 +25,11 @@ data:
     oauth2:
       skipApprovalScreen: true
 
+    # Tokens live a minute, so Kokumi checks a session at Dex at every
+    # refresh: sessions with offline_access ask Dex again when its tokens expire.
+    expiry:
+      idTokens: 1m
+
     enablePasswordDB: true
 
     staticPasswords:

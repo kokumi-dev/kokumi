@@ -45,6 +45,10 @@ type identityClaims struct {
 	Provider  string   `json:"provider,omitempty"`
 	IDPIssuer string   `json:"idp_iss,omitempty"`
 	Username  string   `json:"name,omitempty"`
+	// SessionID, AuthTime and IDPCheck carry the sessionState.
+	SessionID string           `json:"sid,omitempty"`
+	AuthTime  *jwt.NumericDate `json:"auth_time,omitempty"`
+	IDPCheck  *jwt.NumericDate `json:"idp_check,omitempty"`
 }
 
 // identityContextKey is the context key for the resolved Identity.
@@ -91,9 +95,21 @@ func (c *identityClaims) identity() *Identity {
 	}
 }
 
-// newIdentityClaims builds session claims for id.
-func newIdentityClaims(registered jwt.RegisteredClaims, tokenType string, id *Identity) identityClaims {
-	return identityClaims{
+// session returns the sessionState carried by the session claims.
+func (c *identityClaims) session() sessionState {
+	s := sessionState{ID: c.SessionID}
+	if c.AuthTime != nil {
+		s.AuthTime = c.AuthTime.Time
+	}
+	if c.IDPCheck != nil {
+		s.IDPCheck = c.IDPCheck.Time
+	}
+	return s
+}
+
+// newIdentityClaims builds the claims of a token for id in session s.
+func newIdentityClaims(registered jwt.RegisteredClaims, tokenType string, id *Identity, s sessionState) identityClaims {
+	claims := identityClaims{
 		RegisteredClaims: registered,
 		TokenType:        tokenType,
 		Email:            id.Email,
@@ -101,7 +117,13 @@ func newIdentityClaims(registered jwt.RegisteredClaims, tokenType string, id *Id
 		Provider:         id.Provider,
 		IDPIssuer:        id.Issuer,
 		Username:         id.Username,
+		SessionID:        s.ID,
+		AuthTime:         jwt.NewNumericDate(s.AuthTime),
 	}
+	if !s.IDPCheck.IsZero() {
+		claims.IDPCheck = jwt.NewNumericDate(s.IDPCheck)
+	}
+	return claims
 }
 
 // claimAtPath resolves a claim by name. A top-level claim of exactly that name

@@ -21,6 +21,7 @@ package e2e
 import (
 	"context"
 	"net/http"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -67,6 +68,19 @@ var _ = Describe("API server", Label("server"), Serial, func() {
 
 			ns = framework.CreateNamespace("server")
 			framework.ApplyExample(ns, "getting-started")
+		})
+
+		It("keeps an SSO session that Dex still vouches for once Dex's tokens expire", func() {
+			browser := server.SignInOIDC("viewer@kokumi.dev", "password")
+
+			By("waiting until Dex's one-minute tokens expire, so that the next refresh asks Dex")
+			time.Sleep(65 * time.Second)
+			Expect(browser.Refresh(true)).To(Equal(http.StatusOK))
+
+			resp, body := server.Do(http.MethodGet, "/api/v1/whoami", browser.Token, nil)
+			Expect(resp.StatusCode).To(Equal(http.StatusOK), string(body))
+			Expect(string(body)).To(ContainSubstring("kokumi-viewer"), "the groups come from Dex's answer")
+			Expect(browser.Refresh(false)).To(Equal(http.StatusOK), "the rotated refresh token works")
 		})
 
 		It("lets the viewer read an Order", func() {
