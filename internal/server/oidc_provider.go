@@ -348,6 +348,10 @@ func handleOIDCCallback(m *authManager) http.HandlerFunc {
 		}
 		id.Issuer = idToken.Issuer
 		signIn := newSessionState(time.Now())
+		// The provider's session, which a back-channel logout may name.
+		if sid, ok := claims["sid"].(string); ok {
+			signIn.ProviderSessionID = sid
+		}
 		sealedRefresh := p.keepRefreshToken(m, token, signIn)
 		if sealedRefresh != "" {
 			signIn.IDPCheck = nextProviderCheck(signIn.AuthTime, token, idToken)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -45,10 +44,12 @@ type identityClaims struct {
 	Provider  string   `json:"provider,omitempty"`
 	IDPIssuer string   `json:"idp_iss,omitempty"`
 	Username  string   `json:"name,omitempty"`
-	// SessionID, AuthTime and IDPCheck carry the sessionState.
-	SessionID string           `json:"sid,omitempty"`
-	AuthTime  *jwt.NumericDate `json:"auth_time,omitempty"`
-	IDPCheck  *jwt.NumericDate `json:"idp_check,omitempty"`
+	// SessionID, AuthTime, IDPCheck and ProviderSessionID carry the
+	// sessionState.
+	SessionID         string           `json:"sid,omitempty"`
+	AuthTime          *jwt.NumericDate `json:"auth_time,omitempty"`
+	IDPCheck          *jwt.NumericDate `json:"idp_check,omitempty"`
+	ProviderSessionID string           `json:"idp_sid,omitempty"`
 }
 
 // identityContextKey is the context key for the resolved Identity.
@@ -66,21 +67,21 @@ func identityFromRequest(r *http.Request) *Identity {
 	return id
 }
 
-// tokenExpiryContextKey is the context key for the expiry of the request's
+// sessionTokenContextKey is the context key for the request's verified
 // access token.
-type tokenExpiryContextKey struct{}
+type sessionTokenContextKey struct{}
 
-// withTokenExpiry stores the expiry of the request's access token in the
-// request context.
-func withTokenExpiry(ctx context.Context, expires time.Time) context.Context {
-	return context.WithValue(ctx, tokenExpiryContextKey{}, expires)
+// withSessionToken stores the request's verified access token, with its
+// identity, in the request context.
+func withSessionToken(ctx context.Context, t *sessionToken) context.Context {
+	return withIdentity(context.WithValue(ctx, sessionTokenContextKey{}, t), t.identity)
 }
 
-// tokenExpiry returns when the request's access token expires; ok is false
-// when the request carries none, as on a public path.
-func tokenExpiry(ctx context.Context) (time.Time, bool) {
-	expires, ok := ctx.Value(tokenExpiryContextKey{}).(time.Time)
-	return expires, ok
+// sessionTokenFrom returns the request's verified access token, or nil when
+// the request carries none, as on a public path.
+func sessionTokenFrom(ctx context.Context) *sessionToken {
+	t, _ := ctx.Value(sessionTokenContextKey{}).(*sessionToken)
+	return t
 }
 
 // identity returns the Identity carried by the session claims.
@@ -97,7 +98,7 @@ func (c *identityClaims) identity() *Identity {
 
 // session returns the sessionState carried by the session claims.
 func (c *identityClaims) session() sessionState {
-	s := sessionState{ID: c.SessionID}
+	s := sessionState{ID: c.SessionID, ProviderSessionID: c.ProviderSessionID}
 	if c.AuthTime != nil {
 		s.AuthTime = c.AuthTime.Time
 	}
@@ -110,15 +111,16 @@ func (c *identityClaims) session() sessionState {
 // newIdentityClaims builds the claims of a token for id in session s.
 func newIdentityClaims(registered jwt.RegisteredClaims, tokenType string, id *Identity, s sessionState) identityClaims {
 	claims := identityClaims{
-		RegisteredClaims: registered,
-		TokenType:        tokenType,
-		Email:            id.Email,
-		Groups:           id.Groups,
-		Provider:         id.Provider,
-		IDPIssuer:        id.Issuer,
-		Username:         id.Username,
-		SessionID:        s.ID,
-		AuthTime:         jwt.NewNumericDate(s.AuthTime),
+		RegisteredClaims:  registered,
+		TokenType:         tokenType,
+		Email:             id.Email,
+		Groups:            id.Groups,
+		Provider:          id.Provider,
+		IDPIssuer:         id.Issuer,
+		Username:          id.Username,
+		SessionID:         s.ID,
+		AuthTime:          jwt.NewNumericDate(s.AuthTime),
+		ProviderSessionID: s.ProviderSessionID,
 	}
 	if !s.IDPCheck.IsZero() {
 		claims.IDPCheck = jwt.NewNumericDate(s.IDPCheck)

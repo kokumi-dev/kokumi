@@ -13,7 +13,7 @@ func addRoutes(
 	installNamespace string,
 ) {
 	mux.HandleFunc("GET /api/v1/info", handleInfo(authMgr))
-	mux.HandleFunc("GET /api/v1/events", handleEventsStream(h, deps, sseHeartbeatInterval))
+	mux.HandleFunc("GET /api/v1/events", handleEventsStream(h, deps, authMgr.endedSessions(), sseHeartbeatInterval))
 	mux.HandleFunc("GET /healthz", handleHealthz)
 	mux.HandleFunc("GET /readyz", handleReadyz)
 
@@ -23,6 +23,7 @@ func addRoutes(
 		mux.HandleFunc("POST /api/v1/auth/logout", handleLogout(authMgr))
 		mux.HandleFunc("GET /api/v1/auth/oidc/start", handleOIDCStart(authMgr))
 		mux.HandleFunc("GET /api/v1/auth/oidc/callback", handleOIDCCallback(authMgr))
+		mux.HandleFunc("POST /api/v1/auth/oidc/backchannel-logout", handleBackchannelLogout(authMgr))
 	}
 
 	mux.HandleFunc("GET /api/v1/oci/default", handleGetDefaultRegistry())

@@ -21,6 +21,8 @@ package e2e
 import (
 	"context"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -81,6 +83,34 @@ var _ = Describe("API server", Label("server"), Serial, func() {
 			Expect(resp.StatusCode).To(Equal(http.StatusOK), string(body))
 			Expect(string(body)).To(ContainSubstring("kokumi-viewer"), "the groups come from Dex's answer")
 			Expect(browser.Refresh(false)).To(Equal(http.StatusOK), "the rotated refresh token works")
+		})
+
+		It("ends a session at sign-out, so that a copy of its access token stops working", func() {
+			browser := server.SignInOIDC("viewer@kokumi.dev", "password")
+			resp, body := server.Do(http.MethodGet, "/api/v1/whoami", browser.Token, nil)
+			Expect(resp.StatusCode).To(Equal(http.StatusOK), string(body))
+
+			Expect(browser.SignOut()).To(Equal(http.StatusNoContent))
+			resp, body = server.Do(http.MethodGet, "/api/v1/whoami", browser.Token, nil)
+			Expect(resp.StatusCode).To(Equal(http.StatusUnauthorized), string(body))
+		})
+
+		It("refuses a back-channel logout whose token the provider did not sign", func() {
+			resp, body := server.PostForm("/api/v1/auth/oidc/backchannel-logout", url.Values{"logout_token": {"not-a-jwt"}})
+			Expect(resp.StatusCode).To(Equal(http.StatusBadRequest), string(body))
+			Expect(string(body)).To(ContainSubstring("invalid_request"))
+		})
+
+		It("lets the server write the record of ended sessions and no other ConfigMap", func() {
+			record := "configmap/" + deliveryv1alpha1.EndedSessionsConfigMapName
+			can := func(verb, resource string) string {
+				out, _ := framework.KubectlAs("kokumi-server", "auth", "can-i", verb, resource, "-n", framework.InstallNamespace)
+				return strings.TrimSpace(out)
+			}
+			Expect(can("patch", record)).To(Equal("yes"))
+			Expect(can("delete", record)).To(Equal("no"))
+			Expect(can("patch", "configmap/kube-root-ca.crt")).To(Equal("no"))
+			Expect(can("create", "configmaps")).To(Equal("no"))
 		})
 
 		It("lets the viewer read an Order", func() {

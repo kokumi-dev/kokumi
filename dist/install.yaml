@@ -4396,6 +4396,20 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
+  name: kokumi-controller-manager-creator
+  namespace: kokumi
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  - configmaps
+  verbs:
+  - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
   name: kokumi-controller-manager-pod-reader
   namespace: kokumi
 rules:
@@ -4405,19 +4419,6 @@ rules:
   - pods
   verbs:
   - get
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: kokumi-controller-manager-secret-creator
-  namespace: kokumi
-rules:
-- apiGroups:
-  - ""
-  resources:
-  - secrets
-  verbs:
-  - create
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -4474,6 +4475,24 @@ rules:
   - get
   - watch
   - list
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kokumi-server-ended-sessions
+  namespace: kokumi
+rules:
+- apiGroups:
+  - ""
+  resourceNames:
+  - kokumi-server-ended-sessions
+  resources:
+  - configmaps
+  verbs:
+  - get
+  - list
+  - watch
+  - patch
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -5624,12 +5643,12 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: kokumi-controller-manager-pod-reader
+  name: kokumi-controller-manager-creator
   namespace: kokumi
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: kokumi-controller-manager-pod-reader
+  name: kokumi-controller-manager-creator
 subjects:
 - kind: ServiceAccount
   name: kokumi-controller-manager
@@ -5638,12 +5657,12 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: kokumi-controller-manager-secret-creator
+  name: kokumi-controller-manager-pod-reader
   namespace: kokumi
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: kokumi-controller-manager-secret-creator
+  name: kokumi-controller-manager-pod-reader
 subjects:
 - kind: ServiceAccount
   name: kokumi-controller-manager
@@ -5675,6 +5694,20 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: kokumi-server-auth-reader
+subjects:
+- kind: ServiceAccount
+  name: kokumi-server
+  namespace: kokumi
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kokumi-server-ended-sessions-binding
+  namespace: kokumi
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kokumi-server-ended-sessions
 subjects:
 - kind: ServiceAccount
   name: kokumi-server

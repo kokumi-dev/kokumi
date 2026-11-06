@@ -24,9 +24,9 @@ import (
 )
 
 const (
-	// defaultAccessTokenTTL is the default access-token lifetime. It is short
-	// because a sign-out cannot revoke an access token: a copied token works
-	// until it expires.
+	// defaultAccessTokenTTL is the default access-token lifetime. Access
+	// tokens are checked locally on every request, so it bounds how long a
+	// copied token works when the record of ended sessions cannot be written.
 	defaultAccessTokenTTL = 5 * time.Minute
 	// defaultSessionTTL is how long a session lasts from sign-in by default.
 	// Refreshing never extends it.
@@ -84,13 +84,14 @@ type tokenLifetimes struct {
 
 // publicAPIPaths are API paths reachable without a valid access token.
 var publicAPIPaths = map[string]struct{}{
-	"/api/v1/auth/login":         {},
-	"/api/v1/auth/refresh":       {},
-	"/api/v1/auth/logout":        {},
-	"/api/v1/auth/oidc/start":    {},
-	"/api/v1/auth/oidc/callback": {},
-	"/api/v1/info":               {},
-	"/api/v1/signing":            {},
+	"/api/v1/auth/login":                   {},
+	"/api/v1/auth/refresh":                 {},
+	"/api/v1/auth/logout":                  {},
+	"/api/v1/auth/oidc/start":              {},
+	"/api/v1/auth/oidc/callback":           {},
+	"/api/v1/auth/oidc/backchannel-logout": {},
+	"/api/v1/info":                         {},
+	"/api/v1/signing":                      {},
 }
 
 // newAuthenticator builds an authenticator with default token lifetimes.
@@ -223,6 +224,10 @@ type sessionState struct {
 	// again whether the user stays signed in. It is zero for a session the
 	// provider is not asked about.
 	IDPCheck time.Time
+	// ProviderSessionID (claim idp_sid) is the sid of the OIDC provider's
+	// session the user signed in with, when the provider names it. A
+	// back-channel logout of that session ends this one.
+	ProviderSessionID string
 }
 
 // newSessionState returns the state of a session the user signs in to at now.
@@ -419,7 +424,11 @@ func (m *authManager) middleware(next http.Handler) http.Handler {
 			respondError(w, http.StatusUnauthorized, "invalid or expired token")
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(withTokenExpiry(withIdentity(r.Context(), t.identity), t.expires)))
+		if m.ended.ended(t) {
+			respondError(w, http.StatusUnauthorized, "the session has ended")
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(withSessionToken(r.Context(), t)))
 	})
 }
 
@@ -534,6 +543,10 @@ func handleRefresh(m *authManager) http.HandlerFunc {
 			endSession("invalid or expired refresh token")
 			return
 		}
+		if m.ended.ended(t) {
+			endSession("the session has ended")
+			return
+		}
 		id, state := t.identity, t.session
 
 		var providerRefresh string
@@ -593,10 +606,10 @@ type logoutResponse struct {
 }
 
 // handleLogout ends the session in this browser by expiring its cookies,
-// also while authentication cannot be resolved. Kokumi's tokens are not
-// revoked: a copied access token works until it expires. The provider's
-// refresh token of an OIDC session is revoked at the provider, so a copied
-// cookie fails at its next provider check. With providerSignOut Always,
+// also while authentication cannot be resolved. It records the session in the
+// record of ended sessions, so copies of its access token and refresh cookie
+// stop working at once, and revokes the provider's refresh token of an OIDC
+// session at the provider. With providerSignOut Always,
 // an OIDC session also ends at the provider when it offers RP-initiated
 // logout: the response carries the provider's end-session URL. The next SSO
 // sign-in then asks the provider to authenticate the user again, in case its
@@ -609,9 +622,15 @@ func handleLogout(m *authManager) http.HandlerFunc {
 		}
 		a, p := m.get(), m.getOIDC()
 		oidcSession := idToken != ""
-		if a != nil && !oidcSession {
-			t, err := a.parseToken(refreshTokenFromCookie(r), refreshTokenType)
-			oidcSession = err == nil && t.identity.Provider == providerOIDC
+		if a != nil {
+			if t, err := a.parseToken(refreshTokenFromCookie(r), refreshTokenType); err == nil {
+				oidcSession = oidcSession || t.identity.Provider == providerOIDC
+				// Best effort: the browser signs out either way, and a copy of
+				// its tokens then works until they expire, as before the record.
+				if err := m.ended.record(context.WithoutCancel(r.Context()), endedSessionKey(t.session.ID), time.Now()); err != nil {
+					m.logger.Error(err, "Could not record a signed-out session")
+				}
+			}
 		}
 		if c, err := r.Cookie(providerTokenCookie); err == nil && a != nil && p != nil {
 			if t, err := a.openProviderToken(c.Value); err == nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -34,6 +35,35 @@ type authManager struct {
 	ns          string
 	lifetimes   tokenLifetimes
 	logger      logr.Logger
+	ended       *endedSessions // record of ended sessions; nil records nothing
+}
+
+// endedSessions returns the record of ended sessions, or nil without one.
+func (m *authManager) endedSessions() *endedSessions {
+	if m == nil {
+		return nil
+	}
+	return m.ended
+}
+
+// pruneEndedSessions drops the entries of the record of ended sessions that
+// no session can match any more, every endedSessionsPruneInterval until ctx
+// ends.
+func (m *authManager) pruneEndedSessions(ctx context.Context) {
+	ticker := time.NewTicker(endedSessionsPruneInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if a := m.get(); a != nil {
+				if err := m.ended.prune(ctx, time.Now(), a.sessionTTL); err != nil {
+					m.logger.Error(err, "Could not prune the record of ended sessions")
+				}
+			}
+		}
+	}
 }
 
 // newAuthManager builds an authManager and performs the initial resolution.
@@ -43,6 +73,7 @@ func newAuthManager(
 	apiReader client.Reader,
 	ns string,
 	lifetimes tokenLifetimes,
+	ended *endedSessions,
 ) *authManager {
 	logger := log.FromContext(ctx)
 	m := &authManager{
@@ -51,6 +82,7 @@ func newAuthManager(
 		ns:        ns,
 		lifetimes: lifetimes,
 		logger:    logger,
+		ended:     ended,
 	}
 	m.reload(ctx, nil)
 	return m
