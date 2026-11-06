@@ -54,7 +54,7 @@ const (
 	ssoErrorUnavailable = "unavailable"
 )
 
-// oidcProvider implements IdentityProvider via the OIDC authorization-code flow
+// oidcProvider signs users in through the OIDC authorization-code flow
 // (PKCE). It verifies the issuer ID token and mints kokumi session tokens using
 // the shared authenticator's signing key, so OIDC and admin sessions share one trust root.
 type oidcProvider struct {
@@ -65,8 +65,6 @@ type oidcProvider struct {
 	groupsClaim   string
 	auth          *authenticator
 }
-
-var _ IdentityProvider = (*oidcProvider)(nil)
 
 // oidcIssuer discovers an issuer on first use and keeps the result. A failure
 // is not kept: a use after oidcDiscoveryRetryInterval asks the issuer again,
@@ -229,24 +227,6 @@ func (p *oidcProvider) endSessionURL(r *http.Request, idToken string) (string, e
 	return endpoint.String(), nil
 }
 
-// Login is unused for OIDC (flow is Start + Callback); satisfies the interface.
-func (p *oidcProvider) Login(_ *http.Request) (*Session, error) {
-	return nil, fmt.Errorf("oidc login is handled via the start/callback flow")
-}
-
-// Refresh is unused for OIDC (uses the shared refresh cookie); satisfies the interface.
-func (p *oidcProvider) Refresh(_ *http.Request) (*Session, error) {
-	return nil, fmt.Errorf("oidc refresh uses the shared refresh cookie")
-}
-
-// issueSession mints a new kokumi session carrying the OIDC identity claims
-// (sub, email, groups) used for ServiceAccount mapping; minting errors are
-// returned.
-func (p *oidcProvider) issueSession(id *Identity) (*Session, error) {
-	now := time.Now()
-	return p.auth.issueSession(now, id, now.Add(p.auth.sessionTTL))
-}
-
 // handleOIDCStart generates a CSRF state + PKCE verifier, stores them in a cookie,
 // and redirects to the issuer's authorization endpoint, with prompt=login after
 // a sign-out. An issuer that cannot be reached sends the browser back to the
@@ -357,7 +337,7 @@ func handleOIDCCallback(m *authManager) http.HandlerFunc {
 			return
 		}
 		id.Issuer = idToken.Issuer
-		session, err := p.issueSession(id)
+		session, err := p.auth.startSession(id)
 		if err != nil {
 			m.logger.Error(err, "Failed to issue OIDC session")
 			respondError(w, http.StatusInternalServerError, "failed to issue session")

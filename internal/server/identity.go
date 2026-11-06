@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -78,32 +77,6 @@ func withTokenExpiry(ctx context.Context, expires time.Time) context.Context {
 func tokenExpiry(ctx context.Context) (time.Time, bool) {
 	expires, ok := ctx.Value(tokenExpiryContextKey{}).(time.Time)
 	return expires, ok
-}
-
-// parseIdentityToken verifies a session access token and returns the identity
-// and the token's expiry.
-func parseIdentityToken(a *authenticator, token string) (*Identity, time.Time, error) {
-	claims := &identityClaims{}
-	_, err := jwt.ParseWithClaims(token, claims, func(t *jwt.Token) (any, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
-		}
-		return a.signingKey, nil
-	},
-		jwt.WithValidMethods([]string{signingMethod}),
-		jwt.WithIssuer(tokenIssuer),
-		jwt.WithExpirationRequired(),
-	)
-	if err != nil {
-		return nil, time.Time{}, err
-	}
-	if claims.TokenType != accessTokenType {
-		return nil, time.Time{}, fmt.Errorf("unexpected token type %q", claims.TokenType)
-	}
-	if claims.Subject == "" {
-		return nil, time.Time{}, fmt.Errorf("token missing subject")
-	}
-	return claims.identity(), claims.ExpiresAt.Time, nil
 }
 
 // identity returns the Identity carried by the session claims.

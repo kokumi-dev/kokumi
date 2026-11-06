@@ -163,77 +163,107 @@ func TestVerifyCredentialsHtpasswdHash(t *testing.T) {
 		"htpasswd -B ($2y$) hash must reject a wrong password")
 }
 
-func TestIssueAndParseToken(t *testing.T) {
+func TestIssueAndParseSession(t *testing.T) {
 	auth := newTestAuthenticator(t)
 	now := time.Now()
+	id := &Identity{Subject: testUsername, Provider: providerAdmin}
 
-	token, expires, err := auth.issueAccessToken(now)
+	s, err := auth.issueSession(now, id, now.Add(defaultSessionTTL))
 	require.NoError(t, err)
-	require.NotEmpty(t, token)
-	assert.WithinDuration(t, now.Add(defaultAccessTokenTTL), expires, time.Second)
+	assert.WithinDuration(t, now.Add(defaultAccessTokenTTL), s.AccessExpiresAt, time.Second)
 
-	claims, err := auth.parseToken(token)
+	got, expires, err := auth.parseToken(s.AccessToken, accessTokenType)
 	require.NoError(t, err)
-	assert.Equal(t, testUsername, claims.Subject)
-	assert.Equal(t, tokenIssuer, claims.Issuer)
-	assert.NotEmpty(t, claims.ID)
-	require.NotNil(t, claims.ExpiresAt)
-	assert.WithinDuration(t, expires, claims.ExpiresAt.Time, time.Second)
+	assert.Equal(t, id, got)
+	assert.WithinDuration(t, s.AccessExpiresAt, expires, time.Second)
+
+	got, expires, err = auth.parseToken(s.RefreshToken, refreshTokenType)
+	require.NoError(t, err)
+	assert.Equal(t, id, got)
+	assert.WithinDuration(t, s.ExpiresAt, expires, time.Second)
 }
 
+func TestIssueSessionRequiresSubject(t *testing.T) {
+	_, err := newTestAuthenticator(t).startSession(&Identity{Provider: providerOIDC})
+	assert.Error(t, err)
+}
+
+// TestParseTokenRejectsInvalidTokens runs the parser the auth middleware
+// checks access tokens with.
 func TestParseTokenRejectsInvalidTokens(t *testing.T) {
 	auth := newTestAuthenticator(t)
 	now := time.Now()
-
-	t.Run("garbage string", func(t *testing.T) {
-		_, err := auth.parseToken("not-a-jwt")
-		assert.Error(t, err)
-	})
-
-	t.Run("signed with a different key", func(t *testing.T) {
-		other := &authenticator{
-			username:   testUsername,
-			signingKey: []byte("a-totally-different-key"),
-			accessTTL:  defaultAccessTokenTTL,
-		}
-		token, _, err := other.issueAccessToken(now)
-		require.NoError(t, err)
-		_, err = auth.parseToken(token)
-		assert.Error(t, err, "token signed with another key must be rejected")
-	})
-
-	t.Run("expired token", func(t *testing.T) {
-		token, _, err := auth.issueAccessToken(now.Add(-2 * defaultAccessTokenTTL))
-		require.NoError(t, err)
-		_, err = auth.parseToken(token)
-		require.Error(t, err)
-		assert.ErrorIs(t, err, jwt.ErrTokenExpired)
-	})
-
-	t.Run("wrong issuer", func(t *testing.T) {
-		claims := jwt.RegisteredClaims{
-			Subject:   testUsername,
-			Issuer:    "someone-else",
-			ExpiresAt: jwt.NewNumericDate(now.Add(time.Hour)),
-		}
-		raw := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-		signed, err := raw.SignedString(auth.signingKey)
-		require.NoError(t, err)
-		_, err = auth.parseToken(signed)
-		assert.Error(t, err, "token with unexpected issuer must be rejected")
-	})
-
-	t.Run("alg none is rejected", func(t *testing.T) {
-		claims := jwt.RegisteredClaims{
+	id := &Identity{Subject: testUsername, Provider: providerAdmin}
+	// valid returns the claims of a valid access token, for a case to break.
+	valid := func() identityClaims {
+		return newIdentityClaims(jwt.RegisteredClaims{
 			Subject:   testUsername,
 			Issuer:    tokenIssuer,
 			ExpiresAt: jwt.NewNumericDate(now.Add(time.Hour)),
-		}
-		raw := jwt.NewWithClaims(jwt.SigningMethodNone, claims)
-		signed, err := raw.SignedString(jwt.UnsafeAllowNoneSignatureType)
+		}, accessTokenType, id)
+	}
+	sign := func(t *testing.T, method jwt.SigningMethod, key any, claims identityClaims) string {
+		t.Helper()
+		signed, err := jwt.NewWithClaims(method, claims).SignedString(key)
 		require.NoError(t, err)
-		_, err = auth.parseToken(signed)
-		assert.Error(t, err, "alg=none must never be accepted")
+		return signed
+	}
+	parse := func(token string) error {
+		_, _, err := auth.parseToken(token, accessTokenType)
+		return err
+	}
+
+	t.Run("the token the cases break is valid", func(t *testing.T) {
+		assert.NoError(t, parse(sign(t, jwt.SigningMethodHS256, auth.signingKey, valid())))
+	})
+
+	t.Run("garbage string", func(t *testing.T) {
+		assert.Error(t, parse("not-a-jwt"))
+	})
+
+	t.Run("signed with a different key", func(t *testing.T) {
+		assert.Error(t, parse(sign(t, jwt.SigningMethodHS256, []byte("a-totally-different-key"), valid())),
+			"token signed with another key must be rejected")
+	})
+
+	t.Run("expired token", func(t *testing.T) {
+		s, err := auth.issueSession(now.Add(-2*defaultAccessTokenTTL), id, now.Add(time.Hour))
+		require.NoError(t, err)
+		assert.ErrorIs(t, parse(s.AccessToken), jwt.ErrTokenExpired)
+	})
+
+	t.Run("no expiry", func(t *testing.T) {
+		claims := valid()
+		claims.ExpiresAt = nil
+		assert.Error(t, parse(sign(t, jwt.SigningMethodHS256, auth.signingKey, claims)))
+	})
+
+	t.Run("wrong issuer", func(t *testing.T) {
+		claims := valid()
+		claims.Issuer = "someone-else"
+		assert.Error(t, parse(sign(t, jwt.SigningMethodHS256, auth.signingKey, claims)),
+			"token with unexpected issuer must be rejected")
+	})
+
+	t.Run("alg none is rejected", func(t *testing.T) {
+		assert.Error(t, parse(sign(t, jwt.SigningMethodNone, jwt.UnsafeAllowNoneSignatureType, valid())),
+			"alg=none must never be accepted")
+	})
+
+	t.Run("another HMAC algorithm is rejected", func(t *testing.T) {
+		assert.Error(t, parse(sign(t, jwt.SigningMethodHS512, auth.signingKey, valid())))
+	})
+
+	t.Run("a refresh token is not an access token", func(t *testing.T) {
+		s, err := auth.issueSession(now, id, now.Add(time.Hour))
+		require.NoError(t, err)
+		assert.Error(t, parse(s.RefreshToken))
+	})
+
+	t.Run("no subject", func(t *testing.T) {
+		claims := valid()
+		claims.Subject = ""
+		assert.Error(t, parse(sign(t, jwt.SigningMethodHS256, auth.signingKey, claims)))
 	})
 }
 
@@ -299,7 +329,7 @@ func TestBearerTokenFromQueryParam(t *testing.T) {
 
 func TestMiddleware(t *testing.T) {
 	auth := newTestAuthenticator(t)
-	validToken, _, err := auth.issueAccessToken(time.Now())
+	session, err := auth.startSession(&Identity{Subject: testUsername, Provider: providerAdmin})
 	require.NoError(t, err)
 
 	// next records whether it was invoked so we can assert pass-through.
@@ -324,7 +354,8 @@ func TestMiddleware(t *testing.T) {
 		{"health passes without token", "/healthz", "", http.StatusOK, true},
 		{"protected without token is rejected", testOrdersPath, "", http.StatusUnauthorized, false},
 		{"protected with bad token is rejected", testOrdersPath, "Bearer bad", http.StatusUnauthorized, false},
-		{"protected with valid token passes", testOrdersPath, "Bearer " + validToken, http.StatusOK, true},
+		{"protected with a refresh token is rejected", testOrdersPath, "Bearer " + session.RefreshToken, http.StatusUnauthorized, false},
+		{"protected with valid token passes", testOrdersPath, "Bearer " + session.AccessToken, http.StatusOK, true},
 	}
 
 	for _, tt := range tests {
@@ -361,9 +392,9 @@ func TestHandleLogin(t *testing.T) {
 		assert.True(t, resp.ExpiresAt.After(time.Now()))
 
 		// The issued token must validate against the same authenticator.
-		claims, err := auth.parseToken(resp.Token)
+		id, _, err := auth.parseToken(resp.Token, accessTokenType)
 		require.NoError(t, err)
-		assert.Equal(t, testUsername, claims.Subject)
+		assert.Equal(t, &Identity{Subject: testUsername, Provider: providerAdmin}, id)
 	})
 
 	t.Run("wrong password is rejected", func(t *testing.T) {
@@ -439,7 +470,7 @@ func TestHandleLoginSetsRefreshCookie(t *testing.T) {
 	assert.InDelta(t, defaultSessionTTL.Seconds(), refresh.MaxAge, 2, "the cookie lasts as long as the session")
 
 	// The refresh cookie value must validate as a refresh token.
-	_, _, err := auth.parseRefresh(refresh.Value)
+	_, _, err := auth.parseToken(refresh.Value, refreshTokenType)
 	assert.NoError(t, err)
 	assert.Equal(t, -1, cookieNamed(t, w.Result().Cookies(), oidcIDTokenCookie).MaxAge,
 		"an ID token of an earlier OIDC session is dropped")
@@ -470,7 +501,7 @@ func TestHandleRefresh(t *testing.T) {
 		var resp loginResponse
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		assert.NotEmpty(t, resp.Token)
-		_, err := auth.parseToken(resp.Token)
+		_, _, err := auth.parseToken(resp.Token, accessTokenType)
 		assert.NoError(t, err)
 
 		// The refresh cookie must have been rotated (different value).
@@ -859,14 +890,15 @@ func cookieNamed(t *testing.T, cookies []*http.Cookie, name string) *http.Cookie
 
 func TestSessionEndsAtSignInPlusSessionTTL(t *testing.T) {
 	auth := newTestAuthenticator(t)
-	provider := newAdminProvider(auth)
+	mgr := &authManager{auth: auth, adminLogin: true}
 	id := &Identity{Subject: testUsername, Provider: providerAdmin}
 
-	refreshWith := func(t *testing.T, s *Session) (*Session, error) {
-		t.Helper()
+	refreshWith := func(refreshToken string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", nil)
-		r.AddCookie(&http.Cookie{Name: refreshCookieName, Value: s.RefreshToken})
-		return provider.Refresh(r)
+		r.AddCookie(&http.Cookie{Name: refreshCookieName, Value: refreshToken})
+		w := httptest.NewRecorder()
+		handleRefresh(mgr).ServeHTTP(w, r)
+		return w
 	}
 
 	t.Run("refreshing keeps the end of the session", func(t *testing.T) {
@@ -874,10 +906,11 @@ func TestSessionEndsAtSignInPlusSessionTTL(t *testing.T) {
 		signedIn, err := auth.issueSession(time.Now(), id, ends)
 		require.NoError(t, err)
 
-		refreshed, err := refreshWith(t, signedIn)
-		require.NoError(t, err)
-		assert.WithinDuration(t, ends, refreshed.ExpiresAt, time.Second)
-		_, refreshEnds, err := auth.parseRefresh(refreshed.RefreshToken)
+		w := refreshWith(signedIn.RefreshToken)
+		require.Equal(t, http.StatusOK, w.Code)
+		refresh := cookieNamed(t, w.Result().Cookies(), refreshCookieName)
+		assert.InDelta(t, time.Until(ends).Seconds(), refresh.MaxAge, 2, "the cookie lasts until the session ends")
+		_, refreshEnds, err := auth.parseToken(refresh.Value, refreshTokenType)
 		require.NoError(t, err)
 		assert.WithinDuration(t, ends, refreshEnds, time.Second, "the rotated refresh token must not outlive the session")
 	})
@@ -887,7 +920,7 @@ func TestSessionEndsAtSignInPlusSessionTTL(t *testing.T) {
 		s, err := auth.issueSession(time.Now(), id, ends)
 		require.NoError(t, err)
 		assert.Equal(t, ends, s.AccessExpiresAt)
-		_, expires, err := parseIdentityToken(auth, s.AccessToken)
+		_, expires, err := auth.parseToken(s.AccessToken, accessTokenType)
 		require.NoError(t, err)
 		assert.WithinDuration(t, ends, expires, time.Second)
 	})
@@ -896,17 +929,24 @@ func TestSessionEndsAtSignInPlusSessionTTL(t *testing.T) {
 		ended, err := auth.issueSession(time.Now().Add(-time.Hour), id, time.Now().Add(-time.Second))
 		require.NoError(t, err)
 
-		_, err = refreshWith(t, ended)
-		assert.ErrorIs(t, err, errInvalidRefresh)
+		w := refreshWith(ended.RefreshToken)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Equal(t, -1, cookieNamed(t, w.Result().Cookies(), refreshCookieName).MaxAge)
 	})
 
 	t.Run("a sign-in starts a session of sessionTTL", func(t *testing.T) {
 		r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login",
 			strings.NewReader(`{"username":"admin","password":"s3cret-passw0rd"}`))
-		s, err := provider.Login(r)
+		w := httptest.NewRecorder()
+		handleLogin(mgr).ServeHTTP(w, r)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp loginResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+		assert.WithinDuration(t, time.Now().Add(defaultAccessTokenTTL), resp.ExpiresAt, time.Second)
+		_, ends, err := auth.parseToken(cookieNamed(t, w.Result().Cookies(), refreshCookieName).Value, refreshTokenType)
 		require.NoError(t, err)
-		assert.WithinDuration(t, time.Now().Add(defaultSessionTTL), s.ExpiresAt, time.Second)
-		assert.WithinDuration(t, time.Now().Add(defaultAccessTokenTTL), s.AccessExpiresAt, time.Second)
+		assert.WithinDuration(t, time.Now().Add(defaultSessionTTL), ends, time.Second)
 	})
 }
 
