@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,7 +17,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
 	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/namespace"
@@ -30,6 +33,9 @@ const (
 	testRootUser   = "root"
 	testOrdersPath = "/api/v1/orders"
 	testToken      = "abc.def.ghi"
+
+	// unrelatedSecretKey is a Secret key Kokumi does not read.
+	unrelatedSecretKey = "other"
 )
 
 // newTestAuthenticator builds an authenticator with a bcrypt hash of testPassword.
@@ -47,57 +53,41 @@ func newAuthSecret(data map[string][]byte) *corev1.Secret {
 	}
 }
 
-func TestMiddlewareFailClosed(t *testing.T) {
-	var reached bool
-	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		reached = true
-		w.WriteHeader(http.StatusOK)
+func TestReadAdminCredentials(t *testing.T) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(testPassword), bcrypt.MinCost)
+	require.NoError(t, err)
+	c := fake.NewClientBuilder().WithObjects(
+		newAuthSecret(map[string][]byte{secretKeyPasswordHash: hash}),
+		&corev1.Secret{Name: "incomplete", Namespace: testNS, Data: map[string][]byte{unrelatedSecretKey: []byte("x")}},
+	).Build()
+	read := func(cfg *deliveryv1alpha1.AdminUserConfig) (*adminCredentials, error) {
+		return readAdminCredentials(context.Background(), c, testNS, cfg)
+	}
+
+	t.Run("custom username from the Kitchen", func(t *testing.T) {
+		admin, err := read(&deliveryv1alpha1.AdminUserConfig{
+			Username:  testRootUser,
+			SecretRef: &corev1.LocalObjectReference{Name: testSecret},
+		})
+		require.NoError(t, err)
+		auth := newAuthenticator("", nil, []byte("test-signing-key-at-least-32-bytes-long!!")).withAdmin(admin)
+		assert.True(t, auth.verifyCredentials(testRootUser, testPassword))
 	})
 
-	t.Run("intentionally disabled opens protected paths", func(t *testing.T) {
-		reached = false
-		mgr := &authManager{disabled: true}
-		handler := mgr.middleware(next)
-		r := httptest.NewRequest(http.MethodGet, "/api/v1/orders", nil)
-		w := httptest.NewRecorder()
-		handler.ServeHTTP(w, r)
-		assert.Equal(t, http.StatusOK, w.Code)
-		assert.True(t, reached, "disabled auth must pass through")
+	t.Run("missing Secret has no credentials", func(t *testing.T) {
+		_, err := read(&deliveryv1alpha1.AdminUserConfig{SecretRef: &corev1.LocalObjectReference{Name: "absent"}})
+		require.ErrorIs(t, err, errNoAdminCredentials)
+		assert.Contains(t, err.Error(), "absent")
 	})
 
-	t.Run("unresolvable auth fails closed", func(t *testing.T) {
-		reached = false
-		// auth nil + disabled=false: configured but Secret missing.
-		mgr := &authManager{}
-		handler := mgr.middleware(next)
-		r := httptest.NewRequest(http.MethodGet, "/api/v1/orders", nil)
-		w := httptest.NewRecorder()
-		handler.ServeHTTP(w, r)
-		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
-		assert.False(t, reached, "unresolvable auth must not pass through")
+	t.Run("Secret without password hash has no credentials", func(t *testing.T) {
+		_, err := read(&deliveryv1alpha1.AdminUserConfig{SecretRef: &corev1.LocalObjectReference{Name: "incomplete"}})
+		require.ErrorIs(t, err, errNoAdminCredentials)
+		assert.Contains(t, err.Error(), secretKeyPasswordHash)
 	})
 }
 
-func TestApplyAdminCredentials(t *testing.T) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(testPassword), bcrypt.MinCost)
-	require.NoError(t, err)
-	secret := newAuthSecret(map[string][]byte{
-		secretKeyUsername:     []byte(testUsername),
-		secretKeyPasswordHash: hash,
-	})
-	c := fake.NewClientBuilder().WithObjects(secret).Build()
-
-	t.Run("disabled leaves the authenticator token-only", func(t *testing.T) {
-		auth, err := applyAdminCredentials(context.Background(), c, testNS, &deliveryv1alpha1.AdminUserConfig{
-			Enabled:   new(false),
-			SecretRef: &corev1.LocalObjectReference{Name: testSecret},
-		}, newAuthenticator("", nil, []byte("test-signing-key-at-least-32-bytes-long!!")))
-		require.NoError(t, err)
-		assert.Empty(t, auth.username)
-		assert.Empty(t, auth.passwordHash)
-		assert.NotEmpty(t, auth.signingKey)
-	})
-
+func TestBuildTokenAuthenticator(t *testing.T) {
 	t.Run("token-only authenticator from signing-key Secret", func(t *testing.T) {
 		signingOnly := &corev1.Secret{
 			Name: deliveryv1alpha1.DefaultTokenSigningKeySecretName, Namespace: testNS,
@@ -121,32 +111,12 @@ func TestApplyAdminCredentials(t *testing.T) {
 	t.Run("signing-key Secret without key errors", func(t *testing.T) {
 		incomplete := &corev1.Secret{
 			Name: deliveryv1alpha1.DefaultTokenSigningKeySecretName, Namespace: testNS,
-			Data: map[string][]byte{"other": []byte("x")},
+			Data: map[string][]byte{unrelatedSecretKey: []byte("x")},
 		}
 		cr := fake.NewClientBuilder().WithObjects(incomplete).Build()
 		_, err := buildTokenAuthenticator(context.Background(), cr, testNS, deliveryv1alpha1.DefaultTokenSigningKeySecretName, tokenLifetimes{})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), secretKeySigningKey)
-	})
-
-	t.Run("enabled with custom username uses config username", func(t *testing.T) {
-		auth, err := applyAdminCredentials(context.Background(), c, testNS, &deliveryv1alpha1.AdminUserConfig{
-			Enabled:   new(true),
-			Username:  testRootUser,
-			SecretRef: &corev1.LocalObjectReference{Name: testSecret},
-		}, newAuthenticator("", nil, []byte("test-signing-key-at-least-32-bytes-long!!")))
-		require.NoError(t, err)
-		assert.Equal(t, testRootUser, auth.username)
-		assert.True(t, auth.verifyCredentials(testRootUser, testPassword))
-	})
-
-	t.Run("missing secret errors", func(t *testing.T) {
-		_, err := applyAdminCredentials(context.Background(), c, testNS, &deliveryv1alpha1.AdminUserConfig{
-			Enabled:   new(true),
-			SecretRef: &corev1.LocalObjectReference{Name: "absent"},
-		}, newAuthenticator("", nil, []byte("test-signing-key-at-least-32-bytes-long!!")))
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "absent")
 	})
 }
 
@@ -610,81 +580,212 @@ func TestBuildTokenAuthenticatorAppliesTokenTTL(t *testing.T) {
 	})
 }
 
-func TestAuthManagerFailClosed(t *testing.T) {
+// authKitchen returns the Kitchen singleton with auth.
+func authKitchen(auth *deliveryv1alpha1.KitchenAuth) *deliveryv1alpha1.Kitchen {
+	return &deliveryv1alpha1.Kitchen{
+		Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS,
+		Spec: deliveryv1alpha1.KitchenSpec{Auth: auth},
+	}
+}
+
+func TestAuthManagerAdminCredentials(t *testing.T) {
 	hash, err := bcrypt.GenerateFromPassword([]byte(testPassword), bcrypt.MinCost)
 	require.NoError(t, err)
-	secret := newAuthSecret(map[string][]byte{
-		secretKeyUsername:     []byte(testUsername),
-		secretKeyPasswordHash: hash,
-	})
-	tokenSecret := &corev1.Secret{
-		Name: deliveryv1alpha1.DefaultTokenSigningKeySecretName, Namespace: testNS,
-		Data: map[string][]byte{secretKeySigningKey: []byte("test-signing-key-at-least-32-bytes-long!!")},
+	tokenSecret := func() *corev1.Secret {
+		return &corev1.Secret{
+			Name: deliveryv1alpha1.DefaultTokenSigningKeySecretName, Namespace: testNS,
+			Data: map[string][]byte{secretKeySigningKey: []byte("test-signing-key-at-least-32-bytes-long!!")},
+		}
 	}
-	reader := fake.NewClientBuilder().WithScheme(newScheme()).WithObjects(secret, tokenSecret).Build()
+	adminSecret := func() *corev1.Secret {
+		return newAuthSecret(map[string][]byte{secretKeyPasswordHash: hash})
+	}
+	admin := &deliveryv1alpha1.AdminUserConfig{
+		Enabled:   true,
+		Username:  testUsername,
+		SecretRef: &corev1.LocalObjectReference{Name: testSecret},
+	}
+	newManager := func(c client.Reader) *authManager {
+		return &authManager{reader: c, apiReader: c, ns: testNS, logger: logr.Discard()}
+	}
+	canSignIn := func(m *authManager) bool {
+		a := m.get()
+		return m.adminLoginEnabled() && a != nil && a.verifyCredentials(testUsername, testPassword)
+	}
 
-	logger := logr.Discard()
-
-	t.Run("keeps last-known-good authenticator on transient error", func(t *testing.T) {
-		m := &authManager{
-			reader:    reader,
-			apiReader: reader,
-			ns:        testNS,
-			logger:    logger,
-		}
-		// Establish a working authenticator.
-		m.reload(context.Background(), &deliveryv1alpha1.Kitchen{
-			Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS,
-			Spec: deliveryv1alpha1.KitchenSpec{
-				Auth: &deliveryv1alpha1.KitchenAuth{
-					AdminUser: &deliveryv1alpha1.AdminUserConfig{
-						Enabled:   new(true),
-						SecretRef: &corev1.LocalObjectReference{Name: testSecret},
-					},
-				},
+	t.Run("a missing admin Secret leaves OIDC and tokens working", func(t *testing.T) {
+		c := fake.NewClientBuilder().WithObjects(tokenSecret(), &corev1.Secret{
+			Name: testOIDCSecret, Namespace: testNS,
+			Data: map[string][]byte{secretKeyClientSecret: []byte(testClientSec)},
+		}).Build()
+		m := newManager(c)
+		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{
+			AdminUser: admin,
+			OIDC: &deliveryv1alpha1.OIDCConfig{
+				IssuerURL: testIssuerURL, ClientID: testClientID,
+				ClientSecretRef: &corev1.LocalObjectReference{Name: testOIDCSecret},
 			},
-		})
-		require.NotNil(t, m.get())
-
-		// Point at a missing Secret: reload must fail closed and keep the previous authenticator.
-		m.reload(context.Background(), &deliveryv1alpha1.Kitchen{
-			Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS,
-			Spec: deliveryv1alpha1.KitchenSpec{
-				Auth: &deliveryv1alpha1.KitchenAuth{
-					AdminUser: &deliveryv1alpha1.AdminUserConfig{
-						Enabled:   new(true),
-						SecretRef: &corev1.LocalObjectReference{Name: "does-not-exist"},
-					},
-				},
-			},
-		})
-		assert.NotNil(t, m.get(), "auth must remain enabled after a transient error")
-		assert.False(t, m.disabled)
+		}))
+		assert.Equal(t, []string{providerOIDC}, m.providers())
+		assert.NotNil(t, m.get(), "tokens must still verify")
 	})
 
-	t.Run("intentional disable opens the API", func(t *testing.T) {
-		m := &authManager{
-			reader:    reader,
-			apiReader: reader,
-			ns:        testNS,
-			logger:    logger,
-		}
-		m.reload(context.Background(), &deliveryv1alpha1.Kitchen{
-			Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS,
-			Spec: deliveryv1alpha1.KitchenSpec{
-				Auth: &deliveryv1alpha1.KitchenAuth{
-					AdminUser: &deliveryv1alpha1.AdminUserConfig{
-						Enabled:   new(false),
-						SecretRef: &corev1.LocalObjectReference{Name: testSecret},
-					},
-				},
-			},
-		})
-		// Admin disabled + no OIDC: intentionally off (open API); token-only authenticator still present.
-		assert.True(t, m.disabled)
-		assert.False(t, m.adminLoginEnabled())
-		assert.Empty(t, m.providers())
+	t.Run("deleting the admin Secret stops admin login", func(t *testing.T) {
+		secret := adminSecret()
+		c := fake.NewClientBuilder().WithObjects(tokenSecret(), secret).Build()
+		m := newManager(c)
+		kitchen := authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: admin})
+		m.reload(context.Background(), kitchen)
+		require.True(t, canSignIn(m))
+
+		require.NoError(t, c.Delete(context.Background(), secret))
+		m.reload(context.Background(), kitchen)
+		assert.False(t, canSignIn(m))
+		assert.NotNil(t, m.get(), "tokens must still verify")
 	})
+
+	t.Run("an admin Secret without a password hash stops admin login", func(t *testing.T) {
+		secret := adminSecret()
+		c := fake.NewClientBuilder().WithObjects(tokenSecret(), secret).Build()
+		m := newManager(c)
+		kitchen := authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: admin})
+		m.reload(context.Background(), kitchen)
+		require.True(t, canSignIn(m))
+
+		secret.Data = map[string][]byte{unrelatedSecretKey: []byte("x")}
+		require.NoError(t, c.Update(context.Background(), secret))
+		m.reload(context.Background(), kitchen)
+		assert.False(t, canSignIn(m))
+	})
+
+	t.Run("a disabled admin account reads no Secret", func(t *testing.T) {
+		var adminReads int
+		c := fake.NewClientBuilder().WithObjects(tokenSecret(), &corev1.Secret{
+			Name: testOIDCSecret, Namespace: testNS,
+			Data: map[string][]byte{secretKeyClientSecret: []byte(testClientSec)},
+		}).WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if key.Name == testSecret {
+					adminReads++
+				}
+				return c.Get(ctx, key, obj, opts...)
+			},
+		}).Build()
+		m := newManager(c)
+		disabled := *admin
+		disabled.Enabled = false
+		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{
+			AdminUser: &disabled,
+			OIDC: &deliveryv1alpha1.OIDCConfig{
+				IssuerURL: testIssuerURL, ClientID: testClientID,
+				ClientSecretRef: &corev1.LocalObjectReference{Name: testOIDCSecret},
+			},
+		}))
+		assert.Equal(t, []string{providerOIDC}, m.providers())
+		assert.Zero(t, adminReads)
+	})
+
+	t.Run("disabling the admin account stops admin login", func(t *testing.T) {
+		c := fake.NewClientBuilder().WithObjects(tokenSecret(), adminSecret()).Build()
+		m := newManager(c)
+		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: admin}))
+		require.True(t, canSignIn(m))
+
+		disabled := *admin
+		disabled.Enabled = false
+		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: &disabled}))
+		assert.False(t, canSignIn(m))
+	})
+
+	t.Run("removing adminUser stops admin login", func(t *testing.T) {
+		c := fake.NewClientBuilder().WithObjects(tokenSecret(), adminSecret()).Build()
+		m := newManager(c)
+		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: admin}))
+		require.True(t, canSignIn(m))
+
+		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{}))
+		assert.False(t, canSignIn(m))
+	})
+
+	t.Run("an unreadable admin Secret keeps the last credentials", func(t *testing.T) {
+		var unreachable bool
+		c := fake.NewClientBuilder().WithObjects(tokenSecret(), adminSecret()).WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if unreachable && key.Name == testSecret {
+					return errors.New("connection refused")
+				}
+				return c.Get(ctx, key, obj, opts...)
+			},
+		}).Build()
+		m := newManager(c)
+		kitchen := authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: admin})
+		m.reload(context.Background(), kitchen)
+		require.True(t, canSignIn(m))
+
+		unreachable = true
+		m.reload(context.Background(), kitchen)
+		assert.True(t, canSignIn(m))
+	})
+
+	t.Run("an unreadable token Secret keeps tokens and still stops admin login", func(t *testing.T) {
+		var unreachable bool
+		c := fake.NewClientBuilder().WithObjects(tokenSecret(), adminSecret()).WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if unreachable && key.Name == deliveryv1alpha1.DefaultTokenSigningKeySecretName {
+					return errors.New("connection refused")
+				}
+				return c.Get(ctx, key, obj, opts...)
+			},
+		}).Build()
+		m := newManager(c)
+		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: admin}))
+		require.True(t, canSignIn(m))
+
+		unreachable = true
+		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{}))
+		assert.False(t, canSignIn(m))
+		assert.NotNil(t, m.get(), "tokens must still verify")
+	})
+
+	t.Run("the username comes from the Kitchen, not the Secret", func(t *testing.T) {
+		c := fake.NewClientBuilder().WithObjects(tokenSecret(), newAuthSecret(map[string][]byte{
+			secretKeyPasswordHash: hash,
+			"username":            []byte(testRootUser),
+		})).Build()
+		m := newManager(c)
+		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: &deliveryv1alpha1.AdminUserConfig{
+			Enabled:   true,
+			SecretRef: &corev1.LocalObjectReference{Name: testSecret},
+		}}))
+		assert.True(t, canSignIn(m), "an unset username falls back to %q", testUsername)
+	})
+}
+
+func TestNoLoginMethodLocksTheAPI(t *testing.T) {
+	var reached bool
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reached = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	for name, kitchen := range map[string]*deliveryv1alpha1.Kitchen{
+		"no Kitchen yet": nil,
+		"no auth":        authKitchen(nil),
+		"no provider":    authKitchen(&deliveryv1alpha1.KitchenAuth{}),
+	} {
+		t.Run(name, func(t *testing.T) {
+			reached = false
+			c := fake.NewClientBuilder().Build()
+			m := &authManager{reader: c, apiReader: c, ns: testNS, logger: logr.Discard()}
+			m.reload(context.Background(), kitchen)
+			assert.Empty(t, m.providers())
+
+			w := httptest.NewRecorder()
+			m.middleware(next).ServeHTTP(w, httptest.NewRequest(http.MethodGet, testOrdersPath, nil))
+			assert.False(t, reached, "a protected path must not be reached")
+			assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+		})
+	}
 }
 
 func TestIsHTTPS(t *testing.T) {
@@ -810,20 +911,13 @@ func TestSessionEndsAtSignInPlusSessionTTL(t *testing.T) {
 }
 
 func TestTokenLifetimesSurviveAdminCredentials(t *testing.T) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(testPassword), bcrypt.MinCost)
-	require.NoError(t, err)
-	c := fake.NewClientBuilder().WithObjects(newAuthSecret(map[string][]byte{secretKeyPasswordHash: hash})).Build()
 	shared := newAuthenticator("", nil, []byte("test-signing-key-at-least-32-bytes-long!!"))
 	shared.accessTTL, shared.sessionTTL = 15*time.Minute, 8*time.Hour
 
-	for _, enabled := range []bool{true, false} {
-		auth, err := applyAdminCredentials(context.Background(), c, testNS, &deliveryv1alpha1.AdminUserConfig{
-			Enabled:   new(enabled),
-			SecretRef: &corev1.LocalObjectReference{Name: testSecret},
-		}, shared)
-		require.NoError(t, err)
-		assert.Equal(t, 15*time.Minute, auth.accessTTL, "KOKUMI_TOKEN_TTL must apply with an admin user (enabled=%t)", enabled)
-		assert.Equal(t, 8*time.Hour, auth.sessionTTL, "KOKUMI_SESSION_TTL must apply with an admin user (enabled=%t)", enabled)
+	for _, admin := range []*adminCredentials{{username: testUsername, passwordHash: []byte("hash")}, nil} {
+		auth := shared.withAdmin(admin)
+		assert.Equal(t, 15*time.Minute, auth.accessTTL, "KOKUMI_TOKEN_TTL must apply (admin=%t)", admin != nil)
+		assert.Equal(t, 8*time.Hour, auth.sessionTTL, "KOKUMI_SESSION_TTL must apply (admin=%t)", admin != nil)
 	}
 	assert.Empty(t, shared.username, "the shared authenticator is not modified")
 }

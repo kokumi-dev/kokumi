@@ -70,29 +70,30 @@ spec:
               auth:
                 description: |-
                   auth configures UI/API authentication. The built-in admin account
-                  (auth.adminUser) and an external OIDC provider (auth.oidc) can be enabled
-                  independently; both may be active at once. When Auth is unset, no identity
-                  provider is configured and the server runs without authentication.
+                  (auth.adminUser, when enabled) and an external OIDC provider (auth.oidc)
+                  may be active at once. With neither, no one can sign in and the API
+                  refuses every request.
                 properties:
                   adminUser:
-                    description: adminUser configures the built-in admin account used
-                      for UI login.
+                    description: |-
+                      adminUser configures the built-in admin account for UI login. It is off
+                      unless enabled.
                     properties:
                       enabled:
-                        default: true
                         description: |-
-                          enabled toggles the admin account. When false, admin login is disabled and
-                          the server falls back to no authentication unless another identity
-                          provider (e.g. OIDC) is configured. Defaults to true.
+                          enabled turns the admin account on. When its Secret does not exist, the
+                          controller then generates a password, writes its bcrypt hash into that
+                          Secret and the password into the Secret "kokumi-initial-admin".
+                          Defaults to false.
                         type: boolean
                       secretRef:
                         default:
                           name: kokumi-server-auth
                         description: |-
-                          secretRef points to the Secret holding the admin credentials. The Secret
-                          must reside in the same namespace as the Kitchen. The recognized key is
-                          "password-hash" (bcrypt hash); "username" may optionally override the
-                          configured username. Defaults to "kokumi-server-auth".
+                          secretRef points to the Secret, in the namespace of the Kitchen, whose
+                          key "password-hash" holds the bcrypt hash of the admin password. While
+                          the account is enabled, the controller creates it with a generated
+                          password when it does not exist. Defaults to "kokumi-server-auth".
                         properties:
                           name:
                             default: ""
@@ -117,7 +118,7 @@ spec:
                     description: |-
                       oidc configures an external OpenID Connect identity provider for UI
                       login. When set, the login page offers an SSO button alongside (or
-                      instead of) the admin account, depending on whether AdminUser is also
+                      instead of) the admin account, depending on whether adminUser is also
                       enabled.
                     properties:
                       clientID:

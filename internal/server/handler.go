@@ -28,9 +28,8 @@ type InfoResponse struct {
 
 // handleInfo handles GET /api/v1/info; authProviders tells the UI how to render
 // login. An empty provider list means the UI shows the login page with a "no
-// login method configured" notice. Without a provider there is no identity,
-// hence no mapped ServiceAccount, hence no data. A non-empty list both selects
-// the login methods and signals that login is required.
+// login method configured" notice, and the API refuses every request. A
+// non-empty list selects the login methods.
 func handleInfo(authMgr *authManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

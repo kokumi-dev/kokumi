@@ -7,6 +7,8 @@ metadata:
   name: default
 spec:
   argoCDURL: "https://localhost:8443"
+  # Turns on the built-in admin account. Its generated password is in the
+  # Secret kokumi/kokumi-initial-admin.
   auth:
     adminUser:
       enabled: true

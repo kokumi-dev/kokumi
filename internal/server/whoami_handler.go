@@ -37,7 +37,7 @@ func handleWhoami(deps *apiDeps, namespace string) http.HandlerFunc {
 		resp := whoamiResponse{Capabilities: []Capability{}, Undetermined: []Capability{}}
 		id := identityFromRequest(r)
 		if id == nil {
-			// Auth disabled: no identity exists, nothing to report.
+			// No identity, nothing to report.
 			respondJSON(w, http.StatusOK, resp)
 			return
 		}

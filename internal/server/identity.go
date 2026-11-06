@@ -57,7 +57,7 @@ func withIdentity(ctx context.Context, id *Identity) context.Context {
 }
 
 // identityFromRequest returns the authenticated identity, or nil when the
-// request is unauthenticated (auth disabled).
+// request carries none, as on a public path.
 func identityFromRequest(r *http.Request) *Identity {
 	id, _ := r.Context().Value(identityContextKey{}).(*Identity)
 	return id
@@ -74,7 +74,7 @@ func withTokenExpiry(ctx context.Context, expires time.Time) context.Context {
 }
 
 // tokenExpiry returns when the request's access token expires; ok is false
-// when the request is unauthenticated (auth disabled).
+// when the request carries none, as on a public path.
 func tokenExpiry(ctx context.Context) (time.Time, bool) {
 	expires, ok := ctx.Value(tokenExpiryContextKey{}).(time.Time)
 	return expires, ok

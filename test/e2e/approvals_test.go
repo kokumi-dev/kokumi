@@ -61,7 +61,7 @@ var _ = Describe("Approvals", Label("approvals"), Serial, func() {
 		})
 
 		It("refuses an approval by the shared admin account, which identifies no person", func() {
-			status, body := approve(server.Login("admin", "admin"))
+			status, body := approve(server.Login("admin", framework.AdminPassword()))
 			Expect(status).To(Equal(http.StatusForbidden), body)
 		})
 

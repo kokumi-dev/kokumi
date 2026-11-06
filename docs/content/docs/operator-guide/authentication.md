@@ -1,7 +1,7 @@
 ---
 title: Authentication
 weight: 1
-description: Configure the built-in admin account, OIDC single sign-on, rotate credentials, and disable login.
+description: Turn on the built-in admin account, configure OIDC single sign-on, rotate credentials, and turn login off.
 ---
 
 Kokumi's web UI and API server require authentication. Two identity providers
@@ -15,24 +15,46 @@ are supported and can be enabled independently:
 
 A fresh installation has no login method. The controller creates the `Kitchen`
 `default` with an empty spec, so the login page shows "No login method is
-configured" and the API denies every request for Kokumi resources with 403.
-Enable the admin account on the Kitchen:
+configured" and the API refuses every request. Turn on the admin account on the
+Kitchen:
 
 ```bash
 kubectl -n kokumi patch kitchen default --type=merge \
   -p '{"spec":{"auth":{"adminUser":{"enabled":true}}}}'
 ```
 
-The controller then creates the [token signing key](#token-signing-key), and
-the server picks up the change without a restart. The installation ships the
-`kokumi-server-auth` Secret with these credentials:
+The controller then creates the [token signing key](#token-signing-key) and,
+as the Secret `kokumi-server-auth` does not exist, generates a password for the
+user `admin`:
 
-| Username | Password |
-| -------- | -------- |
-| `admin`  | `admin`  |
+- `kokumi-server-auth` holds its bcrypt hash under the key `password-hash`.
+- `kokumi-initial-admin` holds the password under the key `password`.
 
-Change the password before any non-development use. Generate a new bcrypt hash
-with `htpasswd` and patch the `kokumi-server-auth` Secret:
+Read the password, then delete `kokumi-initial-admin`. The controller does not
+create it again:
+
+```bash
+kubectl -n kokumi get secret kokumi-initial-admin \
+  -o jsonpath='{.data.password}' | base64 -d; echo
+kubectl -n kokumi delete secret kokumi-initial-admin
+```
+
+The server picks up the change without a restart. To change the username from
+the default `admin`, set `spec.auth.adminUser.username` on the Kitchen (see
+below).
+
+### Your own password
+
+The controller keeps a `kokumi-server-auth` that exists and generates nothing.
+To bring your own password, create the Secret with a bcrypt hash before you
+turn on the admin account:
+
+```bash
+kubectl -n kokumi create secret generic kokumi-server-auth \
+  --from-literal=password-hash="$(htpasswd -nbB admin 'your-password' | cut -d: -f2)"
+```
+
+To change the password later, replace the hash:
 
 ```bash
 kubectl -n kokumi patch secret kokumi-server-auth \
@@ -40,18 +62,16 @@ kubectl -n kokumi patch secret kokumi-server-auth \
   -p "{\"stringData\":{\"password-hash\":\"$(htpasswd -nbB admin 'your-new-password' | cut -d: -f2)\"}}"
 ```
 
-A new password does not end sessions that are already signed in; see
-[Sessions and signing out](#sessions-and-signing-out).
+To get a new generated password instead, delete both Secrets. The controller
+generates a new one at once:
 
-To change the username from the default `admin`, set
-`spec.auth.adminUser.username` on the Kitchen (see below).
+```bash
+kubectl -n kokumi delete secret kokumi-server-auth kokumi-initial-admin --ignore-not-found
+```
 
-The Secret holds these keys:
-
-| Key | Purpose |
-| --- | ------- |
-| `username` | Fallback login name, used only when `spec.auth.adminUser.username` is empty. The Kitchen defaults that field to `admin`, so set the username there. |
-| `password-hash` | bcrypt hash of the password. Required. |
+Admin login stops as soon as `kokumi-server-auth` is gone or holds no
+`password-hash`. A new password does not end sessions that are already signed
+in; see [Sessions and signing out](#sessions-and-signing-out).
 
 ## Token signing key
 
@@ -109,7 +129,7 @@ To change the lifetimes, set these environment variables of the
 | `KOKUMI_TOKEN_TTL` | `5m` | An access token. It never outlives its session. |
 | `KOKUMI_SESSION_TTL` | `24h` | A session, counted from the sign-in. |
 
-Disabling the admin account, changing its password, or removing a user or a
+Turning the admin account off, changing its password, or removing a user or a
 group at the OIDC provider does not end sessions that are already signed in.
 They end with their session at the latest. To end them at once, replace the
 [token signing key](#token-signing-key).
@@ -137,20 +157,15 @@ the server must pass the original `Host` header.
 ## Configuring the admin user
 
 The built-in admin account is configured through the singleton `Kitchen`
-resource (named `default` in the install namespace). The following fields are
-supported under `spec.auth.adminUser`:
+resource (named `default` in the install namespace). It is off unless
+`spec.auth.adminUser.enabled` is `true`. These fields are supported under
+`spec.auth.adminUser`:
 
 | Field | Type | Default | Description |
 | ----- | ---- | ------- | ----------- |
-| `enabled` | `*bool` | `true` | Toggle the admin account. Set to `false` to disable UI login (e.g. once an external identity provider is wired up). |
+| `enabled` | `bool` | `false` | Turns the admin account on. |
 | `username` | `string` | `admin` | Login username. Must not contain whitespace or `/`. |
-| `secretRef` | `LocalObjectReference` | `kokumi-server-auth` | Name of the `Secret` holding the credentials (`password-hash`, and optionally `username`) in the same namespace. |
-
-The defaults apply once the `adminUser` block is present. A Kitchen without
-it has no admin account.
-
-When `secretRef` is omitted, the server uses the default Secret name
-`kokumi-server-auth`.
+| `secretRef` | `LocalObjectReference` | `kokumi-server-auth` | Name of the `Secret`, in the same namespace, whose key `password-hash` holds the bcrypt hash of the password. Created with a generated password when it does not exist. |
 
 Example — custom username backed by a dedicated Secret:
 
@@ -163,6 +178,7 @@ metadata:
 spec:
   auth:
     adminUser:
+      enabled: true
       username: root
       secretRef:
         name: kokumi-admin-creds
@@ -176,31 +192,27 @@ Sessions that are already signed in stay valid; see
 The admin login always acts as the `kokumi-admin` ServiceAccount, which has
 full access to Kokumi resources. See [Authorization](../authorization/).
 
-## Disabling the admin account
+## Turning the admin account off
 
-Set `enabled: false` to turn off the built-in login. This is useful when an
-external identity provider takes over authentication.
+Set `enabled` to `false`, for example once an external identity provider takes
+over authentication. The username and Secret reference stay, so turning the
+account on again, say for an emergency, needs nothing else:
 
-```yaml
-apiVersion: delivery.kokumi.dev/v1alpha1
-kind: Kitchen
-metadata:
-  name: default
-  namespace: kokumi
-spec:
-  auth:
-    adminUser:
-      enabled: false
+```bash
+kubectl -n kokumi patch kitchen default --type=merge \
+  -p '{"spec":{"auth":{"adminUser":{"enabled":false}}}}'
 ```
 
 New admin logins are refused at once. Sessions that are already signed in as
 the admin keep working until their session ends; replace the
-[token signing key](#token-signing-key) to end them at once.
+[token signing key](#token-signing-key) to end them at once. The admin Secrets
+stay; delete them if you do not turn the account on again.
 
 ## OIDC-only (no admin account)
 
-You can run OIDC as the sole identity provider by omitting the `adminUser`
-block entirely. The login page then shows only the SSO button:
+You can run OIDC as the sole identity provider by leaving the admin account
+off: leave out the `adminUser` block, or set `enabled: false`. The login page
+then shows only the SSO button:
 
 ```yaml
 apiVersion: delivery.kokumi.dev/v1alpha1
@@ -215,14 +227,6 @@ spec:
       clientID: kokumi
       clientSecretRef:
         name: kokumi-server-oidc
-```
-
-A merge patch keeps fields it does not name. To remove the block from a
-Kitchen that has it, set it to `null`:
-
-```bash
-kubectl -n kokumi patch kitchen default --type=merge \
-  -p '{"spec":{"auth":{"adminUser":null}}}'
 ```
 
 No admin credentials Secret is needed in this mode; only the OIDC client

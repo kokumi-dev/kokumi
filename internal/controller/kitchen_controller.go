@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -168,9 +169,9 @@ func markSigningKeyFailed(kitchen *deliveryv1alpha1.Kitchen, reason string, err 
 	conditions.MarkFalse(kitchen, deliveryv1alpha1.ConditionTypeReady, reason, err.Error())
 }
 
-// validateAuth ensures the token signing-key Secret and checks that the
-// Secrets of the configured identity providers exist, so that a
-// misconfiguration is visible instead of silently disabling login.
+// validateAuth ensures the token signing-key Secret and the admin Secret, and
+// checks that the OIDC client Secret exists, so that a misconfiguration is
+// visible instead of silently disabling login.
 func (r *KitchenReconciler) validateAuth(ctx context.Context, kitchen *deliveryv1alpha1.Kitchen) error {
 	auth := kitchen.Spec.Auth
 	if auth == nil {
@@ -183,11 +184,11 @@ func (r *KitchenReconciler) validateAuth(ctx context.Context, kitchen *deliveryv
 
 	// secretRefs are defaulted by CRD defaulting, so a missing ref is a
 	// configuration error.
-	if adminUser := auth.AdminUser; adminUser != nil && adminUser.Enabled != nil && *adminUser.Enabled {
+	if adminUser := auth.AdminUser; adminUser != nil && adminUser.Enabled {
 		if adminUser.SecretRef == nil || adminUser.SecretRef.Name == "" {
 			return errors.New("admin credentials secretRef not set")
 		}
-		if err := r.requireSecretKey(ctx, kitchen.Namespace, adminUser.SecretRef.Name, "password-hash"); err != nil {
+		if err := r.ensureAdminSecret(ctx, kitchen.Namespace, adminUser.SecretRef.Name); err != nil {
 			return fmt.Errorf("admin credentials: %w", err)
 		}
 	}
@@ -212,6 +213,66 @@ func (r *KitchenReconciler) requireSecretKey(ctx context.Context, namespace, nam
 		return fmt.Errorf("secret %q missing or incomplete", name)
 	}
 	return nil
+}
+
+// ensureAdminSecret makes sure the admin Secret name holds a password hash.
+// A missing one is created with the hash of the password in the initial
+// admin Secret, which is generated first when it does not exist either. So a
+// reconcile that fails between the two creates keeps the password, and
+// deleting both Secrets resets it.
+func (r *KitchenReconciler) ensureAdminSecret(ctx context.Context, namespace, name string) error {
+	secret := &corev1.Secret{}
+	err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, secret)
+	if err == nil {
+		if len(secret.Data[resources.AdminPasswordHash]) == 0 {
+			return fmt.Errorf("secret %q missing or incomplete", name)
+		}
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return err
+	}
+
+	password, err := r.initialAdminPassword(ctx, namespace)
+	if err != nil {
+		return err
+	}
+	hash, err := bcrypt.GenerateFromPassword(password, bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("hashing the initial admin password: %w", err)
+	}
+	if err := r.Create(ctx, resources.AdminSecret(namespace, name, hash)); err != nil && !apierrors.IsAlreadyExists(err) {
+		return err
+	}
+
+	log.FromContext(ctx).Info("Created admin Secret", "namespace", namespace, "secret", name, "passwordSecret", deliveryv1alpha1.InitialAdminSecretName)
+	return nil
+}
+
+// initialAdminPassword returns the password in the initial admin Secret, and
+// generates that Secret when it does not exist.
+func (r *KitchenReconciler) initialAdminPassword(ctx context.Context, namespace string) ([]byte, error) {
+	name := deliveryv1alpha1.InitialAdminSecretName
+	secret := &corev1.Secret{}
+	err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, secret)
+	if err == nil {
+		if password := secret.Data[resources.InitialAdminPassword]; len(password) > 0 {
+			return password, nil
+		}
+		return nil, fmt.Errorf("secret %q missing or incomplete", name)
+	}
+	if !apierrors.IsNotFound(err) {
+		return nil, err
+	}
+
+	// An AlreadyExists means the cache has not seen the Secret yet; its event
+	// reconciles again.
+	password := []byte(rand.Text())
+	if err := r.Create(ctx, resources.InitialAdminSecret(namespace, password)); err != nil {
+		return nil, err
+	}
+	log.FromContext(ctx).Info("Generated initial admin password", "namespace", namespace, "secret", name)
+	return password, nil
 }
 
 // ensureSigningKeySecret generates the signing key Secret in cosign's layout

@@ -32,6 +32,7 @@ const (
 	testClientID   = "kokumi-client"
 	testClientSec  = "kokumi-client-secret"
 	testKeyID      = "test-key"
+	testIssuerURL  = "https://issuer.example"
 )
 
 // newTestOIDCProvider spins up an in-process OIDC test OP and returns a provider + server.
@@ -253,7 +254,6 @@ func TestAuthManagerReloadWithKitchenOIDC(t *testing.T) {
 	client := fake.NewClientBuilder().WithObjects(&corev1.Secret{
 		Name: testSecret, Namespace: testNS,
 		Data: map[string][]byte{
-			secretKeyUsername:     []byte(testUsername),
 			secretKeyPasswordHash: mustBcrypt(t, testPassword),
 		},
 	}, &corev1.Secret{
@@ -277,12 +277,12 @@ func TestAuthManagerReloadWithKitchenOIDC(t *testing.T) {
 		Spec: deliveryv1alpha1.KitchenSpec{
 			Auth: &deliveryv1alpha1.KitchenAuth{
 				AdminUser: &deliveryv1alpha1.AdminUserConfig{
-					Enabled:   new(true),
+					Enabled:   true,
 					Username:  testUsername,
 					SecretRef: &corev1.LocalObjectReference{Name: testSecret},
 				},
 				OIDC: &deliveryv1alpha1.OIDCConfig{
-					IssuerURL:       "https://issuer.example",
+					IssuerURL:       testIssuerURL,
 					ClientID:        testClientID,
 					ClientSecretRef: &corev1.LocalObjectReference{Name: testOIDCSecret},
 				},
@@ -293,20 +293,14 @@ func TestAuthManagerReloadWithKitchenOIDC(t *testing.T) {
 	// Both resolve: discovery happens at sign-in, so an issuer that cannot be
 	// reached does not hide SSO.
 	assert.ElementsMatch(t, []string{providerAdmin, providerOIDC}, m.providers())
-	assert.False(t, m.disabled)
 
-	// Disable admin and point OIDC at a reachable test OP to confirm it can be the sole provider.
-	disabled := false
+	// Remove the admin account and point OIDC at a reachable test OP to confirm it can be the sole provider.
 	p, httpSrv := newTestOIDCProvider(t)
 	defer httpSrv.Close()
 	oidcKitchen := &deliveryv1alpha1.Kitchen{
 		Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS,
 		Spec: deliveryv1alpha1.KitchenSpec{
 			Auth: &deliveryv1alpha1.KitchenAuth{
-				AdminUser: &deliveryv1alpha1.AdminUserConfig{
-					Enabled:   &disabled,
-					SecretRef: &corev1.LocalObjectReference{Name: testSecret},
-				},
 				OIDC: &deliveryv1alpha1.OIDCConfig{
 					IssuerURL:       httpSrv.URL,
 					ClientID:        testClientID,
@@ -317,7 +311,6 @@ func TestAuthManagerReloadWithKitchenOIDC(t *testing.T) {
 	}
 	m.reload(context.Background(), oidcKitchen)
 	assert.ElementsMatch(t, []string{providerOIDC}, m.providers())
-	assert.False(t, m.disabled)
 	_ = p
 }
 
@@ -393,12 +386,9 @@ func mustBcrypt(t *testing.T, pw string) []byte {
 	return h
 }
 
-// TestHandleLoginForbiddenWhenAdminDisabled verifies OIDC-only mode returns 403 (not 503) on login.
-func TestHandleLoginForbiddenWhenAdminDisabled(t *testing.T) {
+// TestHandleLoginForbiddenWithoutAdmin verifies OIDC-only mode returns 403 (not 503) on login.
+func TestHandleLoginForbiddenWithoutAdmin(t *testing.T) {
 	client := fake.NewClientBuilder().WithObjects(&corev1.Secret{
-		Name: testSecret, Namespace: testNS,
-		Data: map[string][]byte{},
-	}, &corev1.Secret{
 		Name: deliveryv1alpha1.DefaultTokenSigningKeySecretName, Namespace: testNS,
 		Data: map[string][]byte{secretKeySigningKey: []byte("test-signing-key-do-not-use-in-prod")},
 	}, &corev1.Secret{
@@ -412,17 +402,12 @@ func TestHandleLoginForbiddenWhenAdminDisabled(t *testing.T) {
 		ns:        testNS,
 		logger:    logr.Discard(),
 	}
-	disabled := false
 	kitchen := &deliveryv1alpha1.Kitchen{
 		Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS,
 		Spec: deliveryv1alpha1.KitchenSpec{
 			Auth: &deliveryv1alpha1.KitchenAuth{
-				AdminUser: &deliveryv1alpha1.AdminUserConfig{
-					Enabled:   &disabled,
-					SecretRef: &corev1.LocalObjectReference{Name: testSecret},
-				},
 				OIDC: &deliveryv1alpha1.OIDCConfig{
-					IssuerURL:       "https://issuer.example",
+					IssuerURL:       testIssuerURL,
 					ClientID:        testClientID,
 					ClientSecretRef: &corev1.LocalObjectReference{Name: testOIDCSecret},
 				},
@@ -430,10 +415,9 @@ func TestHandleLoginForbiddenWhenAdminDisabled(t *testing.T) {
 		},
 	}
 	m.reload(context.Background(), kitchen)
-	// Admin disabled (token-only authenticator); OIDC is the only provider, so login returns 403.
+	// No admin account (token-only authenticator); OIDC is the only provider, so login returns 403.
 	assert.Equal(t, []string{providerOIDC}, m.providers())
 	assert.False(t, m.adminLoginEnabled())
-	assert.False(t, m.disabled)
 
 	handler := handleLogin(m)
 	r := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/v1/auth/login", strings.NewReader(`{"username":"admin","password":"x"}`))

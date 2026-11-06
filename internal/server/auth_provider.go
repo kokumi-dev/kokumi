@@ -22,7 +22,7 @@ type Session struct {
 
 // IdentityProvider authenticates users and issues/refreshes Sessions. The
 // admin provider and the OIDC provider implement it and can run in parallel
-// (or one can be disabled).
+// (or only one of them).
 type IdentityProvider interface {
 	// Login validates the given credentials and returns a fresh Session.
 	Login(r *http.Request) (*Session, error)

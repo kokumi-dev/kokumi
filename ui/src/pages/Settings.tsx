@@ -19,6 +19,7 @@ import {
   saveSigningSettings,
 } from '../api/client'
 import type {
+  AdminUserSettings,
   AuthSettings,
   ImageMirror,
   ImagesSettings,
@@ -357,13 +358,13 @@ function AuthenticationTab({ auth, onSaved }: { auth?: AuthSettings; onSaved: (s
     groupsClaim: 'groups',
     scopes: 'openid, profile, email',
   }
-  const [adminEnabled, setAdminEnabled] = useState(auth?.adminUser?.enabled ?? true)
+  const [adminEnabled, setAdminEnabled] = useState(auth?.adminUser?.enabled ?? false)
   const [adminUsername, setAdminUsername] = useState(auth?.adminUser?.username ?? adminDefaults.username)
   const [adminSecretRef, setAdminSecretRef] = useState(auth?.adminUser?.secretRef?.name ?? adminDefaults.secretRef)
   // Disabled groups collapse; their field values are retained locally until a
-  // successful save. On save with a group disabled, only the enabled flag is
-  // persisted (the CRD's kubebuilder defaults refill the omitted fields
-  // server-side), and the local fields reset to defaults — mirroring the CR.
+  // successful save. A disabled admin account is saved as enabled: false with
+  // the username and Secret the CR holds; a disabled OIDC group is saved as
+  // absent. Either way the local fields then mirror the CR.
   const [oidcEnabled, setOidcEnabled] = useState(auth?.oidc != null)
   const [oidcIssuer, setOidcIssuer] = useState(auth?.oidc?.issuerURL ?? oidcDefaults.issuer)
   const [oidcClientID, setOidcClientID] = useState(auth?.oidc?.clientID ?? oidcDefaults.clientID)
@@ -385,9 +386,9 @@ function AuthenticationTab({ auth, onSaved }: { auth?: AuthSettings; onSaved: (s
     if (savedTimer.current) clearTimeout(savedTimer.current)
   }, [])
 
-  function resetAdminFields() {
-    setAdminUsername(adminDefaults.username)
-    setAdminSecretRef(adminDefaults.secretRef)
+  function resetAdminFields(saved?: AdminUserSettings) {
+    setAdminUsername(saved?.username ?? adminDefaults.username)
+    setAdminSecretRef(saved?.secretRef?.name ?? adminDefaults.secretRef)
   }
 
   function resetOidcFields() {
@@ -402,7 +403,7 @@ function AuthenticationTab({ auth, onSaved }: { auth?: AuthSettings; onSaved: (s
 
   function toggleAdmin(enabled: boolean) {
     // Values are kept (hidden only) so an off→on flip without saving restores
-    // them; clearing to defaults happens on save while disabled.
+    // them; saving while off keeps what the CR holds and drops unsaved edits.
     setAdminEnabled(enabled)
     setSaved(false)
   }
@@ -446,19 +447,20 @@ function AuthenticationTab({ auth, onSaved }: { auth?: AuthSettings; onSaved: (s
     }
     setError(null)
     setSubmitting(true)
-    // Disabled admin account: only the flag is persisted. username/secretRef
-    // are omitted and the CRD's kubebuilder defaults refill them server-side.
     const next: AuthSettings = {
-      adminUser: adminEnabled
-        ? {
-            enabled: true,
-            username: adminUsername.trim(),
-            secretRef: { name: adminSecretRef.trim() },
-          }
-        : { enabled: false },
       tokenSigningKeySecretRef: { name: tokenSecretRef.trim() },
     }
-    // Toggled-off OIDC is persisted as absence of the oidc object.
+    if (adminEnabled) {
+      next.adminUser = {
+        enabled: true,
+        username: adminUsername.trim(),
+        secretRef: { name: adminSecretRef.trim() },
+      }
+    } else if (auth?.adminUser) {
+      // Turning the admin off keeps its username and Secret for next time.
+      next.adminUser = { ...auth.adminUser, enabled: false }
+    }
+    // A toggled-off OIDC group is persisted as absence of its object.
     if (oidcEnabled) {
       next.oidc = {
         issuerURL: oidcIssuer.trim().replace(/\/$/, ''),
@@ -472,9 +474,9 @@ function AuthenticationTab({ auth, onSaved }: { auth?: AuthSettings; onSaved: (s
     }
     saveAuthSettings(next)
       .then((s) => {
-        // The CR now holds defaults for disabled groups — mirror that locally
-        // so re-enabling shows defaults, not the discarded values.
-        if (!adminEnabled) resetAdminFields()
+        // Mirror the CR for disabled groups, so re-enabling shows what it
+        // holds, not discarded edits.
+        if (!adminEnabled) resetAdminFields(s.auth?.adminUser)
         if (!oidcEnabled) resetOidcFields()
         setSaved(true)
         savedTimer.current = setTimeout(() => setSaved(false), 2000)
@@ -535,6 +537,12 @@ function AuthenticationTab({ auth, onSaved }: { auth?: AuthSettings; onSaved: (s
                     onChange={(e) => { setAdminSecretRef(e.target.value); setSaved(false) }}
                   />
                 </div>
+                <p className={styles.fieldHint}>
+                  Holds the bcrypt hash of the admin password (key
+                  "password-hash"). When missing, it is created with a
+                  generated password, which the Secret "kokumi-initial-admin"
+                  holds until you delete it.
+                </p>
               </>
             )}
           </div>
