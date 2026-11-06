@@ -357,6 +357,7 @@ function AuthenticationTab({ auth, onSaved }: { auth?: AuthSettings; onSaved: (s
     emailClaim: 'email',
     groupsClaim: 'groups',
     scopes: 'openid, profile, email',
+    signOutAtProvider: false,
   }
   const [adminEnabled, setAdminEnabled] = useState(auth?.adminUser?.enabled ?? false)
   const [adminUsername, setAdminUsername] = useState(auth?.adminUser?.username ?? adminDefaults.username)
@@ -373,6 +374,7 @@ function AuthenticationTab({ auth, onSaved }: { auth?: AuthSettings; onSaved: (s
   const [emailClaim, setEmailClaim] = useState(auth?.oidc?.emailClaim ?? oidcDefaults.emailClaim)
   const [groupsClaim, setGroupsClaim] = useState(auth?.oidc?.groupsClaim ?? oidcDefaults.groupsClaim)
   const [scopes, setScopes] = useState(auth?.oidc?.scopes?.join(', ') ?? oidcDefaults.scopes)
+  const [signOutAtProvider, setSignOutAtProvider] = useState(auth?.oidc?.providerSignOut === 'Always')
   const [tokenSecretRef, setTokenSecretRef] = useState(auth?.tokenSigningKeySecretRef?.name ?? 'kokumi-server-tokens')
 
   const [saved, setSaved] = useState(false)
@@ -399,6 +401,7 @@ function AuthenticationTab({ auth, onSaved }: { auth?: AuthSettings; onSaved: (s
     setEmailClaim(oidcDefaults.emailClaim)
     setGroupsClaim(oidcDefaults.groupsClaim)
     setScopes(oidcDefaults.scopes)
+    setSignOutAtProvider(oidcDefaults.signOutAtProvider)
   }
 
   function toggleAdmin(enabled: boolean) {
@@ -470,6 +473,7 @@ function AuthenticationTab({ auth, onSaved }: { auth?: AuthSettings; onSaved: (s
         emailClaim: emailClaim.trim(),
         groupsClaim: groupsClaim.trim(),
         scopes: scopes.split(',').map((s) => s.trim()).filter(Boolean),
+        providerSignOut: signOutAtProvider ? 'Always' : 'Never',
       }
     }
     saveAuthSettings(next)
@@ -653,6 +657,23 @@ function AuthenticationTab({ auth, onSaved }: { auth?: AuthSettings; onSaved: (s
                   />
                   <span className={styles.fieldHint}>Comma-separated</span>
                 </div>
+
+                <div className={styles.fieldRow}>
+                  <label className={styles.fieldLabel} htmlFor="oidc-provider-sign-out">Provider sign-out</label>
+                  <Toggle
+                    id="oidc-provider-sign-out"
+                    checked={signOutAtProvider}
+                    disabled={submitting}
+                    label="Signing out of Kokumi also signs out of the provider"
+                    onChange={(value) => { setSignOutAtProvider(value); setSaved(false) }}
+                  />
+                </div>
+                <p className={styles.fieldHint}>
+                  Off, signing out ends only the Kokumi session: the user stays signed in to the provider and its other
+                  apps, and the next sign-in uses that session. On, Kokumi also ends the provider session where the
+                  provider supports it, and the next sign-in in that browser asks the provider for the user&apos;s
+                  credentials again.
+                </p>
               </>
             )}
           </div>

@@ -360,7 +360,33 @@ type OIDCConfig struct {
 	// +kubebuilder:validation:items:MaxLength=256
 	// +listType=atomic
 	Scopes []string `json:"scopes,omitempty"`
+
+	// providerSignOut says whether signing out of Kokumi also signs the user
+	// out of the provider. Never, the default, ends only the Kokumi session,
+	// so the user stays signed in to the provider and the other apps that use
+	// it, and the next sign-in uses that session. Always also ends the
+	// provider session, where the provider offers RP-initiated logout, and
+	// makes the next sign-in in that browser ask the provider to authenticate
+	// the user again.
+	// +kubebuilder:default=Never
+	// +optional
+	ProviderSignOut ProviderSignOut `json:"providerSignOut,omitempty"`
 }
+
+// ProviderSignOut says whether signing out of Kokumi also signs the user out
+// of the OIDC provider.
+// +kubebuilder:validation:Enum=Never;Always
+type ProviderSignOut string
+
+const (
+	// ProviderSignOutNever ends only the Kokumi session.
+	ProviderSignOutNever ProviderSignOut = "Never"
+	// ProviderSignOutAlways also ends the session at the provider, through
+	// the end_session_endpoint of its discovery document (OpenID Connect
+	// RP-Initiated Logout), and asks the provider to authenticate the user
+	// again (max_age=0) at the next sign-in.
+	ProviderSignOutAlways ProviderSignOut = "Always"
+)
 
 // KitchenStatus defines the observed state of Kitchen.
 type KitchenStatus struct {

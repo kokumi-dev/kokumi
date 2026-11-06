@@ -545,7 +545,11 @@ export interface OIDCSettings {
   emailClaim?: string
   groupsClaim?: string
   scopes?: string[]
+  /** Whether signing out of Kokumi also signs the user out of the provider. */
+  providerSignOut?: ProviderSignOut
 }
+
+export type ProviderSignOut = 'Never' | 'Always'
 
 export interface AuthSettings {
   adminUser?: AdminUserSettings

@@ -34,13 +34,13 @@ const (
 	// maxIDTokenCookieLen is the longest ID token kept in a cookie; browsers
 	// drop cookies larger than 4096 bytes.
 	maxIDTokenCookieLen = 4000
-	// oidcPromptCookie is set by a sign-out and makes the next sign-in ask
-	// the provider to authenticate the user again (prompt=login), instead of
-	// signing them back in with the provider's own session.
-	oidcPromptCookie = "kokumi.oidc.prompt"
-	// oidcPromptCookieMaxAge keeps the prompt cookie until the next sign-in;
-	// 400 days is the longest lifetime browsers allow.
-	oidcPromptCookieMaxAge = 400 * 24 * 60 * 60
+	// oidcReauthCookie is set by a sign-out at the provider and makes the
+	// next sign-in ask the provider to authenticate the user again
+	// (max_age=0), in case the provider session outlives the sign-out.
+	oidcReauthCookie = "kokumi.oidc.reauth"
+	// oidcReauthCookieMaxAge keeps the re-authentication cookie until the
+	// next sign-in; 400 days is the longest lifetime browsers allow.
+	oidcReauthCookieMaxAge = 400 * 24 * 60 * 60
 	// secretKeyClientSecret is the key within the OIDC Secret that holds the client secret.
 	secretKeyClientSecret = "client-secret"
 	// oidcDiscoveryTimeout bounds one discovery request to the issuer.
@@ -63,7 +63,10 @@ type oidcProvider struct {
 	usernameClaim string
 	emailClaim    string
 	groupsClaim   string
-	auth          *authenticator
+	// signOutAtProvider is providerSignOut Always: signing out of Kokumi
+	// also signs the user out of the provider.
+	signOutAtProvider bool
+	auth              *authenticator
 }
 
 // oidcIssuer discovers an issuer on first use and keeps the result. A failure
@@ -142,12 +145,13 @@ func buildOIDCProvider(
 	}
 
 	return &oidcProvider{
-		issuer:        &oidcIssuer{url: cfg.IssuerURL},
-		oauth:         oauth,
-		usernameClaim: cfg.UsernameClaim,
-		emailClaim:    defaultString(cfg.EmailClaim, "email"),
-		groupsClaim:   defaultString(cfg.GroupsClaim, "groups"),
-		auth:          auth,
+		issuer:            &oidcIssuer{url: cfg.IssuerURL},
+		oauth:             oauth,
+		usernameClaim:     cfg.UsernameClaim,
+		emailClaim:        defaultString(cfg.EmailClaim, "email"),
+		groupsClaim:       defaultString(cfg.GroupsClaim, "groups"),
+		signOutAtProvider: cfg.ProviderSignOut == v1alpha1.ProviderSignOutAlways,
+		auth:              auth,
 	}, nil
 }
 
@@ -228,9 +232,11 @@ func (p *oidcProvider) endSessionURL(r *http.Request, idToken string) (string, e
 }
 
 // handleOIDCStart generates a CSRF state + PKCE verifier, stores them in a cookie,
-// and redirects to the issuer's authorization endpoint, with prompt=login after
-// a sign-out. An issuer that cannot be reached sends the browser back to the
-// login page.
+// and redirects to the issuer's authorization endpoint. After a sign-out at
+// the provider it sends max_age=0, which OIDC Core defines as equivalent to
+// prompt=login; unlike prompt=login, a provider that does not support it
+// ignores it instead of refusing the request. An issuer that cannot be
+// reached sends the browser back to the login page.
 func handleOIDCStart(m *authManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p := m.getOIDC()
@@ -260,8 +266,8 @@ func handleOIDCStart(m *authManager) http.HandlerFunc {
 		opts := []oauth2.AuthCodeOption{
 			oauth2.S256ChallengeOption(verifier),
 		}
-		if _, err := r.Cookie(oidcPromptCookie); err == nil {
-			opts = append(opts, oauth2.SetAuthURLParam("prompt", "login"))
+		if _, err := r.Cookie(oidcReauthCookie); err == nil {
+			opts = append(opts, oauth2.SetAuthURLParam("max_age", "0"))
 		}
 		http.Redirect(w, r, oauth.AuthCodeURL(state, opts...), http.StatusFound)
 	}
@@ -279,6 +285,8 @@ func handleOIDCCallback(m *authManager) http.HandlerFunc {
 		}
 		q := r.URL.Query()
 		if errCode := q.Get("error"); errCode != "" {
+			// A refused request must not hold up every later sign-in.
+			clearCookie(w, r, oidcReauthCookie, oidcCookiePath)
 			respondError(w, http.StatusBadRequest, fmt.Sprintf("oidc error: %s", errCode))
 			return
 		}
@@ -353,7 +361,7 @@ func handleOIDCCallback(m *authManager) http.HandlerFunc {
 			clearCookie(w, r, oidcIDTokenCookie, oidcIDTokenCookiePath)
 		}
 		// The user has signed in at the provider, so a sign-out before this one is done with.
-		clearCookie(w, r, oidcPromptCookie, oidcCookiePath)
+		clearCookie(w, r, oidcReauthCookie, oidcCookiePath)
 		// Redirect to the app root with the access token in the fragment (never sent to the server).
 		target := "/#access_token=" + url.QueryEscape(session.AccessToken)
 		http.Redirect(w, r, target, http.StatusFound)

@@ -139,16 +139,24 @@ They end with their session at the latest. To end them at once, replace the
 - The server expires the refresh cookie. It does not revoke tokens: an access
   token copied before the sign-out works until it expires, which is why access
   tokens are short-lived.
-- An OIDC session also ends at the provider when the provider supports
-  [RP-initiated logout](https://openid.net/specs/openid-connect-rpinitiated-1_0.html),
-  that is, when its discovery document has an `end_session_endpoint`. The
-  browser goes there, and the provider sends it back to the UI. Register the
-  post-logout redirect URI described in
-  [OIDC single sign-on](#oidc-single-sign-on).
-- The next "Sign in with SSO" in this browser asks the provider to
-  authenticate the user again (`prompt=login`). A provider session that
-  outlives the sign-out, for example at a provider without RP-initiated
-  logout such as Dex, then does not sign the user back in without asking.
+- For an OIDC session, `spec.auth.oidc.providerSignOut` decides whether the
+  user is also signed out of the provider:
+  - `Never`, the default, ends only the Kokumi session. The user stays signed
+    in to the provider and to the other apps that use it, and the next "Sign
+    in with SSO" uses that session without asking for credentials. Keep it for
+    a provider that other apps share, such as a company's.
+  - `Always` also ends the session at the provider when the provider supports
+    [RP-initiated logout](https://openid.net/specs/openid-connect-rpinitiated-1_0.html),
+    that is, when its discovery document has an `end_session_endpoint`. The
+    browser goes there, and the provider sends it back to the UI. Register the
+    post-logout redirect URI described in
+    [OIDC single sign-on](#oidc-single-sign-on). The next "Sign in with SSO"
+    in this browser asks the provider to authenticate the user again
+    (`max_age=0`), in case the provider session outlives the sign-out: at a
+    provider without RP-initiated logout, such as Dex, or when the user
+    cancels the provider's confirmation. A provider that ignores `max_age`
+    signs the user in without asking. Use `Always` for a provider that serves
+    only Kokumi.
 
 Another site cannot sign a user in or out: the server refuses state-changing
 requests that a browser sends from another origin. A reverse proxy in front of
@@ -257,9 +265,10 @@ Register this redirect URI with the provider:
 https://<kokumi host>/api/v1/auth/oidc/callback
 ```
 
-If the provider supports RP-initiated logout, also register the UI's root as a
-post-logout redirect URI, which some providers call a sign-out redirect URI.
-The provider sends the browser there after signing the user out:
+With `providerSignOut: Always` and a provider that supports RP-initiated
+logout, also register the UI's root as a post-logout redirect URI, which some
+providers call a sign-out redirect URI. The provider sends the browser there
+after signing the user out:
 
 ```text
 https://<kokumi host>/
@@ -283,6 +292,7 @@ OIDC is configured under `spec.auth.oidc` on the singleton `Kitchen` resource:
 | `emailClaim` | `string` | `email` | ID-token claim matched against `kokumi.dev/identity-email`. Supports dotted nested paths. |
 | `groupsClaim` | `string` | `groups` | ID-token claim holding the user's groups, a list of strings, matched against `kokumi.dev/identity-groups`. Supports dotted nested paths (e.g. `realm_access.roles` for Keycloak). |
 | `scopes` | `[]string` | `["openid","profile","email"]` | OAuth2 scopes requested during the flow (max 16). |
+| `providerSignOut` | `string` | `Never` | `Never` or `Always`: whether signing out of Kokumi also signs the user out of the provider. See [Sessions and signing out](#sessions-and-signing-out). |
 
 The default scopes do not request groups. The built-in ServiceAccounts match
 by group (see [Authorization](../authorization/#built-in-serviceaccounts)), so

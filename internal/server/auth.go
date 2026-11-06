@@ -462,10 +462,11 @@ type logoutResponse struct {
 
 // handleLogout ends the session in this browser by expiring its cookies,
 // also while authentication cannot be resolved. Tokens are not revoked: a
-// copied access token works until it expires. An OIDC session also ends at
-// the provider when it offers RP-initiated logout: the response carries the
-// provider's end-session URL. Either way the next SSO sign-in asks the
-// provider to authenticate the user again, in case its session outlives this.
+// copied access token works until it expires. With providerSignOut Always,
+// an OIDC session also ends at the provider when it offers RP-initiated
+// logout: the response carries the provider's end-session URL. The next SSO
+// sign-in then asks the provider to authenticate the user again, in case its
+// session outlives this, as it does at a provider without RP-initiated logout.
 func handleLogout(m *authManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var idToken string
@@ -481,11 +482,11 @@ func handleLogout(m *authManager) http.HandlerFunc {
 		clearCookie(w, r, oidcIDTokenCookie, oidcIDTokenCookiePath)
 
 		p := m.getOIDC()
-		if !oidcSession || p == nil {
+		if !oidcSession || p == nil || !p.signOutAtProvider {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		setCookie(w, r, oidcPromptCookie, "login", oidcCookiePath, oidcPromptCookieMaxAge)
+		setCookie(w, r, oidcReauthCookie, "1", oidcCookiePath, oidcReauthCookieMaxAge)
 		endSessionURL, err := p.endSessionURL(r, idToken)
 		if err != nil {
 			m.logger.Error(err, "Could not build the OIDC end-session URL")

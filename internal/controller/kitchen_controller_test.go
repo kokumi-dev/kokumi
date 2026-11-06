@@ -404,6 +404,47 @@ func cosignKeyData(password string) map[string][]byte {
 	}
 }
 
+var _ = Describe("Kitchen OIDC sign-out", func() {
+	ctx := context.Background()
+
+	BeforeEach(func() {
+		ns := &corev1.Namespace{Name: testNamespace}
+		if err := k8sClient.Create(ctx, ns); err != nil && !errors.IsAlreadyExists(err) {
+			Expect(err).NotTo(HaveOccurred())
+		}
+	})
+
+	AfterEach(func() {
+		_ = k8sClient.Delete(ctx, &deliveryv1alpha1.Kitchen{
+			Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace,
+		})
+	})
+
+	oidcKitchen := func(signOut deliveryv1alpha1.ProviderSignOut) *deliveryv1alpha1.Kitchen {
+		return &deliveryv1alpha1.Kitchen{
+			Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace,
+			Spec: deliveryv1alpha1.KitchenSpec{
+				Auth: &deliveryv1alpha1.KitchenAuth{
+					OIDC: &deliveryv1alpha1.OIDCConfig{
+						IssuerURL:       "https://sso.example.com",
+						ClientID:        "kokumi",
+						ProviderSignOut: signOut,
+					},
+				},
+			},
+		}
+	}
+
+	It("signs out only of Kokumi by default", func() {
+		Expect(k8sClient.Create(ctx, oidcKitchen(""))).To(Succeed())
+		Expect(getKitchen(ctx).Spec.Auth.OIDC.ProviderSignOut).To(Equal(deliveryv1alpha1.ProviderSignOutNever))
+	})
+
+	It("rejects an unknown mode", func() {
+		Expect(k8sClient.Create(ctx, oidcKitchen("Ask"))).To(MatchError(ContainSubstring("Unsupported value")))
+	})
+})
+
 var _ = Describe("Kitchen signing key", func() {
 	ctx := context.Background()
 
