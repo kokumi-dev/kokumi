@@ -200,7 +200,7 @@ oidc: ## Install local Dex OIDC (sidecar in kokumi-server) and wire Kitchen auth
 		--from-literal=client-secret=kokumi-local-client-secret \
 		--dry-run=client -o yaml | "$(KUBECTL)" apply -f -
 	"$(KUBECTL)" -n kokumi patch kitchen default --type=merge \
-		-p '{"spec":{"auth":{"adminUser":{"enabled":true},"oidc":{"issuerURL":"http://localhost:5556","clientID":"kokumi","scopes":["openid","profile","email","groups"]}}}}'
+		-p '{"spec":{"auth":{"adminUser":{"enabled":true},"oidc":{"issuerURL":"http://localhost:5556","clientID":"kokumi","scopes":["openid","profile","email","groups","offline_access"]}}}}'
 
 .PHONY: argocd
 argocd: kustomize ## Installs Argo CD in the cluster

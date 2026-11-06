@@ -120,11 +120,43 @@ func (s *Server) Login(username, password string) string {
 
 var formAction = regexp.MustCompile(`<form[^>]*action="([^"]*)"`)
 
-// LoginOIDC signs in through OIDC as a user of Dex's password database, as a
+// LoginOIDC signs in through OIDC as SignInOIDC does and returns the access
+// token.
+func (s *Server) LoginOIDC(email, password string) string {
+	return s.SignInOIDC(email, password).Token
+}
+
+// Browser is a browser signed in to the API server: the access token the UI
+// holds, and the cookies the server set.
+type Browser struct {
+	Token  string
+	client *http.Client
+}
+
+// Refresh exchanges the browser's refresh cookie for a new access token, as
+// the UI does, reporting whether the user was active. It returns the status
+// of the response, and keeps the new access token on success.
+func (b *Browser) Refresh(active bool) int {
+	body, err := json.Marshal(map[string]bool{"active": active})
+	Expect(err).NotTo(HaveOccurred())
+	resp, err := b.client.Post("http://"+serverAddress+"/api/v1/auth/refresh", "application/json", bytes.NewReader(body))
+	Expect(err).NotTo(HaveOccurred())
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode == http.StatusOK {
+		var session struct {
+			Token string `json:"token"`
+		}
+		Expect(json.NewDecoder(resp.Body).Decode(&session)).To(Succeed())
+		b.Token = session.Token
+	}
+	return resp.StatusCode
+}
+
+// SignInOIDC signs in through OIDC as a user of Dex's password database, as a
 // browser would: it starts the flow at the API server, submits the user's
 // credentials to Dex's login form and follows the redirects back to the API
 // server, which hands the access token to the UI in the URL fragment.
-func (s *Server) LoginOIDC(email, password string) string {
+func (s *Server) SignInOIDC(email, password string) *Browser {
 	jar, err := cookiejar.New(nil)
 	Expect(err).NotTo(HaveOccurred())
 	var token string
@@ -155,7 +187,7 @@ func (s *Server) LoginOIDC(email, password string) string {
 	Expect(err).NotTo(HaveOccurred())
 	_ = resp.Body.Close()
 	Expect(token).NotTo(BeEmpty(), "The OIDC login of %s ended without an access token, at %s", email, resp.Request.URL)
-	return token
+	return &Browser{Token: token, client: &http.Client{Jar: jar, Transport: s.transport, Timeout: 30 * time.Second}}
 }
 
 // Do sends a request with a JSON body, unless body is nil, to the API server,

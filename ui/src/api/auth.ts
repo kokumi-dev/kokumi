@@ -11,12 +11,79 @@ const TOKEN_KEY = 'kokumi.token'
 // while it is set no tab resumes the session from the cookie.
 const SIGN_OUT_KEY = 'kokumi.signOut'
 
+// The server ends a session after a time without user activity (its idle
+// limit). A refresh reports whether the user was active, which moves that
+// deadline; background renewals of an open but unattended tab do not.
+//
+// LAST_INPUT_KEY holds the time of the last user input in any tab, written at
+// most every INPUT_WRITE_INTERVAL_MS. LAST_REPORT_KEY holds when a refresh in
+// any tab last reported activity. Input within ACTIVE_WINDOW_MS counts as
+// activity, and input after ACTIVE_WINDOW_MS without a report refreshes at
+// once, so a user who comes back to a tab moves the deadline before it passes.
+// The window bounds how far the deadline can trail the last input, at the cost
+// of at most one refresh per window while the user is active.
+const LAST_INPUT_KEY = 'kokumi.lastInput'
+const LAST_REPORT_KEY = 'kokumi.lastActivityReport'
+const INPUT_WRITE_INTERVAL_MS = 15_000
+const ACTIVE_WINDOW_MS = 60_000
+
+// REFRESH_LOCK serializes refreshes across tabs, so two tabs never redeem the
+// same refresh token; the waiting tab sends the cookies the first one received.
+const REFRESH_LOCK = 'kokumi.refresh'
+
 let token: string | null = sessionStorage.getItem(TOKEN_KEY)
 const listeners = new Set<() => void>()
+let lastInput = 0
+let lastInputWrite = 0
+let lastReportAttempt = 0
 
 // A sign-out in another tab ends the session in this one too.
 window.addEventListener('storage', (event) => {
   if (event.key === SIGN_OUT_KEY && event.newValue !== null) setToken(null)
+})
+
+function readTime(key: string): number {
+  try {
+    return Number(localStorage.getItem(key)) || 0
+  } catch {
+    return 0
+  }
+}
+
+function writeTime(key: string, time: number): void {
+  try {
+    localStorage.setItem(key, String(time))
+  } catch {
+    // Storage may be unavailable; activity then counts in this tab only.
+  }
+}
+
+/** The time of the last user input in any tab. */
+function lastInputAt(): number {
+  return Math.max(lastInput, readTime(LAST_INPUT_KEY))
+}
+
+function recordInput(): void {
+  const now = Date.now()
+  lastInput = now
+  if (now - lastInputWrite >= INPUT_WRITE_INTERVAL_MS) {
+    lastInputWrite = now
+    writeTime(LAST_INPUT_KEY, now)
+  }
+  // Report a return to an idle session at once, before its deadline passes;
+  // at most once per window, also when the report fails.
+  const lastReport = Math.max(readTime(LAST_REPORT_KEY), lastReportAttempt)
+  if (token !== null && now - lastReport > ACTIVE_WINDOW_MS) {
+    lastReportAttempt = now
+    void refresh()
+  }
+}
+
+for (const type of ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart']) {
+  window.addEventListener(type, recordInput, { capture: true, passive: true })
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') recordInput()
 })
 
 function signOutPending(): boolean {
@@ -26,6 +93,8 @@ function signOutPending(): boolean {
 /** Stores the token of a new sign-in, which ends a pending sign-out. */
 function startSession(next: string): void {
   localStorage.removeItem(SIGN_OUT_KEY)
+  // A sign-in starts the idle deadline, as a report of activity does.
+  writeTime(LAST_REPORT_KEY, Date.now())
   setToken(next)
 }
 
@@ -157,8 +226,9 @@ export async function login(username: string, password: string): Promise<void> {
 /**
  * Silently exchanges the HttpOnly refresh cookie for a new access token. Used
  * both proactively (before expiry) and reactively (after a 401). On success
- * the new access token is stored; on failure the token is cleared so the app
- * returns to the login screen.
+ * the new access token is stored. When the server ends the session the token
+ * is cleared so the app returns to the login screen; a network error or a 5xx,
+ * such as an OIDC provider that cannot be reached, keeps it for a retry.
  *
  * Concurrent callers (the proactive timer, the SSE reconnect handler, and the
  * 401 retry path) share a single in-flight refresh via refreshInFlight, so a
@@ -183,15 +253,29 @@ export async function refresh(): Promise<boolean> {
 }
 
 async function doRefresh(): Promise<boolean> {
+  // Missing outside a secure context; tabs then refresh on their own.
+  const locks: LockManager | undefined = navigator.locks
+  return locks ? locks.request(REFRESH_LOCK, exchangeRefreshToken) : exchangeRefreshToken()
+}
+
+async function exchangeRefreshToken(): Promise<boolean> {
+  if (signOutPending()) return false
+  const sentAt = Date.now()
+  const active = sentAt - lastInputAt() < ACTIVE_WINDOW_MS
   try {
     const res = await fetch('/api/v1/auth/refresh', {
       method: 'POST',
       // Send cookies (the refresh token) with the request.
       credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active }),
     })
+    // The server or the OIDC provider cannot be reached right now; the
+    // session may well be valid, so keep the token and retry later.
+    if (res.status >= 500) return false
     if (!res.ok) {
-      // The server rejected the refresh token (invalid/expired) — the session
-      // is genuinely over, so clear the access token and return to login.
+      // The server ended the session (signed out, idle, expired, or refused
+      // by the OIDC provider), so clear the access token and return to login.
       setToken(null)
       return false
     }
@@ -199,6 +283,7 @@ async function doRefresh(): Promise<boolean> {
     // A sign-out started while this refresh was on its way: the new token
     // must not resume the session.
     if (signOutPending()) return false
+    if (active) writeTime(LAST_REPORT_KEY, sentAt)
     setToken(data.token)
     return true
   } catch {

@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -314,7 +313,7 @@ func TestOIDCMiddlewareAcceptsIssuedToken(t *testing.T) {
 	handler := mgr.middleware(next)
 
 	const testOIDCUser = "admin@example.com"
-	session, err := p.auth.startSession(&Identity{Subject: testOIDCUser, Email: testOIDCUser, Provider: providerOIDC})
+	session, err := p.auth.startSession(&Identity{Subject: testOIDCUser, Email: testOIDCUser, Provider: providerOIDC}, newSessionState(time.Now()))
 	require.NoError(t, err)
 	require.NotEmpty(t, session.AccessToken)
 
@@ -338,7 +337,7 @@ func TestRefreshPreservesSubject(t *testing.T) {
 		Groups:   []string{"devops"},
 		Provider: providerOIDC,
 	}
-	signedIn, err := auth.startSession(origID)
+	signedIn, err := auth.startSession(origID, newSessionState(time.Now()))
 	require.NoError(t, err)
 
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", nil)
@@ -349,9 +348,9 @@ func TestRefreshPreservesSubject(t *testing.T) {
 
 	var resp loginResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	newID, _, err := auth.parseToken(resp.Token, accessTokenType)
+	got, err := auth.parseToken(resp.Token, accessTokenType)
 	require.NoError(t, err)
-	assert.Equal(t, origID, newID, "refresh must preserve the full OIDC identity")
+	assert.Equal(t, origID, got.identity, "refresh must preserve the full OIDC identity")
 }
 
 func mustBcrypt(t *testing.T, pw string) []byte {
@@ -562,36 +561,7 @@ func TestAuthManagerReloadKeepsDiscoveredIssuer(t *testing.T) {
 // advertises RP-initiated logout at /logout.
 func newFakeIssuer(t *testing.T, endSession bool) *httptest.Server {
 	t.Helper()
-	priv, err := rsa.GenerateKey(rand.Reader, 2048)
-	require.NoError(t, err)
-	op := &oidctest.Server{
-		PublicKeys: []oidctest.PublicKey{{PublicKey: priv.Public(), KeyID: testKeyID, Algorithm: oidc.RS256}},
-	}
-	var srv *httptest.Server
-	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.URL.Path == "/token":
-			now := time.Now()
-			claims := fmt.Sprintf(`{"iss":%q,"aud":%q,"sub":"user-1","email":"user@example.com","iat":%d,"exp":%d}`,
-				srv.URL, testClientID, now.Unix(), now.Add(time.Hour).Unix())
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"access_token": "upstream-access-token", "token_type": "Bearer", "expires_in": 3600,
-				"id_token": oidctest.SignIDToken(priv, testKeyID, oidc.RS256, claims),
-			})
-		case r.URL.Path == "/.well-known/openid-configuration" && endSession:
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"issuer": srv.URL, "authorization_endpoint": srv.URL + "/auth", "token_endpoint": srv.URL + "/token",
-				"jwks_uri": srv.URL + "/keys", "end_session_endpoint": srv.URL + "/logout",
-				"id_token_signing_alg_values_supported": []string{oidc.RS256},
-			})
-		default:
-			op.ServeHTTP(w, r)
-		}
-	}))
-	t.Cleanup(srv.Close)
-	op.SetIssuer(srv.URL)
-	return srv
+	return newFakeProvider(t, func(p *fakeProvider) { p.endSession = endSession }).Server
 }
 
 // signInOIDC runs the sign-in flow against mgr with the browser's cookies
@@ -635,7 +605,7 @@ func TestOIDCSignOutEndsTheSessionAtTheProvider(t *testing.T) {
 
 	signedIn := signInOIDC(t, mgr)
 	refresh := cookieNamed(t, signedIn, refreshCookieName)
-	assert.InDelta(t, defaultSessionTTL.Seconds(), refresh.MaxAge, 2, "the session lasts sessionTTL")
+	assert.InDelta(t, defaultSessionIdleTTL.Seconds(), refresh.MaxAge, 2, "the refresh cookie lasts until the idle deadline")
 	idToken := cookieNamed(t, signedIn, oidcIDTokenCookie)
 	assert.Equal(t, oidcIDTokenCookiePath, idToken.Path, "only the sign-out reads the ID token")
 	assert.True(t, idToken.HttpOnly)
@@ -722,7 +692,7 @@ func TestAdminSignOutStaysLocalWithOIDCConfigured(t *testing.T) {
 	issuer := newFakeIssuer(t, true)
 	p := newOIDCProviderFor(t, issuer.URL, deliveryv1alpha1.ProviderSignOutAlways)
 	mgr := &authManager{auth: p.auth, oidc: p, logger: logr.Discard()}
-	s, err := p.auth.startSession(&Identity{Subject: testUsername, Provider: providerAdmin})
+	s, err := p.auth.startSession(&Identity{Subject: testUsername, Provider: providerAdmin}, newSessionState(time.Now()))
 	require.NoError(t, err)
 
 	w := signOut(mgr, &http.Cookie{Name: refreshCookieName, Value: s.RefreshToken})

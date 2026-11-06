@@ -67,6 +67,8 @@ type oidcProvider struct {
 	// also signs the user out of the provider.
 	signOutAtProvider bool
 	auth              *authenticator
+	// noRefreshToken logs once that the provider issues no refresh tokens.
+	noRefreshToken sync.Once
 }
 
 // oidcIssuer discovers an issuer on first use and keeps the result. A failure
@@ -345,18 +347,28 @@ func handleOIDCCallback(m *authManager) http.HandlerFunc {
 			return
 		}
 		id.Issuer = idToken.Issuer
-		session, err := p.auth.startSession(id)
+		signIn := newSessionState(time.Now())
+		sealedRefresh := p.keepRefreshToken(m, token, signIn)
+		if sealedRefresh != "" {
+			signIn.IDPCheck = nextProviderCheck(signIn.AuthTime, token, idToken)
+		}
+		session, err := p.auth.startSession(id, signIn)
 		if err != nil {
 			m.logger.Error(err, "Failed to issue OIDC session")
 			respondError(w, http.StatusInternalServerError, "failed to issue session")
 			return
 		}
 		// Set the refresh cookie now; the access token is delivered via the fragment for the SPA to hold in memory.
-		setRefreshCookie(w, r, session.RefreshToken, session.ExpiresAt)
+		setRefreshCookie(w, r, session.RefreshToken, session.RefreshExpiresAt)
+		if sealedRefresh != "" {
+			setProviderTokenCookie(w, r, sealedRefresh, session.RefreshExpiresAt)
+		} else {
+			clearCookie(w, r, providerTokenCookie, refreshCookiePath)
+		}
 		// Keep the ID token as the hint of the sign-out at the provider. One
 		// too large for a cookie is left out; the sign-out then names only the client.
 		if len(rawID) <= maxIDTokenCookieLen {
-			setCookie(w, r, oidcIDTokenCookie, rawID, oidcIDTokenCookiePath, maxAgeUntil(session.ExpiresAt))
+			setCookie(w, r, oidcIDTokenCookie, rawID, oidcIDTokenCookiePath, maxAgeUntil(p.auth.sessionEnd(signIn)))
 		} else {
 			clearCookie(w, r, oidcIDTokenCookie, oidcIDTokenCookiePath)
 		}
@@ -366,6 +378,28 @@ func handleOIDCCallback(m *authManager) http.HandlerFunc {
 		target := "/#access_token=" + url.QueryEscape(session.AccessToken)
 		http.Redirect(w, r, target, http.StatusFound)
 	}
+}
+
+// keepRefreshToken seals the provider's refresh token of the token response
+// for the provider token cookie of session s, or returns "" when there is
+// none to keep. The session is then not checked at the provider.
+func (p *oidcProvider) keepRefreshToken(m *authManager, token *oauth2.Token, s sessionState) string {
+	if token.RefreshToken == "" {
+		p.noRefreshToken.Do(func() {
+			m.logger.Info("OIDC provider issued no refresh token; sessions are not checked at the provider",
+				"hint", "add the scope offline_access to spec.auth.oidc.scopes")
+		})
+		return ""
+	}
+	sealed, err := p.auth.sealProviderToken(providerToken{RefreshToken: token.RefreshToken, SessionID: s.ID})
+	if err == nil && len(sealed) > maxProviderTokenCookieLen {
+		err = fmt.Errorf("the sealed refresh token has %d bytes, more than a cookie holds", len(sealed))
+	}
+	if err != nil {
+		m.logger.Error(err, "Could not keep the OIDC provider's refresh token; the session is not checked at the provider")
+		return ""
+	}
+	return sealed
 }
 
 // extractClaim reads a non-empty string claim by name or dotted path (see

@@ -3,9 +3,13 @@ import { RouterProvider } from 'react-router/dom'
 import Login from './pages/Login'
 import { router } from './routes/router'
 import { AppContext, type AppInfo, type Viewer } from './appContext'
-import { logout, onAuthChange, refresh, getTokenTTL, isAuthed, consumeFragmentToken } from './api/auth'
+import { logout, onAuthChange, refresh, getToken, getTokenTTL, isAuthed, consumeFragmentToken } from './api/auth'
 import { getWhoAmI } from './api/client'
 import { mergeCapabilities, type Capability } from './api/capabilities'
+
+// REFRESH_RETRY_MS is how long the UI waits before it retries a refresh that
+// failed without ending the session.
+const REFRESH_RETRY_MS = 30_000
 
 interface Info {
   name: string
@@ -87,20 +91,25 @@ function App() {
   }, [ready, info])
 
   // Proactively refresh the access token shortly before it expires, so the SSE
-  // dashboard stream and API calls never hit a 401.
+  // dashboard stream and API calls never hit a 401. A refresh that fails while
+  // the token is kept, such as while the server or the OIDC provider cannot be
+  // reached, is retried after REFRESH_RETRY_MS.
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null
+    const refreshAfter = (delayMs: number) => {
+      timer = setTimeout(() => {
+        void refresh().then((ok) => {
+          if (ok) schedule()
+          else if (getToken() !== null) refreshAfter(REFRESH_RETRY_MS)
+        })
+      }, delayMs)
+    }
     const schedule = () => {
       const ttl = getTokenTTL()
       if (ttl <= 0) return
       // Refresh at 80% of the remaining lifetime, leaving a comfortable margin
       // for latency. getTokenTTL derives this from the token's exp claim.
-      const delayMs = Math.max(1000, Math.floor(ttl * 800))
-      timer = setTimeout(() => {
-        void refresh().then((ok) => {
-          if (ok) schedule()
-        })
-      }, delayMs)
+      refreshAfter(Math.max(1000, Math.floor(ttl * 800)))
     }
     schedule()
     const unsub = onAuthChange(() => {

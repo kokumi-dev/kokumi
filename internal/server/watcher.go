@@ -124,6 +124,7 @@ func startK8sWatcher(
 	lifetimes := tokenLifetimes{
 		access:  durationEnv(getenv, "KOKUMI_TOKEN_TTL"),
 		session: durationEnv(getenv, "KOKUMI_SESSION_TTL"),
+		idle:    durationEnv(getenv, "KOKUMI_SESSION_IDLE_TTL"),
 	}
 
 	// Build the auth manager up front so it is never nil when cache handlers fire.

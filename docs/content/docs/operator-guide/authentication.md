@@ -113,13 +113,22 @@ For a Secret you manage yourself, for example through GitOps, replace its
 
 ## Sessions and signing out
 
-A sign-in starts a session that lasts 24 hours. It issues an access token,
-valid for five minutes, and a refresh token in the HttpOnly cookie
-`kokumi.refresh`, which expires with the session. The UI exchanges the refresh
-token for a new access token before the old one expires. Every exchange issues
-a new refresh token, but none extends the session: 24 hours after signing in,
-the user signs in again. The cookies are marked `Secure` only when the request
-arrived over TLS or carries `X-Forwarded-Proto: https`.
+A sign-in starts a session. It issues an access token, valid for five
+minutes, and a refresh token in the HttpOnly cookie `kokumi.refresh`. The UI
+exchanges the refresh token for a new access token before the old one
+expires, and every exchange issues a new refresh token. A session ends:
+
+- **After an hour without activity.** Activity is user input, such as a click,
+  a key press or switching to a Kokumi tab, in any tab of the browser. An open
+  tab nobody uses keeps renewing its access token, so live views stay up to
+  date, but it does not extend the session.
+- **24 hours after the sign-in**, however active the user is.
+- **When the OIDC provider ends it**, for an OIDC session that the provider
+  checks (see [OIDC single sign-on](#oidc-single-sign-on)).
+
+The refresh cookie expires when the session would end without further
+activity. The cookies are marked `Secure` only when the request arrived over
+TLS or carries `X-Forwarded-Proto: https`.
 
 To change the lifetimes, set these environment variables of the
 `kokumi-server` Deployment to a Go duration, such as `15m` or `8h`:
@@ -127,18 +136,23 @@ To change the lifetimes, set these environment variables of the
 | Variable | Default | Lifetime of |
 | -------- | ------- | ----------- |
 | `KOKUMI_TOKEN_TTL` | `5m` | An access token. It never outlives its session. |
-| `KOKUMI_SESSION_TTL` | `24h` | A session, counted from the sign-in. |
+| `KOKUMI_SESSION_TTL` | `24h` | A session, counted from the sign-in. A change applies to running sessions too. |
+| `KOKUMI_SESSION_IDLE_TTL` | `1h` | A session without activity. A value of at least `KOKUMI_SESSION_TTL` turns the limit off. |
 
-Turning the admin account off, changing its password, or removing a user or a
-group at the OIDC provider does not end sessions that are already signed in.
-They end with their session at the latest. To end them at once, replace the
-[token signing key](#token-signing-key).
+Turning the admin account off or changing its password does not end sessions
+that are already signed in, and neither does a change at an OIDC provider that
+does not check its sessions. They end with their session at the latest. To end
+them at once, replace the [token signing key](#token-signing-key).
 
 "Sign out" in the UI ends the session in this browser, in all of its tabs:
 
-- The server expires the refresh cookie. It does not revoke tokens: an access
-  token copied before the sign-out works until it expires, which is why access
-  tokens are short-lived.
+- The server expires the refresh cookie. It does not revoke Kokumi's tokens:
+  an access token copied before the sign-out works until it expires, which is
+  why access tokens are short-lived.
+- For an OIDC session that the provider checks, the server also revokes the
+  provider's refresh token, if the provider offers token revocation
+  ([RFC 7009](https://datatracker.ietf.org/doc/html/rfc7009)). A copy of the
+  session's cookies then fails at its next check.
 - For an OIDC session, `spec.auth.oidc.providerSignOut` decides whether the
   user is also signed out of the provider:
   - `Never`, the default, ends only the Kokumi session. The user stays signed
@@ -248,11 +262,30 @@ authorization-code flow (with PKCE). After the provider authenticates the
 user, Kokumi mints its own session tokens, so that upstream tokens are never
 stored on the server.
 
-The session keeps the subject, email and groups of the ID token. Refreshing it
-does not contact the provider again, so a change at the provider, such as a
-removed group, takes effect at the next sign-in, at the latest when the
-session ends (see [Sessions and signing out](#sessions-and-signing-out)). A
-change to the ServiceAccount mapping takes effect at the next request.
+The session keeps the subject, email and groups of the ID token. A change to
+the ServiceAccount mapping takes effect at the next request.
+
+When the provider issues a refresh token at the sign-in, Kokumi asks the
+provider again whether the user stays signed in, each time the provider's
+access token expires, with the lifetime the provider sets:
+
+- Kokumi keeps the provider's refresh token in the encrypted HttpOnly cookie
+  `kokumi.oidc.refresh`, bound to its session, and redeems it at the provider.
+  The server stores nothing.
+- The provider's answer updates the session's email, groups and username, so a
+  removed group takes effect within one provider token lifetime.
+- When the provider refuses the refresh token (`invalid_grant`), for example
+  because the user was deactivated or deleted, the Kokumi session ends.
+- While the provider cannot be reached, the session goes on until its access
+  token expires; then requests fail until the provider answers again.
+
+Most providers issue a refresh token only for the scope `offline_access`. Add
+it to `scopes` to have sessions checked; without a refresh token the server
+logs once that sessions are not checked, and a change at the provider takes
+effect at the next sign-in. A refresh token from `offline_access` usually
+outlives the user's session at the provider, so the check notices a
+deactivated user or a changed group, but a sign-out elsewhere only at a
+provider whose refresh tokens end with its session.
 
 > **Authorization.** OIDC only authenticates. What a user may do is decided by
 > the ServiceAccounts their identity maps to, by subject, email or groups. A
@@ -297,7 +330,8 @@ OIDC is configured under `spec.auth.oidc` on the singleton `Kitchen` resource:
 The default scopes do not request groups. The built-in ServiceAccounts match
 by group (see [Authorization](../authorization/#built-in-serviceaccounts)), so
 add the scope your provider needs to put groups into the ID token, such as
-`groups` for Dex.
+`groups` for Dex, and `offline_access` to have sessions checked at the
+provider.
 
 Create the client-secret Secret:
 
@@ -322,5 +356,5 @@ spec:
       clientSecretRef:
         name: kokumi-server-oidc
       usernameClaim: email
-      scopes: ["openid", "profile", "email", "groups"]
+      scopes: ["openid", "profile", "email", "groups", "offline_access"]
 ```
