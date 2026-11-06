@@ -24,6 +24,7 @@ import (
 	"github.com/oras-project/oras-go/v3/registry/remote/auth"
 	"github.com/oras-project/oras-go/v3/registry/remote/credentials"
 	"github.com/oras-project/oras-go/v3/registry/remote/errcode"
+	"github.com/oras-project/oras-go/v3/registry/remote/properties"
 	"github.com/oras-project/oras-go/v3/registry/remote/retry"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -95,9 +96,11 @@ func (c *ORASClient) newRepository(ref string) (*remote.Repository, error) {
 
 // newAuthClient returns an auth client that sends cred to host. Like
 // auth.DefaultClient, which anonymous clients use, it caches tokens and
-// retries rate-limited and failed requests. It keeps the distribution token
-// flow for username/password credentials; oras-go v3 would otherwise default
-// to the OAuth2 password grant, which not every registry serves.
+// retries rate-limited and failed requests. It uses the distribution token
+// flow for username/password credentials, which every registry serves. The
+// oras-go default tries the OAuth2 password grant first and falls back only
+// when the token server answers 400, 401, 404 or 405, which costs a round
+// trip per realm and fails against a token server that answers otherwise.
 func newAuthClient(httpClient *http.Client, host string, cred credentials.Credential) *auth.Client {
 	client := &auth.Client{
 		Client: httpClient,
@@ -106,8 +109,8 @@ func newAuthClient(httpClient *http.Client, host string, cred credentials.Creden
 	}
 	if cred != credentials.EmptyCredential {
 		host = CanonicalHost(host)
-		client.CredentialFunc = func(_ context.Context, hostport string) (credentials.Credential, error) {
-			if CanonicalHost(hostport) != host {
+		client.CredentialFunc = func(_ context.Context, resource properties.Resource) (credentials.Credential, error) {
+			if CanonicalHost(resource.Registry) != host {
 				return credentials.EmptyCredential, nil
 			}
 			return cred, nil
@@ -203,11 +206,12 @@ func (c *ORASClient) pingAnonymous(ctx context.Context, host string) error {
 //     targetDir/chart.tgz, wherever it is among the layers (Helm places the
 //     provenance layer before or after it)
 //   - FluxContentMediaType:    extracts the layer's tar archive into targetDir
-//     (Flux layers carry no io.deis.oras.content.unpack annotation, so ORAS
-//     would otherwise store them as a raw blob)
+//     (Flux layers carry no ORAS unpack annotation, so ORAS would otherwise
+//     store them as a raw blob)
 //   - anything else:           uses oras.Copy with a file store, which unpacks
-//     layers annotated with io.deis.oras.content.unpack (e.g. ORAS "file"
-//     artifacts) and otherwise stores raw blobs
+//     layers annotated with file.AnnotationUnpack or its legacy
+//     io.deis.oras.content.unpack key (e.g. ORAS "file" artifacts) and
+//     otherwise stores raw blobs
 //
 // The first return value is the layer media type (empty string for non-Helm artifacts).
 // The third return value is the manifest annotations map (may be nil/empty).

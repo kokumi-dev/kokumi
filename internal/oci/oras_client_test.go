@@ -24,6 +24,8 @@ import (
 	"github.com/oras-project/oras-go/v3/registry/remote/auth"
 	"github.com/oras-project/oras-go/v3/registry/remote/credentials"
 	"github.com/oras-project/oras-go/v3/registry/remote/errcode"
+	"github.com/oras-project/oras-go/v3/registry/remote/properties"
+	"github.com/oras-project/oras-go/v3/registry/remote/retry"
 	"github.com/stretchr/testify/require"
 )
 
@@ -243,6 +245,31 @@ func TestNewClient_sendsCredentialOnlyToItsHost(t *testing.T) {
 	require.Error(t, NewClient(Options{Host: "registry.example.com", Credential: cred, PlainHTTP: true}).Ping(context.Background(), host),
 		"a credential for another host is not sent")
 	require.Error(t, NewClient(Options{PlainHTTP: true}).Ping(context.Background(), host), "anonymous")
+}
+
+func TestNewAuthClient_matchesTheCanonicalRegistry(t *testing.T) {
+	const private = "registry.example.com:5000"
+	cred := credentials.Credential{Username: testUsername, Password: testPassword}
+	for _, tc := range []struct {
+		host, registry string
+		sent           bool
+	}{
+		{host: dockerHubHost, registry: dockerHubHost, sent: true},
+		{host: "index.docker.io", registry: dockerHubHost, sent: true},
+		{host: "registry-1.docker.io", registry: dockerHubHost, sent: true},
+		{host: "Registry.Example.com:5000", registry: private, sent: true},
+		{host: private, registry: "registry.example.com:5001", sent: false},
+		{host: private, registry: dockerHubHost, sent: false},
+	} {
+		client := newAuthClient(retry.DefaultClient, tc.host, cred)
+		got, err := client.CredentialFunc(context.Background(), properties.Resource{Registry: tc.registry, Path: "app"})
+		require.NoError(t, err)
+		want := credentials.EmptyCredential
+		if tc.sent {
+			want = cred
+		}
+		require.Equal(t, want, got, "client for %s, request to %s", tc.host, tc.registry)
+	}
 }
 
 func TestPing_anonymous(t *testing.T) {

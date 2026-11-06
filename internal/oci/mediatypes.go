@@ -4,8 +4,9 @@ package oci
 const HelmChartLayerMediaType = "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
 
 // FluxContentMediaType is the Flux OCI media type for a kustomize/manifest
-// content layer. Unlike ORAS "file" artifacts, Flux layers carry no
-// io.deis.oras.content.unpack annotation, so they must be extracted explicitly.
+// content layer. Unlike ORAS "file" artifacts, Flux layers carry no ORAS
+// unpack annotation (file.AnnotationUnpack), so they must be extracted
+// explicitly.
 const FluxContentMediaType = "application/vnd.cncf.flux.content.v1.tar+gzip"
 
 // ImageLayerMediaType is the media type of the single layer of an artifact
