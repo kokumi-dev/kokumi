@@ -1,5 +1,5 @@
 import { useCallback, useSyncExternalStore } from 'react'
-import { withAccessToken, refresh, onAuthChange, getToken } from '../api/auth'
+import { withAccessToken, refresh, onAuthChange, getToken, getTokenTTL } from '../api/auth'
 
 /** The SSE event types the server streams on /api/v1/events. */
 export type SSEEventType =
@@ -40,13 +40,21 @@ const RETRY_MAX_MS = 30_000
 // after the server pod went away, so it is closed and reconnected.
 const STALE_AFTER_MS = 40_000
 
+// The server ends a stream when the access token it was opened with expires.
+// The stream is reopened with the newest token this long before, so it has no
+// gap; not at every renewal, because the server replays every snapshot to a
+// new stream.
+const RENEW_BEFORE_MS = 30_000
+
 // One EventSource per tab, shared by every hook. The server sends all event
 // types on one connection, in a fixed order, so a single stream delivers
 // related lists in step and costs one connection instead of one per hook.
 let source: EventSource | null = null
-// The access token the stream was opened with; the server ends the stream
-// when it expires.
+// The access token the stream was opened with, and when to reopen the stream
+// with a newer one.
 let sourceToken: string | null = null
+let renewAt = 0
+let renewTimer: ReturnType<typeof setTimeout> | undefined
 let closeTimer: ReturnType<typeof setTimeout> | undefined
 // Set from a stream error until the reconnect, so subscribers that mount in
 // between wait for it instead of connecting on their own.
@@ -99,12 +107,35 @@ function watch(es: EventSource): void {
   )
 }
 
+/**
+ * Reopens the stream with a newer access token once its own is about to
+ * expire. Without a newer token yet, the next one reopens it (onAuthChange).
+ */
+function renew(): void {
+  if (source === null || Date.now() < renewAt) return
+  const token = getToken()
+  if (token === null || token === sourceToken) return
+  source.close()
+  connect()
+}
+
+/** Calls renew at renewAt; as in watch, a timer that fires early waits again. */
+function scheduleRenew(): void {
+  clearTimeout(renewTimer)
+  renewTimer = setTimeout(() => {
+    if (Date.now() < renewAt) scheduleRenew()
+    else renew()
+  }, renewAt - Date.now())
+}
+
 function connect(): void {
   // EventSource cannot set an Authorization header, so the token is passed
   // as a query parameter, which the server also accepts.
   const es = new EventSource(withAccessToken(ENDPOINT))
   source = es
   sourceToken = getToken()
+  renewAt = Date.now() + getTokenTTL() * 1000 - RENEW_BEFORE_MS
+  scheduleRenew()
   lastSeen = Date.now()
   watch(es)
 
@@ -140,6 +171,7 @@ function fail(es: EventSource): void {
   es.close()
   if (source !== es) return
   clearTimeout(watchdog)
+  clearTimeout(renewTimer)
   source = null
   reconnecting = true
   void refresh().then(() => {
@@ -159,6 +191,7 @@ function disconnect(): void {
   clearTimeout(retryTimer)
   retryTimer = undefined
   clearTimeout(watchdog)
+  clearTimeout(renewTimer)
   reconnecting = false
   retries = 0
   source?.close()
@@ -172,16 +205,11 @@ function disconnect(): void {
 }
 
 // Logging out ends the stream and drops data visible to the previous user. A
-// renewed token reopens the stream before the server ends it with the old
-// one; the server replays its snapshots, so the values stay.
+// renewed token reopens the stream only when the stream's own token is about
+// to expire (renew); the server replays its snapshots, so the values stay.
 onAuthChange(() => {
-  const token = getToken()
-  if (!token) {
-    disconnect()
-  } else if (source && token !== sourceToken) {
-    source.close()
-    connect()
-  }
+  if (!getToken()) disconnect()
+  else renew()
 })
 
 function subscribe(type: SSEEventType, listener: () => void): () => void {
