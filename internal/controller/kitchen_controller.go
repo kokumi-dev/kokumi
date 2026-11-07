@@ -22,12 +22,15 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -70,7 +73,7 @@ type KitchenReconciler struct {
 // +kubebuilder:rbac:groups=delivery.kokumi.dev,resources=kitchens/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
-// Reconcile ensures the signing key and the auth Secrets of the Kitchen and
+// Reconcile ensures the signing key and the auth objects of the Kitchen and
 // records its readiness.
 //
 // The Kitchen is a self-healing singleton: a missing object is recreated so
@@ -108,28 +111,22 @@ func (r *KitchenReconciler) Reconcile(ctx context.Context, req ctrl.Request) (re
 	return r.reconcileKitchen(ctx, kitchen)
 }
 
-// reconcileKitchen loads the signing key and checks the auth Secrets. The
-// Kitchen is ready once both are usable.
+// reconcileKitchen reconciles the signing key and the auth objects. Sign-in
+// does not use the signing key, so the auth objects are ensured whether or not
+// the key is ready. The Kitchen is ready once both are.
 func (r *KitchenReconciler) reconcileKitchen(ctx context.Context, kitchen *deliveryv1alpha1.Kitchen) (ctrl.Result, error) {
-	ready, err := r.reconcileSigningKey(ctx, kitchen)
-	if !ready || err != nil {
-		return ctrl.Result{}, err
-	}
-
-	if err := r.validateAuth(ctx, kitchen); err != nil {
-		// A change to the Kitchen or its Secrets reconciles again.
-		conditions.MarkFalse(kitchen, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonFailed, err.Error())
-		return ctrl.Result{}, nil
-	}
-
-	conditions.MarkTrue(kitchen, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonReady, "Kitchen is valid and available")
-	return ctrl.Result{}, nil
+	keyErr := r.reconcileSigningKey(ctx, kitchen)
+	// A change to the Kitchen or its Secrets reconciles again.
+	authErr := r.reconcileAuth(ctx, kitchen)
+	markReady(kitchen, authErr)
+	return ctrl.Result{}, keyErr
 }
 
 // reconcileSigningKey generates the signing key when it does not exist,
-// reloads the signing state, and publishes the public key. It reports whether
-// the key is ready.
-func (r *KitchenReconciler) reconcileSigningKey(ctx context.Context, kitchen *deliveryv1alpha1.Kitchen) (bool, error) {
+// reloads the signing state, publishes the public key, and records in the
+// SigningKeyReady condition whether the key is ready. An error means the
+// Kitchen must be reconciled again.
+func (r *KitchenReconciler) reconcileSigningKey(ctx context.Context, kitchen *deliveryv1alpha1.Kitchen) error {
 	// The key is loaded even when generating it failed, so that a deleted key
 	// is no longer used.
 	generateErr := r.ensureSigningKeySecret(ctx)
@@ -137,14 +134,14 @@ func (r *KitchenReconciler) reconcileSigningKey(ctx context.Context, kitchen *de
 	state, err := r.Signing.Load(ctx)
 	if err != nil {
 		if !errors.Is(err, signing.ErrKeyNotReady) {
-			return false, errors.Join(generateErr, err)
+			return errors.Join(generateErr, err)
 		}
 		if generateErr != nil {
 			// Neither the key's namespace nor its RBAC is watched, so the
 			// error requeues the Kitchen to retry.
 			err := fmt.Errorf("generating signing key Secret: %w", generateErr)
 			markSigningKeyFailed(kitchen, deliveryv1alpha1.ReasonKeyMissing, err)
-			return false, err
+			return err
 		}
 		reason := deliveryv1alpha1.ReasonKeyInvalid
 		if errors.Is(err, signing.ErrInvalidTrustedKey) {
@@ -152,13 +149,13 @@ func (r *KitchenReconciler) reconcileSigningKey(ctx context.Context, kitchen *de
 		}
 		log.FromContext(ctx).Error(err, "Could not load signing key")
 		markSigningKeyFailed(kitchen, reason, err)
-		return false, nil
+		return nil
 	}
 
 	keyID := state.Signer.KeyID()
 	kitchen.Status.Signing = &deliveryv1alpha1.KitchenSigningStatus{KeyID: keyID, PublicKey: string(state.Signer.PublicKeyPEM())}
 	conditions.MarkTrue(kitchen, deliveryv1alpha1.ConditionTypeSigningKeyReady, deliveryv1alpha1.ReasonKeyReady, "Signing key "+keyID+" loaded")
-	return true, nil
+	return nil
 }
 
 // markSigningKeyFailed records that the signing key cannot be used, for
@@ -166,13 +163,41 @@ func (r *KitchenReconciler) reconcileSigningKey(ctx context.Context, kitchen *de
 // verify.
 func markSigningKeyFailed(kitchen *deliveryv1alpha1.Kitchen, reason string, err error) {
 	conditions.MarkFalse(kitchen, deliveryv1alpha1.ConditionTypeSigningKeyReady, reason, err.Error())
-	conditions.MarkFalse(kitchen, deliveryv1alpha1.ConditionTypeReady, reason, err.Error())
 }
 
-// validateAuth ensures the token signing-key Secret and the admin Secret, and
-// checks that the OIDC client Secret exists, so that a misconfiguration is
-// visible instead of silently disabling login.
-func (r *KitchenReconciler) validateAuth(ctx context.Context, kitchen *deliveryv1alpha1.Kitchen) error {
+// markReady sets the Ready condition of kitchen: True when the signing key is
+// ready and authErr is nil, else False naming every failure. The reason is
+// the signing key's when it failed, else Failed.
+func markReady(kitchen *deliveryv1alpha1.Kitchen, authErr error) {
+	var reason string
+	var failures []string
+	switch key := apimeta.FindStatusCondition(kitchen.Status.Conditions, deliveryv1alpha1.ConditionTypeSigningKeyReady); {
+	case key == nil:
+		// Only a read error before the key was ever loaded leaves no
+		// condition; it requeues.
+		reason, failures = deliveryv1alpha1.ReasonSigningKeyNotReady, []string{"signing key not loaded yet"}
+	case key.Status != metav1.ConditionTrue:
+		reason, failures = key.Reason, []string{key.Message}
+	}
+	if authErr != nil {
+		if reason == "" {
+			reason = deliveryv1alpha1.ReasonFailed
+		}
+		failures = append(failures, authErr.Error())
+	}
+
+	if len(failures) == 0 {
+		conditions.MarkTrue(kitchen, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonReady, "Kitchen is valid and available")
+		return
+	}
+	conditions.MarkFalse(kitchen, deliveryv1alpha1.ConditionTypeReady, reason, strings.Join(failures, "; "))
+}
+
+// reconcileAuth ensures the auth objects: the token signing-key Secret, the
+// record of ended sessions and the admin Secret. It checks that the OIDC
+// client Secret exists, so that a misconfiguration is visible instead of
+// silently disabling login.
+func (r *KitchenReconciler) reconcileAuth(ctx context.Context, kitchen *deliveryv1alpha1.Kitchen) error {
 	auth := kitchen.Spec.Auth
 	if auth == nil {
 		return nil
