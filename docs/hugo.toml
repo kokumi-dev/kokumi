@@ -20,7 +20,7 @@ enableGitInfo = true
 
 [params]
   # The release the docs install, and apply the examples from.
-  kokumiVersion = "0.17.0" # x-release-please-version
+  kokumiVersion = "0.18.0" # x-release-please-version
   # The Argo CD release the docs install.
   argoCDVersion = "v3.5.1"
   repository = "https://github.com/kokumi-dev/kokumi"
