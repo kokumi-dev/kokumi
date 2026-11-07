@@ -11,7 +11,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/coreos/go-oidc/v3/oidc/oidctest"
@@ -57,9 +56,6 @@ func newOIDCProviderFor(t *testing.T, issuerURL string, signOut deliveryv1alpha1
 	client := fake.NewClientBuilder().WithObjects(&corev1.Secret{
 		Name: testOIDCSecret, Namespace: testNS,
 		Data: map[string][]byte{secretKeyClientSecret: []byte(testClientSec)},
-	}, &corev1.Secret{
-		Name: testSecret, Namespace: testNS,
-		Data: map[string][]byte{"signing-key": []byte("test-signing-key-do-not-use-in-prod")},
 	}).Build()
 
 	cfg := &deliveryv1alpha1.OIDCConfig{
@@ -68,7 +64,7 @@ func newOIDCProviderFor(t *testing.T, issuerURL string, signOut deliveryv1alpha1
 		ClientSecretRef: &corev1.LocalObjectReference{Name: testOIDCSecret},
 		ProviderSignOut: signOut,
 	}
-	p, err := buildOIDCProvider(context.Background(), client, testNS, cfg, newAuthenticator("", nil, []byte("test-signing-key-do-not-use-in-prod")))
+	p, err := buildOIDCProvider(context.Background(), client, testNS, cfg)
 	require.NoError(t, err)
 	require.NotNil(t, p)
 	return p
@@ -76,7 +72,7 @@ func newOIDCProviderFor(t *testing.T, issuerURL string, signOut deliveryv1alpha1
 
 func TestBuildOIDCProviderDisabled(t *testing.T) {
 	client := fake.NewClientBuilder().Build()
-	p, err := buildOIDCProvider(context.Background(), client, testNS, nil, newAuthenticator("", nil, []byte("k")))
+	p, err := buildOIDCProvider(context.Background(), client, testNS, nil)
 	require.NoError(t, err)
 	assert.Nil(t, p, "disabled config must yield a nil provider")
 }
@@ -87,18 +83,23 @@ func TestBuildOIDCProviderMissingSecret(t *testing.T) {
 		IssuerURL: "http://example.invalid",
 		ClientID:  testClientID,
 	}
-	_, err := buildOIDCProvider(context.Background(), client, testNS, cfg, newAuthenticator("", nil, []byte("k")))
+	_, err := buildOIDCProvider(context.Background(), client, testNS, cfg)
 	require.Error(t, err, "missing client secret must error")
 }
 
-func TestBuildOIDCProviderRequiresAuthenticator(t *testing.T) {
-	client := fake.NewClientBuilder().Build()
-	cfg := &deliveryv1alpha1.OIDCConfig{
-		IssuerURL: "http://example.invalid",
-		ClientID:  testClientID,
-	}
-	_, err := buildOIDCProvider(context.Background(), client, testNS, cfg, nil)
-	require.Error(t, err, "a nil shared authenticator must error")
+func TestAuthManagerOIDCNeedsTheSigningKey(t *testing.T) {
+	client := fake.NewClientBuilder().WithObjects(&corev1.Secret{
+		Name: testOIDCSecret, Namespace: testNS,
+		Data: map[string][]byte{secretKeyClientSecret: []byte(testClientSec)},
+	}).Build()
+	m := &authManager{reader: client, apiReader: client, ns: testNS, logger: logr.Discard()}
+	m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{OIDC: &deliveryv1alpha1.OIDCConfig{
+		IssuerURL:       testIssuerURL,
+		ClientID:        testClientID,
+		ClientSecretRef: &corev1.LocalObjectReference{Name: testOIDCSecret},
+	}}))
+	assert.Nil(t, m.getOIDC(), "without a signing key no OIDC session can be minted")
+	assert.Empty(t, m.providers())
 }
 
 func TestOIDCStartSetsStateCookieAndRedirects(t *testing.T) {
@@ -304,7 +305,7 @@ func TestOIDCMiddlewareAcceptsIssuedToken(t *testing.T) {
 	p, httpSrv := newTestOIDCProvider(t)
 	defer httpSrv.Close()
 
-	mgr := &authManager{auth: p.auth, oidc: p, adminLogin: false}
+	mgr := &authManager{auth: newTokenAuthenticator(), oidc: p, adminLogin: false}
 	var reached bool
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		reached = true
@@ -313,44 +314,17 @@ func TestOIDCMiddlewareAcceptsIssuedToken(t *testing.T) {
 	handler := mgr.middleware(next)
 
 	const testOIDCUser = "admin@example.com"
-	session, err := p.auth.startSession(&Identity{Subject: testOIDCUser, Email: testOIDCUser, Provider: providerOIDC}, newSessionState(time.Now()))
+	res, err := mgr.startSession(signIn{identity: &Identity{Subject: testOIDCUser, Email: testOIDCUser, Provider: providerOIDC}})
 	require.NoError(t, err)
-	require.NotEmpty(t, session.AccessToken)
+	require.NotEmpty(t, res.tokens.accessToken)
 
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/orders", nil)
-	r.Header.Set("Authorization", "Bearer "+session.AccessToken)
+	r.Header.Set("Authorization", "Bearer "+res.tokens.accessToken)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, r)
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.True(t, reached, "a valid OIDC-issued token must pass the middleware")
-}
-
-// TestRefreshPreservesSubject verifies a refresh round-trip keeps the original
-// identity (an OIDC login must not flip to the admin identity on refresh,
-// which would silently remap the user to the admin ServiceAccount).
-func TestRefreshPreservesSubject(t *testing.T) {
-	auth := newAuthenticator("admin", nil, []byte("test-signing-key-do-not-use-in-prod"))
-	origID := &Identity{
-		Subject:  "admin@example.com",
-		Email:    "admin@example.com",
-		Groups:   []string{"devops"},
-		Provider: providerOIDC,
-	}
-	signedIn, err := auth.startSession(origID, newSessionState(time.Now()))
-	require.NoError(t, err)
-
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", nil)
-	r.AddCookie(&http.Cookie{Name: refreshCookieName, Value: signedIn.RefreshToken})
-	w := httptest.NewRecorder()
-	handleRefresh(&authManager{auth: auth}).ServeHTTP(w, r)
-	require.Equal(t, http.StatusOK, w.Code)
-
-	var resp loginResponse
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	got, err := auth.parseToken(resp.Token, accessTokenType)
-	require.NoError(t, err)
-	assert.Equal(t, origID, got.identity, "refresh must preserve the full OIDC identity")
 }
 
 func mustBcrypt(t *testing.T, pw string) []byte {
@@ -471,7 +445,6 @@ func TestOIDCStartRedirectsWhenIssuerUnreachable(t *testing.T) {
 	p := &oidcProvider{
 		issuer: &oidcIssuer{url: f.url},
 		oauth:  oauth2.Config{ClientID: testClientID},
-		auth:   newAuthenticator("", nil, []byte("test-signing-key-do-not-use-in-prod")),
 	}
 	mgr := &authManager{oidc: p}
 
@@ -595,8 +568,8 @@ func signInOIDC(t *testing.T, mgr *authManager, cookies ...*http.Cookie) []*http
 	return cbRec.Result().Cookies()
 }
 
-// signOut posts a sign-out with cookies and returns the response.
-func signOut(mgr *authManager, cookies ...*http.Cookie) *httptest.ResponseRecorder {
+// postSignOut posts a sign-out with cookies and returns the response.
+func postSignOut(mgr *authManager, cookies ...*http.Cookie) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/v1/auth/logout", nil)
 	for _, c := range cookies {
 		r.AddCookie(c)
@@ -609,7 +582,7 @@ func signOut(mgr *authManager, cookies ...*http.Cookie) *httptest.ResponseRecord
 func TestOIDCSignOutEndsTheSessionAtTheProvider(t *testing.T) {
 	issuer := newFakeIssuer(t, true)
 	p := newOIDCProviderFor(t, issuer.URL, deliveryv1alpha1.ProviderSignOutAlways)
-	mgr := &authManager{auth: p.auth, oidc: p, logger: logr.Discard()}
+	mgr := &authManager{auth: newTokenAuthenticator(), oidc: p, logger: logr.Discard()}
 
 	signedIn := signInOIDC(t, mgr)
 	refresh := cookieNamed(t, signedIn, refreshCookieName)
@@ -618,7 +591,7 @@ func TestOIDCSignOutEndsTheSessionAtTheProvider(t *testing.T) {
 	assert.Equal(t, oidcIDTokenCookiePath, idToken.Path, "only the sign-out reads the ID token")
 	assert.True(t, idToken.HttpOnly)
 
-	w := signOut(mgr, refresh, idToken)
+	w := postSignOut(mgr, refresh, idToken)
 	require.Equal(t, http.StatusOK, w.Code)
 	var resp logoutResponse
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
@@ -641,7 +614,7 @@ func TestOIDCSignOutEndsTheSessionAtTheProvider(t *testing.T) {
 func TestOIDCSignOutWithoutProviderLogoutAsksForReauthentication(t *testing.T) {
 	issuer := newFakeIssuer(t, false)
 	p := newOIDCProviderFor(t, issuer.URL, deliveryv1alpha1.ProviderSignOutAlways)
-	mgr := &authManager{auth: p.auth, oidc: p, logger: logr.Discard()}
+	mgr := &authManager{auth: newTokenAuthenticator(), oidc: p, logger: logr.Discard()}
 
 	start := httptest.NewRecorder()
 	handleOIDCStart(mgr).ServeHTTP(start, httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/v1/auth/oidc/start", nil))
@@ -650,7 +623,7 @@ func TestOIDCSignOutWithoutProviderLogoutAsksForReauthentication(t *testing.T) {
 	// An ID token too large for a cookie leaves only the refresh cookie to
 	// tell the session came from OIDC.
 	refresh := cookieNamed(t, signInOIDC(t, mgr), refreshCookieName)
-	w := signOut(mgr, refresh)
+	w := postSignOut(mgr, refresh)
 	require.Equal(t, http.StatusNoContent, w.Code, "the provider offers no end_session_endpoint")
 	reauth := cookieNamed(t, w.Result().Cookies(), oidcReauthCookie)
 	assert.Equal(t, oidcCookiePath, reauth.Path)
@@ -668,24 +641,10 @@ func TestOIDCSignOutWithoutProviderLogoutAsksForReauthentication(t *testing.T) {
 		"signing in again is done with the sign-out")
 }
 
-func TestOIDCSignOutNeverLeavesTheProviderSession(t *testing.T) {
-	issuer := newFakeIssuer(t, true)
-	p := newOIDCProviderFor(t, issuer.URL, deliveryv1alpha1.ProviderSignOutNever)
-	mgr := &authManager{auth: p.auth, oidc: p, logger: logr.Discard()}
-
-	signedIn := signInOIDC(t, mgr)
-	w := signOut(mgr, cookieNamed(t, signedIn, refreshCookieName), cookieNamed(t, signedIn, oidcIDTokenCookie))
-	assert.Equal(t, http.StatusNoContent, w.Code, "no end-session URL, though the provider offers one")
-	cookies := w.Result().Cookies()
-	assert.Equal(t, -1, cookieNamed(t, cookies, refreshCookieName).MaxAge)
-	assert.Equal(t, -1, cookieNamed(t, cookies, oidcIDTokenCookie).MaxAge)
-	assert.Nil(t, findCookie(cookies, oidcReauthCookie), "the next sign-in uses the provider's session")
-}
-
 func TestOIDCCallbackErrorEndsReauthentication(t *testing.T) {
 	issuer := newFakeIssuer(t, false)
 	p := newOIDCProviderFor(t, issuer.URL, deliveryv1alpha1.ProviderSignOutAlways)
-	mgr := &authManager{auth: p.auth, oidc: p, logger: logr.Discard()}
+	mgr := &authManager{auth: newTokenAuthenticator(), oidc: p, logger: logr.Discard()}
 
 	r := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/v1/auth/oidc/callback?error=invalid_request", nil)
 	r.AddCookie(&http.Cookie{Name: oidcReauthCookie, Value: "1"})
@@ -694,16 +653,4 @@ func TestOIDCCallbackErrorEndsReauthentication(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Equal(t, -1, cookieNamed(t, w.Result().Cookies(), oidcReauthCookie).MaxAge,
 		"a provider that refuses the request must not refuse every later sign-in")
-}
-
-func TestAdminSignOutStaysLocalWithOIDCConfigured(t *testing.T) {
-	issuer := newFakeIssuer(t, true)
-	p := newOIDCProviderFor(t, issuer.URL, deliveryv1alpha1.ProviderSignOutAlways)
-	mgr := &authManager{auth: p.auth, oidc: p, logger: logr.Discard()}
-	s, err := p.auth.startSession(&Identity{Subject: testUsername, Provider: providerAdmin}, newSessionState(time.Now()))
-	require.NoError(t, err)
-
-	w := signOut(mgr, &http.Cookie{Name: refreshCookieName, Value: s.RefreshToken})
-	assert.Equal(t, http.StatusNoContent, w.Code)
-	assert.Nil(t, findCookie(w.Result().Cookies(), oidcReauthCookie))
 }

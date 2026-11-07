@@ -119,8 +119,8 @@ func TestEventsStream_sendsHeartbeatsAndNothingUnreadable(t *testing.T) {
 }
 
 func TestEventsStream_endsWithItsAccessToken(t *testing.T) {
-	token := &sessionToken{identity: &Identity{Subject: testUsername}, expires: time.Now().Add(50 * time.Millisecond)}
-	r := httptest.NewRequestWithContext(withSessionToken(t.Context(), token), http.MethodGet, "/api/v1/events", nil)
+	token := &verifiedToken{identity: &Identity{Subject: testUsername}, expires: time.Now().Add(50 * time.Millisecond)}
+	r := httptest.NewRequestWithContext(withVerifiedToken(t.Context(), token), http.MethodGet, "/api/v1/events", nil)
 	done := make(chan struct{})
 	go func() {
 		handleEventsStream(newHub(), nil, nil, time.Hour).ServeHTTP(httptest.NewRecorder(), r)

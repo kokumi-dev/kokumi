@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
-	"strings"
 	"testing"
 	"time"
 
@@ -42,8 +41,8 @@ func TestEndedSessions(t *testing.T) {
 	const issuer, subject = "https://issuer.example", "user-1"
 	ctx := context.Background()
 	now := time.Now().Truncate(time.Second)
-	oidcSession := func(sid, providerSID string, signedIn time.Time) *sessionToken {
-		return &sessionToken{
+	oidcSession := func(sid, providerSID string, signedIn time.Time) *verifiedToken {
+		return &verifiedToken{
 			identity: &Identity{Subject: subject, Provider: providerOIDC, Issuer: issuer},
 			session:  sessionState{ID: sid, AuthTime: signedIn, ProviderSessionID: providerSID},
 		}
@@ -76,7 +75,7 @@ func TestEndedSessions(t *testing.T) {
 	t.Run("provider entries do not match admin sessions", func(t *testing.T) {
 		ended, _ := newTestEndedSessions(t)
 		require.NoError(t, ended.record(ctx, endedProviderUserKey("", testUsername), now))
-		admin := &sessionToken{
+		admin := &verifiedToken{
 			identity: &Identity{Subject: testUsername, Provider: providerAdmin},
 			session:  sessionState{ID: "kokumi-1", AuthTime: now.Add(-time.Hour)},
 		}
@@ -130,31 +129,29 @@ func TestEndedSessions(t *testing.T) {
 
 func TestSignOutEndsCopiesOfTheSession(t *testing.T) {
 	ended, _ := newTestEndedSessions(t)
-	auth := newTestAuthenticator(t)
-	mgr := &authManager{auth: auth, adminLogin: true, logger: logr.Discard(), ended: ended}
+	mgr := &authManager{auth: newTestAuthenticator(t), adminLogin: true, logger: logr.Discard(), ended: ended}
 
-	login := httptest.NewRecorder()
-	handleLogin(mgr).ServeHTTP(login, httptest.NewRequest(http.MethodPost, "/api/v1/auth/login",
-		strings.NewReader(`{"username":"admin","password":"s3cret-passw0rd"}`)))
-	require.Equal(t, http.StatusOK, login.Code)
-	refresh := cookieNamed(t, login.Result().Cookies(), refreshCookieName)
-	access := accessTokenOf(t, login)
+	signedIn, err := mgr.signInAdmin(testUsername, testPassword)
+	require.NoError(t, err)
+	copied := heldBy(signedIn.cookies...)
+	access := signedIn.tokens.accessToken
 
 	assert.Equal(t, http.StatusOK, protectedRequest(mgr, access), "the session works before the sign-out")
-	require.Equal(t, http.StatusNoContent, signOut(mgr, refresh).Code)
+	assertCleared(t, mgr.endSession(context.Background(), copied, testPostLogoutRedirect))
 
 	assert.Equal(t, http.StatusUnauthorized, protectedRequest(mgr, access), "a copied access token stops working")
-	assert.Equal(t, http.StatusUnauthorized, refreshSession(mgr, refresh).Code, "a copied refresh cookie stops working")
+	_, err = mgr.refreshSession(context.Background(), copied, true)
+	assert.ErrorIs(t, err, errSessionEnded, "a copied refresh cookie stops working")
 }
 
 func TestEventsStreamEndsWithItsSession(t *testing.T) {
 	ended, _ := newTestEndedSessions(t)
-	token := &sessionToken{
+	token := &verifiedToken{
 		identity: &Identity{Subject: testUsername, Provider: providerAdmin},
 		session:  sessionState{ID: "kokumi-1", AuthTime: time.Now()},
 		expires:  time.Now().Add(time.Hour),
 	}
-	r := httptest.NewRequestWithContext(withSessionToken(t.Context(), token), http.MethodGet, "/api/v1/events", nil)
+	r := httptest.NewRequestWithContext(withVerifiedToken(t.Context(), token), http.MethodGet, "/api/v1/events", nil)
 	done := make(chan struct{})
 	go func() {
 		handleEventsStream(newHub(), nil, ended, time.Hour).ServeHTTP(httptest.NewRecorder(), r)

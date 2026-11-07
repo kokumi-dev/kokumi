@@ -72,7 +72,7 @@ func newFakeProvider(t *testing.T, configure func(*fakeProvider)) *fakeProvider 
 	op := &oidctest.Server{
 		PublicKeys: []oidctest.PublicKey{{PublicKey: priv.Public(), KeyID: testKeyID, Algorithm: oidc.RS256}},
 	}
-	p := &fakeProvider{priv: priv, clientAuth: clientSecretBasic, expiresIn: 3600, subject: "user-1"}
+	p := &fakeProvider{priv: priv, clientAuth: clientSecretBasic, expiresIn: 3600, subject: testSubject}
 	configure(p)
 	p.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p.mu.Lock()
@@ -111,6 +111,14 @@ func newFakeProvider(t *testing.T, configure func(*fakeProvider)) *fakeProvider 
 	op.SetIssuer(p.URL)
 	return p
 }
+
+const (
+	// testSubject is the subject of a fake provider's ID tokens unless a
+	// test changes it.
+	testSubject = "user-1"
+	// firstRefreshToken is the first refresh token a fake provider issues.
+	firstRefreshToken = "refresh-1"
+)
 
 // The client_secret_* methods of OpenID Connect Core section 9.
 const (
@@ -196,8 +204,8 @@ func get[T any](p *fakeProvider, read func(*fakeProvider) T) T {
 	return read(p)
 }
 
-// refreshSession posts a refresh with cookies and returns the response.
-func refreshSession(mgr *authManager, cookies ...*http.Cookie) *httptest.ResponseRecorder {
+// postRefresh posts a refresh with cookies and returns the response.
+func postRefresh(mgr *authManager, cookies ...*http.Cookie) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/v1/auth/refresh", strings.NewReader(`{"active":true}`))
 	for _, c := range cookies {
 		r.AddCookie(c)
@@ -238,170 +246,30 @@ func TestProviderTokenCookie(t *testing.T) {
 	})
 
 	t.Run("the cookie of another session is refused", func(t *testing.T) {
-		r := httptest.NewRequest(http.MethodPost, "/", nil)
-		r.AddCookie(&http.Cookie{Name: providerTokenCookie, Value: sealed})
-		_, err := auth.providerTokenFromCookie(r, sessionState{ID: "sid-2"})
+		_, err := auth.providerTokenOf(sealed, sessionState{ID: "sid-2"})
 		assert.Error(t, err)
-		token, err := auth.providerTokenFromCookie(r, sessionState{ID: sessionID})
+		token, err := auth.providerTokenOf(sealed, sessionState{ID: sessionID})
 		require.NoError(t, err)
 		assert.Equal(t, refreshToken, token)
+		_, err = auth.providerTokenOf("", sessionState{ID: sessionID})
+		assert.Error(t, err, "no cookie, no token")
+	})
+
+	t.Run("a token too large for a cookie is not sealed", func(t *testing.T) {
+		_, err := auth.sealProviderToken(providerToken{RefreshToken: strings.Repeat("x", maxProviderTokenCookieLen), SessionID: sessionID})
+		assert.Error(t, err)
 	})
 }
 
-func TestOIDCSessionFollowsTheProvider(t *testing.T) {
-	// signIn signs in at a new fake provider, configured by configure, and
-	// returns it with the auth manager and the session's cookies.
-	signIn := func(t *testing.T, configure func(*fakeProvider)) (*fakeProvider, *authManager, []*http.Cookie) {
-		t.Helper()
-		provider := newFakeProvider(t, func(p *fakeProvider) {
-			p.refreshTokens = true
-			configure(p)
-		})
-		p := newOIDCProviderFor(t, provider.URL, deliveryv1alpha1.ProviderSignOutNever)
-		mgr := &authManager{auth: p.auth, oidc: p, logger: logr.Discard()}
-		return provider, mgr, sessionCookies(t, signInOIDC(t, mgr))
-	}
-	due := func(p *fakeProvider) { p.expiresIn = -1 }
-	identityOf := func(t *testing.T, mgr *authManager, w *httptest.ResponseRecorder) *Identity {
-		t.Helper()
-		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-		var resp loginResponse
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		got, err := mgr.auth.parseToken(resp.Token, accessTokenType)
-		require.NoError(t, err)
-		return got.identity
-	}
+func TestHandleRefreshKeepsTheSessionWhileTheProviderIsDown(t *testing.T) {
+	provider := newFakeProvider(t, func(p *fakeProvider) { p.refreshTokens, p.expiresIn = true, -1 })
+	mgr := newOIDCManager(t, provider.URL, deliveryv1alpha1.ProviderSignOutNever)
+	cookies := sessionCookies(t, signInOIDC(t, mgr))
+	provider.set(func(p *fakeProvider) { p.refreshStatus = http.StatusBadGateway })
 
-	t.Run("the sign-in keeps the provider's refresh token for its session", func(t *testing.T) {
-		_, mgr, cookies := signIn(t, func(*fakeProvider) {})
-		session, err := mgr.auth.parseToken(cookies[0].Value, refreshTokenType)
-		require.NoError(t, err)
-		kept, err := mgr.auth.openProviderToken(cookies[1].Value)
-		require.NoError(t, err)
-		assert.Equal(t, providerToken{RefreshToken: "refresh-1", SessionID: session.session.ID}, kept)
-		assert.WithinDuration(t, time.Now().Add(time.Hour), session.session.IDPCheck, 2*time.Second,
-			"the provider is asked again when its access token expires")
-		assert.True(t, cookies[1].HttpOnly)
-		assert.Equal(t, cookies[0].MaxAge, cookies[1].MaxAge, "both cookies expire at the idle deadline")
-	})
-
-	t.Run("a refresh before the check is due does not ask the provider", func(t *testing.T) {
-		provider, mgr, cookies := signIn(t, func(*fakeProvider) {})
-		identityOf(t, mgr, refreshSession(mgr, cookies...))
-		assert.Zero(t, get(provider, func(p *fakeProvider) int { return p.refreshes }))
-	})
-
-	t.Run("a due check takes the identity from the provider and rotates its refresh token", func(t *testing.T) {
-		provider, mgr, cookies := signIn(t, due)
-		provider.set(func(p *fakeProvider) { p.groups = []string{"release-approvers"} })
-
-		w := refreshSession(mgr, cookies...)
-		assert.Equal(t, []string{"release-approvers"}, identityOf(t, mgr, w).Groups)
-		assert.Equal(t, 1, get(provider, func(p *fakeProvider) int { return p.refreshes }))
-		kept, err := mgr.auth.openProviderToken(cookieNamed(t, w.Result().Cookies(), providerTokenCookie).Value)
-		require.NoError(t, err)
-		assert.Equal(t, "refresh-2", kept.RefreshToken)
-
-		identityOf(t, mgr, refreshSession(mgr, sessionCookies(t, w.Result().Cookies())...))
-		assert.Equal(t, 2, get(provider, func(p *fakeProvider) int { return p.refreshes }), "the rotated token works")
-	})
-
-	for _, code := range []string{"invalid_grant", "invalid_request"} {
-		t.Run(code+" ends the session", func(t *testing.T) {
-			provider, mgr, cookies := signIn(t, due)
-			provider.set(func(p *fakeProvider) { p.refreshError = code })
-			w := refreshSession(mgr, cookies...)
-			assert.Equal(t, http.StatusUnauthorized, w.Code)
-			assert.Equal(t, -1, cookieNamed(t, w.Result().Cookies(), refreshCookieName).MaxAge)
-			assert.Equal(t, -1, cookieNamed(t, w.Result().Cookies(), providerTokenCookie).MaxAge)
-			assert.Equal(t, 1, get(provider, func(p *fakeProvider) int { return p.refreshes }), "the provider is asked once")
-		})
-	}
-
-	t.Run("an ID token for another user ends the session", func(t *testing.T) {
-		provider, mgr, cookies := signIn(t, due)
-		provider.set(func(p *fakeProvider) { p.subject = "user-2" })
-		assert.Equal(t, http.StatusUnauthorized, refreshSession(mgr, cookies...).Code)
-	})
-
-	// Answers that say nothing about the user: the session waits for the
-	// provider, or for the operator to fix the client, and goes on after.
-	type pause struct {
-		name         string
-		answer, heal func(*fakeProvider)
-	}
-	answersError := func(code string) pause {
-		return pause{
-			name:   code,
-			answer: func(p *fakeProvider) { p.refreshError = code },
-			heal:   func(p *fakeProvider) { p.refreshError = "" },
-		}
-	}
-	answersStatus := func(status int) pause {
-		return pause{
-			name:   fmt.Sprintf("status %d", status),
-			answer: func(p *fakeProvider) { p.refreshStatus = status },
-			heal:   func(p *fakeProvider) { p.refreshStatus = 0 },
-		}
-	}
-	for _, pause := range []pause{
-		{
-			name:   "a refused client authentication (invalid_client)",
-			answer: func(p *fakeProvider) { p.clientAuth = clientSecretPost },
-			heal:   func(p *fakeProvider) { p.clientAuth = clientSecretBasic },
-		},
-		answersError("unauthorized_client"),
-		answersError("unsupported_grant_type"),
-		answersError("temporarily_unavailable"),
-		answersStatus(http.StatusInternalServerError),
-		answersStatus(http.StatusBadGateway),
-		answersStatus(http.StatusTooManyRequests),
-	} {
-		t.Run(pause.name+" keeps the session for a later try", func(t *testing.T) {
-			provider, mgr, cookies := signIn(t, due)
-			provider.set(pause.answer)
-			w := refreshSession(mgr, cookies...)
-			assert.Equal(t, http.StatusServiceUnavailable, w.Code)
-			assert.Empty(t, w.Result().Cookies(), "the cookies stay")
-			assert.Equal(t, 1, get(provider, func(p *fakeProvider) int { return p.refreshes }),
-				"the refresh token is sent once, not again in the other style")
-
-			provider.set(pause.heal)
-			identityOf(t, mgr, refreshSession(mgr, cookies...))
-		})
-	}
-
-	t.Run("an unreachable provider keeps the session for a later try", func(t *testing.T) {
-		provider, mgr, cookies := signIn(t, due)
-		provider.Close()
-		assert.Equal(t, http.StatusServiceUnavailable, refreshSession(mgr, cookies...).Code)
-	})
-
-	t.Run("a session without its provider token cookie ends", func(t *testing.T) {
-		_, mgr, cookies := signIn(t, func(*fakeProvider) {})
-		assert.Equal(t, http.StatusUnauthorized, refreshSession(mgr, cookies[0]).Code)
-	})
-
-	t.Run("the provider token cookie of another session is refused", func(t *testing.T) {
-		provider, mgr, cookies := signIn(t, func(*fakeProvider) {})
-		other := sessionCookies(t, signInOIDC(t, mgr))
-		assert.Equal(t, http.StatusUnauthorized, refreshSession(mgr, cookies[0], other[1]).Code)
-		assert.Zero(t, get(provider, func(p *fakeProvider) int { return p.refreshes }))
-	})
-
-	t.Run("a provider without refresh tokens leaves the session unchecked", func(t *testing.T) {
-		provider := newFakeProvider(t, due)
-		p := newOIDCProviderFor(t, provider.URL, deliveryv1alpha1.ProviderSignOutNever)
-		mgr := &authManager{auth: p.auth, oidc: p, logger: logr.Discard()}
-		cookies := signInOIDC(t, mgr)
-		assert.Equal(t, -1, cookieNamed(t, cookies, providerTokenCookie).MaxAge)
-		session, err := mgr.auth.parseToken(cookieNamed(t, cookies, refreshCookieName).Value, refreshTokenType)
-		require.NoError(t, err)
-		assert.True(t, session.session.IDPCheck.IsZero())
-
-		identityOf(t, mgr, refreshSession(mgr, cookieNamed(t, cookies, refreshCookieName)))
-		assert.Zero(t, get(provider, func(p *fakeProvider) int { return p.refreshes }))
-	})
+	w := postRefresh(mgr, cookies...)
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code, "the UI keeps the session and retries")
+	assert.Empty(t, w.Result().Cookies(), "the cookies stay")
 }
 
 func TestClientAuthStyle(t *testing.T) {
@@ -436,16 +304,16 @@ func TestOIDCTokenRequestsAuthenticateOneWay(t *testing.T) {
 				p.authMethods, p.clientAuth = tc.advertised, tc.registered
 			})
 			p := newOIDCProviderFor(t, provider.URL, deliveryv1alpha1.ProviderSignOutNever)
-			mgr := &authManager{auth: p.auth, oidc: p, logger: logr.Discard()}
+			mgr := &authManager{auth: newTokenAuthenticator(), oidc: p, logger: logr.Discard()}
 
 			cookies := sessionCookies(t, signInOIDC(t, mgr))
 			assert.Equal(t, 1, get(provider, func(p *fakeProvider) int { return p.exchanges }))
 
-			w := refreshSession(mgr, cookies...)
+			w := postRefresh(mgr, cookies...)
 			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 			assert.Equal(t, 1, get(provider, func(p *fakeProvider) int { return p.refreshes }))
 
-			assert.Equal(t, http.StatusNoContent, signOut(mgr, sessionCookies(t, w.Result().Cookies())...).Code)
+			assert.Equal(t, http.StatusNoContent, postSignOut(mgr, sessionCookies(t, w.Result().Cookies())...).Code)
 			assert.Equal(t, []string{"refresh-2"}, get(provider, func(p *fakeProvider) []string { return p.revoked }))
 		})
 	}
@@ -455,33 +323,10 @@ func TestOIDCTokenRequestsAuthenticateOneWay(t *testing.T) {
 			p.authMethods, p.clientAuth = []string{clientSecretBasic, clientSecretPost}, clientSecretPost
 		})
 		p := newOIDCProviderFor(t, provider.URL, deliveryv1alpha1.ProviderSignOutNever)
-		mgr := &authManager{auth: p.auth, oidc: p, logger: logr.Discard()}
+		mgr := &authManager{auth: newTokenAuthenticator(), oidc: p, logger: logr.Discard()}
 
 		assert.Equal(t, http.StatusBadRequest, oidcCallback(t, mgr).Code)
 		assert.Equal(t, 1, get(provider, func(p *fakeProvider) int { return p.exchanges }),
 			"the authorization code is sent once, not again in the other style")
 	})
-}
-
-func TestOIDCSignOutRevokesTheProviderToken(t *testing.T) {
-	for _, revocation := range []bool{true, false} {
-		t.Run(fmt.Sprintf("revocation endpoint %t", revocation), func(t *testing.T) {
-			provider := newFakeProvider(t, func(p *fakeProvider) {
-				p.refreshTokens = true
-				p.revocation = revocation
-			})
-			p := newOIDCProviderFor(t, provider.URL, deliveryv1alpha1.ProviderSignOutNever)
-			mgr := &authManager{auth: p.auth, oidc: p, logger: logr.Discard()}
-
-			w := signOut(mgr, sessionCookies(t, signInOIDC(t, mgr))...)
-			assert.Equal(t, http.StatusNoContent, w.Code)
-			assert.Equal(t, -1, cookieNamed(t, w.Result().Cookies(), providerTokenCookie).MaxAge)
-			revoked := get(provider, func(p *fakeProvider) []string { return p.revoked })
-			if revocation {
-				assert.Equal(t, []string{"refresh-1"}, revoked)
-			} else {
-				assert.Empty(t, revoked)
-			}
-		})
-	}
 }

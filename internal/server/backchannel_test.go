@@ -31,14 +31,14 @@ func TestBackchannelLogout(t *testing.T) {
 		provider := newFakeProvider(t, func(p *fakeProvider) { p.sessionID = providerSession })
 		p := newOIDCProviderFor(t, provider.URL, deliveryv1alpha1.ProviderSignOutNever)
 		ended, c := newTestEndedSessions(t)
-		return provider, &authManager{auth: p.auth, oidc: p, logger: logr.Discard(), ended: ended}, c
+		return provider, &authManager{auth: newTokenAuthenticator(), oidc: p, logger: logr.Discard(), ended: ended}, c
 	}
 	// logoutClaims returns the claims of a valid logout token of provider.
 	logoutClaims := func(provider *fakeProvider) map[string]any {
 		now := time.Now()
 		return map[string]any{
 			"iss": provider.URL, "aud": testClientID, "iat": now.Unix(), "exp": now.Add(2 * time.Minute).Unix(),
-			"jti": "logout-1", "sub": "user-1", "sid": providerSession,
+			"jti": "logout-1", "sub": testSubject, "sid": providerSession,
 			"events": map[string]any{backchannelLogoutEvent: map[string]any{}},
 		}
 	}
@@ -63,7 +63,7 @@ func TestBackchannelLogout(t *testing.T) {
 	signedIn := func(t *testing.T, mgr *authManager) (*http.Cookie, string) {
 		t.Helper()
 		refresh := cookieNamed(t, signInOIDC(t, mgr), refreshCookieName)
-		w := refreshSession(mgr, refresh)
+		w := postRefresh(mgr, refresh)
 		require.Equal(t, http.StatusOK, w.Code)
 		return cookieNamed(t, w.Result().Cookies(), refreshCookieName), accessTokenOf(t, w)
 	}
@@ -79,7 +79,7 @@ func TestBackchannelLogout(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		assert.Equal(t, "no-store", w.Header().Get("Cache-Control"))
 		assert.Equal(t, http.StatusUnauthorized, protectedRequest(mgr, access))
-		assert.Equal(t, http.StatusUnauthorized, refreshSession(mgr, refresh).Code)
+		assert.Equal(t, http.StatusUnauthorized, postRefresh(mgr, refresh).Code)
 	})
 
 	t.Run("a logout of the user ends the sessions signed in before it", func(t *testing.T) {

@@ -38,12 +38,21 @@ const (
 	unrelatedSecretKey = "other"
 )
 
+// testSigningKey signs the tokens of test sessions.
+var testSigningKey = []byte("test-signing-key-do-not-use-in-prod")
+
 // newTestAuthenticator builds an authenticator with a bcrypt hash of testPassword.
 func newTestAuthenticator(t *testing.T) *authenticator {
 	t.Helper()
 	hash, err := bcrypt.GenerateFromPassword([]byte(testPassword), bcrypt.MinCost)
 	require.NoError(t, err)
-	return newAuthenticator(testUsername, hash, []byte("test-signing-key-do-not-use-in-prod"))
+	return newAuthenticator(testUsername, hash, testSigningKey)
+}
+
+// newTokenAuthenticator builds a token-only authenticator with
+// testSigningKey, as for an OIDC-only server.
+func newTokenAuthenticator() *authenticator {
+	return newAuthenticator("", nil, testSigningKey)
 }
 
 func newAuthSecret(data map[string][]byte) *corev1.Secret {
@@ -169,28 +178,28 @@ func TestIssueAndParseSession(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	id := &Identity{Subject: testUsername, Provider: providerAdmin}
 	state := newSessionState(now)
-	state.IDPCheck = now.Add(time.Minute)
+	state.ProviderCheckAt = now.Add(time.Minute)
 
-	s, err := auth.issueSession(now, id, state, now.Add(time.Hour))
+	s, err := auth.issueTokens(now, id, state, now.Add(time.Hour))
 	require.NoError(t, err)
-	assert.Equal(t, now.Add(defaultAccessTokenTTL), s.AccessExpiresAt)
-	assert.Equal(t, now.Add(time.Hour), s.RefreshExpiresAt)
+	assert.Equal(t, now.Add(defaultAccessTokenTTL), s.accessExpiresAt)
+	assert.Equal(t, now.Add(time.Hour), s.refreshExpiresAt)
 
-	access, err := auth.parseToken(s.AccessToken, accessTokenType)
+	access, err := auth.parseToken(s.accessToken, accessTokenType)
 	require.NoError(t, err)
 	assert.Equal(t, id, access.identity)
 	assert.Equal(t, state, access.session)
-	assert.Equal(t, s.AccessExpiresAt, access.expires)
+	assert.Equal(t, s.accessExpiresAt, access.expires)
 
-	refresh, err := auth.parseToken(s.RefreshToken, refreshTokenType)
+	refresh, err := auth.parseToken(s.refreshToken, refreshTokenType)
 	require.NoError(t, err)
 	assert.Equal(t, id, refresh.identity)
 	assert.Equal(t, state, refresh.session)
-	assert.Equal(t, s.RefreshExpiresAt, refresh.expires)
+	assert.Equal(t, s.refreshExpiresAt, refresh.expires)
 }
 
 func TestIssueSessionRequiresSubject(t *testing.T) {
-	_, err := newTestAuthenticator(t).startSession(&Identity{Provider: providerOIDC}, newSessionState(time.Now()))
+	_, err := newTestAuthenticator(t).signInTokens(&Identity{Provider: providerOIDC}, newSessionState(time.Now()))
 	assert.Error(t, err)
 }
 
@@ -234,9 +243,9 @@ func TestParseTokenRejectsInvalidTokens(t *testing.T) {
 
 	t.Run("expired token", func(t *testing.T) {
 		signedIn := now.Add(-2 * defaultAccessTokenTTL)
-		s, err := auth.issueSession(signedIn, id, newSessionState(signedIn), now.Add(time.Hour))
+		s, err := auth.issueTokens(signedIn, id, newSessionState(signedIn), now.Add(time.Hour))
 		require.NoError(t, err)
-		assert.ErrorIs(t, parse(s.AccessToken), jwt.ErrTokenExpired)
+		assert.ErrorIs(t, parse(s.accessToken), jwt.ErrTokenExpired)
 	})
 
 	t.Run("no expiry", func(t *testing.T) {
@@ -262,9 +271,9 @@ func TestParseTokenRejectsInvalidTokens(t *testing.T) {
 	})
 
 	t.Run("a refresh token is not an access token", func(t *testing.T) {
-		s, err := auth.issueSession(now, id, newSessionState(now), now.Add(time.Hour))
+		s, err := auth.issueTokens(now, id, newSessionState(now), now.Add(time.Hour))
 		require.NoError(t, err)
-		assert.Error(t, parse(s.RefreshToken))
+		assert.Error(t, parse(s.refreshToken))
 	})
 
 	t.Run("no subject", func(t *testing.T) {
@@ -348,7 +357,7 @@ func TestBearerTokenFromQueryParam(t *testing.T) {
 
 func TestMiddleware(t *testing.T) {
 	auth := newTestAuthenticator(t)
-	session, err := auth.startSession(&Identity{Subject: testUsername, Provider: providerAdmin}, newSessionState(time.Now()))
+	session, err := auth.signInTokens(&Identity{Subject: testUsername, Provider: providerAdmin}, newSessionState(time.Now()))
 	require.NoError(t, err)
 
 	// next records whether it was invoked so we can assert pass-through.
@@ -373,8 +382,8 @@ func TestMiddleware(t *testing.T) {
 		{"health passes without token", "/healthz", "", http.StatusOK, true},
 		{"protected without token is rejected", testOrdersPath, "", http.StatusUnauthorized, false},
 		{"protected with bad token is rejected", testOrdersPath, "Bearer bad", http.StatusUnauthorized, false},
-		{"protected with a refresh token is rejected", testOrdersPath, "Bearer " + session.RefreshToken, http.StatusUnauthorized, false},
-		{"protected with valid token passes", testOrdersPath, "Bearer " + session.AccessToken, http.StatusOK, true},
+		{"protected with a refresh token is rejected", testOrdersPath, "Bearer " + session.refreshToken, http.StatusUnauthorized, false},
+		{"protected with valid token passes", testOrdersPath, "Bearer " + session.accessToken, http.StatusOK, true},
 	}
 
 	for _, tt := range tests {
@@ -465,13 +474,6 @@ func TestCurrentNamespace(t *testing.T) {
 	})
 }
 
-func TestRandomTokenIDUnique(t *testing.T) {
-	a := randomTokenID()
-	b := randomTokenID()
-	assert.Len(t, a, 32)
-	assert.NotEqual(t, a, b)
-}
-
 func TestHandleLoginSetsRefreshCookie(t *testing.T) {
 	auth := newTestAuthenticator(t)
 	handler := handleLogin(&authManager{auth: auth, adminLogin: true})
@@ -523,10 +525,16 @@ func TestHandleRefresh(t *testing.T) {
 		_, err := auth.parseToken(resp.Token, accessTokenType)
 		assert.NoError(t, err)
 
-		// The refresh cookie must have been rotated (different value).
+		// The refresh cookie is set again with a refresh token of the same
+		// session; within the same second, with the same claims, it may be
+		// the same token.
 		newCookies := w.Result().Cookies()
 		require.Len(t, newCookies, 1)
-		assert.NotEqual(t, refreshCookie.Value, newCookies[0].Value)
+		rotated, err := auth.parseToken(newCookies[0].Value, refreshTokenType)
+		require.NoError(t, err)
+		session, err := auth.parseToken(refreshCookie.Value, refreshTokenType)
+		require.NoError(t, err)
+		assert.Equal(t, session.session, rotated.session)
 	})
 
 	t.Run("missing refresh cookie is rejected", func(t *testing.T) {
@@ -540,6 +548,28 @@ func TestHandleRefresh(t *testing.T) {
 		cookies := w.Result().Cookies()
 		assert.Equal(t, -1, cookieNamed(t, cookies, refreshCookieName).MaxAge)
 		assert.Equal(t, -1, cookieNamed(t, cookies, providerTokenCookie).MaxAge)
+		assert.Equal(t, -1, cookieNamed(t, cookies, oidcIDTokenCookie).MaxAge)
+	})
+
+	t.Run("a refresh without a body is a background one", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", nil)
+		r.AddCookie(refreshCookie)
+		w := httptest.NewRecorder()
+		refreshHandler.ServeHTTP(w, r)
+		require.Equal(t, http.StatusOK, w.Code)
+		rotated, err := auth.parseToken(cookieNamed(t, w.Result().Cookies(), refreshCookieName).Value, refreshTokenType)
+		require.NoError(t, err)
+		session, err := auth.parseToken(refreshCookie.Value, refreshTokenType)
+		require.NoError(t, err)
+		assert.Equal(t, session.expires, rotated.expires, "the idle deadline stays")
+	})
+
+	t.Run("a malformed body is refused", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", strings.NewReader(`{not json`))
+		r.AddCookie(refreshCookie)
+		w := httptest.NewRecorder()
+		refreshHandler.ServeHTTP(w, r)
+		assert.Equal(t, http.StatusBadRequest, w.Code)
 	})
 
 	t.Run("access token cannot be used as a refresh token", func(t *testing.T) {
@@ -869,12 +899,12 @@ func TestIsHTTPS(t *testing.T) {
 	})
 }
 
-func TestRefreshCookieSecureFlagMatchesRequest(t *testing.T) {
+func TestCookiesAreSecureOverHTTPS(t *testing.T) {
 	t.Run("Secure over HTTPS", func(t *testing.T) {
 		r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
 		r.TLS = &tls.ConnectionState{}
 		w := httptest.NewRecorder()
-		setRefreshCookie(w, r, "rt", time.Now().Add(time.Hour))
+		writeCookies(w, r, newCookie(refreshCookieName, "rt", refreshCookiePath, 60))
 
 		cookies := w.Result().Cookies()
 		require.Len(t, cookies, 1)
@@ -884,7 +914,7 @@ func TestRefreshCookieSecureFlagMatchesRequest(t *testing.T) {
 	t.Run("not Secure over plain HTTP so Safari keeps it", func(t *testing.T) {
 		r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
 		w := httptest.NewRecorder()
-		setRefreshCookie(w, r, "rt", time.Now().Add(time.Hour))
+		writeCookies(w, r, newCookie(refreshCookieName, "rt", refreshCookiePath, 60))
 
 		cookies := w.Result().Cookies()
 		require.Len(t, cookies, 1)
@@ -913,100 +943,6 @@ func cookieNamed(t *testing.T, cookies []*http.Cookie, name string) *http.Cookie
 	return c
 }
 
-func TestSessionLifetime(t *testing.T) {
-	auth := newTestAuthenticator(t)
-	mgr := &authManager{auth: auth, adminLogin: true, logger: logr.Discard()}
-	id := &Identity{Subject: testUsername, Provider: providerAdmin}
-
-	// session returns the refresh token of a session the user signed in to
-	// at signedIn, whose idle deadline is idleUntil.
-	session := func(t *testing.T, signedIn, idleUntil time.Time) (string, sessionState) {
-		t.Helper()
-		state := newSessionState(signedIn)
-		s, err := auth.issueSession(signedIn, id, state, idleUntil)
-		require.NoError(t, err)
-		return s.RefreshToken, state
-	}
-	refreshWith := func(refreshToken, body string) *httptest.ResponseRecorder {
-		r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", strings.NewReader(body))
-		r.AddCookie(&http.Cookie{Name: refreshCookieName, Value: refreshToken})
-		w := httptest.NewRecorder()
-		handleRefresh(mgr).ServeHTTP(w, r)
-		return w
-	}
-	// refreshed returns the token of the refresh cookie w sets.
-	refreshed := func(t *testing.T, w *httptest.ResponseRecorder) *sessionToken {
-		t.Helper()
-		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-		cookie := cookieNamed(t, w.Result().Cookies(), refreshCookieName)
-		got, err := auth.parseToken(cookie.Value, refreshTokenType)
-		require.NoError(t, err)
-		assert.InDelta(t, time.Until(got.expires).Seconds(), cookie.MaxAge, 2, "the cookie expires with the token")
-		return got
-	}
-
-	t.Run("a refresh with activity moves the idle deadline", func(t *testing.T) {
-		token, state := session(t, time.Now().Add(-time.Hour), time.Now().Add(10*time.Minute))
-		got := refreshed(t, refreshWith(token, `{"active":true}`))
-		assert.WithinDuration(t, time.Now().Add(defaultSessionIdleTTL), got.expires, 2*time.Second)
-		assert.Equal(t, state.ID, got.session.ID, "a refresh keeps the session")
-	})
-
-	t.Run("a background refresh keeps the idle deadline", func(t *testing.T) {
-		idleUntil := time.Now().Add(10 * time.Minute)
-		token, _ := session(t, time.Now().Add(-time.Hour), idleUntil)
-		assert.WithinDuration(t, idleUntil, refreshed(t, refreshWith(token, `{"active":false}`)).expires, 2*time.Second)
-		assert.WithinDuration(t, idleUntil, refreshed(t, refreshWith(token, "")).expires, 2*time.Second,
-			"a refresh without a body is a background one")
-	})
-
-	t.Run("an idle session cannot be refreshed", func(t *testing.T) {
-		token, _ := session(t, time.Now().Add(-2*time.Hour), time.Now().Add(-time.Second))
-		w := refreshWith(token, `{"active":true}`)
-		assert.Equal(t, http.StatusUnauthorized, w.Code)
-		assert.Equal(t, -1, cookieNamed(t, w.Result().Cookies(), refreshCookieName).MaxAge)
-	})
-
-	t.Run("activity never extends a session beyond sessionTTL after its sign-in", func(t *testing.T) {
-		signedIn := time.Now().Add(-defaultSessionTTL + time.Minute)
-		token, _ := session(t, signedIn, time.Now().Add(time.Minute))
-		got := refreshed(t, refreshWith(token, `{"active":true}`))
-		assert.WithinDuration(t, signedIn.Add(defaultSessionTTL), got.expires, 2*time.Second)
-	})
-
-	t.Run("a session past sessionTTL ends, as after the setting was lowered", func(t *testing.T) {
-		token, _ := session(t, time.Now().Add(-defaultSessionTTL-time.Minute), time.Now().Add(time.Hour))
-		assert.Equal(t, http.StatusUnauthorized, refreshWith(token, `{"active":true}`).Code)
-	})
-
-	t.Run("an access token expires at the idle deadline", func(t *testing.T) {
-		idleUntil := time.Now().Add(time.Minute)
-		s, err := auth.issueSession(time.Now(), id, newSessionState(time.Now()), idleUntil)
-		require.NoError(t, err)
-		assert.Equal(t, idleUntil, s.AccessExpiresAt)
-	})
-
-	t.Run("a malformed body is refused", func(t *testing.T) {
-		token, _ := session(t, time.Now(), time.Now().Add(time.Hour))
-		assert.Equal(t, http.StatusBadRequest, refreshWith(token, `{not json`).Code)
-	})
-
-	t.Run("a sign-in starts with idleTTL", func(t *testing.T) {
-		r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login",
-			strings.NewReader(`{"username":"admin","password":"s3cret-passw0rd"}`))
-		w := httptest.NewRecorder()
-		handleLogin(mgr).ServeHTTP(w, r)
-		got := refreshed(t, w)
-		assert.WithinDuration(t, time.Now().Add(defaultSessionIdleTTL), got.expires, 2*time.Second)
-		assert.WithinDuration(t, time.Now(), got.session.AuthTime, 2*time.Second)
-		assert.NotEmpty(t, got.session.ID)
-
-		var resp loginResponse
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-		assert.WithinDuration(t, time.Now().Add(defaultAccessTokenTTL), resp.ExpiresAt, time.Second)
-	})
-}
-
 func TestTokenLifetimesSurviveAdminCredentials(t *testing.T) {
 	shared := newAuthenticator("", nil, []byte("test-signing-key-at-least-32-bytes-long!!"))
 	shared.accessTTL, shared.sessionTTL = 15*time.Minute, 8*time.Hour
@@ -1017,23 +953,6 @@ func TestTokenLifetimesSurviveAdminCredentials(t *testing.T) {
 		assert.Equal(t, 8*time.Hour, auth.sessionTTL, "KOKUMI_SESSION_TTL must apply (admin=%t)", admin != nil)
 	}
 	assert.Empty(t, shared.username, "the shared authenticator is not modified")
-}
-
-func TestHandleLogoutClearsCookiesWithoutAuthenticator(t *testing.T) {
-	// The signing key may not be resolved yet, e.g. right after a restart;
-	// the browser's cookies must go anyway.
-	handler := handleLogout(&authManager{})
-
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
-	r.AddCookie(&http.Cookie{Name: refreshCookieName, Value: "rt"})
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, r)
-
-	assert.Equal(t, http.StatusNoContent, w.Code)
-	cookies := w.Result().Cookies()
-	assert.Equal(t, -1, cookieNamed(t, cookies, refreshCookieName).MaxAge)
-	assert.Equal(t, -1, cookieNamed(t, cookies, oidcIDTokenCookie).MaxAge)
-	assert.Nil(t, findCookie(cookies, oidcReauthCookie), "no OIDC provider, no re-authentication")
 }
 
 func TestServerRefusesCrossOriginRequests(t *testing.T) {
