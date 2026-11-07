@@ -81,7 +81,9 @@ whether the key could be loaded:
 | `KeyInvalid` | The Secret cannot be used: not cosign's layout, a wrong password, not a P-256 key, or `cosign.pub` does not match. |
 | `TrustedKeyInvalid` | A key in `spec.signing.trustedKeys` cannot be parsed. |
 
-While the key is not ready, nothing is signed and nothing is deployed.
+While the key is not ready, nothing is signed and nothing is deployed, and
+the Kitchen's `Ready` condition is `False` with the same reason. Sign-in does
+not depend on the key and keeps working.
 
 To bring your own key, create the Secret before installing Kokumi, or before
 the controller first starts:
