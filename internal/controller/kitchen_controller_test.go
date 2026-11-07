@@ -580,4 +580,65 @@ var _ = Describe("Kitchen signing key", func() {
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Reason).To(Equal(deliveryv1alpha1.ReasonTrustedKeyInvalid))
 	})
+
+	Context("while the signing key is not ready", func() {
+		brokenTrustedKey := []deliveryv1alpha1.TrustedKey{{
+			Name:      "broken",
+			PublicKey: "-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n",
+		}}
+
+		AfterEach(func() {
+			for _, name := range []string{tokenSecretName, secretName, initialAdminName} {
+				_ = k8sClient.Delete(ctx, &corev1.Secret{Name: name, Namespace: testNamespace})
+			}
+			_ = k8sClient.Delete(ctx, &corev1.ConfigMap{
+				Name: deliveryv1alpha1.EndedSessionsConfigMapName, Namespace: testNamespace,
+			})
+		})
+
+		It("still ensures the auth objects, so that sign-in works", func() {
+			kitchen := getKitchen(ctx)
+			kitchen.Spec.Signing = &deliveryv1alpha1.KitchenSigning{TrustedKeys: brokenTrustedKey}
+			kitchen.Spec.Auth = &deliveryv1alpha1.KitchenAuth{
+				AdminUser: &deliveryv1alpha1.AdminUserConfig{Enabled: true},
+			}
+			Expect(k8sClient.Update(ctx, kitchen)).To(Succeed())
+
+			reconcileSingleton(ctx)
+
+			Expect(getSecret(ctx, testNamespace, tokenSecretName).Data[secretKeySigningKey]).NotTo(BeEmpty())
+			Expect(getSecret(ctx, testNamespace, secretName).Data[secretKeyPasswordHash]).NotTo(BeEmpty())
+			record := &corev1.ConfigMap{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name: deliveryv1alpha1.EndedSessionsConfigMapName, Namespace: testNamespace,
+			}, record)).To(Succeed())
+
+			By("reporting the signing key as what is not ready")
+			ready := readyCondition(getKitchen(ctx))
+			Expect(ready.Status).To(Equal(metav1.ConditionFalse))
+			Expect(ready.Reason).To(Equal(deliveryv1alpha1.ReasonTrustedKeyInvalid))
+			Expect(ready.Message).To(ContainSubstring(`invalid trusted key "broken"`))
+		})
+
+		It("names both failures in the Ready condition", func() {
+			Expect(k8sClient.Create(ctx, &corev1.Secret{
+				Name: secretName, Namespace: testNamespace,
+				Data: map[string][]byte{"username": []byte("admin")},
+			})).To(Succeed())
+			kitchen := getKitchen(ctx)
+			kitchen.Spec.Signing = &deliveryv1alpha1.KitchenSigning{TrustedKeys: brokenTrustedKey}
+			kitchen.Spec.Auth = &deliveryv1alpha1.KitchenAuth{
+				AdminUser: &deliveryv1alpha1.AdminUserConfig{Enabled: true},
+			}
+			Expect(k8sClient.Update(ctx, kitchen)).To(Succeed())
+
+			reconcileSingleton(ctx)
+
+			ready := readyCondition(getKitchen(ctx))
+			Expect(ready.Status).To(Equal(metav1.ConditionFalse))
+			Expect(ready.Reason).To(Equal(deliveryv1alpha1.ReasonTrustedKeyInvalid))
+			Expect(ready.Message).To(ContainSubstring(`invalid trusted key "broken"`))
+			Expect(ready.Message).To(ContainSubstring(`admin credentials: secret "` + secretName + `"`))
+		})
+	})
 })
