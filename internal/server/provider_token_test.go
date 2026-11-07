@@ -49,6 +49,8 @@ type fakeProvider struct {
 	expiresIn int
 	subject   string
 	groups    []string
+	// emailUnverified issues ID tokens whose email_verified is false.
+	emailUnverified bool
 	// sessionID, when set, is the sid of issued ID tokens.
 	sessionID string
 	// refreshError, when set, answers refresh grants with this error code
@@ -171,8 +173,8 @@ func (p *fakeProvider) serveToken(w http.ResponseWriter, r *http.Request, priv *
 	}
 	now := time.Now()
 	groups, _ := json.Marshal(p.groups)
-	claims := fmt.Sprintf(`{"iss":%q,"aud":%q,"sub":%q,"sid":%q,"email":"user@example.com","groups":%s,"iat":%d,"exp":%d}`,
-		p.URL, testClientID, p.subject, p.sessionID, groups, now.Unix(), now.Add(time.Hour).Unix())
+	claims := fmt.Sprintf(`{"iss":%q,"aud":%q,"sub":%q,"sid":%q,"email":"user@example.com","email_verified":%t,"groups":%s,"iat":%d,"exp":%d}`,
+		p.URL, testClientID, p.subject, p.sessionID, !p.emailUnverified, groups, now.Unix(), now.Add(time.Hour).Unix())
 	response := map[string]any{
 		"access_token": "upstream-access-token", "token_type": "Bearer", "expires_in": p.expiresIn,
 		"id_token": oidctest.SignIDToken(priv, testKeyID, oidc.RS256, claims),
@@ -254,11 +256,6 @@ func TestProviderTokenCookie(t *testing.T) {
 		_, err = auth.providerTokenOf("", sessionState{ID: sessionID})
 		assert.Error(t, err, "no cookie, no token")
 	})
-
-	t.Run("a token too large for a cookie is not sealed", func(t *testing.T) {
-		_, err := auth.sealProviderToken(providerToken{RefreshToken: strings.Repeat("x", maxProviderTokenCookieLen), SessionID: sessionID})
-		assert.Error(t, err)
-	})
 }
 
 func TestHandleRefreshKeepsTheSessionWhileTheProviderIsDown(t *testing.T) {
@@ -303,8 +300,7 @@ func TestOIDCTokenRequestsAuthenticateOneWay(t *testing.T) {
 				p.refreshTokens, p.revocation, p.expiresIn = true, true, -1
 				p.authMethods, p.clientAuth = tc.advertised, tc.registered
 			})
-			p := newOIDCProviderFor(t, provider.URL, deliveryv1alpha1.ProviderSignOutNever)
-			mgr := &authManager{auth: newTokenAuthenticator(), oidc: p, logger: logr.Discard()}
+			mgr := newOIDCManager(t, provider.URL, deliveryv1alpha1.ProviderSignOutNever)
 
 			cookies := sessionCookies(t, signInOIDC(t, mgr))
 			assert.Equal(t, 1, get(provider, func(p *fakeProvider) int { return p.exchanges }))

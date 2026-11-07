@@ -3,16 +3,21 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 )
 
+// tooLargeHint is how an operator shrinks a session too large for the
+// browser's cookies.
+const tooLargeHint = "limit the groups the OIDC provider puts into the ID token, for example with a groups filter"
+
 // The outcomes of a session operation that issues no tokens.
 // respondSessionError answers them.
 var (
-	// errAuthUnavailable: no token signing key was read yet, so no session
-	// can start or go on.
+	// errAuthUnavailable: the Kitchen or the token signing key was not read
+	// yet, so no session can start or go on.
 	errAuthUnavailable = errors.New("authentication is not available")
 	// errAdminLoginDisabled: there is no admin account to sign in to.
 	errAdminLoginDisabled = errors.New("admin login is disabled")
@@ -24,9 +29,12 @@ var (
 	errSessionInvalid = errors.New("invalid or expired refresh token")
 	// errSessionEnded: the session ended before its tokens expire: at a
 	// sign-out or a back-channel logout, which the record of ended sessions
-	// holds, or because its OIDC provider is no longer configured or its
-	// provider token cannot be kept.
+	// holds, because what signed it in no longer does (see sessionEnded), or
+	// because its provider token cannot be kept.
 	errSessionEnded = errors.New("the session has ended")
+	// errSessionTooLarge: the session's tokens do not fit in the browser's
+	// cookies, mostly because its identity has many groups.
+	errSessionTooLarge = errors.New("the session is too large for the browser's cookies")
 	// errProviderUnavailable: the session's check at the OIDC provider is
 	// due, and the provider cannot be asked right now. The session stays.
 	errProviderUnavailable = errors.New("the session cannot be checked at the OIDC provider")
@@ -67,7 +75,7 @@ type signIn struct {
 	// signed in with, when the provider names it.
 	providerSessionID string
 	// idToken is the OIDC provider's ID token, the hint of a sign-out at the
-	// provider.
+	// provider; set only with providerSignOut Always.
 	idToken string
 	// providerRefreshToken is the OIDC provider's refresh token, or "" when
 	// it issued none: the session is then not checked at the provider.
@@ -89,6 +97,45 @@ type sessionResult struct {
 	// endSessionURL, after a sign-out, is where the browser goes to sign out
 	// at the OIDC provider, or "" when it does not.
 	endSessionURL string
+}
+
+// sessionEnded returns an errSessionEnded when the session of t, verified by
+// a, ended before its tokens expire, and nil while it goes on. A session ends
+// when the record of ended sessions holds it, and when what signed it in no
+// longer does: an admin session when admin login is off or the admin's
+// username or password changed since, and an OIDC session when the Kitchen
+// no longer configures OIDC or configures another issuer. The middleware
+// checks every access token with it, and a refresh its refresh token.
+func (m *authManager) sessionEnded(a *authenticator, t *verifiedToken) error {
+	if m.ended.ended(t) {
+		return fmt.Errorf("%w: the record of ended sessions holds it", errSessionEnded)
+	}
+	id := t.identity
+	switch id.Provider {
+	case providerAdmin:
+		if !a.signsInAdmin(id.Subject, t.adminPassword) {
+			return fmt.Errorf("%w: admin login is off, or its username or password changed", errSessionEnded)
+		}
+	case providerOIDC:
+		if issuer := m.oidcIssuerURL(); issuer == "" || id.Issuer != issuer {
+			return fmt.Errorf("%w: OIDC is off, or its issuer changed", errSessionEnded)
+		}
+	default:
+		return fmt.Errorf("%w: unknown login method %q", errSessionEnded, id.Provider)
+	}
+	return nil
+}
+
+// sessionGoesOn reports whether the session of t, which a request verified
+// earlier, goes on now; a live-update stream checks it at every change of
+// the record of ended sessions or of the auth configuration. Without an auth
+// manager or a token, as without authentication, it does.
+func (m *authManager) sessionGoesOn(t *verifiedToken) bool {
+	if m == nil || t == nil {
+		return true
+	}
+	a := m.get()
+	return a != nil && m.sessionEnded(a, t) == nil
 }
 
 // signInAdmin starts a session of the admin account when username and
@@ -118,42 +165,75 @@ func (m *authManager) startSession(in signIn) (*sessionResult, error) {
 
 // start mints the first tokens of a new session for in and sets its cookies.
 // The provider's refresh token goes, sealed, into the provider token cookie,
-// so that refreshes check the session at the provider; one that cannot be
-// kept leaves the session unchecked. A sign-in without provider tokens clears
-// the cookies of an earlier OIDC session, so that they do not turn this
-// session's sign-out into one at the provider.
+// so that refreshes check the session at the provider. A session whose
+// cookies would not fit (see fitCookies) fails with errSessionTooLarge; the ID
+// token, only a hint for the sign-out at the provider, is left out first. A
+// sign-in without provider tokens clears the cookies of an earlier OIDC
+// session, so that they do not turn this session's sign-out into one at the
+// provider.
 func (m *authManager) start(a *authenticator, in signIn) (*sessionResult, error) {
 	s := newSessionState(time.Now())
 	s.ProviderSessionID = in.providerSessionID
 	var sealed string
 	if in.providerRefreshToken != "" {
 		var err error
-		sealed, err = a.sealProviderToken(providerToken{RefreshToken: in.providerRefreshToken, SessionID: s.ID})
-		if err != nil {
-			m.logger.Error(err, "Could not keep the OIDC provider's refresh token; the session is not checked at the provider")
-		} else {
-			s.ProviderCheckAt = in.providerCheckAt
+		if sealed, err = a.sealProviderToken(providerToken{RefreshToken: in.providerRefreshToken, SessionID: s.ID}); err != nil {
+			m.logger.Error(err, "Could not keep the OIDC provider's refresh token")
+			return &sessionResult{}, err
 		}
+		s.ProviderCheckAt = in.providerCheckAt
 	}
 	tokens, err := a.signInTokens(in.identity, s)
 	if err != nil {
 		m.logger.Error(err, "Could not issue the tokens of a new session")
 		return &sessionResult{}, err
 	}
+	if err := fitCookies(tokens.refreshToken, sealed); err != nil {
+		m.logger.Error(err, "Refused a sign-in whose session does not fit in the browser's cookies",
+			"subject", in.identity.Subject, "groups", len(in.identity.Groups), "hint", tooLargeHint)
+		return &sessionResult{}, err
+	}
+	idToken := in.idToken
+	if len(idToken) > maxCookieLen || len(tokens.refreshToken)+len(sealed)+len(idToken) > maxSessionCookiesLen {
+		m.logger.V(1).Info("Left the ID token out of the session's cookies; a sign-out at the provider names only the client",
+			"subject", in.identity.Subject, "bytes", len(idToken))
+		idToken = ""
+	}
 	return &sessionResult{tokens: tokens, cookies: []*http.Cookie{
 		newRefreshCookie(tokens),
 		newProviderTokenCookie(sealed, tokens.refreshExpiresAt),
-		newIDTokenCookie(in.idToken, a.sessionEnd(s)),
+		newIDTokenCookie(idToken, a.sessionEnd(s)),
 	}}, nil
 }
 
+// fitCookies returns an errSessionTooLarge unless the refresh token and the
+// sealed provider token each fit in a cookie, and both together within
+// maxSessionCookiesLen; the ID token gets the room that is left. A refresh
+// token carries the identity's groups, so many groups make it too large.
+func fitCookies(refreshToken, sealedProviderToken string) error {
+	switch {
+	case len(refreshToken) > maxCookieLen:
+		return fmt.Errorf("%w: the refresh token has %d bytes, more than the %d of a cookie",
+			errSessionTooLarge, len(refreshToken), maxCookieLen)
+	case len(sealedProviderToken) > maxCookieLen:
+		return fmt.Errorf("%w: the sealed OIDC provider refresh token has %d bytes, more than the %d of a cookie",
+			errSessionTooLarge, len(sealedProviderToken), maxCookieLen)
+	case len(refreshToken)+len(sealedProviderToken) > maxSessionCookiesLen:
+		return fmt.Errorf("%w: the session's cookies have %d bytes, more than the %d a request carries",
+			errSessionTooLarge, len(refreshToken)+len(sealedProviderToken), maxSessionCookiesLen)
+	}
+	return nil
+}
+
 // refreshSession exchanges the browser's refresh token for new tokens. A
-// session ends sessionTTL after its sign-in, and idleTTL after the last
-// refresh that reported user activity (active). When the session's check at
-// the OIDC provider is due, the provider is asked first: a refusal ends the
-// session with errProviderEndedSession, and a provider that cannot be asked
-// is errProviderUnavailable, which keeps the session for a later try. A
-// refusal that ends the session clears its cookies.
+// session ends sessionTTL after its sign-in, idleTTL after the last refresh
+// that reported user activity (active), and as sessionEnded says. When the
+// session's check at the OIDC provider is due, the provider is asked first: a
+// refusal ends the session with errProviderEndedSession, and a provider that
+// cannot be asked is errProviderUnavailable, which keeps the session for a
+// later try. Tokens that grew too large for the browser's cookies end the
+// session with errSessionTooLarge. A refusal that ends the session clears its
+// cookies.
 func (m *authManager) refreshSession(ctx context.Context, b browserSession, active bool) (*sessionResult, error) {
 	a := m.get()
 	if a == nil {
@@ -167,8 +247,9 @@ func (m *authManager) refreshSession(ctx context.Context, b browserSession, acti
 	if err != nil || !now.Before(a.sessionEnd(t.session)) {
 		return end(errSessionInvalid)
 	}
-	if m.ended.ended(t) {
-		return end(errSessionEnded)
+	if err := m.sessionEnded(a, t); err != nil {
+		m.logger.Info("Refused the refresh of an ended session", "subject", t.identity.Subject, "reason", err.Error())
+		return end(err)
 	}
 	id, s := t.identity, t.session
 
@@ -195,29 +276,37 @@ func (m *authManager) refreshSession(ctx context.Context, b browserSession, acti
 		m.logger.Error(err, "Could not issue the tokens of a refreshed session")
 		return &sessionResult{}, err
 	}
+	var sealed string
+	if providerRefresh != "" {
+		if sealed, err = a.sealProviderToken(providerToken{RefreshToken: providerRefresh, SessionID: s.ID}); err != nil {
+			m.logger.Error(err, "Could not keep the OIDC provider's refresh token")
+			return end(errSessionEnded)
+		}
+	}
+	// The groups from the provider may have grown since the sign-in.
+	if err := fitCookies(tokens.refreshToken, sealed); err != nil {
+		m.logger.Error(err, "Ended a session whose tokens no longer fit in the browser's cookies",
+			"subject", id.Subject, "groups", len(id.Groups), "hint", tooLargeHint)
+		return end(err)
+	}
 	res := &sessionResult{tokens: tokens, cookies: []*http.Cookie{newRefreshCookie(tokens)}}
-	if providerRefresh == "" {
-		return res, nil
+	if sealed != "" {
+		res.cookies = append(res.cookies, newProviderTokenCookie(sealed, tokens.refreshExpiresAt))
 	}
-	sealed, err := a.sealProviderToken(providerToken{RefreshToken: providerRefresh, SessionID: s.ID})
-	if err != nil {
-		m.logger.Error(err, "Could not keep the OIDC provider's refresh token")
-		return end(errSessionEnded)
-	}
-	res.cookies = append(res.cookies, newProviderTokenCookie(sealed, tokens.refreshExpiresAt))
 	return res, nil
 }
 
 // checkAtProvider asks the OIDC provider whether the user of id stays signed
 // in, with the provider's refresh token of the session. It returns
-// errProviderEndedSession when the provider refuses, errSessionEnded without
-// a configured provider, and errProviderUnavailable when the provider cannot
-// be asked.
+// errProviderEndedSession when the provider refuses, and
+// errProviderUnavailable when the provider cannot be asked, also while the
+// configured provider cannot be built, as without its client Secret.
 func (m *authManager) checkAtProvider(ctx context.Context, refreshToken string, id *Identity) (*providerCheck, error) {
 	p := m.getOIDC()
 	if p == nil {
-		m.logger.Info("Ended a session whose OIDC provider is no longer configured", "subject", id.Subject)
-		return nil, errSessionEnded
+		m.logger.Error(errors.New("the configured OIDC provider is not available"),
+			"Could not check a session at the OIDC provider", "subject", id.Subject)
+		return nil, errProviderUnavailable
 	}
 	checked, err := p.checkSession(ctx, refreshToken, id)
 	if errors.Is(err, errProviderEndedSession) {
@@ -294,11 +383,9 @@ func newProviderTokenCookie(sealed string, expires time.Time) *http.Cookie {
 }
 
 // newIDTokenCookie returns the ID token cookie holding idToken until the
-// session ends at sessionEnd, or clears it. An ID token too large for a
-// cookie is left out; the sign-out at the provider then names only the
-// client.
+// session ends at sessionEnd, or clears it when idToken is "".
 func newIDTokenCookie(idToken string, sessionEnd time.Time) *http.Cookie {
-	if idToken == "" || len(idToken) > maxIDTokenCookieLen {
+	if idToken == "" {
 		return expiredCookie(oidcIDTokenCookie, oidcIDTokenCookiePath)
 	}
 	return newCookie(oidcIDTokenCookie, idToken, oidcIDTokenCookiePath, maxAgeUntil(sessionEnd))
@@ -339,5 +426,6 @@ var sessionOutcomes = []struct {
 	{errInvalidCredentials, http.StatusUnauthorized},
 	{errSessionInvalid, http.StatusUnauthorized},
 	{errSessionEnded, http.StatusUnauthorized},
+	{errSessionTooLarge, http.StatusUnauthorized},
 	{errProviderEndedSession, http.StatusUnauthorized},
 }

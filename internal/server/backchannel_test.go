@@ -29,9 +29,10 @@ func TestBackchannelLogout(t *testing.T) {
 	setup := func(t *testing.T) (*fakeProvider, *authManager, client.Client) {
 		t.Helper()
 		provider := newFakeProvider(t, func(p *fakeProvider) { p.sessionID = providerSession })
-		p := newOIDCProviderFor(t, provider.URL, deliveryv1alpha1.ProviderSignOutNever)
+		mgr := newOIDCManager(t, provider.URL, deliveryv1alpha1.ProviderSignOutNever)
 		ended, c := newTestEndedSessions(t)
-		return provider, &authManager{auth: newTokenAuthenticator(), oidc: p, logger: logr.Discard(), ended: ended}, c
+		mgr.ended = ended
+		return provider, mgr, c
 	}
 	// logoutClaims returns the claims of a valid logout token of provider.
 	logoutClaims := func(provider *fakeProvider) map[string]any {

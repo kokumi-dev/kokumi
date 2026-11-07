@@ -7,6 +7,8 @@ import { Button } from '../components/ui'
 // Messages for the sso_error codes the server's OIDC flow redirects back with.
 const ssoErrorMessages: Record<string, string> = {
   unavailable: 'The identity provider could not be reached. Try again in a moment.',
+  too_large:
+    'Your sign-in carries more groups than a browser cookie holds. Ask your administrator to limit the groups the identity provider sends to Kokumi.',
 }
 
 /** Returns the message for the sso_error in the URL, or null when there is none. */

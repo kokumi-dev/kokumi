@@ -2,8 +2,12 @@ package server
 
 import (
 	"context"
+	"crypto/hkdf"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -45,6 +49,9 @@ const (
 
 	// defaultAdminUsername is the admin's username when the Kitchen sets none.
 	defaultAdminUsername = "admin"
+	// adminPasswordKeyInfo is the HKDF info that derives the key of the admin
+	// password fingerprint from the token signing key.
+	adminPasswordKeyInfo = "kokumi admin password"
 
 	// minSigningKeyLen is the minimum accepted HMAC signing-key length (bytes).
 	minSigningKeyLen = 32
@@ -56,6 +63,15 @@ const (
 	refreshCookieName = "kokumi.refresh"
 	// refreshCookiePath scopes the cookie to the auth endpoints.
 	refreshCookiePath = "/api/v1/auth"
+
+	// maxCookieLen is the longest value of a cookie Kokumi sets: browsers
+	// drop a cookie larger than 4096 bytes, its name and attributes included.
+	maxCookieLen = 4000
+	// maxSessionCookiesLen is the most bytes the values of a session's
+	// cookies may have together; the sign-out receives all three. Proxies
+	// refuse a request whose headers exceed their limit, often 8 KiB, and the
+	// browser may send cookies of other apps on the host too.
+	maxSessionCookiesLen = 7000
 )
 
 // authenticator validates admin credentials and issues/verifies HMAC-signed
@@ -63,7 +79,10 @@ const (
 type authenticator struct {
 	username     string
 	passwordHash []byte
-	signingKey   []byte
+	// passwordFingerprint is the fingerprint of passwordHash that admin
+	// tokens carry, or "" without the admin account.
+	passwordFingerprint string
+	signingKey          []byte
 	// providerTokenKey seals the provider token cookie; it is derived from
 	// signingKey.
 	providerTokenKey []byte
@@ -99,14 +118,32 @@ var publicAPIPaths = map[string]struct{}{
 // newAuthenticator builds an authenticator with default token lifetimes.
 func newAuthenticator(username string, passwordHash, signingKey []byte) *authenticator {
 	return &authenticator{
-		username:         username,
-		passwordHash:     passwordHash,
-		signingKey:       signingKey,
-		providerTokenKey: deriveProviderTokenKey(signingKey),
-		accessTTL:        defaultAccessTokenTTL,
-		sessionTTL:       defaultSessionTTL,
-		idleTTL:          defaultSessionIdleTTL,
+		username:            username,
+		passwordHash:        passwordHash,
+		passwordFingerprint: passwordFingerprint(signingKey, passwordHash),
+		signingKey:          signingKey,
+		providerTokenKey:    deriveProviderTokenKey(signingKey),
+		accessTTL:           defaultAccessTokenTTL,
+		sessionTTL:          defaultSessionTTL,
+		idleTTL:             defaultSessionIdleTTL,
 	}
+}
+
+// passwordFingerprint returns the fingerprint of the admin password hash
+// that admin tokens carry in the claim pwd, or "" without a hash: the first
+// 16 hex digits of an HMAC-SHA256 of passwordHash with a key derived from
+// signingKey. A new password changes it, so the tokens issued under the old
+// one are refused; the key keeps it from telling a reader of the token
+// anything about the hash.
+func passwordFingerprint(signingKey, passwordHash []byte) string {
+	if len(passwordHash) == 0 {
+		return ""
+	}
+	// HKDF fails only for a key longer than 255 hash lengths.
+	key, _ := hkdf.Key(sha256.New, signingKey, nil, adminPasswordKeyInfo, sha256.Size)
+	mac := hmac.New(sha256.New, key)
+	mac.Write(passwordHash)
+	return hex.EncodeToString(mac.Sum(nil))[:16]
 }
 
 // buildTokenAuthenticator reads the token signing-key Secret and builds a
@@ -186,11 +223,20 @@ func readAdminCredentials(
 // nil. a is never mutated: authenticators are immutable once published.
 func (a *authenticator) withAdmin(admin *adminCredentials) *authenticator {
 	out := *a
-	out.username, out.passwordHash = "", nil
+	out.username, out.passwordHash, out.passwordFingerprint = "", nil, ""
 	if admin != nil {
 		out.username, out.passwordHash = admin.username, admin.passwordHash
+		out.passwordFingerprint = passwordFingerprint(out.signingKey, admin.passwordHash)
 	}
 	return &out
+}
+
+// signsInAdmin reports whether a still signs in the admin of an admin token
+// with subject and the password fingerprint pwd: the admin account is on,
+// and its username and password are those of the token's sign-in.
+func (a *authenticator) signsInAdmin(subject, pwd string) bool {
+	return a.passwordFingerprint != "" && subject == a.username &&
+		hmac.Equal([]byte(pwd), []byte(a.passwordFingerprint))
 }
 
 // verifyCredentials checks username/password; bcrypt runs even on username
@@ -298,7 +344,9 @@ func (a *authenticator) issueTokens(now time.Time, id *Identity, s sessionState,
 
 // signToken mints a session JWT of tokenType for id in session s that
 // expires at expires. Email, groups and provider are embedded for
-// ServiceAccount mapping.
+// ServiceAccount mapping. An admin token carries the fingerprint of the
+// current admin password; a refresh, which checked the fingerprint of the
+// token it exchanges, keeps it.
 func (a *authenticator) signToken(now time.Time, tokenType string, id *Identity, s sessionState, expires time.Time) (string, error) {
 	registered := jwt.RegisteredClaims{
 		Subject:   id.Subject,
@@ -307,7 +355,11 @@ func (a *authenticator) signToken(now time.Time, tokenType string, id *Identity,
 		NotBefore: jwt.NewNumericDate(now),
 		ExpiresAt: jwt.NewNumericDate(expires),
 	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, newIdentityClaims(registered, tokenType, id, s))
+	claims := newIdentityClaims(registered, tokenType, id, s)
+	if id.Provider == providerAdmin {
+		claims.AdminPassword = a.passwordFingerprint
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, err := token.SignedString(a.signingKey)
 	if err != nil {
 		return "", fmt.Errorf("signing token: %w", err)
@@ -321,6 +373,9 @@ type verifiedToken struct {
 	session  sessionState
 	// expires is the token's exp; for a refresh token, the idle deadline.
 	expires time.Time
+	// adminPassword is the fingerprint of the admin password an admin token
+	// was issued under, or "".
+	adminPassword string
 }
 
 // parseToken verifies a session token. It accepts only an unexpired HS256
@@ -352,9 +407,10 @@ func (a *authenticator) parseToken(tokenString, tokenType string) (*verifiedToke
 		return nil, errors.New("token has no session ID or sign-in time")
 	}
 	return &verifiedToken{
-		identity: claims.identity(),
-		session:  claims.session(),
-		expires:  claims.ExpiresAt.Time,
+		identity:      claims.identity(),
+		session:       claims.session(),
+		expires:       claims.ExpiresAt.Time,
+		adminPassword: claims.AdminPassword,
 	}, nil
 }
 
@@ -405,8 +461,9 @@ func maxAgeUntil(t time.Time) int {
 	return max(1, int(time.Until(t).Seconds()))
 }
 
-// middleware rejects protected API paths without a valid bearer token; the
-// authenticator is resolved per request so config changes apply without restart.
+// middleware rejects protected API paths without a valid bearer token of a
+// session that goes on (see sessionEnded); the authenticator is resolved per
+// request so config changes apply without restart.
 func (m *authManager) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !requiresAuth(r.URL.Path) {
@@ -415,9 +472,9 @@ func (m *authManager) middleware(next http.Handler) http.Handler {
 		}
 		a := m.get()
 		if a == nil {
-			// No token signing key yet, so no token can be valid: no login
-			// method is configured, or its Secrets cannot be read.
-			respondError(w, http.StatusServiceUnavailable, "authentication is not available")
+			// The Kitchen or the token signing key was not read yet, so no
+			// token can be checked.
+			respondError(w, http.StatusServiceUnavailable, errAuthUnavailable.Error())
 			return
 		}
 		token := bearerToken(r)
@@ -430,8 +487,8 @@ func (m *authManager) middleware(next http.Handler) http.Handler {
 			respondError(w, http.StatusUnauthorized, "invalid or expired token")
 			return
 		}
-		if m.ended.ended(t) {
-			respondError(w, http.StatusUnauthorized, "the session has ended")
+		if err := m.sessionEnded(a, t); err != nil {
+			respondError(w, http.StatusUnauthorized, errSessionEnded.Error())
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(withVerifiedToken(r.Context(), t)))

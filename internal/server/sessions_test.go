@@ -25,10 +25,23 @@ import (
 const testPostLogoutRedirect = "http://localhost:8080/"
 
 // newOIDCManager returns an auth manager with a token-only authenticator
-// that signs users in at the issuer at issuerURL.
+// that signs users in at the issuer at issuerURL, as the Kitchen configures.
 func newOIDCManager(t *testing.T, issuerURL string, signOut deliveryv1alpha1.ProviderSignOut) *authManager {
 	t.Helper()
-	return &authManager{auth: newTokenAuthenticator(), oidc: newOIDCProviderFor(t, issuerURL, signOut), logger: logr.Discard()}
+	return &authManager{
+		auth: newTokenAuthenticator(), oidc: newOIDCProviderFor(t, issuerURL, signOut), oidcIssuer: issuerURL,
+		logger: logr.Discard(),
+	}
+}
+
+// manyGroups returns n group names of 36 characters, as Microsoft Entra ID
+// emits them.
+func manyGroups(n int) []string {
+	groups := make([]string, n)
+	for i := range groups {
+		groups[i] = fmt.Sprintf("00000000-0000-0000-0000-%012d", i)
+	}
+	return groups
 }
 
 // heldBy returns the session a browser holds after it got cookies: the ones
@@ -135,17 +148,51 @@ func TestStartSession(t *testing.T) {
 		assert.Equal(t, -1, cookieNamed(t, res.cookies, providerTokenCookie).MaxAge)
 	})
 
-	t.Run("a provider refresh token too large for a cookie leaves the session unchecked", func(t *testing.T) {
-		res, session := start(t, signIn{
-			identity: id, providerRefreshToken: strings.Repeat("x", maxProviderTokenCookieLen), providerCheckAt: checkAt,
-		})
-		assert.True(t, session.session.ProviderCheckAt.IsZero())
-		assert.Equal(t, -1, cookieNamed(t, res.cookies, providerTokenCookie).MaxAge)
+	tooLarge := func(t *testing.T, in signIn) {
+		t.Helper()
+		res, err := mgr.startSession(in)
+		require.ErrorIs(t, err, errSessionTooLarge)
+		assert.Nil(t, res.tokens)
+		assert.Empty(t, res.cookies)
+		w := httptest.NewRecorder()
+		respondSessionError(w, err)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	}
+
+	t.Run("a refresh token too large for a cookie fails the sign-in", func(t *testing.T) {
+		many := &Identity{Subject: testSubject, Provider: providerOIDC, Issuer: testIssuerURL, Groups: manyGroups(200)}
+		tooLarge(t, signIn{identity: many})
+	})
+
+	t.Run("a provider refresh token too large for a cookie fails the sign-in", func(t *testing.T) {
+		tooLarge(t, signIn{identity: id, providerRefreshToken: strings.Repeat("x", maxCookieLen), providerCheckAt: checkAt})
+	})
+
+	t.Run("a refresh token and a provider token that fit alone but not together fail the sign-in", func(t *testing.T) {
+		many := &Identity{Subject: testSubject, Provider: providerOIDC, Issuer: testIssuerURL, Groups: manyGroups(60)}
+		res, err := mgr.startSession(signIn{identity: many})
+		require.NoError(t, err)
+		require.Greater(t, len(res.tokens.refreshToken), 3300, "the refresh token alone fits")
+		tooLarge(t, signIn{identity: many, providerRefreshToken: strings.Repeat("x", 2700), providerCheckAt: checkAt})
 	})
 
 	t.Run("an ID token too large for a cookie is left out", func(t *testing.T) {
-		res, _ := start(t, signIn{identity: id, idToken: strings.Repeat("x", maxIDTokenCookieLen+1)})
+		res, _ := start(t, signIn{identity: id, idToken: strings.Repeat("x", maxCookieLen+1)})
 		assert.Equal(t, -1, cookieNamed(t, res.cookies, oidcIDTokenCookie).MaxAge)
+	})
+
+	t.Run("an ID token that would take the session's cookies beyond their limit is left out", func(t *testing.T) {
+		in := signIn{
+			identity: id, idToken: strings.Repeat("x", maxCookieLen),
+			providerRefreshToken: strings.Repeat("x", 2000), providerCheckAt: checkAt,
+		}
+		res, session := start(t, in)
+		assert.Equal(t, -1, cookieNamed(t, res.cookies, oidcIDTokenCookie).MaxAge)
+		assert.Equal(t, checkAt, session.session.ProviderCheckAt, "the session is still checked at the provider")
+
+		in.idToken = strings.Repeat("x", 1000)
+		res, _ = start(t, in)
+		assert.Equal(t, in.idToken, cookieNamed(t, res.cookies, oidcIDTokenCookie).Value, "one that fits stays")
 	})
 
 	t.Run("no signing key yet", func(t *testing.T) {
@@ -213,7 +260,9 @@ func TestOIDCSignInUsesTheCurrentSigningKey(t *testing.T) {
 
 func TestRefreshSession(t *testing.T) {
 	ended, _ := newTestEndedSessions(t)
-	mgr := &authManager{auth: newTestAuthenticator(t), adminLogin: true, logger: logr.Discard(), ended: ended}
+	mgr := &authManager{
+		auth: newTestAuthenticator(t), adminLogin: true, oidcIssuer: testIssuerURL, logger: logr.Discard(), ended: ended,
+	}
 	start := func(t *testing.T, id *Identity) *sessionResult {
 		t.Helper()
 		res, err := mgr.startSession(signIn{identity: id})
@@ -224,7 +273,10 @@ func TestRefreshSession(t *testing.T) {
 	t.Run("a refresh keeps the session and its whole identity", func(t *testing.T) {
 		// An OIDC session must not turn into the admin's, which would map
 		// the user to the admin's ServiceAccount.
-		id := &Identity{Subject: "admin@example.com", Email: "admin@example.com", Groups: []string{"devops"}, Provider: providerOIDC}
+		id := &Identity{
+			Subject: "admin@example.com", Email: "admin@example.com", Groups: []string{"devops"},
+			Provider: providerOIDC, Issuer: testIssuerURL,
+		}
 		signedIn := start(t, id)
 		res, err := mgr.refreshSession(context.Background(), heldBy(signedIn.cookies...), false)
 		require.NoError(t, err)
@@ -487,11 +539,44 @@ func TestOIDCSessionFollowsTheProvider(t *testing.T) {
 	})
 
 	t.Run("a session whose OIDC provider is no longer configured ends", func(t *testing.T) {
-		_, mgr, b := signIn(t, due)
-		mgr.oidc = nil
+		provider, mgr, b := signIn(t, due)
+		mgr.oidc, mgr.oidcIssuer = nil, ""
 		res, err := refresh(mgr, b)
 		assert.ErrorIs(t, err, errSessionEnded)
 		assertCleared(t, res)
+		assert.Zero(t, get(provider, refreshes), "the provider is not asked")
+	})
+
+	t.Run("a configured provider that cannot be built keeps the session for a later try", func(t *testing.T) {
+		// As while its client Secret cannot be read.
+		_, mgr, b := signIn(t, due)
+		p := mgr.oidc
+		mgr.oidc = nil
+		res, err := refresh(mgr, b)
+		assert.ErrorIs(t, err, errProviderUnavailable)
+		assert.Empty(t, res.cookies, "the cookies stay")
+
+		mgr.oidc = p
+		res, err = refresh(mgr, b)
+		identityOf(t, mgr, res, err)
+	})
+
+	t.Run("groups that outgrow the browser's cookies at a check end the session", func(t *testing.T) {
+		provider, mgr, b := signIn(t, due)
+		provider.set(func(p *fakeProvider) { p.groups = manyGroups(200) })
+		res, err := refresh(mgr, b)
+		assert.ErrorIs(t, err, errSessionTooLarge)
+		assertCleared(t, res)
+	})
+
+	t.Run("a check takes the email only when the provider verified it", func(t *testing.T) {
+		provider, mgr, b := signIn(t, due)
+		res, err := refresh(mgr, b)
+		assert.Equal(t, "user@example.com", identityOf(t, mgr, res, err).Email)
+
+		provider.set(func(p *fakeProvider) { p.emailUnverified = true })
+		res, err = refresh(mgr, heldBy(res.cookies...))
+		assert.Empty(t, identityOf(t, mgr, res, err).Email)
 	})
 
 	t.Run("a session without its provider token cookie ends", func(t *testing.T) {
@@ -622,4 +707,141 @@ func TestRespondSessionError(t *testing.T) {
 		assert.Equal(t, tc.want, w.Code, tc.err.Error())
 		assert.NotContains(t, w.Body.String(), "invalid_grant", "details are not told the client")
 	}
+}
+
+// TestSessionsEndWithWhatSignedThemIn covers sessions whose login method,
+// admin credentials or issuer changed after the sign-in: the middleware
+// refuses their access tokens, and a refresh their refresh tokens.
+func TestSessionsEndWithWhatSignedThemIn(t *testing.T) {
+	admin := newTestAuthenticator(t)
+	adminID := &Identity{Subject: testUsername, Provider: providerAdmin}
+	oidcID := &Identity{Subject: testSubject, Provider: providerOIDC, Issuer: testIssuerURL}
+	// signedIn returns a manager in the state the sessions sign in under.
+	signedIn := func() *authManager {
+		return &authManager{auth: admin, adminLogin: true, oidcIssuer: testIssuerURL, logger: logr.Discard()}
+	}
+	withAdmin := func(username string, passwordHash []byte) func(*authManager) {
+		return func(m *authManager) {
+			m.auth = m.auth.withAdmin(&adminCredentials{username: username, passwordHash: passwordHash})
+		}
+	}
+
+	for _, tc := range []struct {
+		name   string
+		id     *Identity
+		change func(*authManager)
+		ends   bool
+	}{
+		{"an unchanged admin account keeps its session", adminID, withAdmin(testUsername, admin.passwordHash), false},
+		{"turning admin off ends an admin session", adminID, func(m *authManager) { m.auth = m.auth.withAdmin(nil) }, true},
+		{"a new admin password ends an admin session", adminID, withAdmin(testUsername, mustBcrypt(t, "new-password")), true},
+		{"a new admin username ends an admin session", adminID, withAdmin(testRootUser, admin.passwordHash), true},
+		{"removing OIDC leaves an admin session", adminID, func(m *authManager) { m.oidcIssuer = "" }, false},
+		{"an unchanged issuer keeps an OIDC session", oidcID, func(*authManager) {}, false},
+		{"removing OIDC ends an OIDC session", oidcID, func(m *authManager) { m.oidcIssuer = "" }, true},
+		{"another issuer ends an OIDC session", oidcID, func(m *authManager) { m.oidcIssuer = testOtherIssuerURL }, true},
+		{"turning admin off leaves an OIDC session", oidcID, func(m *authManager) { m.auth = m.auth.withAdmin(nil) }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := signedIn()
+			tokens, err := m.auth.signInTokens(tc.id, newSessionState(time.Now()))
+			require.NoError(t, err)
+			tc.change(m)
+
+			res, err := m.refreshSession(context.Background(), browserSession{refreshToken: tokens.refreshToken}, true)
+			if tc.ends {
+				assert.Equal(t, http.StatusUnauthorized, protectedRequest(m, tokens.accessToken))
+				assert.ErrorIs(t, err, errSessionEnded)
+				assertCleared(t, res)
+				return
+			}
+			assert.Equal(t, http.StatusOK, protectedRequest(m, tokens.accessToken))
+			require.NoError(t, err)
+			assert.Equal(t, http.StatusOK, protectedRequest(m, res.tokens.accessToken), "the refreshed session goes on")
+		})
+	}
+
+	t.Run("an admin token without the password fingerprint is refused", func(t *testing.T) {
+		// As one issued before tokens carried it, or by a token-only
+		// authenticator with the same signing key.
+		tokens, err := newTokenAuthenticator().signInTokens(adminID, newSessionState(time.Now()))
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusUnauthorized, protectedRequest(signedIn(), tokens.accessToken))
+	})
+
+	t.Run("a token of an unknown login method is refused", func(t *testing.T) {
+		tokens, err := admin.signInTokens(&Identity{Subject: testSubject, Provider: "ldap"}, newSessionState(time.Now()))
+		require.NoError(t, err)
+		assert.Equal(t, http.StatusUnauthorized, protectedRequest(signedIn(), tokens.accessToken))
+	})
+}
+
+// TestAuthManagerOIDCSessionsFollowTheKitchen covers reloads of the Kitchen's
+// OIDC configuration while a user is signed in through OIDC.
+func TestAuthManagerOIDCSessionsFollowTheKitchen(t *testing.T) {
+	const newOIDCSecret = "kokumi-server-oidc-2"
+	oidcSecret := func(name string) *corev1.Secret {
+		return &corev1.Secret{
+			Name: name, Namespace: testNS,
+			Data: map[string][]byte{secretKeyClientSecret: []byte(testClientSec)},
+		}
+	}
+	kitchen := func(issuerURL, secret string) *deliveryv1alpha1.Kitchen {
+		return authKitchen(&deliveryv1alpha1.KitchenAuth{OIDC: &deliveryv1alpha1.OIDCConfig{
+			IssuerURL: issuerURL, ClientID: testClientID,
+			ClientSecretRef: &corev1.LocalObjectReference{Name: secret},
+		}})
+	}
+	// setup signs a user in through OIDC at a fake provider and returns the
+	// manager, its client, the provider's URL and the session's access token.
+	setup := func(t *testing.T, get func(context.Context, client.WithWatch, client.ObjectKey, client.Object, ...client.GetOption) error) (*authManager, client.Client, string, string) {
+		t.Helper()
+		provider := newFakeProvider(t, func(*fakeProvider) {})
+		c := fake.NewClientBuilder().WithObjects(testTokenSecret(), oidcSecret(testOIDCSecret)).
+			WithInterceptorFuncs(interceptor.Funcs{Get: get}).Build()
+		m := &authManager{reader: c, apiReader: c, ns: testNS, logger: logr.Discard()}
+		m.reload(context.Background(), kitchen(provider.URL, testOIDCSecret))
+		access := accessTokenFromCallback(t, oidcCallback(t, m))
+		require.Equal(t, http.StatusOK, protectedRequest(m, access))
+		return m, c, provider.URL, access
+	}
+	passThrough := func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+		return c.Get(ctx, key, obj, opts...)
+	}
+
+	t.Run("removing OIDC ends its sessions", func(t *testing.T) {
+		m, _, _, access := setup(t, passThrough)
+		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{}))
+		assert.Nil(t, m.getOIDC())
+		assert.Equal(t, http.StatusUnauthorized, protectedRequest(m, access))
+	})
+
+	t.Run("another issuer ends the sessions of the old one, even while its provider cannot be built", func(t *testing.T) {
+		m, _, _, access := setup(t, passThrough)
+		m.reload(context.Background(), kitchen(testOtherIssuerURL, newOIDCSecret))
+		assert.Nil(t, m.getOIDC(), "the old issuer no longer signs anyone in")
+		assert.Equal(t, newOIDCSecret, m.oidcSecretName(), "creating the new Secret is noticed")
+		assert.Equal(t, http.StatusUnauthorized, protectedRequest(m, access))
+	})
+
+	t.Run("an OIDC Secret that cannot be read keeps the provider and its sessions", func(t *testing.T) {
+		var unreadable bool
+		m, _, issuer, access := setup(t, func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if unreadable && key.Name == testOIDCSecret {
+				return errors.New("connection refused")
+			}
+			return c.Get(ctx, key, obj, opts...)
+		})
+		unreadable = true
+		m.reload(context.Background(), kitchen(issuer, testOIDCSecret))
+		assert.NotNil(t, m.getOIDC())
+		assert.Equal(t, http.StatusOK, protectedRequest(m, access))
+	})
+
+	t.Run("a deleted OIDC Secret keeps the sessions of the configured issuer", func(t *testing.T) {
+		m, c, issuer, access := setup(t, passThrough)
+		require.NoError(t, c.Delete(context.Background(), oidcSecret(testOIDCSecret)))
+		m.reload(context.Background(), kitchen(issuer, testOIDCSecret))
+		assert.Equal(t, http.StatusOK, protectedRequest(m, access))
+	})
 }

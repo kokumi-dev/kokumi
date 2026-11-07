@@ -354,7 +354,6 @@ function AuthenticationTab({ auth, onSaved }: { auth?: AuthSettings; onSaved: (s
     clientID: '',
     secretRef: 'kokumi-server-oidc',
     usernameClaim: 'email',
-    emailClaim: 'email',
     groupsClaim: 'groups',
     scopes: 'openid, profile, email',
     signOutAtProvider: false,
@@ -371,7 +370,6 @@ function AuthenticationTab({ auth, onSaved }: { auth?: AuthSettings; onSaved: (s
   const [oidcClientID, setOidcClientID] = useState(auth?.oidc?.clientID ?? oidcDefaults.clientID)
   const [oidcSecretRef, setOidcSecretRef] = useState(auth?.oidc?.clientSecretRef?.name ?? oidcDefaults.secretRef)
   const [usernameClaim, setUsernameClaim] = useState(auth?.oidc?.usernameClaim ?? oidcDefaults.usernameClaim)
-  const [emailClaim, setEmailClaim] = useState(auth?.oidc?.emailClaim ?? oidcDefaults.emailClaim)
   const [groupsClaim, setGroupsClaim] = useState(auth?.oidc?.groupsClaim ?? oidcDefaults.groupsClaim)
   const [scopes, setScopes] = useState(auth?.oidc?.scopes?.join(', ') ?? oidcDefaults.scopes)
   const [signOutAtProvider, setSignOutAtProvider] = useState(auth?.oidc?.providerSignOut === 'Always')
@@ -398,7 +396,6 @@ function AuthenticationTab({ auth, onSaved }: { auth?: AuthSettings; onSaved: (s
     setOidcClientID(oidcDefaults.clientID)
     setOidcSecretRef(oidcDefaults.secretRef)
     setUsernameClaim(oidcDefaults.usernameClaim)
-    setEmailClaim(oidcDefaults.emailClaim)
     setGroupsClaim(oidcDefaults.groupsClaim)
     setScopes(oidcDefaults.scopes)
     setSignOutAtProvider(oidcDefaults.signOutAtProvider)
@@ -435,7 +432,7 @@ function AuthenticationTab({ auth, onSaved }: { auth?: AuthSettings; onSaved: (s
       }
       if (oidcClientID.trim() === '') return 'OIDC client ID is required when OIDC is enabled'
       if (oidcSecretRef.trim() === '') return 'OIDC client secret reference must not be empty'
-      for (const c of [usernameClaim, emailClaim, groupsClaim]) {
+      for (const c of [usernameClaim, groupsClaim]) {
         if (c.length > maxClaimLength) return 'OIDC claim names are limited to 253 characters'
       }
     }
@@ -470,7 +467,6 @@ function AuthenticationTab({ auth, onSaved }: { auth?: AuthSettings; onSaved: (s
         clientID: oidcClientID.trim(),
         clientSecretRef: { name: oidcSecretRef.trim() },
         usernameClaim: usernameClaim.trim(),
-        emailClaim: emailClaim.trim(),
         groupsClaim: groupsClaim.trim(),
         scopes: scopes.split(',').map((s) => s.trim()).filter(Boolean),
         providerSignOut: signOutAtProvider ? 'Always' : 'Never',
@@ -618,18 +614,6 @@ function AuthenticationTab({ auth, onSaved }: { auth?: AuthSettings; onSaved: (s
                     value={usernameClaim}
                     disabled={submitting}
                     onChange={(e) => { setUsernameClaim(e.target.value); setSaved(false) }}
-                  />
-                </div>
-
-                <div className={styles.fieldRow}>
-                  <label className={styles.fieldLabel} htmlFor="email-claim">Email claim</label>
-                  <input
-                    id="email-claim"
-                    className={styles.fieldInput}
-                    type="text"
-                    value={emailClaim}
-                    disabled={submitting}
-                    onChange={(e) => { setEmailClaim(e.target.value); setSaved(false) }}
                   />
                 </div>
 

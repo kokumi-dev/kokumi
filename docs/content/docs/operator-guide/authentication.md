@@ -70,8 +70,8 @@ kubectl -n kokumi delete secret kokumi-server-auth kokumi-initial-admin --ignore
 ```
 
 Admin login stops as soon as `kokumi-server-auth` is gone or holds no
-`password-hash`. A new password does not end sessions that are already signed
-in; see [Sessions and signing out](#sessions-and-signing-out).
+`password-hash`. That, and a new hash, end the admin sessions that are already
+signed in; see [Sessions and signing out](#sessions-and-signing-out).
 
 ## Token signing key
 
@@ -128,13 +128,38 @@ works until its own expiry, and a sign-out ends them all. A session ends:
   cookies can keep it going until its 24 hours are up.
 - **24 hours after the sign-in**, however active the user is.
 - **At a sign-out**, also for every copy of its tokens.
+- **When what signed it in no longer does**:
+  - an admin session when the admin account is turned off, or its username or
+    its password hash changes;
+  - an OIDC session when the Kitchen no longer configures OIDC, or configures
+    another `issuerURL`.
 - **When the OIDC provider ends it**: at a check of the session, or through
   [back-channel logout](#back-channel-logout) (see
   [OIDC single sign-on](#oidc-single-sign-on)).
 
+Every request checks its session, so a session that ends this way is refused
+at its next request, and its live updates stop at once. After a restart the
+server answers `503` until it has read the Kitchen; the UI keeps its session
+and tries again.
+
 The refresh cookie expires when the session would end without further
 activity. The cookies are marked `Secure` only when the request arrived over
 TLS or carries `X-Forwarded-Proto: https`.
+
+Browsers drop a cookie larger than 4096 bytes, and proxies refuse a request
+whose headers exceed their limit, often 8 KiB. The refresh cookie carries the
+user's groups, so Kokumi keeps it under 4,000 bytes, and the cookies of a
+session under 7,000 bytes together:
+
+- A sign-in whose cookies would be larger fails. The login page asks the user
+  to have the groups limited, and the server logs the number of groups. Have
+  the provider send only the groups Kokumi maps, for example with a group
+  filter; with Microsoft Entra ID's object IDs of 36 characters, a session
+  holds about 60 groups.
+- A refresh whose groups have grown that large since the sign-in ends the
+  session.
+- The ID token, which only a sign-out at the provider uses, is left out first
+  (see `providerSignOut` below).
 
 To change the lifetimes, set these environment variables of the
 `kokumi-server` Deployment to a Go duration, such as `15m` or `8h`:
@@ -145,10 +170,9 @@ To change the lifetimes, set these environment variables of the
 | `KOKUMI_SESSION_TTL` | `24h` | A session, counted from the sign-in. A change applies to running sessions too. |
 | `KOKUMI_SESSION_IDLE_TTL` | `1h` | A session without activity. A value of at least `KOKUMI_SESSION_TTL` turns the limit off. |
 
-Turning the admin account off or changing its password does not end sessions
-that are already signed in, and neither does a change at an OIDC provider that
-does not check its sessions. They end with their session at the latest. To end
-them at once, replace the [token signing key](#token-signing-key).
+A change at an OIDC provider that does not check its sessions reaches Kokumi
+only at the next sign-in. To end every session at once, replace the
+[token signing key](#token-signing-key).
 
 "Sign out" in the UI ends the session in this browser, in all of its tabs:
 
@@ -172,6 +196,13 @@ them at once, replace the [token signing key](#token-signing-key).
     post-logout redirect URI described in
     [OIDC single sign-on](#oidc-single-sign-on). Use `Always` for a provider
     that serves only Kokumi.
+
+    For the sign-out, the server keeps the provider's ID token in the
+    HttpOnly cookie `kokumi.oidc.id_token`, which only the sign-out receives,
+    and sends it as `id_token_hint`. With `Never` it keeps none. An ID token
+    that does not fit beside the session's other cookies is left out; the
+    sign-out then names only the client, and some providers ask the user to
+    confirm it.
 
     The next "Sign in with SSO" in this browser asks the provider to
     authenticate the user again (`max_age=0`), in case the provider session
@@ -243,9 +274,9 @@ spec:
 ```
 
 The server watches the Secret and the `Kitchen` resource, so credential and
-configuration changes are picked up automatically; no restart is needed.
-Sessions that are already signed in stay valid; see
-[Sessions and signing out](#sessions-and-signing-out).
+configuration changes are picked up automatically; no restart is needed. A new
+username or password hash ends the admin sessions that are already signed in;
+see [Sessions and signing out](#sessions-and-signing-out).
 
 The admin login always acts as the `kokumi-admin` ServiceAccount, which has
 full access to Kokumi resources. See [Authorization](../authorization/).
@@ -261,10 +292,12 @@ kubectl -n kokumi patch kitchen default --type=merge \
   -p '{"spec":{"auth":{"adminUser":{"enabled":false}}}}'
 ```
 
-New admin logins are refused at once. Sessions that are already signed in as
-the admin keep working until their session ends; replace the
-[token signing key](#token-signing-key) to end them at once. The admin Secrets
-stay; delete them if you do not turn the account on again.
+New admin logins are refused at once, and sessions that are already signed in
+as the admin end at their next request. The check keeps no state: turn the
+account on again with the same password, and a session that has not reached
+its idle or 24-hour limit goes on. To end the admin sessions for good, change
+the password. The admin Secrets stay; delete them if you do not turn the
+account on again.
 
 ## OIDC-only (no admin account)
 
@@ -300,6 +333,17 @@ stored on the server.
 
 The session keeps the subject, email and groups of the ID token. A change to
 the ServiceAccount mapping takes effect at the next request.
+
+- The ID token must have a `sub` claim, as OpenID Connect requires; a token
+  without it fails the sign-in.
+- The email is the `email` claim, and only when the token's `email_verified`
+  is `true`: ServiceAccounts map by it, and some providers let users set an
+  address they do not own. Providers that send no `email_verified`, such as
+  Microsoft Entra ID, map by subject or group (see
+  [Authorization](../authorization/)).
+- Removing `spec.auth.oidc` or changing its `issuerURL` ends the sessions
+  signed in through it. While the client Secret cannot be read, the sessions
+  go on, but their checks at the provider wait until it can.
 
 When the provider issues a refresh token at the sign-in, Kokumi asks the
 provider again whether the user stays signed in, each time the provider's
@@ -372,8 +416,7 @@ OIDC is configured under `spec.auth.oidc` on the singleton `Kitchen` resource:
 | `issuerURL` | `string` | _(required)_ | OIDC issuer base URL (must be a valid `https://` or `http://` URL). Discovery is performed against `<issuerURL>/.well-known/openid-configuration`. |
 | `clientID` | `string` | _(required)_ | OAuth2 client identifier registered with the provider. |
 | `clientSecretRef` | `*LocalObjectReference` | `kokumi-server-oidc` | Name of the `Secret` (in the install namespace) holding the client secret under the `client-secret` key. |
-| `usernameClaim` | `string` | `email` | ID-token claim shown as the user's name. Supports dotted nested paths (e.g. `user.name`). It only names the user: mapping uses the `sub` claim, and falls back to this claim only when the token has no `sub`. |
-| `emailClaim` | `string` | `email` | ID-token claim matched against `kokumi.dev/identity-email`. Supports dotted nested paths. |
+| `usernameClaim` | `string` | `email` | ID-token claim shown as the user's name. Supports dotted nested paths (e.g. `user.name`). It only names the user: Kokumi identifies the user by `sub`, and maps by `sub`, the verified `email` and the groups. |
 | `groupsClaim` | `string` | `groups` | ID-token claim holding the user's groups, a list of strings, matched against `kokumi.dev/identity-groups`. Supports dotted nested paths (e.g. `realm_access.roles` for Keycloak). |
 | `scopes` | `[]string` | `["openid","profile","email"]` | OAuth2 scopes requested during the flow (max 16). |
 | `providerSignOut` | `string` | `Never` | `Never` or `Always`: whether signing out of Kokumi also signs the user out of the provider. See [Sessions and signing out](#sessions-and-signing-out). |

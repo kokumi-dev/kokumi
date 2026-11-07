@@ -171,5 +171,21 @@ var _ = Describe("API server", Label("server"), Serial, func() {
 				To(Succeed(), "the API server stores the kubeconfig next to the Cluster")
 			Expect(secret.OwnerReferences).To(ContainElement(HaveField("Name", "spoke")), "the Secret goes with its Cluster")
 		})
+
+		// Last in this context: it turns the admin account off, and the
+		// scenario restores the Kitchen when it ends.
+		It("ends a running admin session when the admin account is turned off", func() {
+			token := server.Login("admin", framework.AdminPassword())
+			resp, body := server.Do(http.MethodGet, "/api/v1/whoami", token, nil)
+			Expect(resp.StatusCode).To(Equal(http.StatusOK), string(body))
+
+			framework.Update(framework.InstallNamespace, deliveryv1alpha1.DefaultKitchenName, func(k *deliveryv1alpha1.Kitchen) {
+				k.Spec.Auth.AdminUser.Enabled = false
+			})
+			Eventually(func(g Gomega) {
+				resp, body := server.Do(http.MethodGet, "/api/v1/whoami", token, nil)
+				g.Expect(resp.StatusCode).To(Equal(http.StatusUnauthorized), string(body))
+			}).Should(Succeed(), "the server refuses the session's access token once it has read the Kitchen")
+		})
 	})
 })

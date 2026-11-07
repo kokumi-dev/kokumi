@@ -905,14 +905,6 @@ spec:
                             type: string
                         type: object
                         x-kubernetes-map-type: atomic
-                      emailClaim:
-                        default: email
-                        description: |-
-                          emailClaim is the ID-token claim used as the user's email for
-                          ServiceAccount identity mapping (kokumi.dev/identity-email). Supports
-                          dotted paths for nested claims (e.g. "user.email"). Defaults to "email".
-                        maxLength: 253
-                        type: string
                       groupsClaim:
                         default: groups
                         description: |-
@@ -962,8 +954,10 @@ spec:
                       usernameClaim:
                         default: email
                         description: |-
-                          usernameClaim is the ID-token claim used as the kokumi username.
-                          Defaults to "email".
+                          usernameClaim is the ID-token claim shown as the user's name. It only
+                          names the user: the user is identified by the "sub" claim, and mapped to
+                          ServiceAccounts by "sub", by "email" when "email_verified" is true, and
+                          by groups. Defaults to "email".
                         maxLength: 253
                         type: string
                     required:

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -27,13 +28,11 @@ const (
 	// oidcStateTTL bounds how long an in-flight authorization request stays valid.
 	oidcStateTTL = 10 * time.Minute
 	// oidcIDTokenCookie holds the provider's ID token for the session, sent as
-	// id_token_hint when the user signs out at the provider.
+	// id_token_hint when the user signs out at the provider. It is set only
+	// with providerSignOut Always.
 	oidcIDTokenCookie = "kokumi.oidc.id_token"
 	// oidcIDTokenCookiePath scopes the ID token cookie to the sign-out.
 	oidcIDTokenCookiePath = "/api/v1/auth/logout"
-	// maxIDTokenCookieLen is the longest ID token kept in a cookie; browsers
-	// drop cookies larger than 4096 bytes.
-	maxIDTokenCookieLen = 4000
 	// oidcReauthCookie is set by a sign-out at the provider and makes the
 	// next sign-in ask the provider to authenticate the user again
 	// (max_age=0), in case the provider session outlives the sign-out.
@@ -52,6 +51,9 @@ const (
 	// ssoErrorUnavailable is the sso_error code for an issuer that cannot be
 	// reached; the login page turns it into a message.
 	ssoErrorUnavailable = "unavailable"
+	// ssoErrorTooLarge is the sso_error code for a sign-in whose session does
+	// not fit in the browser's cookies.
+	ssoErrorTooLarge = "too_large"
 )
 
 // oidcProvider signs users in through the OIDC authorization-code flow
@@ -62,7 +64,6 @@ type oidcProvider struct {
 	issuer        *oidcIssuer
 	oauth         oauth2.Config // without Endpoint, which comes from discovery
 	usernameClaim string
-	emailClaim    string
 	groupsClaim   string
 	// signOutAtProvider is providerSignOut Always: signing out of Kokumi
 	// also signs the user out of the provider.
@@ -200,7 +201,6 @@ func buildOIDCProvider(
 		issuer:            &oidcIssuer{url: cfg.IssuerURL},
 		oauth:             oauth,
 		usernameClaim:     cfg.UsernameClaim,
-		emailClaim:        defaultString(cfg.EmailClaim, "email"),
 		groupsClaim:       defaultString(cfg.GroupsClaim, "groups"),
 		signOutAtProvider: cfg.ProviderSignOut == v1alpha1.ProviderSignOutAlways,
 	}, nil
@@ -375,7 +375,7 @@ func handleOIDCCallback(m *authManager) http.HandlerFunc {
 			respondError(w, http.StatusBadRequest, "failed to parse id token claims")
 			return
 		}
-		id, err := identityFromClaims(claims, p.usernameClaim, p.emailClaim, p.groupsClaim)
+		id, err := identityFromClaims(claims, p.usernameClaim, p.groupsClaim)
 		if err != nil {
 			respondError(w, http.StatusBadRequest, err.Error())
 			return
@@ -387,15 +387,22 @@ func handleOIDCCallback(m *authManager) http.HandlerFunc {
 					"hint", "if the provider issues refresh tokens only for it, add the scope offline_access to spec.auth.oidc.scopes")
 			})
 		}
-		// The provider's session, which a back-channel logout may name.
-		providerSessionID, _ := claims["sid"].(string)
-		res, err := m.startSession(signIn{
+		in := signIn{
 			identity:             id,
-			providerSessionID:    providerSessionID,
-			idToken:              rawID,
 			providerRefreshToken: token.RefreshToken,
 			providerCheckAt:      nextProviderCheck(time.Now(), token, idToken),
-		})
+		}
+		// The provider's session, which a back-channel logout may name.
+		in.providerSessionID, _ = claims["sid"].(string)
+		// Only a sign-out at the provider sends the ID token back.
+		if p.signOutAtProvider {
+			in.idToken = rawID
+		}
+		res, err := m.startSession(in)
+		if errors.Is(err, errSessionTooLarge) {
+			redirectSSOError(w, r, ssoErrorTooLarge)
+			return
+		}
 		if err != nil {
 			respondSessionError(w, err)
 			return

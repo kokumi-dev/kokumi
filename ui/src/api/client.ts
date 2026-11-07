@@ -542,7 +542,6 @@ export interface OIDCSettings {
   clientID: string
   clientSecretRef?: SecretRef
   usernameClaim?: string
-  emailClaim?: string
   groupsClaim?: string
   scopes?: string[]
   /** Whether signing out of Kokumi also signs the user out of the provider. */

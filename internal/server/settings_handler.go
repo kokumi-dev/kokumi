@@ -54,7 +54,6 @@ type oidcDTO struct {
 	ClientID        string        `json:"clientID"`
 	ClientSecretRef *secretRefDTO `json:"clientSecretRef,omitempty"`
 	UsernameClaim   string        `json:"usernameClaim,omitempty"`
-	EmailClaim      string        `json:"emailClaim,omitempty"`
 	GroupsClaim     string        `json:"groupsClaim,omitempty"`
 	Scopes          []string      `json:"scopes,omitempty"`
 	ProviderSignOut string        `json:"providerSignOut,omitempty"`
@@ -304,7 +303,6 @@ func authToDTO(auth *deliveryv1alpha1.KitchenAuth) *authDTO {
 			ClientID:        auth.OIDC.ClientID,
 			ClientSecretRef: secretRefToDTO(auth.OIDC.ClientSecretRef),
 			UsernameClaim:   auth.OIDC.UsernameClaim,
-			EmailClaim:      auth.OIDC.EmailClaim,
 			GroupsClaim:     auth.OIDC.GroupsClaim,
 			Scopes:          auth.OIDC.Scopes,
 			ProviderSignOut: string(auth.OIDC.ProviderSignOut),
@@ -353,7 +351,6 @@ func applyAuth(auth *deliveryv1alpha1.KitchenAuth, dto *authDTO) {
 			ClientID:        dto.OIDC.ClientID,
 			ClientSecretRef: secretRefFromDTO(dto.OIDC.ClientSecretRef),
 			UsernameClaim:   dto.OIDC.UsernameClaim,
-			EmailClaim:      dto.OIDC.EmailClaim,
 			GroupsClaim:     dto.OIDC.GroupsClaim,
 			Scopes:          dto.OIDC.Scopes,
 			ProviderSignOut: deliveryv1alpha1.ProviderSignOut(dto.OIDC.ProviderSignOut),
@@ -410,7 +407,6 @@ func validateAuthDTO(dto *authDTO) error {
 		}
 		for _, c := range []struct{ label, val string }{
 			{"usernameClaim", dto.OIDC.UsernameClaim},
-			{"emailClaim", dto.OIDC.EmailClaim},
 			{"groupsClaim", dto.OIDC.GroupsClaim},
 		} {
 			if len(c.val) > 253 {

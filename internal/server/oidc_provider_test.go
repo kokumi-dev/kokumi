@@ -31,6 +31,8 @@ const (
 	testClientSec  = "kokumi-client-secret"
 	testKeyID      = "test-key"
 	testIssuerURL  = "https://issuer.example"
+	// testOtherIssuerURL is an issuer the sessions of a test did not sign in at.
+	testOtherIssuerURL = "https://other-issuer.example"
 )
 
 // newTestOIDCProvider spins up an in-process OIDC test OP and returns a provider + server.
@@ -305,7 +307,7 @@ func TestOIDCMiddlewareAcceptsIssuedToken(t *testing.T) {
 	p, httpSrv := newTestOIDCProvider(t)
 	defer httpSrv.Close()
 
-	mgr := &authManager{auth: newTokenAuthenticator(), oidc: p, adminLogin: false}
+	mgr := &authManager{auth: newTokenAuthenticator(), oidc: p, oidcIssuer: p.issuer.url, adminLogin: false}
 	var reached bool
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		reached = true
@@ -314,7 +316,7 @@ func TestOIDCMiddlewareAcceptsIssuedToken(t *testing.T) {
 	handler := mgr.middleware(next)
 
 	const testOIDCUser = "admin@example.com"
-	res, err := mgr.startSession(signIn{identity: &Identity{Subject: testOIDCUser, Email: testOIDCUser, Provider: providerOIDC}})
+	res, err := mgr.startSession(signIn{identity: &Identity{Subject: testOIDCUser, Email: testOIDCUser, Provider: providerOIDC, Issuer: p.issuer.url}})
 	require.NoError(t, err)
 	require.NotEmpty(t, res.tokens.accessToken)
 
@@ -525,7 +527,7 @@ func TestAuthManagerReloadKeepsDiscoveredIssuer(t *testing.T) {
 	_, err = m.getOIDC().issuer.discover(ctx)
 	require.NoError(t, err, "sign-in must keep working while the issuer is down")
 
-	m.reload(ctx, kitchen("https://other-issuer.example"))
+	m.reload(ctx, kitchen(testOtherIssuerURL))
 	assert.NotSame(t, first, m.getOIDC().issuer, "a new issuer must be discovered on its own")
 }
 
@@ -653,4 +655,47 @@ func TestOIDCCallbackErrorEndsReauthentication(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Equal(t, -1, cookieNamed(t, w.Result().Cookies(), oidcReauthCookie).MaxAge,
 		"a provider that refuses the request must not refuse every later sign-in")
+}
+
+func TestOIDCCallbackCookies(t *testing.T) {
+	t.Run("with providerSignOut Never the ID token is not kept", func(t *testing.T) {
+		mgr := newOIDCManager(t, newFakeIssuer(t, true).URL, deliveryv1alpha1.ProviderSignOutNever)
+		assert.Equal(t, -1, cookieNamed(t, signInOIDC(t, mgr), oidcIDTokenCookie).MaxAge)
+	})
+
+	t.Run("with providerSignOut Always the ID token is kept for the sign-out", func(t *testing.T) {
+		mgr := newOIDCManager(t, newFakeIssuer(t, true).URL, deliveryv1alpha1.ProviderSignOutAlways)
+		assert.NotEmpty(t, cookieNamed(t, signInOIDC(t, mgr), oidcIDTokenCookie).Value)
+	})
+
+	t.Run("a session too large for the browser's cookies returns to the login page with a message", func(t *testing.T) {
+		provider := newFakeProvider(t, func(p *fakeProvider) { p.groups = manyGroups(200) })
+		mgr := newOIDCManager(t, provider.URL, deliveryv1alpha1.ProviderSignOutNever)
+		w := oidcCallback(t, mgr)
+		assert.Equal(t, http.StatusFound, w.Code)
+		assert.Equal(t, "/?sso_error="+ssoErrorTooLarge, w.Header().Get("Location"))
+		assert.Nil(t, findCookie(w.Result().Cookies(), refreshCookieName), "no session starts")
+	})
+
+	t.Run("an ID token without email_verified gives the session no email", func(t *testing.T) {
+		provider := newFakeProvider(t, func(p *fakeProvider) { p.emailUnverified = true })
+		mgr := newOIDCManager(t, provider.URL, deliveryv1alpha1.ProviderSignOutNever)
+		token, err := mgr.auth.parseToken(accessTokenFromCallback(t, oidcCallback(t, mgr)), accessTokenType)
+		require.NoError(t, err)
+		assert.Empty(t, token.identity.Email)
+		assert.Equal(t, testSubject, token.identity.Subject)
+	})
+}
+
+// accessTokenFromCallback returns the access token the OIDC callback hands
+// the UI in the URL fragment.
+func accessTokenFromCallback(t *testing.T, w *httptest.ResponseRecorder) string {
+	t.Helper()
+	require.Equal(t, http.StatusFound, w.Code, w.Body.String())
+	loc, err := url.Parse(w.Header().Get("Location"))
+	require.NoError(t, err)
+	fragment, err := url.ParseQuery(loc.Fragment)
+	require.NoError(t, err)
+	require.NotEmpty(t, fragment.Get("access_token"))
+	return fragment.Get("access_token")
 }

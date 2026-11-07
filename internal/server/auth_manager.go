@@ -21,15 +21,18 @@ const (
 // authManager holds the active authenticator and OIDC provider behind a mutex
 // so they can be swapped when the Kitchen config or Secrets change. Without a
 // configured provider no one can sign in and the API stays closed. A Secret
-// that cannot be read keeps the last state it gave.
+// that cannot be read keeps the last state it gave. Until the Kitchen was read
+// there is no authenticator, and authentication is unavailable.
 type authManager struct {
 	mu          sync.RWMutex
-	auth        *authenticator // signing key, plus the admin account when it can sign in; nil until a signing key was read
-	oidc        *oidcProvider  // OIDC provider; nil when not configured or not yet resolved
+	auth        *authenticator // signing key, plus the admin account when it can sign in; nil until the Kitchen and a signing key were read
+	oidc        *oidcProvider  // OIDC provider; nil when not configured or not yet built
+	oidcIssuer  string         // issuer the Kitchen configures for OIDC, also while its provider cannot be built; "" without OIDC
 	adminLogin  bool           // true when admin credential login is available
 	secret      string         // name of the admin Secret last resolved from
-	oidcSecret  string         // name of the OIDC Secret last resolved from
+	oidcSecret  string         // name of the OIDC Secret the Kitchen configures
 	tokenSecret string         // name of the token signing-key Secret last resolved from
+	changed     chan struct{}  // closed at the next reload; nil until changes asks for it
 	reader      client.Reader  // informer cache, used for the Kitchen singleton
 	apiReader   client.Reader  // direct API client, used for live Secret reads
 	ns          string
@@ -66,7 +69,8 @@ func (m *authManager) pruneEndedSessions(ctx context.Context) {
 	}
 }
 
-// newAuthManager builds an authManager and performs the initial resolution.
+// newAuthManager builds an authManager. The Kitchen's first event resolves
+// it: tokens are only checked against the auth configuration of a Kitchen.
 func newAuthManager(
 	ctx context.Context,
 	reader client.Reader,
@@ -76,7 +80,7 @@ func newAuthManager(
 	ended *endedSessions,
 ) *authManager {
 	logger := log.FromContext(ctx)
-	m := &authManager{
+	return &authManager{
 		reader:    reader,
 		apiReader: apiReader,
 		ns:        ns,
@@ -84,11 +88,10 @@ func newAuthManager(
 		logger:    logger,
 		ended:     ended,
 	}
-	m.reload(ctx, nil)
-	return m
 }
 
-// get returns the active authenticator (nil until a signing key was read).
+// get returns the active authenticator (nil until the Kitchen and a signing
+// key were read).
 func (m *authManager) get() *authenticator {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -119,6 +122,28 @@ func (m *authManager) getOIDC() *oidcProvider {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.oidc
+}
+
+// oidcIssuerURL returns the issuer the Kitchen configures for OIDC, or ""
+// without OIDC.
+func (m *authManager) oidcIssuerURL() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.oidcIssuer
+}
+
+// changes returns a channel that is closed at the next reload of the auth
+// configuration, or nil without an auth manager.
+func (m *authManager) changes() <-chan struct{} {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.changed == nil {
+		m.changed = make(chan struct{})
+	}
+	return m.changed
 }
 
 // providers returns enabled provider names for the UI (subset of
@@ -251,13 +276,14 @@ func (m *authManager) reload(ctx context.Context, kitchen *deliveryv1alpha1.Kitc
 	}
 }
 
-// apply swaps the freshly built providers into the manager state. Callers must
-// hold m.mu. Admin credentials whose Secret cannot be read are kept while they
-// come from the same Secret; a Secret that is gone or holds no password hash
-// ends admin login. An OIDC provider that fails to (re)build keeps its
-// last-known-good state; an intentionally unset one (nil, nil) is applied
-// as-is. It returns the OIDC issuer it introduced, or nil when the issuer is
-// unchanged or OIDC is off.
+// apply swaps the freshly built providers into the manager state and wakes
+// the waiters on changes. Callers must hold m.mu. Admin credentials whose
+// Secret cannot be read are kept while they come from the same Secret; a
+// Secret that is gone or holds no password hash ends admin login. An OIDC
+// provider that fails to rebuild keeps its last-known-good state while the
+// Kitchen configures the same issuer; an intentionally unset one (nil, nil)
+// is applied as-is. It returns the OIDC issuer it introduced, or nil when the
+// issuer is unchanged or OIDC is off.
 func (m *authManager) apply(
 	tokens *authenticator,
 	adminCfg *deliveryv1alpha1.AdminUserConfig,
@@ -284,20 +310,33 @@ func (m *authManager) apply(
 	} else {
 		m.secret = ""
 	}
-	if oidc != nil || oidcErr == nil {
+	// Track the configured OIDC Secret even when the build failed, so that
+	// creating it is noticed.
+	m.oidcIssuer, m.oidcSecret = "", ""
+	if oidcCfg != nil && oidcCfg.ClientSecretRef != nil {
+		m.oidcIssuer, m.oidcSecret = oidcCfg.IssuerURL, oidcCfg.ClientSecretRef.Name
+	}
+	switch {
+	case oidc != nil:
 		// The same issuer keeps what was discovered, so a reload neither asks
 		// the issuer again nor loses it while the issuer is down.
-		if oidc != nil && m.oidc != nil && m.oidc.issuer.url == oidc.issuer.url {
+		if m.oidc != nil && m.oidc.issuer.url == oidc.issuer.url {
 			oidc.issuer = m.oidc.issuer
-		} else if oidc != nil {
+		} else {
 			newIssuer = oidc.issuer
 		}
 		m.oidc = oidc
-		if oidcCfg != nil && oidcCfg.ClientSecretRef != nil {
-			m.oidcSecret = oidcCfg.ClientSecretRef.Name
-		}
+	case oidcErr == nil, m.oidc != nil && m.oidc.issuer.url != m.oidcIssuer:
+		// OIDC is off, or the Kitchen configures another issuer: the provider
+		// of before no longer signs anyone in, even while the new one cannot
+		// be built.
+		m.oidc = nil
 	}
 	m.adminLogin = m.auth != nil && m.auth.passwordHash != nil
+	if m.changed != nil {
+		close(m.changed)
+		m.changed = nil
+	}
 	return newIssuer
 }
 
