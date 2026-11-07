@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - '[0-9]+\.[0-9]+\.[0-9]+'
     paths:
       - "docs/**"
       - "examples/**"
@@ -25,6 +27,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: main
           fetch-depth: 0
           persist-credentials: false
 
@@ -42,21 +45,21 @@ jobs:
           wget -O ${{ runner.temp }}/hugo.deb https://github.com/gohugoio/hugo/releases/download/v${HUGO_VERSION}/hugo_extended_${HUGO_VERSION}_linux-amd64.deb \
           && sudo dpkg -i ${{ runner.temp }}/hugo.deb
 
-      - name: Build with Hugo
+      - name: Build the docs of the latest release and of main
         env:
-          HUGO_ENVIRONMENT: production
-          HUGO_ENV: production
           PAGES_BASE_URL: ${{ steps.pages.outputs.base_url }}
         run: |
-          hugo \
-            --source docs/ \
-            --gc --minify \
-            --baseURL "${PAGES_BASE_URL}/"
+          release=$(git describe --tags --abbrev=0 --match '[0-9]*.[0-9]*.[0-9]*')
+          git worktree add "${RUNNER_TEMP}/release" "${release}"
+          hugo --source "${RUNNER_TEMP}/release/docs" --gc --minify \
+            --baseURL "${PAGES_BASE_URL}/" --destination "${GITHUB_WORKSPACE}/public"
+          hugo --source docs --config hugo.toml,hugo.next.toml --gc --minify \
+            --baseURL "${PAGES_BASE_URL}/next/" --destination "${GITHUB_WORKSPACE}/public/next"
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: ./docs/public
+          path: ./public
 
   deploy:
     environment:

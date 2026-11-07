@@ -68,17 +68,35 @@ enableGitInfo = true
     name = "Docs"
     pageRef = "/docs"
     weight = 1
+  # The Pages workflow publishes the docs of the latest release at the root and
+  # the docs of main, built with hugo.next.toml, under /next/.
+  [[menu.main]]
+    identifier = "versions"
+    name = "Versions"
+    weight = 2
+  [[menu.main]]
+    identifier = "release-docs"
+    name = "Latest release"
+    parent = "versions"
+    url = "https://kokumi.dev/docs/"
+    weight = 1
+  [[menu.main]]
+    identifier = "main-docs"
+    name = "main (unreleased)"
+    parent = "versions"
+    url = "https://kokumi.dev/next/docs/"
+    weight = 2
   [[menu.main]]
     identifier = "search"
     name = "Search"
-    weight = 2
+    weight = 3
     [menu.main.params]
       type = "search"
   [[menu.main]]
     identifier = "github"
     name = "GitHub"
     url = "https://github.com/kokumi-dev/kokumi"
-    weight = 3
+    weight = 4
     [menu.main.params]
       icon = "github"
 

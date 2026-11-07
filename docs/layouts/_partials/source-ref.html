@@ -1,0 +1,9 @@
+{{- /*
+Return the Git ref of the repository these docs describe: main for the docs
+of main, which hugo.next.toml marks, and the release tag in kokumiVersion
+otherwise.
+
+@example {{ partial "source-ref.html" . }}
+*/ -}}
+
+{{- return cond (site.Params.unreleased | default false) "main" site.Params.kokumiVersion -}}

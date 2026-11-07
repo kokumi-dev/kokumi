@@ -57,7 +57,7 @@ registry instead; see [Registries and Repositories](../user-guide/registries/).
 
 ```bash
 kubectl apply -f \
-    https://github.com/kokumi-dev/kokumi/releases/download/{{< param kokumiVersion >}}/install.yaml
+    {{< install-url >}}
 ```
 
 To check the release before you apply it, see
@@ -178,8 +178,9 @@ kubectl apply -f \
 
 Kokumi is pre-1.0, and a release may change its CRDs without a migration;
 the [release notes](https://github.com/kokumi-dev/kokumi/releases) say what
-to re-apply. To run an unreleased version, build it from source; see
-[Run your build](../contribution-guide/#run-your-build).
+to re-apply. To run `main`, follow the
+[docs of main](https://kokumi.dev/next/docs/installation/); to run your own
+change, see [Run your build](../contribution-guide/#run-your-build).
 
 ## Uninstall
 
@@ -192,7 +193,7 @@ rest:
 ```bash
 kubectl get crd -o name | grep '\.delivery\.kokumi\.dev$' | xargs kubectl delete
 kubectl delete --ignore-not-found -f \
-    https://github.com/kokumi-dev/kokumi/releases/download/{{< param kokumiVersion >}}/install.yaml
+    {{< install-url >}}
 ```
 
 {{< callout type="warning" >}}
