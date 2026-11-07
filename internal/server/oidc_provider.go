@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -56,8 +55,9 @@ const (
 )
 
 // oidcProvider signs users in through the OIDC authorization-code flow
-// (PKCE). It verifies the issuer ID token and mints kokumi session tokens using
-// the shared authenticator's signing key, so OIDC and admin sessions share one trust root.
+// (PKCE) and verifies the issuer's ID tokens. The sessions it signs users in
+// to are minted by the session module with the active authenticator, so OIDC
+// and admin sessions share one trust root.
 type oidcProvider struct {
 	issuer        *oidcIssuer
 	oauth         oauth2.Config // without Endpoint, which comes from discovery
@@ -67,7 +67,6 @@ type oidcProvider struct {
 	// signOutAtProvider is providerSignOut Always: signing out of Kokumi
 	// also signs the user out of the provider.
 	signOutAtProvider bool
-	auth              *authenticator
 	// noRefreshToken logs once that the provider issues no refresh tokens.
 	noRefreshToken sync.Once
 }
@@ -173,13 +172,9 @@ func buildOIDCProvider(
 	reader client.Reader,
 	namespace string,
 	cfg *v1alpha1.OIDCConfig,
-	auth *authenticator,
 ) (*oidcProvider, error) {
 	if cfg == nil {
 		return nil, nil
-	}
-	if auth == nil {
-		return nil, fmt.Errorf("oidc requires a shared authenticator (token signing key) to be configured")
 	}
 	if cfg.ClientSecretRef == nil {
 		return nil, fmt.Errorf("oidc clientSecretRef not set")
@@ -208,7 +203,6 @@ func buildOIDCProvider(
 		emailClaim:        defaultString(cfg.EmailClaim, "email"),
 		groupsClaim:       defaultString(cfg.GroupsClaim, "groups"),
 		signOutAtProvider: cfg.ProviderSignOut == v1alpha1.ProviderSignOutAlways,
-		auth:              auth,
 	}, nil
 }
 
@@ -221,11 +215,11 @@ func defaultString(v, fallback string) string {
 }
 
 // oauthConfig returns a copy of the OAuth2 config with the discovered endpoint
-// and the redirect URI of r, so requests never write to the shared struct.
-func (p *oidcProvider) oauthConfig(r *http.Request, d *oidcDiscovery) oauth2.Config {
+// and redirectURL, so requests never write to the shared struct.
+func (p *oidcProvider) oauthConfig(d *oidcDiscovery, redirectURL string) oauth2.Config {
 	oauth := p.oauth
 	oauth.Endpoint = d.endpoint
-	oauth.RedirectURL = redirectURI(r)
+	oauth.RedirectURL = redirectURL
 	return oauth
 }
 
@@ -257,11 +251,11 @@ func externalURL(r *http.Request, path string) string {
 }
 
 // endSessionURL returns the URL that signs the user out at the provider and
-// sends the browser back to the UI (OIDC RP-Initiated Logout 1.0), or "" when
-// the provider advertises no end_session_endpoint. idToken, when not empty,
-// is sent as id_token_hint.
-func (p *oidcProvider) endSessionURL(r *http.Request, idToken string) (string, error) {
-	d, err := p.issuer.discover(r.Context())
+// sends the browser back to postLogoutRedirect (OIDC RP-Initiated Logout
+// 1.0), or "" when the provider advertises no end_session_endpoint. idToken,
+// when not empty, is sent as id_token_hint.
+func (p *oidcProvider) endSessionURL(ctx context.Context, postLogoutRedirect, idToken string) (string, error) {
+	d, err := p.issuer.discover(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -274,7 +268,7 @@ func (p *oidcProvider) endSessionURL(r *http.Request, idToken string) (string, e
 	}
 	q := endpoint.Query()
 	q.Set("client_id", p.oauth.ClientID)
-	q.Set("post_logout_redirect_uri", postLogoutRedirectURI(r))
+	q.Set("post_logout_redirect_uri", postLogoutRedirect)
 	if idToken != "" {
 		q.Set("id_token_hint", idToken)
 	}
@@ -301,19 +295,10 @@ func handleOIDCStart(m *authManager) http.HandlerFunc {
 			redirectSSOError(w, r, ssoErrorUnavailable)
 			return
 		}
-		state, err := randomToken(32)
-		if err != nil {
-			respondError(w, http.StatusInternalServerError, "failed to generate state")
-			return
-		}
-		verifier, err := randomToken(64)
-		if err != nil {
-			respondError(w, http.StatusInternalServerError, "failed to generate pkce verifier")
-			return
-		}
+		state, verifier := rand.Text(), oauth2.GenerateVerifier()
 		// Store state + PKCE verifier in a cookie so the callback validates without server state.
 		setCookie(w, r, oidcStateCookie, state+"."+verifier, oidcCookiePath, int(oidcStateTTL.Seconds()))
-		oauth := p.oauthConfig(r, d)
+		oauth := p.oauthConfig(d, redirectURI(r))
 		opts := []oauth2.AuthCodeOption{
 			oauth2.S256ChallengeOption(verifier),
 		}
@@ -325,7 +310,7 @@ func handleOIDCStart(m *authManager) http.HandlerFunc {
 }
 
 // handleOIDCCallback validates the state cookie, exchanges the code, verifies the
-// ID token, extracts the username claim, mints a session, and redirects to the UI
+// ID token, extracts the username claim, starts a session, and redirects to the UI
 // with the access token in the URL fragment (captured by the SPA, never sent to the server).
 func handleOIDCCallback(m *authManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -366,7 +351,7 @@ func handleOIDCCallback(m *authManager) http.HandlerFunc {
 			redirectSSOError(w, r, ssoErrorUnavailable)
 			return
 		}
-		oauth := p.oauthConfig(r, d)
+		oauth := p.oauthConfig(d, redirectURI(r))
 		token, err := oauth.Exchange(r.Context(), code, oauth2.VerifierOption(parts[1]))
 		if err != nil {
 			// Log the underlying error but do not echo it to the client.
@@ -396,63 +381,32 @@ func handleOIDCCallback(m *authManager) http.HandlerFunc {
 			return
 		}
 		id.Issuer = idToken.Issuer
-		signIn := newSessionState(time.Now())
+		if token.RefreshToken == "" {
+			p.noRefreshToken.Do(func() {
+				m.logger.Info("OIDC provider issued no refresh token; sessions are not checked at the provider",
+					"hint", "if the provider issues refresh tokens only for it, add the scope offline_access to spec.auth.oidc.scopes")
+			})
+		}
 		// The provider's session, which a back-channel logout may name.
-		if sid, ok := claims["sid"].(string); ok {
-			signIn.ProviderSessionID = sid
-		}
-		sealedRefresh := p.keepRefreshToken(m, token, signIn)
-		if sealedRefresh != "" {
-			signIn.IDPCheck = nextProviderCheck(signIn.AuthTime, token, idToken)
-		}
-		session, err := p.auth.startSession(id, signIn)
+		providerSessionID, _ := claims["sid"].(string)
+		res, err := m.startSession(signIn{
+			identity:             id,
+			providerSessionID:    providerSessionID,
+			idToken:              rawID,
+			providerRefreshToken: token.RefreshToken,
+			providerCheckAt:      nextProviderCheck(time.Now(), token, idToken),
+		})
 		if err != nil {
-			m.logger.Error(err, "Failed to issue OIDC session")
-			respondError(w, http.StatusInternalServerError, "failed to issue session")
+			respondSessionError(w, err)
 			return
 		}
-		// Set the refresh cookie now; the access token is delivered via the fragment for the SPA to hold in memory.
-		setRefreshCookie(w, r, session.RefreshToken, session.RefreshExpiresAt)
-		if sealedRefresh != "" {
-			setProviderTokenCookie(w, r, sealedRefresh, session.RefreshExpiresAt)
-		} else {
-			clearCookie(w, r, providerTokenCookie, refreshCookiePath)
-		}
-		// Keep the ID token as the hint of the sign-out at the provider. One
-		// too large for a cookie is left out; the sign-out then names only the client.
-		if len(rawID) <= maxIDTokenCookieLen {
-			setCookie(w, r, oidcIDTokenCookie, rawID, oidcIDTokenCookiePath, maxAgeUntil(p.auth.sessionEnd(signIn)))
-		} else {
-			clearCookie(w, r, oidcIDTokenCookie, oidcIDTokenCookiePath)
-		}
+		writeCookies(w, r, res.cookies...)
 		// The user has signed in at the provider, so a sign-out before this one is done with.
 		clearCookie(w, r, oidcReauthCookie, oidcCookiePath)
 		// Redirect to the app root with the access token in the fragment (never sent to the server).
-		target := "/#access_token=" + url.QueryEscape(session.AccessToken)
+		target := "/#access_token=" + url.QueryEscape(res.tokens.accessToken)
 		http.Redirect(w, r, target, http.StatusFound)
 	}
-}
-
-// keepRefreshToken seals the provider's refresh token of the token response
-// for the provider token cookie of session s, or returns "" when there is
-// none to keep. The session is then not checked at the provider.
-func (p *oidcProvider) keepRefreshToken(m *authManager, token *oauth2.Token, s sessionState) string {
-	if token.RefreshToken == "" {
-		p.noRefreshToken.Do(func() {
-			m.logger.Info("OIDC provider issued no refresh token; sessions are not checked at the provider",
-				"hint", "if the provider issues refresh tokens only for it, add the scope offline_access to spec.auth.oidc.scopes")
-		})
-		return ""
-	}
-	sealed, err := p.auth.sealProviderToken(providerToken{RefreshToken: token.RefreshToken, SessionID: s.ID})
-	if err == nil && len(sealed) > maxProviderTokenCookieLen {
-		err = fmt.Errorf("the sealed refresh token has %d bytes, more than a cookie holds", len(sealed))
-	}
-	if err != nil {
-		m.logger.Error(err, "Could not keep the OIDC provider's refresh token; the session is not checked at the provider")
-		return ""
-	}
-	return sealed
 }
 
 // extractClaim reads a non-empty string claim by name or dotted path (see
@@ -466,13 +420,4 @@ func extractClaim(claims map[string]any, name string) (string, error) {
 		return s, nil
 	}
 	return "", fmt.Errorf("oidc claim %q is not a non-empty string", name)
-}
-
-// randomToken returns a hex-encoded URL-safe random token of n bytes (OIDC state/PKCE verifier).
-func randomToken(n int) (string, error) {
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(b), nil
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -65,9 +64,12 @@ type authenticator struct {
 	username     string
 	passwordHash []byte
 	signingKey   []byte
-	accessTTL    time.Duration
-	sessionTTL   time.Duration
-	idleTTL      time.Duration
+	// providerTokenKey seals the provider token cookie; it is derived from
+	// signingKey.
+	providerTokenKey []byte
+	accessTTL        time.Duration
+	sessionTTL       time.Duration
+	idleTTL          time.Duration
 }
 
 // tokenLifetimes overrides the default token lifetimes; a zero field keeps
@@ -97,12 +99,13 @@ var publicAPIPaths = map[string]struct{}{
 // newAuthenticator builds an authenticator with default token lifetimes.
 func newAuthenticator(username string, passwordHash, signingKey []byte) *authenticator {
 	return &authenticator{
-		username:     username,
-		passwordHash: passwordHash,
-		signingKey:   signingKey,
-		accessTTL:    defaultAccessTokenTTL,
-		sessionTTL:   defaultSessionTTL,
-		idleTTL:      defaultSessionIdleTTL,
+		username:         username,
+		passwordHash:     passwordHash,
+		signingKey:       signingKey,
+		providerTokenKey: deriveProviderTokenKey(signingKey),
+		accessTTL:        defaultAccessTokenTTL,
+		sessionTTL:       defaultSessionTTL,
+		idleTTL:          defaultSessionIdleTTL,
 	}
 }
 
@@ -198,21 +201,22 @@ func (a *authenticator) verifyCredentials(username, password string) bool {
 	return userMatch && passMatch
 }
 
-// Session is a signed-in user's pair of tokens. The access token is
-// short-lived and presented as a Bearer header (or the access_token query
-// parameter for SSE); the refresh token travels in an HttpOnly cookie.
-type Session struct {
-	AccessToken     string
-	AccessExpiresAt time.Time
-	RefreshToken    string
-	// RefreshExpiresAt is when the refresh token and its cookie expire: the
+// sessionTokens are the pair of tokens a sign-in or a refresh issues. The
+// access token is short-lived and presented as a Bearer header (or the
+// access_token query parameter for SSE); the refresh token travels in an
+// HttpOnly cookie.
+type sessionTokens struct {
+	accessToken     string
+	accessExpiresAt time.Time
+	refreshToken    string
+	// refreshExpiresAt is when the refresh token and its cookie expire: the
 	// idle deadline, never after the end of the session.
-	RefreshExpiresAt time.Time
+	refreshExpiresAt time.Time
 }
 
 // sessionState is what every token of a session carries besides the
 // identity. A refresh keeps it, except that a check at the OIDC provider
-// moves IDPCheck.
+// moves ProviderCheckAt.
 type sessionState struct {
 	// ID (claim sid) names the session. It is random, set at sign-in, and
 	// binds the provider token cookie to its session.
@@ -220,10 +224,10 @@ type sessionState struct {
 	// AuthTime (claim auth_time) is when the user signed in. The session
 	// ends sessionTTL later.
 	AuthTime time.Time
-	// IDPCheck (claim idp_check) is when a refresh asks the OIDC provider
-	// again whether the user stays signed in. It is zero for a session the
-	// provider is not asked about.
-	IDPCheck time.Time
+	// ProviderCheckAt (claim idp_check) is when a refresh asks the OIDC
+	// provider again whether the user stays signed in. It is zero for a
+	// session the provider is not asked about.
+	ProviderCheckAt time.Time
 	// ProviderSessionID (claim idp_sid) is the sid of the OIDC provider's
 	// session the user signed in with, when the provider names it. A
 	// back-channel logout of that session ends this one.
@@ -255,17 +259,17 @@ func (a *authenticator) idleDeadline(now time.Time, s sessionState, previous tim
 	return deadline
 }
 
-// startSession mints the first tokens of session s for id, at its sign-in.
-func (a *authenticator) startSession(id *Identity, s sessionState) (*Session, error) {
-	return a.issueSession(s.AuthTime, id, s, a.idleDeadline(s.AuthTime, s, time.Time{}, true))
+// signInTokens mints the first tokens of session s for id, at its sign-in.
+func (a *authenticator) signInTokens(id *Identity, s sessionState) (*sessionTokens, error) {
+	return a.issueTokens(s.AuthTime, id, s, a.idleDeadline(s.AuthTime, s, time.Time{}, true))
 }
 
-// issueSession mints the access and refresh tokens of session s for id. The
+// issueTokens mints the access and refresh tokens of session s for id. The
 // refresh token expires at idleUntil, the idle deadline; the access token
 // accessTTL from now, or at idleUntil if that is sooner. Both tokens carry
 // the whole identity and the session state, so a refreshed OIDC session
 // stays an OIDC session.
-func (a *authenticator) issueSession(now time.Time, id *Identity, s sessionState, idleUntil time.Time) (*Session, error) {
+func (a *authenticator) issueTokens(now time.Time, id *Identity, s sessionState, idleUntil time.Time) (*sessionTokens, error) {
 	if id.Subject == "" {
 		return nil, errors.New("identity has no subject")
 	}
@@ -284,11 +288,11 @@ func (a *authenticator) issueSession(now time.Time, id *Identity, s sessionState
 	if err != nil {
 		return nil, fmt.Errorf("issuing refresh token: %w", err)
 	}
-	return &Session{
-		AccessToken:      access,
-		AccessExpiresAt:  accessExpires,
-		RefreshToken:     refresh,
-		RefreshExpiresAt: idleUntil,
+	return &sessionTokens{
+		accessToken:      access,
+		accessExpiresAt:  accessExpires,
+		refreshToken:     refresh,
+		refreshExpiresAt: idleUntil,
 	}, nil
 }
 
@@ -302,7 +306,6 @@ func (a *authenticator) signToken(now time.Time, tokenType string, id *Identity,
 		IssuedAt:  jwt.NewNumericDate(now),
 		NotBefore: jwt.NewNumericDate(now),
 		ExpiresAt: jwt.NewNumericDate(expires),
-		ID:        randomTokenID(),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, newIdentityClaims(registered, tokenType, id, s))
 	signed, err := token.SignedString(a.signingKey)
@@ -312,8 +315,8 @@ func (a *authenticator) signToken(now time.Time, tokenType string, id *Identity,
 	return signed, nil
 }
 
-// sessionToken is a verified session token.
-type sessionToken struct {
+// verifiedToken is a session token that parseToken verified.
+type verifiedToken struct {
 	identity *Identity
 	session  sessionState
 	// expires is the token's exp; for a refresh token, the idle deadline.
@@ -324,7 +327,7 @@ type sessionToken struct {
 // token signed with the signing key, issued by tokenIssuer, of tokenType,
 // with a subject, a session ID and a sign-in time. The auth middleware
 // checks access tokens with it, and a refresh checks refresh tokens.
-func (a *authenticator) parseToken(tokenString, tokenType string) (*sessionToken, error) {
+func (a *authenticator) parseToken(tokenString, tokenType string) (*verifiedToken, error) {
 	claims := &identityClaims{}
 	_, err := jwt.ParseWithClaims(tokenString, claims, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -348,7 +351,7 @@ func (a *authenticator) parseToken(tokenString, tokenType string) (*sessionToken
 	if claims.SessionID == "" || claims.AuthTime == nil {
 		return nil, errors.New("token has no session ID or sign-in time")
 	}
-	return &sessionToken{
+	return &verifiedToken{
 		identity: claims.identity(),
 		session:  claims.session(),
 		expires:  claims.ExpiresAt.Time,
@@ -361,42 +364,45 @@ func isHTTPS(r *http.Request) bool {
 	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
-// setCookie writes an HttpOnly, SameSite=Lax cookie that lasts maxAge
-// seconds; Secure only over HTTPS.
-func setCookie(w http.ResponseWriter, r *http.Request, name, value, path string, maxAge int) {
-	http.SetCookie(w, &http.Cookie{
+// newCookie returns an HttpOnly, SameSite=Lax cookie that lasts maxAge
+// seconds; a negative maxAge clears it.
+func newCookie(name, value, path string, maxAge int) *http.Cookie {
+	return &http.Cookie{
 		Name:     name,
 		Value:    value,
 		Path:     path,
 		HttpOnly: true,
-		Secure:   isHTTPS(r),
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   maxAge,
-	})
+	}
+}
+
+// expiredCookie returns the cookie that clears the cookie name of path.
+func expiredCookie(name, path string) *http.Cookie {
+	return newCookie(name, "", path, -1)
+}
+
+// writeCookies sets cookies, Secure only over HTTPS.
+func writeCookies(w http.ResponseWriter, r *http.Request, cookies ...*http.Cookie) {
+	for _, c := range cookies {
+		c.Secure = isHTTPS(r)
+		http.SetCookie(w, c)
+	}
+}
+
+// setCookie writes a cookie of newCookie.
+func setCookie(w http.ResponseWriter, r *http.Request, name, value, path string, maxAge int) {
+	writeCookies(w, r, newCookie(name, value, path, maxAge))
 }
 
 // clearCookie expires a cookie written by setCookie.
 func clearCookie(w http.ResponseWriter, r *http.Request, name, path string) {
-	setCookie(w, r, name, "", path, -1)
+	writeCookies(w, r, expiredCookie(name, path))
 }
 
 // maxAgeUntil returns the Max-Age, in seconds, of a cookie that lasts until t.
 func maxAgeUntil(t time.Time) int {
 	return max(1, int(time.Until(t).Seconds()))
-}
-
-// setRefreshCookie writes the refresh cookie, which lasts as long as its session.
-func setRefreshCookie(w http.ResponseWriter, r *http.Request, refreshToken string, sessionExpires time.Time) {
-	setCookie(w, r, refreshCookieName, refreshToken, refreshCookiePath, maxAgeUntil(sessionExpires))
-}
-
-// refreshTokenFromCookie returns the refresh token from the cookie, trimmed.
-func refreshTokenFromCookie(r *http.Request) string {
-	c, err := r.Cookie(refreshCookieName)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(c.Value)
 }
 
 // middleware rejects protected API paths without a valid bearer token; the
@@ -428,7 +434,7 @@ func (m *authManager) middleware(next http.Handler) http.Handler {
 			respondError(w, http.StatusUnauthorized, "the session has ended")
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(withSessionToken(r.Context(), t)))
+		next.ServeHTTP(w, r.WithContext(withVerifiedToken(r.Context(), t)))
 	})
 }
 
@@ -466,39 +472,17 @@ type loginResponse struct {
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
-// handleLogin validates credentials and issues an access token + refresh cookie.
+// handleLogin signs in to the admin account: it returns an access token
+// and sets the refresh cookie.
 func handleLogin(m *authManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		a := m.get()
-		if a == nil {
-			respondError(w, http.StatusServiceUnavailable, "authentication is not available")
-			return
-		}
-		// Without the admin account the server rejects password logins.
-		if !m.adminLoginEnabled() {
-			respondError(w, http.StatusForbidden, "admin login is disabled")
-			return
-		}
 		var req loginRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			respondError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
-		if !a.verifyCredentials(req.Username, req.Password) {
-			respondError(w, http.StatusUnauthorized, "invalid username or password")
-			return
-		}
-		session, err := a.startSession(&Identity{Subject: a.username, Provider: providerAdmin}, newSessionState(time.Now()))
-		if err != nil {
-			// Token minting failed (signing key problem); not the client's fault.
-			respondError(w, http.StatusInternalServerError, "failed to issue session")
-			return
-		}
-		// The cookies of an earlier OIDC session must not turn this admin
-		// session's sign-out into a sign-out at the provider.
-		clearCookie(w, r, oidcIDTokenCookie, oidcIDTokenCookiePath)
-		clearCookie(w, r, providerTokenCookie, refreshCookiePath)
-		writeSession(w, r, session)
+		res, err := m.signInAdmin(req.Username, req.Password)
+		writeSession(w, r, res, err)
 	}
 }
 
@@ -510,92 +494,18 @@ type refreshRequest struct {
 }
 
 // handleRefresh exchanges a valid refresh cookie for a new access token and
-// a rotated cookie. A session ends sessionTTL after its sign-in, and idleTTL
-// after the last refresh that reported user activity. When the session's
-// check at the OIDC provider is due, the provider is asked first: a refusal
-// ends the session, and a provider that cannot be asked answers 503, which
-// the UI retries until its access token expires.
+// a rotated cookie (see refreshSession). A refusal that ends the session
+// answers 401 and clears its cookies; a provider that cannot be asked
+// answers 503, which the UI retries until its access token expires.
 func handleRefresh(m *authManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		a := m.get()
-		if a == nil {
-			respondError(w, http.StatusServiceUnavailable, "authentication is not available")
-			return
-		}
 		var req refreshRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 			respondError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
-		endSession := func(message string) {
-			clearCookie(w, r, refreshCookieName, refreshCookiePath)
-			clearCookie(w, r, providerTokenCookie, refreshCookiePath)
-			respondError(w, http.StatusUnauthorized, message)
-		}
-		token := refreshTokenFromCookie(r)
-		if token == "" {
-			endSession("missing refresh token")
-			return
-		}
-		now := time.Now()
-		t, err := a.parseToken(token, refreshTokenType)
-		if err != nil || !now.Before(a.sessionEnd(t.session)) {
-			endSession("invalid or expired refresh token")
-			return
-		}
-		if m.ended.ended(t) {
-			endSession("the session has ended")
-			return
-		}
-		id, state := t.identity, t.session
-
-		var providerRefresh string
-		if !state.IDPCheck.IsZero() {
-			if providerRefresh, err = a.providerTokenFromCookie(r, state); err != nil {
-				m.logger.Info("Refused a session refresh without its OIDC provider token", "reason", err.Error())
-				endSession("invalid or expired refresh token")
-				return
-			}
-		}
-		if providerRefresh != "" && !now.Before(state.IDPCheck) {
-			p := m.getOIDC()
-			if p == nil {
-				endSession("OIDC sign-in is not configured")
-				return
-			}
-			checked, err := p.checkSession(r.Context(), r, providerRefresh, id)
-			if errors.Is(err, errProviderEndedSession) {
-				m.logger.Info("OIDC provider ended a session", "subject", id.Subject, "reason", err.Error())
-				endSession("the OIDC provider ended the session")
-				return
-			}
-			if err != nil {
-				m.logger.Error(err, "Could not check a session at the OIDC provider", "subject", id.Subject)
-				respondError(w, http.StatusServiceUnavailable, "the session cannot be checked at the OIDC provider")
-				return
-			}
-			id, state.IDPCheck, providerRefresh = checked.identity, checked.next, checked.refreshToken
-		}
-
-		session, err := a.issueSession(now, id, state, a.idleDeadline(now, state, t.expires, req.Active))
-		if err != nil {
-			// Token minting failed (signing key problem); not the client's fault.
-			respondError(w, http.StatusInternalServerError, "failed to refresh session")
-			return
-		}
-		if providerRefresh != "" {
-			sealed, err := a.sealProviderToken(providerToken{RefreshToken: providerRefresh, SessionID: state.ID})
-			if err == nil && len(sealed) > maxProviderTokenCookieLen {
-				err = fmt.Errorf("the sealed refresh token has %d bytes, more than a cookie holds", len(sealed))
-			}
-			if err != nil {
-				m.logger.Error(err, "Could not keep the OIDC provider's refresh token")
-				endSession("failed to refresh session")
-				return
-			}
-			setProviderTokenCookie(w, r, sealed, session.RefreshExpiresAt)
-		}
-		writeSession(w, r, session)
+		res, err := m.refreshSession(r.Context(), browserSessionOf(r), req.Active)
+		writeSession(w, r, res, err)
 	}
 }
 
@@ -605,76 +515,29 @@ type logoutResponse struct {
 	EndSessionURL string `json:"endSessionURL"`
 }
 
-// handleLogout ends the session in this browser by expiring its cookies,
-// also while authentication cannot be resolved. It records the session in the
-// record of ended sessions, so copies of its access token and refresh cookie
-// stop working at once, and revokes the provider's refresh token of an OIDC
-// session at the provider. With providerSignOut Always,
-// an OIDC session also ends at the provider when it offers RP-initiated
-// logout: the response carries the provider's end-session URL. The next SSO
-// sign-in then asks the provider to authenticate the user again, in case its
-// session outlives this, as it does at a provider without RP-initiated logout.
+// handleLogout ends the session in this browser (see endSession). It
+// answers 204, or 200 with the URL of the sign-out at the OIDC provider.
 func handleLogout(m *authManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var idToken string
-		if c, err := r.Cookie(oidcIDTokenCookie); err == nil {
-			idToken = c.Value
-		}
-		a, p := m.get(), m.getOIDC()
-		oidcSession := idToken != ""
-		if a != nil {
-			if t, err := a.parseToken(refreshTokenFromCookie(r), refreshTokenType); err == nil {
-				oidcSession = oidcSession || t.identity.Provider == providerOIDC
-				// Best effort: the browser signs out either way, and a copy of
-				// its tokens then works until they expire, as before the record.
-				if err := m.ended.record(context.WithoutCancel(r.Context()), endedSessionKey(t.session.ID), time.Now()); err != nil {
-					m.logger.Error(err, "Could not record a signed-out session")
-				}
-			}
-		}
-		if c, err := r.Cookie(providerTokenCookie); err == nil && a != nil && p != nil {
-			if t, err := a.openProviderToken(c.Value); err == nil {
-				// The browser may leave for the provider before this ends.
-				if err := p.revoke(context.WithoutCancel(r.Context()), t.RefreshToken); err != nil {
-					m.logger.Error(err, "Could not revoke the OIDC provider's refresh token")
-				}
-			}
-		}
-		clearCookie(w, r, refreshCookieName, refreshCookiePath)
-		clearCookie(w, r, oidcIDTokenCookie, oidcIDTokenCookiePath)
-		clearCookie(w, r, providerTokenCookie, refreshCookiePath)
-
-		if !oidcSession || p == nil || !p.signOutAtProvider {
+		res := m.endSession(r.Context(), browserSessionOf(r), postLogoutRedirectURI(r))
+		writeCookies(w, r, res.cookies...)
+		if res.endSessionURL == "" {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		setCookie(w, r, oidcReauthCookie, "1", oidcCookiePath, oidcReauthCookieMaxAge)
-		endSessionURL, err := p.endSessionURL(r, idToken)
-		if err != nil {
-			m.logger.Error(err, "Could not build the OIDC end-session URL")
-		}
-		if endSessionURL == "" {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		respondJSON(w, http.StatusOK, logoutResponse{EndSessionURL: endSessionURL})
+		respondJSON(w, http.StatusOK, logoutResponse{EndSessionURL: res.endSessionURL})
 	}
 }
 
-// writeSession sets the refresh cookie and returns the access token.
-func writeSession(w http.ResponseWriter, r *http.Request, s *Session) {
-	setRefreshCookie(w, r, s.RefreshToken, s.RefreshExpiresAt)
-	respondJSON(w, http.StatusOK, loginResponse{Token: s.AccessToken, ExpiresAt: s.AccessExpiresAt})
-}
-
-// randomTokenID returns a random 128-bit hex string for use as a JWT ID.
-func randomTokenID() string {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		// crypto/rand failure is effectively impossible; fall back to a time-based value.
-		return hex.EncodeToString([]byte(time.Now().UTC().Format(time.RFC3339Nano)))
+// writeSession answers a sign-in or a refresh: it sets the cookies of res,
+// then returns the access token, or answers the refusal err.
+func writeSession(w http.ResponseWriter, r *http.Request, res *sessionResult, err error) {
+	writeCookies(w, r, res.cookies...)
+	if err != nil {
+		respondSessionError(w, err)
+		return
 	}
-	return hex.EncodeToString(b)
+	respondJSON(w, http.StatusOK, loginResponse{Token: res.tokens.accessToken, ExpiresAt: res.tokens.accessExpiresAt})
 }
 
 // errNoAdminCredentials is returned when the admin Secret does not exist or

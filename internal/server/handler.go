@@ -115,7 +115,7 @@ func handleEventsStream(h *hub, deps *apiDeps, ended *endedSessions, heartbeat t
 		// session when that ends first, at a sign-out or by the OIDC provider.
 		// The UI reopens it with each renewed token.
 		var expired <-chan time.Time
-		token := sessionTokenFrom(r.Context())
+		token := verifiedTokenFrom(r.Context())
 		if token != nil {
 			timer := time.NewTimer(time.Until(token.expires))
 			defer timer.Stop()

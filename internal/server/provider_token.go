@@ -46,45 +46,48 @@ type providerToken struct {
 	SessionID string `json:"sid"`
 }
 
-// providerTokenKey derives the key that seals providerTokenCookie from the
-// token signing key, so replacing the signing key also invalidates the cookie.
-func (a *authenticator) providerTokenKey() ([]byte, error) {
-	return hkdf.Key(sha256.New, a.signingKey, nil, providerTokenKeyInfo, 32)
+// deriveProviderTokenKey derives the key that seals providerTokenCookie from
+// the token signing key, so replacing the signing key also invalidates the
+// cookie.
+func deriveProviderTokenKey(signingKey []byte) []byte {
+	// HKDF fails only for a key longer than 255 hash lengths.
+	key, _ := hkdf.Key(sha256.New, signingKey, nil, providerTokenKeyInfo, 32)
+	return key
 }
 
-// sealProviderToken encrypts t as a compact JWE (dir, A256GCM).
+// sealProviderToken encrypts t as a compact JWE (dir, A256GCM) for
+// providerTokenCookie. A sealed token too large for the cookie is an error.
 func (a *authenticator) sealProviderToken(t providerToken) (string, error) {
-	key, err := a.providerTokenKey()
-	if err != nil {
-		return "", err
-	}
 	payload, err := json.Marshal(t)
 	if err != nil {
 		return "", err
 	}
-	encrypter, err := jose.NewEncrypter(jose.A256GCM, jose.Recipient{Algorithm: jose.DIRECT, Key: key}, nil)
+	encrypter, err := jose.NewEncrypter(jose.A256GCM, jose.Recipient{Algorithm: jose.DIRECT, Key: a.providerTokenKey}, nil)
 	if err != nil {
 		return "", err
 	}
-	sealed, err := encrypter.Encrypt(payload)
+	encrypted, err := encrypter.Encrypt(payload)
 	if err != nil {
 		return "", err
 	}
-	return sealed.CompactSerialize()
+	sealed, err := encrypted.CompactSerialize()
+	if err != nil {
+		return "", err
+	}
+	if len(sealed) > maxProviderTokenCookieLen {
+		return "", fmt.Errorf("the sealed refresh token has %d bytes, more than a cookie holds", len(sealed))
+	}
+	return sealed, nil
 }
 
 // openProviderToken decrypts a value of providerTokenCookie.
 func (a *authenticator) openProviderToken(sealed string) (providerToken, error) {
 	var t providerToken
-	key, err := a.providerTokenKey()
-	if err != nil {
-		return t, err
-	}
 	jwe, err := jose.ParseEncryptedCompact(sealed, []jose.KeyAlgorithm{jose.DIRECT}, []jose.ContentEncryption{jose.A256GCM})
 	if err != nil {
 		return t, err
 	}
-	payload, err := jwe.Decrypt(key)
+	payload, err := jwe.Decrypt(a.providerTokenKey)
 	if err != nil {
 		return t, err
 	}
@@ -97,14 +100,14 @@ func (a *authenticator) openProviderToken(sealed string) (providerToken, error) 
 	return t, nil
 }
 
-// providerTokenFromCookie returns the provider token of session s from its
-// cookie, refusing a token of another session.
-func (a *authenticator) providerTokenFromCookie(r *http.Request, s sessionState) (string, error) {
-	c, err := r.Cookie(providerTokenCookie)
-	if err != nil {
+// providerTokenOf returns the provider's refresh token of session s from
+// sealed, the value of its provider token cookie, refusing a token of another
+// session.
+func (a *authenticator) providerTokenOf(sealed string, s sessionState) (string, error) {
+	if sealed == "" {
 		return "", errors.New("no provider token cookie")
 	}
-	t, err := a.openProviderToken(c.Value)
+	t, err := a.openProviderToken(sealed)
 	if err != nil {
 		return "", fmt.Errorf("opening the provider token cookie: %w", err)
 	}
@@ -112,12 +115,6 @@ func (a *authenticator) providerTokenFromCookie(r *http.Request, s sessionState)
 		return "", errors.New("the provider token belongs to another session")
 	}
 	return t.RefreshToken, nil
-}
-
-// setProviderTokenCookie writes the sealed provider token; it expires with
-// the refresh cookie.
-func setProviderTokenCookie(w http.ResponseWriter, r *http.Request, sealed string, expires time.Time) {
-	setCookie(w, r, providerTokenCookie, sealed, refreshCookiePath, maxAgeUntil(expires))
 }
 
 // nextProviderCheck is when the provider's tokens of a token response
@@ -150,14 +147,15 @@ type providerCheck struct {
 // errProviderEndedSession when the provider refuses the grant (see
 // refusesGrant), and another error when the provider cannot vouch for the
 // user right now.
-func (p *oidcProvider) checkSession(ctx context.Context, r *http.Request, refreshToken string, id *Identity) (*providerCheck, error) {
+func (p *oidcProvider) checkSession(ctx context.Context, refreshToken string, id *Identity) (*providerCheck, error) {
 	ctx, cancel := context.WithTimeout(ctx, providerRequestTimeout)
 	defer cancel()
 	d, err := p.issuer.discover(ctx)
 	if err != nil {
 		return nil, err
 	}
-	oauth := p.oauthConfig(r, d)
+	// A refresh grant sends no redirect URI (RFC 6749 section 6).
+	oauth := p.oauthConfig(d, "")
 	token, err := oauth.TokenSource(ctx, &oauth2.Token{RefreshToken: refreshToken}).Token()
 	if refusesGrant(err) {
 		return nil, fmt.Errorf("%w: %w", errProviderEndedSession, err)

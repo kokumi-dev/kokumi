@@ -204,19 +204,23 @@ func (m *authManager) reload(ctx context.Context, kitchen *deliveryv1alpha1.Kitc
 		m.logger.Info("Admin authentication not available", "reason", adminErr.Error())
 	}
 
-	// OIDC reuses the shared authenticator; absent oidc block or ClientSecretRef
-	// -> unconfigured (no default-name fallback). Errors keep last-known-good state.
+	// OIDC sessions are signed with the shared signing key; absent oidc block
+	// or ClientSecretRef -> unconfigured (no default-name fallback). Errors
+	// keep last-known-good state.
 	var oidc *oidcProvider
 	var oidcErr error
-	if oidcCfg == nil {
+	switch {
+	case oidcCfg == nil:
 		m.logger.Info("OIDC authentication not configured", "reason", "oidc not set")
-	} else if oidcCfg.ClientSecretRef == nil {
+	case oidcCfg.ClientSecretRef == nil:
 		m.logger.Info("OIDC authentication not configured", "reason", "oidc clientSecretRef not set")
-	} else {
-		oidc, oidcErr = buildOIDCProvider(ctx, m.apiReader, m.ns, oidcCfg, tokens)
-		if oidcErr != nil {
-			m.logger.Info("OIDC authentication not configured", "reason", oidcErr.Error())
-		}
+	case tokens == nil:
+		oidcErr = errors.New("oidc requires the token signing key")
+	default:
+		oidc, oidcErr = buildOIDCProvider(ctx, m.apiReader, m.ns, oidcCfg)
+	}
+	if oidcErr != nil {
+		m.logger.Info("OIDC authentication not configured", "reason", oidcErr.Error())
 	}
 
 	m.mu.Lock()

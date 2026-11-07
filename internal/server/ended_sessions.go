@@ -88,7 +88,7 @@ func entryHash(parts ...string) string {
 }
 
 // ended reports whether the session of t has ended. A nil record ends nothing.
-func (e *endedSessions) ended(t *sessionToken) bool {
+func (e *endedSessions) ended(t *verifiedToken) bool {
 	if e == nil {
 		return false
 	}

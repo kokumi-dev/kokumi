@@ -44,11 +44,11 @@ type identityClaims struct {
 	Provider  string   `json:"provider,omitempty"`
 	IDPIssuer string   `json:"idp_iss,omitempty"`
 	Username  string   `json:"name,omitempty"`
-	// SessionID, AuthTime, IDPCheck and ProviderSessionID carry the
+	// SessionID, AuthTime, ProviderCheckAt and ProviderSessionID carry the
 	// sessionState.
 	SessionID         string           `json:"sid,omitempty"`
 	AuthTime          *jwt.NumericDate `json:"auth_time,omitempty"`
-	IDPCheck          *jwt.NumericDate `json:"idp_check,omitempty"`
+	ProviderCheckAt   *jwt.NumericDate `json:"idp_check,omitempty"`
 	ProviderSessionID string           `json:"idp_sid,omitempty"`
 }
 
@@ -67,20 +67,20 @@ func identityFromRequest(r *http.Request) *Identity {
 	return id
 }
 
-// sessionTokenContextKey is the context key for the request's verified
+// verifiedTokenContextKey is the context key for the request's verified
 // access token.
-type sessionTokenContextKey struct{}
+type verifiedTokenContextKey struct{}
 
-// withSessionToken stores the request's verified access token, with its
+// withVerifiedToken stores the request's verified access token, with its
 // identity, in the request context.
-func withSessionToken(ctx context.Context, t *sessionToken) context.Context {
-	return withIdentity(context.WithValue(ctx, sessionTokenContextKey{}, t), t.identity)
+func withVerifiedToken(ctx context.Context, t *verifiedToken) context.Context {
+	return withIdentity(context.WithValue(ctx, verifiedTokenContextKey{}, t), t.identity)
 }
 
-// sessionTokenFrom returns the request's verified access token, or nil when
+// verifiedTokenFrom returns the request's verified access token, or nil when
 // the request carries none, as on a public path.
-func sessionTokenFrom(ctx context.Context) *sessionToken {
-	t, _ := ctx.Value(sessionTokenContextKey{}).(*sessionToken)
+func verifiedTokenFrom(ctx context.Context) *verifiedToken {
+	t, _ := ctx.Value(verifiedTokenContextKey{}).(*verifiedToken)
 	return t
 }
 
@@ -102,8 +102,8 @@ func (c *identityClaims) session() sessionState {
 	if c.AuthTime != nil {
 		s.AuthTime = c.AuthTime.Time
 	}
-	if c.IDPCheck != nil {
-		s.IDPCheck = c.IDPCheck.Time
+	if c.ProviderCheckAt != nil {
+		s.ProviderCheckAt = c.ProviderCheckAt.Time
 	}
 	return s
 }
@@ -122,8 +122,8 @@ func newIdentityClaims(registered jwt.RegisteredClaims, tokenType string, id *Id
 		AuthTime:          jwt.NewNumericDate(s.AuthTime),
 		ProviderSessionID: s.ProviderSessionID,
 	}
-	if !s.IDPCheck.IsZero() {
-		claims.IDPCheck = jwt.NewNumericDate(s.IDPCheck)
+	if !s.ProviderCheckAt.IsZero() {
+		claims.ProviderCheckAt = jwt.NewNumericDate(s.ProviderCheckAt)
 	}
 	return claims
 }
