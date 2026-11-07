@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -78,19 +79,19 @@ type oidcProvider struct {
 type oidcIssuer struct {
 	url string
 
-	mu       sync.Mutex
-	provider *oidc.Provider // nil until a discovery succeeds
-	err      error          // the last failure, reported until the retry interval has passed
-	failedAt time.Time
+	mu         sync.Mutex
+	discovered *oidcDiscovery // nil until a discovery succeeds
+	err        error          // the last failure, reported until the retry interval has passed
+	failedAt   time.Time
 }
 
 // discover returns the issuer's discovered metadata, asking the issuer when
 // there is none yet. Concurrent callers share one request.
-func (i *oidcIssuer) discover(ctx context.Context) (*oidc.Provider, error) {
+func (i *oidcIssuer) discover(ctx context.Context) (*oidcDiscovery, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	if i.provider != nil {
-		return i.provider, nil
+	if i.discovered != nil {
+		return i.discovered, nil
 	}
 	if i.err != nil && time.Since(i.failedAt) < oidcDiscoveryRetryInterval {
 		return nil, i.err
@@ -99,14 +100,68 @@ func (i *oidcIssuer) discover(ctx context.Context) (*oidc.Provider, error) {
 	// not cancel the request.
 	discoverCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), oidcDiscoveryTimeout)
 	defer cancel()
-	provider, err := oidc.NewProvider(discoverCtx, i.url)
+	discovered, err := discoverIssuer(discoverCtx, i.url)
 	if err != nil {
 		i.err = fmt.Errorf("oidc discovery for %s: %w", i.url, err)
 		i.failedAt = time.Now()
 		return nil, i.err
 	}
-	i.provider, i.err = provider, nil
-	return provider, nil
+	i.discovered, i.err = discovered, nil
+	return discovered, nil
+}
+
+// oidcDiscovery is what Kokumi uses of an issuer's discovery document.
+type oidcDiscovery struct {
+	provider *oidc.Provider
+	// endpoint holds the authorization and token endpoints, and the one way
+	// the client authenticates to the provider.
+	endpoint oauth2.Endpoint
+	// endSessionEndpoint is where RP-initiated logout signs the user out of
+	// the provider, or "" when it offers none.
+	endSessionEndpoint string
+	// revocationEndpoint is where RFC 7009 revokes a token, or "" when the
+	// provider offers none.
+	revocationEndpoint string
+}
+
+// discoverIssuer reads the discovery document of the issuer at issuerURL.
+func discoverIssuer(ctx context.Context, issuerURL string) (*oidcDiscovery, error) {
+	provider, err := oidc.NewProvider(ctx, issuerURL)
+	if err != nil {
+		return nil, err
+	}
+	var metadata struct {
+		EndSessionEndpoint       string   `json:"end_session_endpoint"`
+		RevocationEndpoint       string   `json:"revocation_endpoint"`
+		TokenEndpointAuthMethods []string `json:"token_endpoint_auth_methods_supported"`
+	}
+	if err := provider.Claims(&metadata); err != nil {
+		return nil, fmt.Errorf("reading the provider metadata: %w", err)
+	}
+	endpoint := provider.Endpoint()
+	endpoint.AuthStyle = clientAuthStyle(metadata.TokenEndpointAuthMethods)
+	return &oidcDiscovery{
+		provider:           provider,
+		endpoint:           endpoint,
+		endSessionEndpoint: metadata.EndSessionEndpoint,
+		revocationEndpoint: metadata.RevocationEndpoint,
+	}, nil
+}
+
+// clientAuthStyle is how the client sends its secret to the provider, from
+// the methods the provider lists: client_secret_basic, which RFC 6749 section
+// 2.3.1 requires every provider to support and OpenID Connect Discovery
+// assumes when the list is missing, unless the list names client_secret_post
+// and not client_secret_basic.
+//
+// The style is set, not detected: oauth2's detection sends a failed token
+// request again in the other style, which redeems an authorization code or a
+// refresh token twice, and returns the second answer.
+func clientAuthStyle(methods []string) oauth2.AuthStyle {
+	if slices.Contains(methods, "client_secret_post") && !slices.Contains(methods, "client_secret_basic") {
+		return oauth2.AuthStyleInParams
+	}
+	return oauth2.AuthStyleInHeader
 }
 
 // buildOIDCProvider reads the client secret. It does not contact the issuer;
@@ -165,11 +220,11 @@ func defaultString(v, fallback string) string {
 	return v
 }
 
-// oauthConfig returns a copy of the OAuth2 config with the discovered endpoints
+// oauthConfig returns a copy of the OAuth2 config with the discovered endpoint
 // and the redirect URI of r, so requests never write to the shared struct.
-func (p *oidcProvider) oauthConfig(r *http.Request, provider *oidc.Provider) oauth2.Config {
+func (p *oidcProvider) oauthConfig(r *http.Request, d *oidcDiscovery) oauth2.Config {
 	oauth := p.oauth
-	oauth.Endpoint = provider.Endpoint()
+	oauth.Endpoint = d.endpoint
 	oauth.RedirectURL = redirectURI(r)
 	return oauth
 }
@@ -206,20 +261,14 @@ func externalURL(r *http.Request, path string) string {
 // the provider advertises no end_session_endpoint. idToken, when not empty,
 // is sent as id_token_hint.
 func (p *oidcProvider) endSessionURL(r *http.Request, idToken string) (string, error) {
-	provider, err := p.issuer.discover(r.Context())
+	d, err := p.issuer.discover(r.Context())
 	if err != nil {
 		return "", err
 	}
-	var metadata struct {
-		EndSessionEndpoint string `json:"end_session_endpoint"`
-	}
-	if err := provider.Claims(&metadata); err != nil {
-		return "", fmt.Errorf("reading oidc provider metadata: %w", err)
-	}
-	if metadata.EndSessionEndpoint == "" {
+	if d.endSessionEndpoint == "" {
 		return "", nil
 	}
-	endpoint, err := url.Parse(metadata.EndSessionEndpoint)
+	endpoint, err := url.Parse(d.endSessionEndpoint)
 	if err != nil {
 		return "", fmt.Errorf("parsing oidc end_session_endpoint: %w", err)
 	}
@@ -246,7 +295,7 @@ func handleOIDCStart(m *authManager) http.HandlerFunc {
 			respondError(w, http.StatusServiceUnavailable, "oidc is not configured")
 			return
 		}
-		provider, err := p.issuer.discover(r.Context())
+		d, err := p.issuer.discover(r.Context())
 		if err != nil {
 			m.logger.Error(err, "Could not discover OIDC issuer")
 			redirectSSOError(w, r, ssoErrorUnavailable)
@@ -264,7 +313,7 @@ func handleOIDCStart(m *authManager) http.HandlerFunc {
 		}
 		// Store state + PKCE verifier in a cookie so the callback validates without server state.
 		setCookie(w, r, oidcStateCookie, state+"."+verifier, oidcCookiePath, int(oidcStateTTL.Seconds()))
-		oauth := p.oauthConfig(r, provider)
+		oauth := p.oauthConfig(r, d)
 		opts := []oauth2.AuthCodeOption{
 			oauth2.S256ChallengeOption(verifier),
 		}
@@ -311,13 +360,13 @@ func handleOIDCCallback(m *authManager) http.HandlerFunc {
 		// Consume the state cookie immediately to prevent reuse.
 		clearCookie(w, r, oidcStateCookie, oidcCookiePath)
 
-		provider, err := p.issuer.discover(r.Context())
+		d, err := p.issuer.discover(r.Context())
 		if err != nil {
 			m.logger.Error(err, "Could not discover OIDC issuer")
 			redirectSSOError(w, r, ssoErrorUnavailable)
 			return
 		}
-		oauth := p.oauthConfig(r, provider)
+		oauth := p.oauthConfig(r, d)
 		token, err := oauth.Exchange(r.Context(), code, oauth2.VerifierOption(parts[1]))
 		if err != nil {
 			// Log the underlying error but do not echo it to the client.
@@ -330,7 +379,7 @@ func handleOIDCCallback(m *authManager) http.HandlerFunc {
 			respondError(w, http.StatusBadRequest, "oidc response missing id_token")
 			return
 		}
-		idToken, err := provider.Verifier(&oidc.Config{ClientID: oauth.ClientID}).Verify(r.Context(), rawID)
+		idToken, err := d.provider.Verifier(&oidc.Config{ClientID: oauth.ClientID}).Verify(r.Context(), rawID)
 		if err != nil {
 			m.logger.Error(err, "OIDC id token invalid")
 			respondError(w, http.StatusBadRequest, "oidc id token invalid")
@@ -391,7 +440,7 @@ func (p *oidcProvider) keepRefreshToken(m *authManager, token *oauth2.Token, s s
 	if token.RefreshToken == "" {
 		p.noRefreshToken.Do(func() {
 			m.logger.Info("OIDC provider issued no refresh token; sessions are not checked at the provider",
-				"hint", "add the scope offline_access to spec.auth.oidc.scopes")
+				"hint", "if the provider issues refresh tokens only for it, add the scope offline_access to spec.auth.oidc.scopes")
 		})
 		return ""
 	}

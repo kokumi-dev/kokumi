@@ -116,12 +116,16 @@ For a Secret you manage yourself, for example through GitOps, replace its
 A sign-in starts a session. It issues an access token, valid for five
 minutes, and a refresh token in the HttpOnly cookie `kokumi.refresh`. The UI
 exchanges the refresh token for a new access token before the old one
-expires, and every exchange issues a new refresh token. A session ends:
+expires. Every exchange also sets a new refresh token, which carries the
+session's idle deadline. The earlier refresh tokens are not revoked: each
+works until its own expiry, and a sign-out ends them all. A session ends:
 
 - **After an hour without activity.** Activity is user input, such as a click,
   a key press or switching to a Kokumi tab, in any tab of the browser. An open
   tab nobody uses keeps renewing its access token, so live views stay up to
-  date, but it does not extend the session.
+  date, but it does not extend the session. The browser reports the activity,
+  so the limit ends sessions that nobody attends: whoever holds a session's
+  cookies can keep it going until its 24 hours are up.
 - **24 hours after the sign-in**, however active the user is.
 - **At a sign-out**, also for every copy of its tokens.
 - **When the OIDC provider ends it**: at a check of the session, or through
@@ -166,13 +170,19 @@ them at once, replace the [token signing key](#token-signing-key).
     that is, when its discovery document has an `end_session_endpoint`. The
     browser goes there, and the provider sends it back to the UI. Register the
     post-logout redirect URI described in
-    [OIDC single sign-on](#oidc-single-sign-on). The next "Sign in with SSO"
-    in this browser asks the provider to authenticate the user again
-    (`max_age=0`), in case the provider session outlives the sign-out: at a
-    provider without RP-initiated logout, such as Dex, or when the user
-    cancels the provider's confirmation. A provider that ignores `max_age`
-    signs the user in without asking. Use `Always` for a provider that serves
-    only Kokumi.
+    [OIDC single sign-on](#oidc-single-sign-on). Use `Always` for a provider
+    that serves only Kokumi.
+
+    The next "Sign in with SSO" in this browser asks the provider to
+    authenticate the user again (`max_age=0`), in case the provider session
+    outlives the sign-out: at a provider without RP-initiated logout, such as
+    Dex, or when the user cancels the provider's confirmation. This is a
+    request, not a guarantee. The browser keeps it in the cookie
+    `kokumi.oidc.reauth` until the next sign-in, and a provider that ignores
+    `max_age`, or a browser whose cookie was deleted, signs the user in
+    without asking. Kokumi does not check the ID token's `auth_time` to
+    enforce it, because sign-in would then fail at every provider that
+    ignores `max_age`.
 
 Another site cannot sign a user in or out: the server refuses state-changing
 requests that a browser sends from another origin. A reverse proxy in front of
@@ -300,18 +310,33 @@ access token expires, with the lifetime the provider sets:
   The server stores nothing.
 - The provider's answer updates the session's email, groups and username, so a
   removed group takes effect within one provider token lifetime.
-- When the provider refuses the refresh token (`invalid_grant`), for example
-  because the user was deactivated or deleted, the Kokumi session ends.
-- While the provider cannot be reached, the session goes on until its access
-  token expires; then requests fail until the provider answers again.
+- The Kokumi session ends when the provider refuses the refresh token with
+  `invalid_grant`, for example because the user was deactivated or deleted,
+  or with `invalid_request`, which Dex sends for a refresh token it no longer
+  knows.
+- Any other answer pauses the session: an error about the client, such as
+  `invalid_client` for a wrong client secret, a server error, or no answer at
+  all. The current access token works until it expires; after that, requests
+  fail until a check succeeds, and the session then goes on. Its idle and
+  24-hour limits still apply.
 
-Most providers issue a refresh token only for the scope `offline_access`. Add
-it to `scopes` to have sessions checked; without a refresh token the server
-logs once that sessions are not checked, and a change at the provider takes
-effect at the next sign-in. A refresh token from `offline_access` usually
-outlives the user's session at the provider, so the check notices a
-deactivated user or a changed group, but a sign-out elsewhere only at a
-provider whose refresh tokens end with its session.
+Request the scope `offline_access` only where the provider issues no refresh
+token without it, as Dex does. Without a refresh token the server logs once
+that sessions are not checked, and a change at the provider takes effect at
+the next sign-in. With `offline_access`:
+
+- Each sign-in creates a grant at the provider that outlives the user's
+  session there, often by weeks. A sign-out in Kokumi revokes it, if the
+  provider offers token revocation; a session that ends after inactivity or
+  after 24 hours leaves it at the provider until it expires.
+- The check notices a deactivated user or a changed group, but not a sign-out
+  elsewhere.
+
+Keycloak issues refresh tokens without the scope, and they end with the
+user's Keycloak session, so the check also notices a sign-out there; with
+`offline_access`, Keycloak creates offline sessions instead. Google rejects
+the scope and issues Kokumi no refresh token, so sessions are not checked
+there.
 
 > **Authorization.** OIDC only authenticates. What a user may do is decided by
 > the ServiceAccounts their identity maps to, by subject, email or groups. A
@@ -356,8 +381,8 @@ OIDC is configured under `spec.auth.oidc` on the singleton `Kitchen` resource:
 The default scopes do not request groups. The built-in ServiceAccounts match
 by group (see [Authorization](../authorization/#built-in-serviceaccounts)), so
 add the scope your provider needs to put groups into the ID token, such as
-`groups` for Dex, and `offline_access` to have sessions checked at the
-provider.
+`groups` for Dex, and, where the provider needs it, `offline_access` to have
+sessions checked at the provider (see above).
 
 Create the client-secret Secret:
 
@@ -365,6 +390,16 @@ Create the client-secret Secret:
 kubectl -n kokumi create secret generic kokumi-server-oidc \
   --from-literal=client-secret='your-oauth-client-secret'
 ```
+
+The server sends the client secret to the provider's token and revocation
+endpoints in one way, chosen by the methods its discovery document lists
+under `token_endpoint_auth_methods_supported`: `client_secret_post`, in the
+request body, when the list names it but not `client_secret_basic`, else
+`client_secret_basic`, in the `Authorization` header, which every provider
+supports. It never tries the other one. Some
+providers, such as Okta and Auth0, set the method per client: register the
+Kokumi client for the method the server chooses, or every sign-in fails and
+the server logs the provider's error.
 
 Enable OIDC on the `Kitchen`:
 

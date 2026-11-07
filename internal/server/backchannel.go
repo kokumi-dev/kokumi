@@ -49,14 +49,14 @@ func (t *logoutToken) entry() string {
 // or a sid; and no nonce, so that an ID token cannot pass as a logout token.
 // A token that fails a check is errInvalidLogoutToken.
 func (p *oidcProvider) verifyLogoutToken(ctx context.Context, raw string) (*logoutToken, error) {
-	provider, err := p.issuer.discover(ctx)
+	d, err := p.issuer.discover(ctx)
 	if err != nil {
 		return nil, err
 	}
 	invalid := func(reason string, args ...any) error {
 		return fmt.Errorf("%w: %s", errInvalidLogoutToken, fmt.Sprintf(reason, args...))
 	}
-	token, err := provider.Verifier(&oidc.Config{ClientID: p.oauth.ClientID}).Verify(ctx, raw)
+	token, err := d.provider.Verifier(&oidc.Config{ClientID: p.oauth.ClientID}).Verify(ctx, raw)
 	if err != nil {
 		return nil, invalid("%v", err)
 	}

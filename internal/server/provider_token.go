@@ -144,38 +144,32 @@ type providerCheck struct {
 }
 
 // checkSession redeems the session's provider refresh token (RFC 6749
-// section 6), so the provider decides whether the user stays signed in. A
-// returned ID token must name the session's user (OpenID Connect Core
-// section 12.2), whose username, email and groups it updates. It returns
-// errProviderEndedSession when the provider refuses, and another error when
-// it cannot be asked.
-//
-// The token endpoint reports OAuth errors, such as invalid_grant for a
-// deactivated user or a revoked grant, with a 4xx status (RFC 6749 section
-// 5.2), and trouble of its own with a 5xx. Every 4xx but 429 counts as a
-// refusal, since providers differ in the error code they send for an unknown
-// refresh token; a 5xx, a 429 or no answer means the provider cannot be asked.
+// section 6) in one request, so the provider decides whether the user stays
+// signed in. A returned ID token must name the session's user (OpenID Connect
+// Core section 12.2), whose username, email and groups it updates. It returns
+// errProviderEndedSession when the provider refuses the grant (see
+// refusesGrant), and another error when the provider cannot vouch for the
+// user right now.
 func (p *oidcProvider) checkSession(ctx context.Context, r *http.Request, refreshToken string, id *Identity) (*providerCheck, error) {
 	ctx, cancel := context.WithTimeout(ctx, providerRequestTimeout)
 	defer cancel()
-	provider, err := p.issuer.discover(ctx)
+	d, err := p.issuer.discover(ctx)
 	if err != nil {
 		return nil, err
 	}
-	oauth := p.oauthConfig(r, provider)
+	oauth := p.oauthConfig(r, d)
 	token, err := oauth.TokenSource(ctx, &oauth2.Token{RefreshToken: refreshToken}).Token()
+	if refusesGrant(err) {
+		return nil, fmt.Errorf("%w: %w", errProviderEndedSession, err)
+	}
 	if err != nil {
-		var answer *oauth2.RetrieveError
-		if errors.As(err, &answer) && answer.Response != nil && refusesGrant(answer.Response.StatusCode) {
-			return nil, fmt.Errorf("%w: %w", errProviderEndedSession, err)
-		}
 		return nil, fmt.Errorf("refreshing at the OIDC provider: %w", err)
 	}
 
 	checked := &providerCheck{identity: id, refreshToken: token.RefreshToken}
 	var idToken *oidc.IDToken
 	if rawID, ok := token.Extra("id_token").(string); ok && rawID != "" {
-		idToken, err = provider.Verifier(&oidc.Config{ClientID: oauth.ClientID}).Verify(ctx, rawID)
+		idToken, err = d.provider.Verifier(&oidc.Config{ClientID: oauth.ClientID}).Verify(ctx, rawID)
 		if err != nil {
 			return nil, fmt.Errorf("%w: invalid ID token: %w", errProviderEndedSession, err)
 		}
@@ -197,38 +191,50 @@ func (p *oidcProvider) checkSession(ctx context.Context, r *http.Request, refres
 	return checked, nil
 }
 
-// refusesGrant reports whether a token endpoint's status refuses the grant,
-// as opposed to the endpoint being unable to answer.
-func refusesGrant(status int) bool {
-	return status >= 400 && status < 500 && status != http.StatusTooManyRequests
+// refusesGrant reports whether a token endpoint's answer err refuses the
+// refresh grant, so the user is no longer signed in at the provider. The
+// endpoint names the reason with an OAuth error code (RFC 6749 section 5.2):
+// invalid_grant for a revoked or expired grant or a deactivated user, and
+// invalid_request, which Dex sends for a refresh token it no longer knows.
+// The other codes, such as invalid_client for a wrong client secret, are the
+// operator's to fix, not the user's; they, an answer without a code, such as
+// a 5xx or a 429, and no answer at all do not end the session.
+func refusesGrant(err error) bool {
+	var answer *oauth2.RetrieveError
+	if !errors.As(err, &answer) {
+		return false
+	}
+	return answer.ErrorCode == "invalid_grant" || answer.ErrorCode == "invalid_request"
 }
 
 // revoke revokes a provider refresh token at the provider's
-// revocation_endpoint (RFC 7009), if it has one. Failures are returned for
-// logging; the sign-out goes on.
+// revocation_endpoint (RFC 7009), if it has one. The client authenticates as
+// at the token endpoint. Failures are returned for logging; the sign-out goes
+// on.
 func (p *oidcProvider) revoke(ctx context.Context, refreshToken string) error {
 	ctx, cancel := context.WithTimeout(ctx, providerRequestTimeout)
 	defer cancel()
-	provider, err := p.issuer.discover(ctx)
+	d, err := p.issuer.discover(ctx)
 	if err != nil {
 		return err
 	}
-	var metadata struct {
-		RevocationEndpoint string `json:"revocation_endpoint"`
-	}
-	if err := provider.Claims(&metadata); err != nil {
-		return fmt.Errorf("reading oidc provider metadata: %w", err)
-	}
-	if metadata.RevocationEndpoint == "" {
+	if d.revocationEndpoint == "" {
 		return nil
 	}
 	form := url.Values{"token": {refreshToken}, "token_type_hint": {"refresh_token"}}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, metadata.RevocationEndpoint, strings.NewReader(form.Encode()))
+	inHeader := d.endpoint.AuthStyle == oauth2.AuthStyleInHeader
+	if !inHeader {
+		form.Set("client_id", p.oauth.ClientID)
+		form.Set("client_secret", p.oauth.ClientSecret)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, d.revocationEndpoint, strings.NewReader(form.Encode()))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.SetBasicAuth(url.QueryEscape(p.oauth.ClientID), url.QueryEscape(p.oauth.ClientSecret))
+	if inHeader {
+		req.SetBasicAuth(url.QueryEscape(p.oauth.ClientID), url.QueryEscape(p.oauth.ClientSecret))
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("revoking the provider refresh token: %w", err)

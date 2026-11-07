@@ -17,6 +17,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/oauth2"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 )
@@ -33,6 +34,14 @@ type fakeProvider struct {
 	endSession bool
 	// revocation advertises a revocation endpoint at /revoke.
 	revocation bool
+	// authMethods, when set, is the token_endpoint_auth_methods_supported
+	// it advertises.
+	authMethods []string
+	// clientAuth is how the client is registered to authenticate,
+	// client_secret_basic or client_secret_post. The token and revocation
+	// endpoints answer a request that authenticates another way with 401
+	// invalid_client, as Okta does.
+	clientAuth string
 	// refreshTokens has token responses carry a refresh token.
 	refreshTokens bool
 	// expiresIn is the expires_in of token responses; negative makes the
@@ -49,6 +58,7 @@ type fakeProvider struct {
 
 	refreshToken string   // the refresh token the provider accepts
 	issued       int      // refresh tokens issued
+	exchanges    int      // authorization code grants received
 	refreshes    int      // refresh grants received
 	revoked      []string // tokens revoked
 }
@@ -62,7 +72,7 @@ func newFakeProvider(t *testing.T, configure func(*fakeProvider)) *fakeProvider 
 	op := &oidctest.Server{
 		PublicKeys: []oidctest.PublicKey{{PublicKey: priv.Public(), KeyID: testKeyID, Algorithm: oidc.RS256}},
 	}
-	p := &fakeProvider{priv: priv, expiresIn: 3600, subject: "user-1"}
+	p := &fakeProvider{priv: priv, clientAuth: clientSecretBasic, expiresIn: 3600, subject: "user-1"}
 	configure(p)
 	p.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p.mu.Lock()
@@ -80,11 +90,18 @@ func newFakeProvider(t *testing.T, configure func(*fakeProvider)) *fakeProvider 
 			if p.revocation {
 				metadata["revocation_endpoint"] = p.URL + "/revoke"
 			}
+			if p.authMethods != nil {
+				metadata["token_endpoint_auth_methods_supported"] = p.authMethods
+			}
 			_ = json.NewEncoder(w).Encode(metadata)
 		case "/token":
 			p.serveToken(w, r, priv)
 		case "/revoke":
 			_ = r.ParseForm()
+			if !p.authenticates(r) {
+				writeOAuthError(w, http.StatusUnauthorized, "invalid_client")
+				return
+			}
 			p.revoked = append(p.revoked, r.PostForm.Get("token"))
 		default:
 			op.ServeHTTP(w, r)
@@ -95,21 +112,52 @@ func newFakeProvider(t *testing.T, configure func(*fakeProvider)) *fakeProvider 
 	return p
 }
 
+// The client_secret_* methods of OpenID Connect Core section 9.
+const (
+	clientSecretBasic = "client_secret_basic"
+	clientSecretPost  = "client_secret_post"
+)
+
+// authenticates reports whether r authenticates the client in the one way
+// it is registered with, and in no other.
+func (p *fakeProvider) authenticates(r *http.Request) bool {
+	user, password, inHeader := r.BasicAuth()
+	inForm := r.PostForm.Has("client_secret")
+	if p.clientAuth == clientSecretPost {
+		return !inHeader && r.PostForm.Get("client_id") == testClientID && r.PostForm.Get("client_secret") == testClientSec
+	}
+	return !inForm && inHeader && user == testClientID && password == testClientSec
+}
+
+// writeOAuthError answers with an OAuth error response (RFC 6749 section
+// 5.2).
+func writeOAuthError(w http.ResponseWriter, status int, code string) {
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": code})
+}
+
 func (p *fakeProvider) serveToken(w http.ResponseWriter, r *http.Request, priv *rsa.PrivateKey) {
 	_ = r.ParseForm()
-	if r.PostForm.Get("grant_type") == "refresh_token" {
+	refresh := r.PostForm.Get("grant_type") == "refresh_token"
+	if refresh {
 		p.refreshes++
+	} else {
+		p.exchanges++
+	}
+	if !p.authenticates(r) {
+		writeOAuthError(w, http.StatusUnauthorized, "invalid_client")
+		return
+	}
+	if refresh {
 		switch {
 		case p.refreshStatus != 0:
 			w.WriteHeader(p.refreshStatus)
 			return
 		case p.refreshError != "":
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": p.refreshError})
+			writeOAuthError(w, http.StatusBadRequest, p.refreshError)
 			return
 		case r.PostForm.Get("refresh_token") != p.refreshToken:
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "invalid_grant"})
+			writeOAuthError(w, http.StatusBadRequest, "invalid_grant")
 			return
 		}
 	}
@@ -266,6 +314,7 @@ func TestOIDCSessionFollowsTheProvider(t *testing.T) {
 			assert.Equal(t, http.StatusUnauthorized, w.Code)
 			assert.Equal(t, -1, cookieNamed(t, w.Result().Cookies(), refreshCookieName).MaxAge)
 			assert.Equal(t, -1, cookieNamed(t, w.Result().Cookies(), providerTokenCookie).MaxAge)
+			assert.Equal(t, 1, get(provider, func(p *fakeProvider) int { return p.refreshes }), "the provider is asked once")
 		})
 	}
 
@@ -275,15 +324,49 @@ func TestOIDCSessionFollowsTheProvider(t *testing.T) {
 		assert.Equal(t, http.StatusUnauthorized, refreshSession(mgr, cookies...).Code)
 	})
 
-	for _, status := range []int{http.StatusInternalServerError, http.StatusTooManyRequests} {
-		t.Run(fmt.Sprintf("a provider answering %d keeps the session for a later try", status), func(t *testing.T) {
+	// Answers that say nothing about the user: the session waits for the
+	// provider, or for the operator to fix the client, and goes on after.
+	type pause struct {
+		name         string
+		answer, heal func(*fakeProvider)
+	}
+	answersError := func(code string) pause {
+		return pause{
+			name:   code,
+			answer: func(p *fakeProvider) { p.refreshError = code },
+			heal:   func(p *fakeProvider) { p.refreshError = "" },
+		}
+	}
+	answersStatus := func(status int) pause {
+		return pause{
+			name:   fmt.Sprintf("status %d", status),
+			answer: func(p *fakeProvider) { p.refreshStatus = status },
+			heal:   func(p *fakeProvider) { p.refreshStatus = 0 },
+		}
+	}
+	for _, pause := range []pause{
+		{
+			name:   "a refused client authentication (invalid_client)",
+			answer: func(p *fakeProvider) { p.clientAuth = clientSecretPost },
+			heal:   func(p *fakeProvider) { p.clientAuth = clientSecretBasic },
+		},
+		answersError("unauthorized_client"),
+		answersError("unsupported_grant_type"),
+		answersError("temporarily_unavailable"),
+		answersStatus(http.StatusInternalServerError),
+		answersStatus(http.StatusBadGateway),
+		answersStatus(http.StatusTooManyRequests),
+	} {
+		t.Run(pause.name+" keeps the session for a later try", func(t *testing.T) {
 			provider, mgr, cookies := signIn(t, due)
-			provider.set(func(p *fakeProvider) { p.refreshStatus = status })
+			provider.set(pause.answer)
 			w := refreshSession(mgr, cookies...)
 			assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 			assert.Empty(t, w.Result().Cookies(), "the cookies stay")
+			assert.Equal(t, 1, get(provider, func(p *fakeProvider) int { return p.refreshes }),
+				"the refresh token is sent once, not again in the other style")
 
-			provider.set(func(p *fakeProvider) { p.refreshStatus = 0 })
+			provider.set(pause.heal)
 			identityOf(t, mgr, refreshSession(mgr, cookies...))
 		})
 	}
@@ -318,6 +401,65 @@ func TestOIDCSessionFollowsTheProvider(t *testing.T) {
 
 		identityOf(t, mgr, refreshSession(mgr, cookieNamed(t, cookies, refreshCookieName)))
 		assert.Zero(t, get(provider, func(p *fakeProvider) int { return p.refreshes }))
+	})
+}
+
+func TestClientAuthStyle(t *testing.T) {
+	for _, tc := range []struct {
+		methods []string
+		want    oauth2.AuthStyle
+	}{
+		{nil, oauth2.AuthStyleInHeader},
+		{[]string{clientSecretBasic}, oauth2.AuthStyleInHeader},
+		{[]string{clientSecretPost, clientSecretBasic}, oauth2.AuthStyleInHeader},
+		{[]string{clientSecretPost}, oauth2.AuthStyleInParams},
+		{[]string{"private_key_jwt", clientSecretPost}, oauth2.AuthStyleInParams},
+		{[]string{"private_key_jwt"}, oauth2.AuthStyleInHeader},
+	} {
+		assert.Equal(t, tc.want, clientAuthStyle(tc.methods), "methods %v", tc.methods)
+	}
+}
+
+func TestOIDCTokenRequestsAuthenticateOneWay(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		advertised []string
+		registered string
+	}{
+		{name: "basic when the provider lists no methods", registered: clientSecretBasic},
+		{name: "basic when the provider lists it", advertised: []string{clientSecretPost, clientSecretBasic}, registered: clientSecretBasic},
+		{name: "post when the provider lists only it", advertised: []string{clientSecretPost}, registered: clientSecretPost},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := newFakeProvider(t, func(p *fakeProvider) {
+				p.refreshTokens, p.revocation, p.expiresIn = true, true, -1
+				p.authMethods, p.clientAuth = tc.advertised, tc.registered
+			})
+			p := newOIDCProviderFor(t, provider.URL, deliveryv1alpha1.ProviderSignOutNever)
+			mgr := &authManager{auth: p.auth, oidc: p, logger: logr.Discard()}
+
+			cookies := sessionCookies(t, signInOIDC(t, mgr))
+			assert.Equal(t, 1, get(provider, func(p *fakeProvider) int { return p.exchanges }))
+
+			w := refreshSession(mgr, cookies...)
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+			assert.Equal(t, 1, get(provider, func(p *fakeProvider) int { return p.refreshes }))
+
+			assert.Equal(t, http.StatusNoContent, signOut(mgr, sessionCookies(t, w.Result().Cookies())...).Code)
+			assert.Equal(t, []string{"refresh-2"}, get(provider, func(p *fakeProvider) []string { return p.revoked }))
+		})
+	}
+
+	t.Run("a client registered another way fails the sign-in after one request", func(t *testing.T) {
+		provider := newFakeProvider(t, func(p *fakeProvider) {
+			p.authMethods, p.clientAuth = []string{clientSecretBasic, clientSecretPost}, clientSecretPost
+		})
+		p := newOIDCProviderFor(t, provider.URL, deliveryv1alpha1.ProviderSignOutNever)
+		mgr := &authManager{auth: p.auth, oidc: p, logger: logr.Discard()}
+
+		assert.Equal(t, http.StatusBadRequest, oidcCallback(t, mgr).Code)
+		assert.Equal(t, 1, get(provider, func(p *fakeProvider) int { return p.exchanges }),
+			"the authorization code is sent once, not again in the other style")
 	})
 }
 
