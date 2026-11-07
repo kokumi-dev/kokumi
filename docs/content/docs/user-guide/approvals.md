@@ -56,8 +56,8 @@ cosign verify-attestation --key kokumi.pub --insecure-ignore-tlog=true \
 ## Who may vote
 
 - Votes are submitted **only through the Kokumi server**, which takes the
-  reviewer's identity (OIDC issuer, subject, username, email, groups) from
-  the verified login session. The built-in admin login cannot vote, since a
+  reviewer's identity (OIDC issuer, subject, username, email if the provider
+  verified it, groups) from the verified login session. The built-in admin login cannot vote, since a
   vote needs a personal OIDC login.
 - Whether a user may vote at all is Kubernetes RBAC: the custom verb
   `approve` on `preparations`, checked for the ServiceAccounts the user maps

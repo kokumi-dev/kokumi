@@ -55,6 +55,15 @@ func newTokenAuthenticator() *authenticator {
 	return newAuthenticator("", nil, testSigningKey)
 }
 
+// testTokenSecret returns the default token signing-key Secret holding
+// testSigningKey.
+func testTokenSecret() *corev1.Secret {
+	return &corev1.Secret{
+		Name: deliveryv1alpha1.DefaultTokenSigningKeySecretName, Namespace: testNS,
+		Data: map[string][]byte{secretKeySigningKey: testSigningKey},
+	}
+}
+
 func newAuthSecret(data map[string][]byte) *corev1.Secret {
 	return &corev1.Secret{
 		Name: testSecret, Namespace: testNS,
@@ -698,6 +707,15 @@ func TestAuthManagerAdminCredentials(t *testing.T) {
 		a := m.get()
 		return m.adminLoginEnabled() && a != nil && a.verifyCredentials(testUsername, testPassword)
 	}
+	// adminSession signs in to the admin account of m and returns the access
+	// token of the session.
+	adminSession := func(t *testing.T, m *authManager) string {
+		t.Helper()
+		res, err := m.signInAdmin(testUsername, testPassword)
+		require.NoError(t, err)
+		require.Equal(t, http.StatusOK, protectedRequest(m, res.tokens.accessToken))
+		return res.tokens.accessToken
+	}
 
 	t.Run("a missing admin Secret leaves OIDC and tokens working", func(t *testing.T) {
 		c := fake.NewClientBuilder().WithObjects(tokenSecret(), &corev1.Secret{
@@ -723,11 +741,33 @@ func TestAuthManagerAdminCredentials(t *testing.T) {
 		kitchen := authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: admin})
 		m.reload(context.Background(), kitchen)
 		require.True(t, canSignIn(m))
+		session := adminSession(t, m)
 
 		require.NoError(t, c.Delete(context.Background(), secret))
 		m.reload(context.Background(), kitchen)
 		assert.False(t, canSignIn(m))
 		assert.NotNil(t, m.get(), "tokens must still verify")
+		assert.Equal(t, http.StatusUnauthorized, protectedRequest(m, session), "the running admin session ends")
+	})
+
+	t.Run("a new password ends running admin sessions", func(t *testing.T) {
+		secret := adminSecret()
+		c := fake.NewClientBuilder().WithObjects(tokenSecret(), secret).Build()
+		m := newManager(c)
+		kitchen := authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: admin})
+		m.reload(context.Background(), kitchen)
+		session := adminSession(t, m)
+
+		// Setting the same hash again changes nothing.
+		m.reload(context.Background(), kitchen)
+		assert.Equal(t, http.StatusOK, protectedRequest(m, session))
+
+		secret.Data[secretKeyPasswordHash] = mustBcrypt(t, testPassword)
+		require.NoError(t, c.Update(context.Background(), secret))
+		m.reload(context.Background(), kitchen)
+		assert.Equal(t, http.StatusUnauthorized, protectedRequest(m, session),
+			"a new hash ends the session, also of the same password")
+		adminSession(t, m)
 	})
 
 	t.Run("an admin Secret without a password hash stops admin login", func(t *testing.T) {
@@ -777,10 +817,13 @@ func TestAuthManagerAdminCredentials(t *testing.T) {
 		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: admin}))
 		require.True(t, canSignIn(m))
 
+		session := adminSession(t, m)
+
 		disabled := *admin
 		disabled.Enabled = false
 		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: &disabled}))
 		assert.False(t, canSignIn(m))
+		assert.Equal(t, http.StatusUnauthorized, protectedRequest(m, session), "the running admin session ends")
 	})
 
 	t.Run("removing adminUser stops admin login", func(t *testing.T) {
@@ -807,10 +850,12 @@ func TestAuthManagerAdminCredentials(t *testing.T) {
 		kitchen := authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: admin})
 		m.reload(context.Background(), kitchen)
 		require.True(t, canSignIn(m))
+		session := adminSession(t, m)
 
 		unreachable = true
 		m.reload(context.Background(), kitchen)
 		assert.True(t, canSignIn(m))
+		assert.Equal(t, http.StatusOK, protectedRequest(m, session), "the running admin session goes on")
 	})
 
 	t.Run("an unreadable token Secret keeps tokens and still stops admin login", func(t *testing.T) {
@@ -845,6 +890,69 @@ func TestAuthManagerAdminCredentials(t *testing.T) {
 		}}))
 		assert.True(t, canSignIn(m), "an unset username falls back to %q", testUsername)
 	})
+
+	t.Run("a new username ends running admin sessions", func(t *testing.T) {
+		c := fake.NewClientBuilder().WithObjects(tokenSecret(), adminSecret()).Build()
+		m := newManager(c)
+		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: admin}))
+		session := adminSession(t, m)
+
+		renamed := *admin
+		renamed.Username = testRootUser
+		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: &renamed}))
+		assert.Equal(t, http.StatusUnauthorized, protectedRequest(m, session))
+	})
+}
+
+func TestPasswordFingerprint(t *testing.T) {
+	hash, otherHash := mustBcrypt(t, testPassword), mustBcrypt(t, testPassword)
+	fingerprint := passwordFingerprint(testSigningKey, hash)
+
+	assert.Len(t, fingerprint, 16)
+	assert.Equal(t, fingerprint, passwordFingerprint(testSigningKey, hash), "the same hash has the same fingerprint")
+	assert.NotEqual(t, fingerprint, passwordFingerprint(testSigningKey, otherHash), "a new hash changes it")
+	assert.NotEqual(t, fingerprint, passwordFingerprint([]byte("another-signing-key-of-32-bytes-or-more"), hash),
+		"another signing key changes it")
+	assert.Empty(t, passwordFingerprint(testSigningKey, nil), "without an admin account there is none")
+
+	a := newAuthenticator(testUsername, hash, testSigningKey)
+	tokens, err := a.signInTokens(&Identity{Subject: testUsername, Provider: providerAdmin}, newSessionState(time.Now()))
+	require.NoError(t, err)
+	claims := jwt.MapClaims{}
+	_, _, err = jwt.NewParser().ParseUnverified(tokens.accessToken, claims)
+	require.NoError(t, err)
+	assert.Equal(t, fingerprint, claims["pwd"], "admin tokens carry it in the claim pwd")
+	assert.NotContains(t, tokens.accessToken, string(hash))
+
+	oidc, err := a.signInTokens(&Identity{Subject: testSubject, Provider: providerOIDC}, newSessionState(time.Now()))
+	require.NoError(t, err)
+	claims = jwt.MapClaims{}
+	_, _, err = jwt.NewParser().ParseUnverified(oidc.accessToken, claims)
+	require.NoError(t, err)
+	assert.NotContains(t, claims, "pwd", "OIDC tokens carry none")
+}
+
+func TestAuthManagerWaitsForTheKitchen(t *testing.T) {
+	c := fake.NewClientBuilder().WithObjects(testTokenSecret(), newAuthSecret(map[string][]byte{
+		secretKeyPasswordHash: mustBcrypt(t, testPassword),
+	})).Build()
+	m := newAuthManager(t.Context(), c, c, testNS, tokenLifetimes{}, nil)
+	session, err := newTestAuthenticator(t).signInTokens(
+		&Identity{Subject: testUsername, Provider: providerAdmin}, newSessionState(time.Now()))
+	require.NoError(t, err)
+
+	assert.Nil(t, m.get(), "nothing is resolved before the Kitchen was read")
+	assert.Equal(t, http.StatusServiceUnavailable, protectedRequest(m, session.accessToken),
+		"the UI keeps its session and retries, instead of signing out")
+	_, err = m.refreshSession(context.Background(), browserSession{refreshToken: session.refreshToken}, true)
+	assert.ErrorIs(t, err, errAuthUnavailable)
+
+	m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: &deliveryv1alpha1.AdminUserConfig{
+		Enabled: true, Username: testUsername, SecretRef: &corev1.LocalObjectReference{Name: testSecret},
+	}}))
+	res, err := m.signInAdmin(testUsername, testPassword)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, protectedRequest(m, res.tokens.accessToken))
 }
 
 func TestNoLoginMethodLocksTheAPI(t *testing.T) {
@@ -855,9 +963,8 @@ func TestNoLoginMethodLocksTheAPI(t *testing.T) {
 	})
 
 	for name, kitchen := range map[string]*deliveryv1alpha1.Kitchen{
-		"no Kitchen yet": nil,
-		"no auth":        authKitchen(nil),
-		"no provider":    authKitchen(&deliveryv1alpha1.KitchenAuth{}),
+		"no auth":     authKitchen(nil),
+		"no provider": authKitchen(&deliveryv1alpha1.KitchenAuth{}),
 	} {
 		t.Run(name, func(t *testing.T) {
 			reached = false

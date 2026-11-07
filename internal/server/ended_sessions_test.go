@@ -145,32 +145,71 @@ func TestSignOutEndsCopiesOfTheSession(t *testing.T) {
 }
 
 func TestEventsStreamEndsWithItsSession(t *testing.T) {
-	ended, _ := newTestEndedSessions(t)
-	token := &verifiedToken{
-		identity: &Identity{Subject: testUsername, Provider: providerAdmin},
-		session:  sessionState{ID: "kokumi-1", AuthTime: time.Now()},
-		expires:  time.Now().Add(time.Hour),
+	// stream opens a live-update stream of an admin session of mgr, and
+	// returns a channel that is closed when the stream ends, and the ID of
+	// the session.
+	stream := func(t *testing.T, mgr *authManager) (<-chan struct{}, string) {
+		t.Helper()
+		res, err := mgr.signInAdmin(testUsername, testPassword)
+		require.NoError(t, err)
+		token, err := mgr.auth.parseToken(res.tokens.accessToken, accessTokenType)
+		require.NoError(t, err)
+		r := httptest.NewRequestWithContext(withVerifiedToken(t.Context(), token), http.MethodGet, "/api/v1/events", nil)
+		done := make(chan struct{})
+		go func() {
+			handleEventsStream(newHub(), nil, mgr, time.Hour).ServeHTTP(httptest.NewRecorder(), r)
+			close(done)
+		}()
+		return done, token.session.ID
 	}
-	r := httptest.NewRequestWithContext(withVerifiedToken(t.Context(), token), http.MethodGet, "/api/v1/events", nil)
-	done := make(chan struct{})
-	go func() {
-		handleEventsStream(newHub(), nil, ended, time.Hour).ServeHTTP(httptest.NewRecorder(), r)
-		close(done)
-	}()
+	stays := func(t *testing.T, done <-chan struct{}, msg string) {
+		t.Helper()
+		select {
+		case <-done:
+			t.Fatal(msg)
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	ends := func(t *testing.T, done <-chan struct{}, msg string) {
+		t.Helper()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal(msg)
+		}
+	}
 
-	require.NoError(t, ended.record(context.Background(), endedSessionKey("other"), time.Now()))
-	select {
-	case <-done:
-		t.Fatal("the stream must stay open when another session ends")
-	case <-time.After(50 * time.Millisecond):
-	}
+	t.Run("at a sign-out", func(t *testing.T) {
+		ended, _ := newTestEndedSessions(t)
+		mgr := &authManager{auth: newTestAuthenticator(t), adminLogin: true, logger: logr.Discard(), ended: ended}
+		done, sessionID := stream(t, mgr)
 
-	require.NoError(t, ended.record(context.Background(), endedSessionKey("kokumi-1"), time.Now()))
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the stream must end when its session ends")
-	}
+		require.NoError(t, ended.record(context.Background(), endedSessionKey("other"), time.Now()))
+		stays(t, done, "the stream must stay open when another session ends")
+
+		require.NoError(t, ended.record(context.Background(), endedSessionKey(sessionID), time.Now()))
+		ends(t, done, "the stream must end when its session ends")
+	})
+
+	t.Run("when the auth configuration ends its session", func(t *testing.T) {
+		c := fake.NewClientBuilder().WithObjects(testTokenSecret(), newAuthSecret(map[string][]byte{
+			secretKeyPasswordHash: mustBcrypt(t, testPassword),
+		})).Build()
+		mgr := &authManager{reader: c, apiReader: c, ns: testNS, logger: logr.Discard()}
+		admin := &deliveryv1alpha1.AdminUserConfig{
+			Enabled: true, Username: testUsername, SecretRef: &corev1.LocalObjectReference{Name: testSecret},
+		}
+		mgr.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: admin}))
+		done, _ := stream(t, mgr)
+
+		mgr.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: admin}))
+		stays(t, done, "the stream must stay open while the configuration still signs it in")
+
+		off := *admin
+		off.Enabled = false
+		mgr.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: &off}))
+		ends(t, done, "the stream must end when admin login is turned off")
+	})
 }
 
 // accessTokenOf returns the access token of a sign-in or refresh response.
@@ -181,8 +220,6 @@ func accessTokenOf(t *testing.T, w *httptest.ResponseRecorder) string {
 	return resp.Token
 }
 
-// protectedRequest sends a request with access to a protected path through
-// mgr's middleware and returns the status.
 func protectedRequest(mgr *authManager, access string) int {
 	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	r := httptest.NewRequest(http.MethodGet, testOrdersPath, nil)

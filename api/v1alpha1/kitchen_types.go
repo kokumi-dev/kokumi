@@ -334,20 +334,14 @@ type OIDCConfig struct {
 	// +optional
 	ClientSecretRef *corev1.LocalObjectReference `json:"clientSecretRef,omitempty"`
 
-	// usernameClaim is the ID-token claim used as the kokumi username.
-	// Defaults to "email".
+	// usernameClaim is the ID-token claim shown as the user's name. It only
+	// names the user: the user is identified by the "sub" claim, and mapped to
+	// ServiceAccounts by "sub", by "email" when "email_verified" is true, and
+	// by groups. Defaults to "email".
 	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:default=email
 	// +optional
 	UsernameClaim string `json:"usernameClaim,omitempty"`
-
-	// emailClaim is the ID-token claim used as the user's email for
-	// ServiceAccount identity mapping (kokumi.dev/identity-email). Supports
-	// dotted paths for nested claims (e.g. "user.email"). Defaults to "email".
-	// +kubebuilder:validation:MaxLength=253
-	// +kubebuilder:default=email
-	// +optional
-	EmailClaim string `json:"emailClaim,omitempty"`
 
 	// groupsClaim is the ID-token claim holding the user's group memberships
 	// (a list of strings) for ServiceAccount identity mapping

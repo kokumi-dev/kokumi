@@ -25,9 +25,6 @@ const (
 	// providerTokenKeyInfo is the HKDF info that derives the key sealing
 	// providerTokenCookie from the token signing key.
 	providerTokenKeyInfo = "kokumi.oidc.refresh cookie"
-	// maxProviderTokenCookieLen is the longest sealed token kept in a cookie;
-	// browsers drop cookies larger than 4096 bytes.
-	maxProviderTokenCookieLen = 4000
 	// providerRequestTimeout bounds one request to the provider's token or
 	// revocation endpoint.
 	providerRequestTimeout = 10 * time.Second
@@ -56,7 +53,7 @@ func deriveProviderTokenKey(signingKey []byte) []byte {
 }
 
 // sealProviderToken encrypts t as a compact JWE (dir, A256GCM) for
-// providerTokenCookie. A sealed token too large for the cookie is an error.
+// providerTokenCookie.
 func (a *authenticator) sealProviderToken(t providerToken) (string, error) {
 	payload, err := json.Marshal(t)
 	if err != nil {
@@ -70,14 +67,7 @@ func (a *authenticator) sealProviderToken(t providerToken) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	sealed, err := encrypted.CompactSerialize()
-	if err != nil {
-		return "", err
-	}
-	if len(sealed) > maxProviderTokenCookieLen {
-		return "", fmt.Errorf("the sealed refresh token has %d bytes, more than a cookie holds", len(sealed))
-	}
-	return sealed, nil
+	return encrypted.CompactSerialize()
 }
 
 // openProviderToken decrypts a value of providerTokenCookie.
@@ -175,7 +165,7 @@ func (p *oidcProvider) checkSession(ctx context.Context, refreshToken string, id
 		if err := idToken.Claims(&claims); err != nil {
 			return nil, fmt.Errorf("%w: reading the ID token: %w", errProviderEndedSession, err)
 		}
-		refreshed, err := identityFromClaims(claims, p.usernameClaim, p.emailClaim, p.groupsClaim)
+		refreshed, err := identityFromClaims(claims, p.usernameClaim, p.groupsClaim)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", errProviderEndedSession, err)
 		}

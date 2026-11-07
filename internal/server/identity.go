@@ -14,7 +14,7 @@ type Identity struct {
 	// Subject is the stable identity string: the OIDC "sub" claim for OIDC
 	// logins, or the configured admin username for admin logins.
 	Subject string
-	// Email is the OIDC "email" claim when present.
+	// Email is the OIDC "email" claim, when the provider verified it.
 	Email string
 	// Groups are the OIDC "groups" claim values when present.
 	Groups []string
@@ -44,6 +44,9 @@ type identityClaims struct {
 	Provider  string   `json:"provider,omitempty"`
 	IDPIssuer string   `json:"idp_iss,omitempty"`
 	Username  string   `json:"name,omitempty"`
+	// AdminPassword is the fingerprint of the admin password an admin
+	// token was issued under (see passwordFingerprint).
+	AdminPassword string `json:"pwd,omitempty"`
 	// SessionID, AuthTime, ProviderCheckAt and ProviderSessionID carry the
 	// sessionState.
 	SessionID         string           `json:"sid,omitempty"`
@@ -152,26 +155,26 @@ func claimAtPath(claims map[string]any, name string) (any, bool) {
 }
 
 // identityFromClaims builds an OIDC Identity from verified ID-token claims.
-// The subject is the OIDC "sub" claim (required); email and groups are
-// optional. usernameClaim selects the display/username claim (default email)
-// used as fallback subject when sub is absent. emailClaim and groupsClaim
-// select the claims used for ServiceAccount identity mapping; both support
-// dotted paths for nested claims (e.g. "realm_access.roles").
-func identityFromClaims(claims map[string]any, usernameClaim, emailClaim, groupsClaim string) (*Identity, error) {
+// The subject is the "sub" claim, which OpenID Connect Core requires. The
+// email is the "email" claim, and only when "email_verified" is true (OpenID
+// Connect Core sections 5.1 and 5.7): ServiceAccounts map by it, and a
+// provider may let users set an address they do not own. usernameClaim
+// selects the claim shown as the user's name (default email), and
+// groupsClaim the user's groups; both support dotted paths for nested claims
+// (e.g. "realm_access.roles").
+func identityFromClaims(claims map[string]any, usernameClaim, groupsClaim string) (*Identity, error) {
 	sub, err := extractClaim(claims, "sub")
 	if err != nil {
-		// Some providers lack sub; fall back to the configured username claim.
-		sub, err = extractClaim(claims, usernameClaim)
-		if err != nil {
-			return nil, err
-		}
+		return nil, err
 	}
 	id := &Identity{Subject: sub, Provider: providerOIDC}
 	if username, err := extractClaim(claims, defaultString(usernameClaim, "email")); err == nil {
 		id.Username = username
 	}
-	if email, err := extractClaim(claims, emailClaim); err == nil {
-		id.Email = email
+	if verified, _ := claims["email_verified"].(bool); verified {
+		if email, ok := claims["email"].(string); ok {
+			id.Email = email
+		}
 	}
 	if raw, ok := claimAtPath(claims, groupsClaim); ok {
 		switch v := raw.(type) {

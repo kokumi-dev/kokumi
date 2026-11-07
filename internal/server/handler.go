@@ -60,7 +60,7 @@ func handleInfo(authMgr *authManager) http.HandlerFunc {
 // A heartbeat event every heartbeat interval keeps a quiet stream alive
 // through proxies that close idle connections, and lets the client tell a
 // quiet stream from a dead one.
-func handleEventsStream(h *hub, deps *apiDeps, ended *endedSessions, heartbeat time.Duration) http.HandlerFunc {
+func handleEventsStream(h *hub, deps *apiDeps, sessions *authManager, heartbeat time.Duration) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
@@ -112,8 +112,9 @@ func handleEventsStream(h *hub, deps *apiDeps, ended *endedSessions, heartbeat t
 
 		// The stream ends with the access token it was opened with, so a
 		// copied token does not stream beyond its expiry, and with its
-		// session when that ends first, at a sign-out or by the OIDC provider.
-		// The UI reopens it with each renewed token.
+		// session when that ends first: at a sign-out, by the OIDC provider,
+		// or when the auth configuration no longer signs it in. The UI
+		// reopens it with each renewed token.
 		var expired <-chan time.Time
 		token := verifiedTokenFrom(r.Context())
 		if token != nil {
@@ -121,17 +122,22 @@ func handleEventsStream(h *hub, deps *apiDeps, ended *endedSessions, heartbeat t
 			defer timer.Stop()
 			expired = timer.C
 		}
-		endedChanged := ended.changes()
+		endedChanged, authChanged := sessions.endedSessions().changes(), sessions.changes()
 
 		for {
 			select {
 			case <-expired:
 				return
 			case <-endedChanged:
-				if token != nil && ended.ended(token) {
+				endedChanged = sessions.endedSessions().changes()
+				if !sessions.sessionGoesOn(token) {
 					return
 				}
-				endedChanged = ended.changes()
+			case <-authChanged:
+				authChanged = sessions.changes()
+				if !sessions.sessionGoesOn(token) {
+					return
+				}
 			case <-ticker.C:
 				if _, err := fmt.Fprintf(w, "event: %s\ndata: {}\n\n", eventHeartbeat); err != nil {
 					return

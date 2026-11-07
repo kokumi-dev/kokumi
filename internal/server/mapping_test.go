@@ -14,6 +14,7 @@ const (
 	testGroup       = "devops"
 	testGroup2      = "leads"
 	testEmailClaim  = "email"
+	testVerified    = "email_verified"
 	testSubClaim    = "sub"
 	testGroupsClaim = "groups"
 	testRealm       = "realm_access"
@@ -168,7 +169,6 @@ func TestIdentityFromClaims(t *testing.T) {
 		name          string
 		claims        map[string]any
 		usernameClaim string
-		emailClaim    string
 		groupsClaim   string
 		want          *Identity
 		wantErr       bool
@@ -178,10 +178,10 @@ func TestIdentityFromClaims(t *testing.T) {
 			claims: map[string]any{
 				testSubClaim:   "123456",
 				testEmailClaim: testEmail,
+				testVerified:   true,
 				"groups":       []any{testGroup, testGroup2},
 			},
 			usernameClaim: testEmailClaim,
-			emailClaim:    testEmailClaim,
 			groupsClaim:   testGroupsClaim,
 			want: &Identity{
 				Subject:  "123456",
@@ -192,45 +192,53 @@ func TestIdentityFromClaims(t *testing.T) {
 			},
 		},
 		{
-			name:          "missing sub falls back to username claim",
-			claims:        map[string]any{testEmailClaim: testEmail},
+			name:          "an unverified email is not the user's email",
+			claims:        map[string]any{testSubClaim: "123456", testEmailClaim: testEmail, testVerified: false},
 			usernameClaim: testEmailClaim,
-			emailClaim:    testEmailClaim,
 			groupsClaim:   testGroupsClaim,
-			want: &Identity{
-				Subject:  testEmail,
-				Email:    testEmail,
-				Provider: providerOIDC,
-				Username: testEmail,
-			},
+			want:          &Identity{Subject: "123456", Provider: providerOIDC, Username: testEmail},
 		},
 		{
-			name:          "no usable claim errors",
-			claims:        map[string]any{},
+			name:          "an email without email_verified is not the user's email",
+			claims:        map[string]any{testSubClaim: "123456", testEmailClaim: testEmail},
 			usernameClaim: testEmailClaim,
-			emailClaim:    testEmailClaim,
+			groupsClaim:   testGroupsClaim,
+			want:          &Identity{Subject: "123456", Provider: providerOIDC, Username: testEmail},
+		},
+		{
+			name:          "email_verified must be the boolean true, not a string",
+			claims:        map[string]any{testSubClaim: "123456", testEmailClaim: testEmail, testVerified: "true"},
+			usernameClaim: testEmailClaim,
+			groupsClaim:   testGroupsClaim,
+			want:          &Identity{Subject: "123456", Provider: providerOIDC, Username: testEmail},
+		},
+		{
+			name:          "a token without sub is refused, also with a username claim",
+			claims:        map[string]any{testEmailClaim: testEmail, testVerified: true},
+			usernameClaim: testEmailClaim,
 			groupsClaim:   testGroupsClaim,
 			wantErr:       true,
 		},
 		{
-			name: "custom email and groups claims are honored",
-			// Keycloak-style token: email under "user.email", groups under
-			// "realm_access.roles".
+			name:          "an empty sub is refused",
+			claims:        map[string]any{testSubClaim: "", testEmailClaim: testEmail},
+			usernameClaim: testEmailClaim,
+			groupsClaim:   testGroupsClaim,
+			wantErr:       true,
+		},
+		{
+			name: "custom groups claims are honored",
+			// Keycloak-style token: groups under "realm_access.roles".
 			claims: map[string]any{
 				testSubClaim: "123456",
-				"user": map[string]any{
-					testEmailClaim: testEmail,
-				},
 				testRealm: map[string]any{
 					testRoles: []any{testGroup},
 				},
 			},
 			usernameClaim: testEmailClaim,
-			emailClaim:    "user.email",
 			groupsClaim:   "realm_access.roles",
 			want: &Identity{
 				Subject:  "123456",
-				Email:    testEmail,
 				Groups:   []string{testGroup},
 				Provider: providerOIDC,
 			},
@@ -239,10 +247,10 @@ func TestIdentityFromClaims(t *testing.T) {
 			name: "default claims ignore nonstandard locations",
 			claims: map[string]any{
 				testSubClaim: "123456",
+				"user":       map[string]any{testEmailClaim: testEmail, testVerified: true},
 				testRealm:    map[string]any{testRoles: []any{testGroup}},
 			},
 			usernameClaim: testEmailClaim,
-			emailClaim:    testEmailClaim,
 			groupsClaim:   testGroupsClaim,
 			want: &Identity{
 				Subject:  "123456",
@@ -253,7 +261,7 @@ func TestIdentityFromClaims(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			id, err := identityFromClaims(tt.claims, tt.usernameClaim, tt.emailClaim, tt.groupsClaim)
+			id, err := identityFromClaims(tt.claims, tt.usernameClaim, tt.groupsClaim)
 			if tt.wantErr {
 				assert.Error(t, err)
 				return

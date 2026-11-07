@@ -13,8 +13,8 @@ applies to users who bypass the UI entirely.
 ## How it works
 
 1. **Authentication** - the server validates the OIDC token (or admin
-   credentials) and extracts stable identity claims: `sub`, the email and the
-   groups, from the claims that
+   credentials) and extracts stable identity claims: `sub`, the email when the
+   provider verified it, and the groups, from the claim that
    [the OIDC configuration](../authentication/#configuration) names.
 2. **Mapping** - the identity is mapped to one or more Kubernetes
    ServiceAccounts in the install namespace via annotations (below).
@@ -40,16 +40,16 @@ metadata:
   namespace: kokumi
   annotations:
     kokumi.dev/identity-sub: "1234567890"          # matches the OIDC "sub" claim
-    kokumi.dev/identity-email: "admin@kokumi.dev"  # matches the "email" claim
+    kokumi.dev/identity-email: "admin@kokumi.dev"  # matches the verified "email" claim
     kokumi.dev/identity-groups: "platform,admins"  # matches ANY of the token's groups
 ```
 
 Matching rules:
 
 - An identity matches a ServiceAccount when its `sub` equals
-  `kokumi.dev/identity-sub`, its `email` equals `kokumi.dev/identity-email`,
-  or any of its `groups` appears in the comma-separated
-  `kokumi.dev/identity-groups` list.
+  `kokumi.dev/identity-sub`, its verified `email` equals
+  `kokumi.dev/identity-email`, or any of its `groups` appears in the
+  comma-separated `kokumi.dev/identity-groups` list.
 - Multiple annotations on one ServiceAccount are OR-ed.
 - A user may match **multiple** ServiceAccounts; reads (lists and gets) are
   merged across all of them, so the effective read access is the **union**.
@@ -59,10 +59,15 @@ Matching rules:
   nothing: every operation returns 403, browsing registries and previews
   included.
 
-Map by `sub` or by group rather than by email. The provider assigns the
-subject and the groups, while some providers let users set their own email
-address. Groups reach Kokumi only when the requested scopes put them into the
-ID token; see [OIDC configuration](../authentication/#configuration).
+Mapping by email needs a verified address: Kokumi takes the ID token's
+`email` claim only when its `email_verified` is `true`
+([OpenID Connect Core, section 5.7](https://openid.net/specs/openid-connect-core-1_0.html#ClaimStability)),
+because some providers let users set an address they do not own. Providers
+that send no `email_verified`, such as Microsoft Entra ID, map by `sub` or by
+group. The provider assigns the subject and the groups, so they are the
+safer choice everywhere. Groups reach Kokumi only when the requested scopes
+put them into the ID token; see
+[OIDC configuration](../authentication/#configuration).
 
 ### Adding your own ServiceAccount
 
