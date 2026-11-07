@@ -453,13 +453,13 @@ func TestOIDCIssuerRetriesFailedDiscovery(t *testing.T) {
 
 	f.down.Store(false)
 	issuer.failedAt = issuer.failedAt.Add(-oidcDiscoveryRetryInterval)
-	provider, err := issuer.discover(ctx)
+	discovered, err := issuer.discover(ctx)
 	require.NoError(t, err, "the issuer must be asked again once the retry interval has passed")
-	assert.True(t, strings.HasPrefix(provider.Endpoint().AuthURL, f.url))
+	assert.True(t, strings.HasPrefix(discovered.endpoint.AuthURL, f.url))
 
 	again, err := issuer.discover(ctx)
 	require.NoError(t, err)
-	assert.Same(t, provider, again, "a discovered issuer is kept")
+	assert.Same(t, discovered, again, "a discovered issuer is kept")
 	assert.Equal(t, int32(2), f.discoveries.Load())
 }
 
@@ -564,9 +564,9 @@ func newFakeIssuer(t *testing.T, endSession bool) *httptest.Server {
 	return newFakeProvider(t, func(p *fakeProvider) { p.endSession = endSession }).Server
 }
 
-// signInOIDC runs the sign-in flow against mgr with the browser's cookies
-// and returns the cookies the callback sets.
-func signInOIDC(t *testing.T, mgr *authManager, cookies ...*http.Cookie) []*http.Cookie {
+// oidcCallback runs the sign-in flow against mgr with the browser's cookies
+// and returns the callback's response.
+func oidcCallback(t *testing.T, mgr *authManager, cookies ...*http.Cookie) *httptest.ResponseRecorder {
 	t.Helper()
 	start := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/v1/auth/oidc/start", nil)
 	for _, c := range cookies {
@@ -582,6 +582,14 @@ func signInOIDC(t *testing.T, mgr *authManager, cookies ...*http.Cookie) []*http
 	cb.AddCookie(cookieNamed(t, startRec.Result().Cookies(), oidcStateCookie))
 	cbRec := httptest.NewRecorder()
 	handleOIDCCallback(mgr).ServeHTTP(cbRec, cb)
+	return cbRec
+}
+
+// signInOIDC runs the sign-in flow against mgr with the browser's cookies
+// and returns the cookies the callback sets.
+func signInOIDC(t *testing.T, mgr *authManager, cookies ...*http.Cookie) []*http.Cookie {
+	t.Helper()
+	cbRec := oidcCallback(t, mgr, cookies...)
 	require.Equal(t, http.StatusFound, cbRec.Code, cbRec.Body.String())
 	assert.Contains(t, cbRec.Header().Get("Location"), "/#access_token=")
 	return cbRec.Result().Cookies()

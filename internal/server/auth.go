@@ -571,7 +571,7 @@ func handleRefresh(m *authManager) http.HandlerFunc {
 			}
 			if err != nil {
 				m.logger.Error(err, "Could not check a session at the OIDC provider", "subject", id.Subject)
-				respondError(w, http.StatusServiceUnavailable, "the OIDC provider cannot be reached")
+				respondError(w, http.StatusServiceUnavailable, "the session cannot be checked at the OIDC provider")
 				return
 			}
 			id, state.IDPCheck, providerRefresh = checked.identity, checked.next, checked.refreshToken
