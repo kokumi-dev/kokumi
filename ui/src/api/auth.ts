@@ -36,10 +36,15 @@ const listeners = new Set<() => void>()
 let lastInput = 0
 let lastInputWrite = 0
 let lastReportAttempt = 0
+// lastReport mirrors LAST_REPORT_KEY, so that input events, which come with
+// every pointer move, do not read storage.
+let lastReport = readTime(LAST_REPORT_KEY)
 
-// A sign-out in another tab ends the session in this one too.
 window.addEventListener('storage', (event) => {
+  // A sign-out in another tab ends the session in this one too.
   if (event.key === SIGN_OUT_KEY && event.newValue !== null) setToken(null)
+  // A report of activity in another tab counts for this one.
+  if (event.key === LAST_REPORT_KEY) lastReport = Number(event.newValue) || 0
 })
 
 function readTime(key: string): number {
@@ -58,6 +63,12 @@ function writeTime(key: string, time: number): void {
   }
 }
 
+/** Records that the server moved the idle deadline at time, for every tab. */
+function reportedAt(time: number): void {
+  lastReport = time
+  writeTime(LAST_REPORT_KEY, time)
+}
+
 /** The time of the last user input in any tab. */
 function lastInputAt(): number {
   return Math.max(lastInput, readTime(LAST_INPUT_KEY))
@@ -72,8 +83,7 @@ function recordInput(): void {
   }
   // Report a return to an idle session at once, before its deadline passes;
   // at most once per window, also when the report fails.
-  const lastReport = Math.max(readTime(LAST_REPORT_KEY), lastReportAttempt)
-  if (token !== null && now - lastReport > ACTIVE_WINDOW_MS) {
+  if (token !== null && now - Math.max(lastReport, lastReportAttempt) > ACTIVE_WINDOW_MS) {
     lastReportAttempt = now
     void refresh()
   }
@@ -94,7 +104,7 @@ function signOutPending(): boolean {
 function startSession(next: string): void {
   localStorage.removeItem(SIGN_OUT_KEY)
   // A sign-in starts the idle deadline, as a report of activity does.
-  writeTime(LAST_REPORT_KEY, Date.now())
+  reportedAt(Date.now())
   setToken(next)
 }
 
@@ -122,7 +132,8 @@ export function onAuthChange(listener: () => void): () => void {
 
 // decodeTokenPayload returns the parsed JWT payload, or null if the token is
 // missing or unreadable. Used to derive expiry and the username without a
-// server-provided TTL.
+// server-provided TTL. The payload is base64url-encoded UTF-8 JSON (RFC 7519),
+// which atob alone does not read.
 function decodeTokenPayload(tokenToCheck: string | null = token): {
   exp?: number
   sub?: string
@@ -132,7 +143,9 @@ function decodeTokenPayload(tokenToCheck: string | null = token): {
   const parts = tokenToCheck.split('.')
   if (parts.length < 2) return null
   try {
-    return JSON.parse(atob(parts[1])) as { exp?: number; sub?: string; email?: string }
+    const binary = atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'))
+    const json = new TextDecoder().decode(Uint8Array.from(binary, (c) => c.charCodeAt(0)))
+    return JSON.parse(json) as { exp?: number; sub?: string; email?: string }
   } catch {
     return null
   }
@@ -228,7 +241,8 @@ export async function login(username: string, password: string): Promise<void> {
  * both proactively (before expiry) and reactively (after a 401). On success
  * the new access token is stored. When the server ends the session the token
  * is cleared so the app returns to the login screen; a network error or a 5xx,
- * such as an OIDC provider that cannot be reached, keeps it for a retry.
+ * such as a session the OIDC provider cannot vouch for right now, keeps it for
+ * a retry.
  *
  * Concurrent callers (the proactive timer, the SSE reconnect handler, and the
  * 401 retry path) share a single in-flight refresh via refreshInFlight, so a
@@ -270,8 +284,9 @@ async function exchangeRefreshToken(): Promise<boolean> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ active }),
     })
-    // The server or the OIDC provider cannot be reached right now; the
-    // session may well be valid, so keep the token and retry later.
+    // The server cannot check the session right now, e.g. at the OIDC
+    // provider; the session may well be valid, so keep the token and retry
+    // later.
     if (res.status >= 500) return false
     if (!res.ok) {
       // The server ended the session (signed out, idle, expired, or refused
@@ -283,7 +298,7 @@ async function exchangeRefreshToken(): Promise<boolean> {
     // A sign-out started while this refresh was on its way: the new token
     // must not resume the session.
     if (signOutPending()) return false
-    if (active) writeTime(LAST_REPORT_KEY, sentAt)
+    if (active) reportedAt(sentAt)
     setToken(data.token)
     return true
   } catch {
