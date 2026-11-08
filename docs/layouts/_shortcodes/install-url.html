@@ -1,13 +1,13 @@
 {{- /*
-Print the URL of the install.yaml these docs describe: the asset of the
-release in kokumiVersion, or dist/install.yaml on main, which installs the
-latest image, for the docs of main.
+Print the URL of the install.yaml these docs describe: dist/install.yaml on
+main, which installs the latest image, or, for the docs of the latest
+release (hugo.release.toml), the asset of the release in kokumiVersion.
 
 @example kubectl apply -f {{< install-url >}}
 */ -}}
 
-{{- if site.Params.unreleased -}}
-  {{- urls.JoinPath (replace site.Params.repository "https://github.com/" "https://raw.githubusercontent.com/") "main/dist/install.yaml" -}}
-{{- else -}}
+{{- if site.Params.release -}}
   {{- urls.JoinPath site.Params.repository "releases/download" site.Params.kokumiVersion "install.yaml" -}}
+{{- else -}}
+  {{- urls.JoinPath (replace site.Params.repository "https://github.com/" "https://raw.githubusercontent.com/") "main/dist/install.yaml" -}}
 {{- end -}}

@@ -47,10 +47,12 @@ body:has(.kokumi-home) .kokumi-home {
   min-height: 0;
 }
 
-/* ── Versions dropdown ───────────────────────────────────────── */
+/* ── Versions dropdown and banner ────────────────────────────── */
 /* The versions belong to the docs, so the home page hides the  */
-/* navbar dropdown of the "versions" menu in hugo.toml.         */
-body:has(.kokumi-home) .hextra-nav-container div:has(> button[aria-label="Versions"]) {
+/* navbar dropdown of the "versions" menu in hugo.toml and the  */
+/* banner of the docs of main.                                  */
+body:has(.kokumi-home) .hextra-nav-container div:has(> button[aria-label="Versions"]),
+body:has(.kokumi-home) .hextra-banner {
   display: none;
 }
 

@@ -19,7 +19,8 @@ enableGitInfo = true
     target = "assets/examples"
 
 [params]
-  # The release the docs install, and apply the examples from.
+  # The latest release. The docs of main link to its docs; the docs of the
+  # release (hugo.release.toml) install it and apply its examples.
   kokumiVersion = "0.17.0" # x-release-please-version
   # The Argo CD release the docs install.
   argoCDVersion = "v3.5.1"
@@ -28,6 +29,12 @@ enableGitInfo = true
   images = ["/images/kokumi.png"]
   displayUpdatedDate = true
   dateFormat = "January 2, 2006"
+
+  # The docs of main say that main is not released yet;
+  # layouts/_partials/custom/banner.html renders the message. The docs of the
+  # latest release hide it (layouts/_partials/custom/head-end.html).
+  [params.banner]
+    key = "kokumi-main-docs"
 
   # Navbar
   [params.navbar]
@@ -68,23 +75,23 @@ enableGitInfo = true
     name = "Docs"
     pageRef = "/docs"
     weight = 1
-  # The Pages workflow publishes the docs of the latest release at the root and
-  # the docs of main, built with hugo.next.toml, under /next/.
+  # The Pages workflow publishes the docs of main at the root and the docs of
+  # the latest release, built with hugo.release.toml, under /release/.
   [[menu.main]]
     identifier = "versions"
     name = "Versions"
     weight = 2
   [[menu.main]]
-    identifier = "release-docs"
-    name = "Latest release"
+    identifier = "main-docs"
+    name = "main (unreleased)"
     parent = "versions"
     url = "https://kokumi.dev/docs/"
     weight = 1
   [[menu.main]]
-    identifier = "main-docs"
-    name = "main (unreleased)"
+    identifier = "release-docs"
+    name = "Latest release"
     parent = "versions"
-    url = "https://kokumi.dev/next/docs/"
+    url = "https://kokumi.dev/release/docs/"
     weight = 2
   [[menu.main]]
     identifier = "search"
