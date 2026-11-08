@@ -44,17 +44,17 @@ type RepositorySpec struct {
 
 // RepositoryStatus defines the observed state of Repository.
 type RepositoryStatus struct {
-	// observedGeneration is the most recent generation observed by the
-	// controller.
-	// +optional
-	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-
 	// conditions represent the current state of the Repository. Ready
 	// reports whether its Registry exists and covers it.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// observedGeneration is the most recent generation observed by the
+	// controller.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }
 
 // +kubebuilder:object:root=true

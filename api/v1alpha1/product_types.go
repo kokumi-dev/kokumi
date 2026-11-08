@@ -370,6 +370,12 @@ type SourceVerification struct {
 
 // ProductStatus defines the observed state of Product.
 type ProductStatus struct {
+	// conditions represent the current state of the Product resource.
+	// +listType=map
+	// +listMapKey=type
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
 	// observedGeneration is the most recent generation observed by the controller.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
@@ -405,12 +411,6 @@ type ProductStatus struct {
 	// image policy is Vendor.
 	// +optional
 	Vulnerabilities *ProductVulnerabilities `json:"vulnerabilities,omitempty"`
-
-	// conditions represent the current state of the Product resource.
-	// +listType=map
-	// +listMapKey=type
-	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // ProductVulnerabilities is the record of the vulnerability scans of a

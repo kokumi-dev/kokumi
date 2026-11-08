@@ -85,11 +85,6 @@ func (s RegistrySpec) EffectiveScheme() RegistryScheme {
 
 // RegistryStatus defines the observed state of Registry.
 type RegistryStatus struct {
-	// observedGeneration is the most recent generation observed by the
-	// controller.
-	// +optional
-	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-
 	// conditions represent the current state of the Registry. Ready reports
 	// whether the registry accepted the Registry's credentials and TLS
 	// settings at its API base endpoint or, without credentials, whether it
@@ -99,6 +94,11 @@ type RegistryStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// observedGeneration is the most recent generation observed by the
+	// controller.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }
 
 // RegistryOperation is what a client does at a registry location.

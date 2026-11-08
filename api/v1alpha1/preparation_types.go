@@ -371,15 +371,15 @@ type AttestationReference struct {
 
 // PreparationStatus defines the observed state of Preparation.
 type PreparationStatus struct {
-	// observedGeneration is the most recent generation observed by the controller.
-	// +optional
-	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-
 	// conditions represent the current state of the Preparation resource.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// observedGeneration is the most recent generation observed by the controller.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// attestations lists the latest attestation of each type that signs the
 	// artifact or records how it was produced. The approvals attestation is

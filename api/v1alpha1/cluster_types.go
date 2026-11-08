@@ -86,6 +86,14 @@ type KubeconfigSecretReference struct {
 
 // ClusterStatus defines the observed state of Cluster.
 type ClusterStatus struct {
+	// conditions represent the current state of the Cluster. Ready reports
+	// whether Orders can deploy to it: it is reachable, accepts the
+	// credential, and is registered with every engine that needs it.
+	// +listType=map
+	// +listMapKey=type
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
 	// observedGeneration is the most recent generation observed by the
 	// controller.
 	// +optional
@@ -101,14 +109,6 @@ type ClusterStatus struct {
 	// +optional
 	// +kubebuilder:validation:MaxLength=64
 	KubernetesVersion string `json:"kubernetesVersion,omitempty"`
-
-	// conditions represent the current state of the Cluster. Ready reports
-	// whether Orders can deploy to it: it is reachable, accepts the
-	// credential, and is registered with every engine that needs it.
-	// +listType=map
-	// +listMapKey=type
-	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true
