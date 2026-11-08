@@ -1,0 +1,13 @@
+# The docs of the latest release. The Pages workflow builds its tag with
+# main's copy of this file, --config hugo.toml,<this file>, and publishes it
+# under /release/, next to the docs of main at the root. Its install commands
+# and examples use the release instead of main, it hides the banner of the
+# docs of main (layouts/_partials/custom/head-end.html), and search engines
+# index the docs of main instead.
+
+[params]
+  release = true
+
+[cascade]
+  [cascade.params]
+    noindex = true

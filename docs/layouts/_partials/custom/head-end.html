@@ -1,0 +1,9 @@
+{{- /*
+The docs of the latest release (hugo.release.toml) hide the banner of the
+docs of main: a config file can add to the banner settings in hugo.toml but
+not remove them.
+*/ -}}
+
+{{- if site.Params.release -}}
+<style>:root { --hextra-banner-height: 0px; } .hextra-banner { display: none; }</style>
+{{- end -}}

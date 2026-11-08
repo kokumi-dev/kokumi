@@ -60,7 +60,7 @@ kubectl apply -f \
     {{< install-url >}}
 ```
 
-To check the release before you apply it, see
+To check a release before you apply it, see
 [Release Verification](../operator-guide/release-verification/).
 
 This installs:
@@ -178,8 +178,8 @@ kubectl apply -f \
 
 Kokumi is pre-1.0, and a release may change its CRDs without a migration;
 the [release notes](https://github.com/kokumi-dev/kokumi/releases) say what
-to re-apply. To run `main`, follow the
-[docs of main](https://kokumi.dev/next/docs/installation/); to run your own
+to re-apply. To run the latest release, follow its
+[docs](https://kokumi.dev/release/docs/installation/); to run your own
 change, see [Run your build](../contribution-guide/#run-your-build).
 
 ## Uninstall
