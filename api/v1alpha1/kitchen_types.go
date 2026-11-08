@@ -390,10 +390,6 @@ const (
 
 // KitchenStatus defines the observed state of Kitchen.
 type KitchenStatus struct {
-	// observedGeneration is the most recent generation observed by the controller.
-	// +optional
-	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-
 	// conditions represent the current state of the Kitchen resource.
 	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
 	//
@@ -407,6 +403,10 @@ type KitchenStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// observedGeneration is the most recent generation observed by the controller.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// signing publishes the public half of the signing key. Absent until the
 	// controller has loaded the key.

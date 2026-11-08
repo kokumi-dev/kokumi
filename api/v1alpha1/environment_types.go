@@ -114,6 +114,14 @@ type RequiredEnvironment struct {
 
 // EnvironmentStatus defines the observed state of Environment.
 type EnvironmentStatus struct {
+	// conditions represent the current state of the Environment. Ready
+	// reports whether Orders can deploy to it at all; each Cluster reports
+	// its own readiness.
+	// +listType=map
+	// +listMapKey=type
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
 	// observedGeneration is the most recent generation observed by the
 	// controller.
 	// +optional
@@ -122,14 +130,6 @@ type EnvironmentStatus struct {
 	// clusters counts the Clusters the Environment selects.
 	// +optional
 	Clusters *EnvironmentClusters `json:"clusters,omitempty"`
-
-	// conditions represent the current state of the Environment. Ready
-	// reports whether Orders can deploy to it at all; each Cluster reports
-	// its own readiness.
-	// +listType=map
-	// +listMapKey=type
-	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // EnvironmentClusters counts the Clusters an Environment selects.

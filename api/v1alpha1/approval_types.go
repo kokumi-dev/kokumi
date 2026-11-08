@@ -124,10 +124,6 @@ type ApprovalSpec struct {
 
 // ApprovalStatus defines the observed state of Approval.
 type ApprovalStatus struct {
-	// observedGeneration is the most recent generation observed by the controller.
-	// +optional
-	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-
 	// conditions represent the current state of the Approval resource.
 	// The Counted condition reports whether this vote contributes to the
 	// approval gate of its Preparation.
@@ -135,6 +131,10 @@ type ApprovalStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// observedGeneration is the most recent generation observed by the controller.
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }
 
 // +kubebuilder:object:root=true

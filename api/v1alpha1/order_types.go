@@ -451,6 +451,12 @@ type OrderRender struct {
 
 // OrderStatus defines the observed state of Order.
 type OrderStatus struct {
+	// conditions represent the current state of the Order resource.
+	// +listType=map
+	// +listMapKey=type
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
 	// observedGeneration is the most recent generation observed by the controller
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
@@ -492,12 +498,6 @@ type OrderStatus struct {
 	// +listMapKey=client
 	// +kubebuilder:validation:MaxItems=32
 	RegistryAccess []RegistryAccess `json:"registryAccess,omitempty"`
-
-	// conditions represent the current state of the Order resource.
-	// +listType=map
-	// +listMapKey=type
-	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // +kubebuilder:object:root=true

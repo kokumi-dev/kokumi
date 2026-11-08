@@ -37,6 +37,12 @@ type ServingSpec struct {
 
 // ServingStatus defines the observed state of Serving.
 type ServingStatus struct {
+	// conditions represent the current state of the Serving resource.
+	// +listType=map
+	// +listMapKey=type
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
 	// observedGeneration is the most recent generation observed by the controller
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
@@ -79,12 +85,6 @@ type ServingStatus struct {
 	// vulnerabilities are published.
 	// +optional
 	DeployedVulnerabilities *VulnerabilitySummary `json:"deployedVulnerabilities,omitempty"`
-
-	// conditions represent the current state of the Serving resource.
-	// +listType=map
-	// +listMapKey=type
-	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // DeploymentClusters counts the clusters a Serving deploys to by the state of
@@ -122,6 +122,15 @@ type DeploymentClusters struct {
 // DeploymentTarget is a cluster a Serving deploys to, with what the engine
 // reports on its deployment there.
 type DeploymentTarget struct {
+	// conditions represent the deployment to the cluster. Ready is True once
+	// the cluster runs the deployed Preparation healthily; its
+	// lastTransitionTime says since when.
+	// +listType=map
+	// +listMapKey=type
+	// +optional
+	// +kubebuilder:validation:MaxItems=8
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
 	// cluster is the name of the Cluster, in the Serving's namespace.
 	// +required
 	// +kubebuilder:validation:MinLength=1
@@ -133,15 +142,6 @@ type DeploymentTarget struct {
 	// +optional
 	// +kubebuilder:validation:MaxLength=71
 	Revision string `json:"revision,omitempty"`
-
-	// conditions represent the deployment to the cluster. Ready is True once
-	// the cluster runs the deployed Preparation healthily; its
-	// lastTransitionTime says since when.
-	// +listType=map
-	// +listMapKey=type
-	// +optional
-	// +kubebuilder:validation:MaxItems=8
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // DeploymentEndReason says why a deployment ended.

@@ -38,23 +38,25 @@ linters:
         description: Kube API Linter lints Kube like APIs based on API conventions and best practices.
         settings:
           linters:
-            # enable:
-            #   # TODO: add MinLength/MinItems by hand.
-            #   - minlength
-            #   # TODO: add MaxLength/MaxItems by hand.
-            #   - maxlength
-            #   - statussubresource
-            #   - statusoptional
+            enable:
+              # TODO: add MinLength/MinItems by hand.
+              # - minlength
+              # TODO: add MaxLength/MaxItems by hand.
+              # - maxlength
+              - statussubresource
+              - statusoptional
             disable:
               # TODO: add Minimum=1 to observedGeneration so it stays a value; the approval counts and some structs need omitzero.
               - optionalfields
               # TODO: mostly adds omitempty to required fields, and a pointer only where a zero value is still valid.
               - requiredfields
+              # nonpointerstructs is for types validated in Go, not for CRDs, which
+              # optionalfields and requiredfields cover. It would mark every
+              # optional omitzero struct with a required field as required.
               - nonpointerstructs
           lintersConfig:
             conditions:
-              # TODO: set to Warn and move Conditions to the top of each status struct.
-              isFirstField: Ignore
+              isFirstField: Warn
               useProtobuf: Forbid
               usePatchStrategy: Forbid
             defaults:
