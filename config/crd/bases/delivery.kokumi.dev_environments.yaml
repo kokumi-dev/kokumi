@@ -153,11 +153,13 @@ spec:
               description:
                 description: description says what the Environment is for.
                 maxLength: 1024
+                minLength: 1
                 type: string
               promotion:
                 description: |-
                   promotion configures what an Order must pass before it deploys to the
                   Environment.
+                minProperties: 1
                 properties:
                   requireAfter:
                     description: |-
@@ -185,6 +187,7 @@ spec:
                       - environment
                       type: object
                     maxItems: 8
+                    minItems: 1
                     type: array
                     x-kubernetes-list-map-keys:
                     - environment
@@ -196,6 +199,7 @@ spec:
             type: object
           status:
             description: status defines the observed state of Environment
+            minProperties: 1
             properties:
               clusters:
                 description: clusters counts the Clusters the Environment selects.
@@ -275,6 +279,8 @@ spec:
                   - status
                   - type
                   type: object
+                maxItems: 32
+                minItems: 1
                 type: array
                 x-kubernetes-list-map-keys:
                 - type

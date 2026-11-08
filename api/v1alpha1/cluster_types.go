@@ -41,6 +41,7 @@ type ClusterSpec struct {
 	// description says what the cluster is, such as where it runs and who
 	// runs it.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=1024
 	Description string `json:"description,omitempty"`
 
@@ -85,6 +86,7 @@ type KubeconfigSecretReference struct {
 }
 
 // ClusterStatus defines the observed state of Cluster.
+// +kubebuilder:validation:MinProperties=1
 type ClusterStatus struct {
 	// conditions represent the current state of the Cluster. Ready reports
 	// whether Orders can deploy to it: it is reachable, accepts the
@@ -92,6 +94,8 @@ type ClusterStatus struct {
 	// +listType=map
 	// +listMapKey=type
 	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=32
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// observedGeneration is the most recent generation observed by the
@@ -101,12 +105,14 @@ type ClusterStatus struct {
 
 	// server is the URL of the cluster's API server.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	Server string `json:"server,omitempty"`
 
 	// kubernetesVersion is the Kubernetes version the cluster's API server
 	// reports.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=64
 	KubernetesVersion string `json:"kubernetesVersion,omitempty"`
 }

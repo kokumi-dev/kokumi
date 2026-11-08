@@ -44,6 +44,7 @@ type OCISource struct {
 	// Product connects to it through the Registry among its registryRefs
 	// that covers it.
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() == 'oci'",message="must be a valid OCI URL"
 	URL string `json:"url"`
@@ -51,6 +52,8 @@ type OCISource struct {
 	// version is the semantic version or tag of the artifact
 	// The controller will resolve this to a digest
 	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=128
 	Version string `json:"version"`
 
 	// verify requires the artifact the version resolves to to carry a
@@ -69,7 +72,7 @@ const VerificationProviderCosign VerificationProvider = "cosign"
 
 // OCISourceVerification configures how the signature of a source artifact is
 // verified. It follows the shape of Flux's OCIRepository spec.verify.
-// +kubebuilder:validation:XValidation:rule="has(self.secretRef) != has(self.matchOIDCIdentity)",message="exactly one of secretRef or matchOIDCIdentity must be set"
+// +kubebuilder:validation:ExactlyOneOf=secretRef;matchOIDCIdentity
 // +kubebuilder:validation:XValidation:rule="!has(self.trustedRootSecretRef) || has(self.matchOIDCIdentity)",message="trustedRootSecretRef is only used with matchOIDCIdentity"
 type OCISourceVerification struct {
 	// provider is the signature format. Only "cosign" is supported.
@@ -120,10 +123,13 @@ type OIDCIdentityMatch struct {
 }
 
 // HelmRender defines Helm-specific rendering options for the source artifact.
+// +kubebuilder:validation:MinProperties=0
 type HelmRender struct {
 	// releaseName is the Helm release name passed to helm template.
 	// Defaults to the Order's metadata.name when omitted.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=53
 	ReleaseName string `json:"releaseName,omitempty"`
 
 	// includeCRDs controls whether CRDs are included in the rendered output.
@@ -153,6 +159,7 @@ const (
 )
 
 // ManifestRender defines rendering options for raw manifest bundle sources.
+// +kubebuilder:validation:MinProperties=0
 type ManifestRender struct {
 	// layout controls whether the artifact's YAML files are merged into a
 	// single manifest.yaml (Single) or kept as separate files (Multi).
@@ -164,7 +171,8 @@ type ManifestRender struct {
 
 // Render defines optional rendering to apply to the source artifact.
 // When absent, the source is treated as a pre-rendered manifest bundle.
-// +kubebuilder:validation:XValidation:rule="!(has(self.helm) && has(self.manifest))",message="helm and manifest are mutually exclusive"
+// Exactly one of helm and manifest is set.
+// +kubebuilder:validation:ExactlyOneOf=helm;manifest
 type Render struct {
 	// helm renders the source OCI artifact as a Helm chart.
 	// When set, the source must be a Helm chart in OCI format.
@@ -177,10 +185,12 @@ type Render struct {
 }
 
 // OCIDestination defines the OCI repository an artifact is pushed to.
+// +kubebuilder:validation:MinProperties=0
 type OCIDestination struct {
 	// url is the oci:// URL of the repository the artifact is pushed to.
 	// When omitted, a repository of the bundled registry is used.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() == 'oci'",message="must be a valid OCI URL"
 	URL string `json:"url,omitempty"`
@@ -190,14 +200,20 @@ type OCIDestination struct {
 type PatchTarget struct {
 	// kind specifies the Kubernetes resource kind to patch
 	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
 	Kind string `json:"kind"`
 
 	// name specifies the name of the resource to patch
 	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
 	Name string `json:"name"`
 
 	// namespace specifies the namespace of the resource (optional, defaults to same namespace as Order)
 	// +optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
 	Namespace string `json:"namespace,omitempty"`
 }
 
@@ -211,6 +227,7 @@ type Patch struct {
 	// Keys are JSONPath expressions (e.g., ".spec.replicas")
 	// Values are the desired values for those paths
 	// +required
+	// +kubebuilder:validation:MinProperties=1
 	Set map[string]string `json:"set"`
 }
 
@@ -254,12 +271,14 @@ type OrderSpec struct {
 	// +optional
 	// +listType=map
 	// +listMapKey=name
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=16
 	RegistryRefs []corev1.LocalObjectReference `json:"registryRefs,omitempty"`
 
 	// patches are merged over the Product's patches, per target, before
 	// producing a Preparation. Subject to the Product's overrides.
 	// +optional
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=128
 	// +listType=atomic
 	Patches []Patch `json:"patches,omitempty"`
@@ -268,6 +287,7 @@ type OrderSpec struct {
 	// They are intended for interactive changes made through the web UI and
 	// are subject to the Product's patch overrides.
 	// +optional
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=128
 	// +listType=atomic
 	Edits []Patch `json:"edits,omitempty"`
@@ -291,6 +311,7 @@ type OrderSpec struct {
 	// rendered: Helm renders into it, and resources without a namespace
 	// are deployed there.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	TargetNamespace string `json:"targetNamespace,omitempty"`
@@ -306,6 +327,7 @@ type EnvironmentRef struct {
 }
 
 // PromotionSpec defines how new Preparations are promoted to active Servings.
+// +kubebuilder:validation:MinProperties=1
 type PromotionSpec struct {
 	// mode controls how a newly created Preparation becomes the active Serving.
 	// Automatic promotes it immediately; Manual requires explicit promotion.
@@ -331,6 +353,7 @@ type PromotionSpec struct {
 	// +optional
 	// +listType=map
 	// +listMapKey=order
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=8
 	After []UpstreamStage `json:"after,omitempty"`
 
@@ -349,7 +372,7 @@ type UpstreamStage struct {
 	// order is the name of the upstream Order, in the same namespace.
 	// +required
 	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:MaxLength=63
 	Order string `json:"order"`
 
 	// soakSeconds is how long the upstream Order must have run its
@@ -363,6 +386,7 @@ type UpstreamStage struct {
 // PromotionGates is what must hold before a Preparation is served: the
 // gates of the Order's spec.promotion, without the mode. It is copied into
 // each Preparation when it is created.
+// +kubebuilder:validation:MinProperties=1
 type PromotionGates struct {
 	// approvals is the approval policy the Preparation must satisfy.
 	// +optional
@@ -373,6 +397,7 @@ type PromotionGates struct {
 	// +optional
 	// +listType=map
 	// +listMapKey=order
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=8
 	After []UpstreamStage `json:"after,omitempty"`
 
@@ -383,6 +408,7 @@ type PromotionGates struct {
 
 // PromotionChecks configures the checks a Preparation must pass before it is
 // served.
+// +kubebuilder:validation:MinProperties=1
 type PromotionChecks struct {
 	// vulnerabilities blocks serving a Preparation whose images have
 	// vulnerabilities at or above maxSeverity. It needs scanning enabled in
@@ -435,6 +461,7 @@ type ApprovalPolicy struct {
 	// +listType=set
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:items:MinLength=1
 	// +kubebuilder:validation:items:MaxLength=253
 	AllowedGroups []string `json:"allowedGroups"`
 }
@@ -444,17 +471,21 @@ type OrderRender struct {
 	// configHash is the hash of the intent being rendered, which becomes
 	// latestConfigHash once the render completes.
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]+$`
 	ConfigHash string `json:"configHash"`
 }
 
 // OrderStatus defines the observed state of Order.
+// +kubebuilder:validation:MinProperties=1
 type OrderStatus struct {
 	// conditions represent the current state of the Order resource.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=32
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// observedGeneration is the most recent generation observed by the controller
@@ -464,6 +495,8 @@ type OrderStatus struct {
 	// latestPreparationName is the name of the most recent immutable Preparation
 	// produced from this Order
 	// +optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
 	LatestPreparationName string `json:"latestPreparationName,omitempty"`
 
 	// latestArtifactDigest is the SHA256 digest of the OCI artifact produced by the
@@ -471,6 +504,8 @@ type OrderStatus struct {
 	// the next Preparation.
 	// +optional
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=71
 	LatestArtifactDigest string `json:"latestArtifactDigest,omitempty"`
 
 	// latestConfigHash is a SHA-256 hash of the intent: the resolved source and
@@ -479,6 +514,8 @@ type OrderStatus struct {
 	// and the Product revision. It is the intent latestPreparationName was
 	// rendered from, written once its render completed.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=71
 	LatestConfigHash string `json:"latestConfigHash,omitempty"`
 
 	// render is the render in progress: recorded before it starts, kept
@@ -496,6 +533,7 @@ type OrderStatus struct {
 	// +listMapKey=url
 	// +listMapKey=operation
 	// +listMapKey=client
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=32
 	RegistryAccess []RegistryAccess `json:"registryAccess,omitempty"`
 }

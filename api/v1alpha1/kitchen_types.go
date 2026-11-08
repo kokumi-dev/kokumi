@@ -58,11 +58,14 @@ const (
 )
 
 // KitchenSpec defines the desired state of Kitchen
+// +kubebuilder:validation:MinProperties=1
 type KitchenSpec struct {
 	// argoCDURL is the base URL of the Argo CD instance used to build deep
-	// links on the Servings page. Empty means no links.
-	// +kubebuilder:validation:XValidation:rule="self == '' || (isURL(self) && url(self).getScheme() in ['http', 'https'])",message="must be a valid http or https URL"
+	// links on the Servings page. Unset means no links.
+	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() in ['http', 'https']",message="must be a valid http or https URL"
 	// +optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=2048
 	ArgoCDURL string `json:"argoCDURL,omitempty"`
 
 	// auth configures UI/API authentication. The built-in admin account
@@ -102,6 +105,7 @@ const (
 // KitchenScanning configures vulnerability scanning. Kokumi scans each image
 // a Product vendors once per digest, with the kokumi-scanner component, and
 // attaches the signed results to the vendored image.
+// +kubebuilder:validation:MinProperties=0
 type KitchenScanning struct {
 	// intervalSeconds is how often an image that a Preparation in use runs
 	// is scanned again, so that new vulnerabilities show up on what is
@@ -127,6 +131,7 @@ type KitchenScanning struct {
 	// oci://mirror.gcr.io/aquasec/trivy-db. Set it to a mirror in
 	// air-gapped clusters.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() == 'oci'",message="must be a valid OCI URL"
 	DBRepository string `json:"dbRepository,omitempty"`
@@ -137,6 +142,7 @@ type KitchenScanning struct {
 	// be scanned without it. Defaults to
 	// oci://mirror.gcr.io/aquasec/trivy-java-db.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() == 'oci'",message="must be a valid OCI URL"
 	JavaDBRepository string `json:"javaDBRepository,omitempty"`
@@ -148,6 +154,7 @@ type KitchenScanning struct {
 	// +optional
 	// +listType=map
 	// +listMapKey=name
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=16
 	RegistryRefs []corev1.LocalObjectReference `json:"registryRefs,omitempty"`
 }
@@ -188,6 +195,7 @@ func (s *KitchenScanning) EffectiveJavaDBRepository() string {
 }
 
 // KitchenImages configures registry access for container images.
+// +kubebuilder:validation:MinProperties=1
 type KitchenImages struct {
 	// mirrors redirects image lookups and copies to mirror registries. Like
 	// a registries.conf prefix with a location, the mirror with the longest
@@ -197,6 +205,7 @@ type KitchenImages struct {
 	// +optional
 	// +listType=map
 	// +listMapKey=prefix
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=32
 	Mirrors []ImageMirror `json:"mirrors,omitempty"`
 }
@@ -219,6 +228,7 @@ type ImageMirror struct {
 	// A Product connects to it through the Registry among its
 	// registryRefs that covers it.
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() == 'oci'",message="must be a valid OCI URL"
 	Location string `json:"location"`
@@ -226,6 +236,7 @@ type ImageMirror struct {
 
 // KitchenSigning configures the trust of the Kitchen. The signing key itself
 // is the Secret named by SigningKeySecretName.
+// +kubebuilder:validation:MinProperties=1
 type KitchenSigning struct {
 	// trustedKeys lists public keys Kokumi trusts for its own artifacts in
 	// addition to the current signing key: the key used before a rotation,
@@ -233,6 +244,7 @@ type KitchenSigning struct {
 	// +optional
 	// +listType=map
 	// +listMapKey=name
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=16
 	TrustedKeys []TrustedKey `json:"trustedKeys,omitempty"`
 
@@ -262,6 +274,7 @@ type TrustedKey struct {
 }
 
 // KitchenAuth groups the authentication configuration for the Kitchen server.
+// +kubebuilder:validation:MinProperties=1
 type KitchenAuth struct {
 	// adminUser configures the built-in admin account for UI login. It is off
 	// unless enabled.
@@ -288,6 +301,7 @@ type KitchenAuth struct {
 
 // AdminUserConfig configures the built-in admin account used for UI login.
 // Its password lives in the referenced Secret, never in this object.
+// +kubebuilder:validation:MinProperties=1
 type AdminUserConfig struct {
 	// enabled turns the admin account on. When its Secret does not exist, the
 	// controller then generates a password, writes its bcrypt hash into that
@@ -297,6 +311,7 @@ type AdminUserConfig struct {
 	Enabled bool `json:"enabled,omitempty"`
 
 	// username is the login name for the admin account. Defaults to "admin".
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:validation:Pattern=`^[^/\s]+$`
 	// +kubebuilder:default="admin"
@@ -320,10 +335,14 @@ type OIDCConfig struct {
 	// and token endpoints from the issuer's well-known configuration.
 	// +required
 	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() in ['http', 'https']",message="must be a valid http or https URL"
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=2048
 	IssuerURL string `json:"issuerURL"`
 
 	// clientID is the OAuth2/OIDC client identifier registered with the issuer.
 	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=255
 	ClientID string `json:"clientID"`
 
 	// clientSecretRef points to the Secret holding the OAuth2 client secret in
@@ -338,6 +357,7 @@ type OIDCConfig struct {
 	// names the user: the user is identified by the "sub" claim, and mapped to
 	// ServiceAccounts by "sub", by "email" when "email_verified" is true, and
 	// by groups. Defaults to "email".
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:default=email
 	// +optional
@@ -347,6 +367,7 @@ type OIDCConfig struct {
 	// (a list of strings) for ServiceAccount identity mapping
 	// (kokumi.dev/identity-groups). Supports dotted paths for nested claims
 	// (e.g. "realm_access.roles" for Keycloak). Defaults to "groups".
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:default=groups
 	// +optional
@@ -354,9 +375,11 @@ type OIDCConfig struct {
 
 	// scopes is the list of OAuth2 scopes requested at login.
 	// Defaults to ["openid", "profile", "email"].
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=16
 	// +kubebuilder:default={openid,profile,email}
 	// +optional
+	// +kubebuilder:validation:items:MinLength=1
 	// +kubebuilder:validation:items:MaxLength=256
 	// +listType=atomic
 	Scopes []string `json:"scopes,omitempty"`
@@ -389,6 +412,7 @@ const (
 )
 
 // KitchenStatus defines the observed state of Kitchen.
+// +kubebuilder:validation:MinProperties=1
 type KitchenStatus struct {
 	// conditions represent the current state of the Kitchen resource.
 	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
@@ -402,6 +426,8 @@ type KitchenStatus struct {
 	// +listType=map
 	// +listMapKey=type
 	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=32
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// observedGeneration is the most recent generation observed by the controller.
@@ -450,8 +476,8 @@ type Kitchen struct {
 	metav1.ObjectMeta `json:"metadata,omitzero"`
 
 	// spec defines the desired state of Kitchen
-	// +required
-	Spec KitchenSpec `json:"spec"`
+	// +optional
+	Spec KitchenSpec `json:"spec,omitzero"`
 
 	// status defines the observed state of Kitchen
 	// +optional

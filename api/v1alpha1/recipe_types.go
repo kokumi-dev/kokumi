@@ -25,6 +25,7 @@ import (
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
 // RecipeSpec defines the desired state of Recipe
+// +kubebuilder:validation:MinProperties=1
 type RecipeSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
@@ -33,10 +34,13 @@ type RecipeSpec struct {
 
 	// foo is an example field of Recipe. Edit recipe_types.go to remove/update
 	// +optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
 	Foo *string `json:"foo,omitempty"`
 }
 
 // RecipeStatus defines the observed state of Recipe.
+// +kubebuilder:validation:MinProperties=1
 type RecipeStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
@@ -56,6 +60,8 @@ type RecipeStatus struct {
 	// +listType=map
 	// +listMapKey=type
 	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=32
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
@@ -72,8 +78,8 @@ type Recipe struct {
 	metav1.ObjectMeta `json:"metadata,omitzero"`
 
 	// spec defines the desired state of Recipe
-	// +required
-	Spec RecipeSpec `json:"spec"`
+	// +optional
+	Spec RecipeSpec `json:"spec,omitzero"`
 
 	// status defines the observed state of Recipe
 	// +optional

@@ -26,6 +26,7 @@ import (
 type EnvironmentSpec struct {
 	// description says what the Environment is for.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=1024
 	Description string `json:"description,omitempty"`
 
@@ -85,6 +86,7 @@ type ArgoCDDeployer struct {
 
 // EnvironmentPromotion configures what an Order must pass before it deploys
 // to an Environment.
+// +kubebuilder:validation:MinProperties=1
 type EnvironmentPromotion struct {
 	// requireAfter lists Environments of the same namespace an Order must
 	// run after: every Order that deploys to this Environment must name, in
@@ -93,6 +95,7 @@ type EnvironmentPromotion struct {
 	// +optional
 	// +listType=map
 	// +listMapKey=environment
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=8
 	RequireAfter []RequiredEnvironment `json:"requireAfter,omitempty"`
 }
@@ -113,6 +116,7 @@ type RequiredEnvironment struct {
 }
 
 // EnvironmentStatus defines the observed state of Environment.
+// +kubebuilder:validation:MinProperties=1
 type EnvironmentStatus struct {
 	// conditions represent the current state of the Environment. Ready
 	// reports whether Orders can deploy to it at all; each Cluster reports
@@ -120,6 +124,8 @@ type EnvironmentStatus struct {
 	// +listType=map
 	// +listMapKey=type
 	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=32
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// observedGeneration is the most recent generation observed by the

@@ -27,20 +27,27 @@ import (
 type ServingSpec struct {
 	// orderName is the name of the Order to serve
 	// +required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
 	OrderName string `json:"orderName"`
 
 	// preparationName is the Preparation promoted for Manual promotion.
 	// It is ignored when the Order uses Automatic promotion.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
 	PreparationName string `json:"preparationName,omitempty"`
 }
 
 // ServingStatus defines the observed state of Serving.
+// +kubebuilder:validation:MinProperties=1
 type ServingStatus struct {
 	// conditions represent the current state of the Serving resource.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=32
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// observedGeneration is the most recent generation observed by the controller
@@ -51,10 +58,12 @@ type ServingStatus struct {
 	// once it is approved and its evidence verifies: spec.preparationName
 	// for Manual promotion, or the newest Ready Preparation of the Order for
 	// Automatic promotion, after it passed its upstream stages and checks.
-	// Its approvals are sealed when it becomes the target. It is empty
+	// Its approvals are sealed when it becomes the target. It is absent
 	// while the Preparation the Serving converges to has not passed them,
 	// or is not Ready.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
 	TargetPreparationName string `json:"targetPreparationName,omitempty"`
 
 	// history lists the most recent deployments, newest first. The deployed
@@ -62,6 +71,7 @@ type ServingStatus struct {
 	// without one is a promotion that is being recorded.
 	// +optional
 	// +listType=atomic
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=16
 	History []DeploymentEntry `json:"history,omitempty"`
 
@@ -77,6 +87,7 @@ type ServingStatus struct {
 	// +optional
 	// +listType=map
 	// +listMapKey=cluster
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=64
 	Targets []DeploymentTarget `json:"targets,omitempty"`
 
@@ -128,18 +139,20 @@ type DeploymentTarget struct {
 	// +listType=map
 	// +listMapKey=type
 	// +optional
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=8
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// cluster is the name of the Cluster, in the Serving's namespace.
 	// +required
 	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:MaxLength=63
 	Cluster string `json:"cluster"`
 
 	// revision is the artifact digest the engine reports synced to the
 	// cluster.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
 	Revision string `json:"revision,omitempty"`
 }
@@ -170,12 +183,14 @@ type DeploymentEntry struct {
 
 	// digest is the digest of the Preparation's artifact.
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	Digest string `json:"digest"`
 
 	// ociRef is the full OCI reference of the artifact, including digest.
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	OCIRef string `json:"ociRef"`
 
@@ -186,6 +201,7 @@ type DeploymentEntry struct {
 
 	// productRevision is the Product revision the Preparation renders.
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	ProductRevision string `json:"productRevision"`
@@ -211,6 +227,7 @@ type DeploymentEntry struct {
 	// referrer of the artifact. A recovery carries the record of the
 	// promotion it continues.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	PromotionRecord string `json:"promotionRecord,omitempty"`
@@ -218,6 +235,7 @@ type DeploymentEntry struct {
 	// deploymentRecord is the digest of the signed deployment record, a
 	// referrer of the artifact pushed once the deployment was healthy.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	DeploymentRecord string `json:"deploymentRecord,omitempty"`

@@ -78,6 +78,7 @@ spec:
                   description says what the cluster is, such as where it runs and who
                   runs it.
                 maxLength: 1024
+                minLength: 1
                 type: string
               kubeconfig:
                 description: kubeconfig names the Secret that holds the cluster's
@@ -119,6 +120,7 @@ spec:
               rule: 'self.connection == ''Kubeconfig'' ? has(self.kubeconfig) : !has(self.kubeconfig)'
           status:
             description: status defines the observed state of Cluster
+            minProperties: 1
             properties:
               conditions:
                 description: |-
@@ -179,6 +181,8 @@ spec:
                   - status
                   - type
                   type: object
+                maxItems: 32
+                minItems: 1
                 type: array
                 x-kubernetes-list-map-keys:
                 - type
@@ -188,6 +192,7 @@ spec:
                   kubernetesVersion is the Kubernetes version the cluster's API server
                   reports.
                 maxLength: 64
+                minLength: 1
                 type: string
               observedGeneration:
                 description: |-
@@ -198,6 +203,7 @@ spec:
               server:
                 description: server is the URL of the cluster's API server.
                 maxLength: 2048
+                minLength: 1
                 type: string
             type: object
         required:

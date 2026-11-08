@@ -73,11 +73,13 @@ spec:
                   digest:
                     description: digest is the SHA256 digest of the artifact
                     maxLength: 71
+                    minLength: 1
                     pattern: ^sha256:[a-f0-9]{64}$
                     type: string
                   ociRef:
                     description: ociRef is the full OCI reference including digest
                     maxLength: 2048
+                    minLength: 1
                     pattern: ^oci://.*@sha256:[a-f0-9]{64}$
                     type: string
                   registryRef:
@@ -107,38 +109,44 @@ spec:
                   commitMessage is the human-readable description of why this Preparation was created.
                   It is stored as the org.opencontainers.image.description annotation on the OCI artifact.
                 maxLength: 512
+                minLength: 1
                 type: string
               configHash:
                 description: configHash is the SHA256 hash of the canonicalized order
                   configuration
                 maxLength: 71
+                minLength: 1
                 pattern: ^sha256:[a-f0-9]+$
                 type: string
               gitSource:
                 description: |-
                   gitSource records the SCM provenance of the base artifact that produced
-                  this Preparation. Empty when the base artifact carries no git provenance.
+                  this Preparation. Absent when the base artifact carries no git provenance.
+                minProperties: 1
                 properties:
                   commitHash:
                     description: |-
                       commitHash is the SCM commit SHA of the base artifact's source files
-                      (org.opencontainers.image.revision). Empty when the base artifact carries
+                      (org.opencontainers.image.revision). Absent when the base artifact carries
                       no git revision.
                     maxLength: 64
+                    minLength: 1
                     type: string
                   repo:
                     description: |-
                       repo is the SCM repository URL of the base artifact's source
-                      (org.opencontainers.image.source). Empty when the base artifact carries
+                      (org.opencontainers.image.source). Absent when the base artifact carries
                       no git provenance.
                     maxLength: 2048
+                    minLength: 1
                     type: string
                   tag:
                     description: |-
                       tag is the SCM tag of the base artifact's source files
-                      (org.opencontainers.image.version). Empty when the base artifact carries
+                      (org.opencontainers.image.version). Absent when the base artifact carries
                       no git tag.
                     maxLength: 256
+                    minLength: 1
                     type: string
                 type: object
               images:
@@ -157,6 +165,7 @@ spec:
                         algorithms the OCI image spec registers. Absent when the image could
                         not be resolved, which only the Record policy allows.
                       maxLength: 135
+                      minLength: 1
                       pattern: ^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128})$
                       type: string
                     mediaType:
@@ -164,12 +173,14 @@ spec:
                         mediaType is the media type of the manifest digest names: an image
                         index for multi-platform images, an image manifest otherwise.
                       maxLength: 255
+                      minLength: 1
                       type: string
                     name:
                       description: |-
                         name is the normalized repository of ref, for example
                         "docker.io/library/nginx". Absent when ref is not a valid reference.
                       maxLength: 512
+                      minLength: 1
                       type: string
                     ref:
                       description: |-
@@ -185,24 +196,28 @@ spec:
                         <destination>/images/ghcr.io/example/app:1.0@sha256:.... Set under the
                         Vendor policy only.
                       maxLength: 2048
+                      minLength: 1
                       type: string
                   required:
                   - ref
                   type: object
                 maxItems: 512
+                minItems: 1
                 type: array
                 x-kubernetes-list-type: atomic
               orderName:
                 description: orderName is the name of the Order this preparation belongs
                   to
-                maxLength: 253
+                maxLength: 63
+                minLength: 1
                 type: string
               parentDigest:
                 description: |-
                   parentDigest is the SHA256 digest of the artifact produced by the immediately preceding
-                  Preparation for this Order. It is empty for the first Preparation and is stored as the
+                  Preparation for this Order. It is absent for the first Preparation and is stored as the
                   kokumi.dev/parent annotation on the OCI artifact, forming a git-like revision chain.
                 maxLength: 71
+                minLength: 1
                 pattern: ^sha256:[a-f0-9]{64}$
                 type: string
               productRevision:
@@ -212,6 +227,7 @@ spec:
                   other Orders of the Product render from the same change carry the same
                   revision, which is what upstream stages are matched by.
                 maxLength: 71
+                minLength: 1
                 pattern: ^sha256:[a-f0-9]{64}$
                 type: string
               promotion:
@@ -219,6 +235,7 @@ spec:
                   promotion holds the gates copied from the Order's spec.promotion when
                   this Preparation was created: the Preparation is only served once it
                   passes them. They are part of the intent recorded on the OCI artifact.
+                minProperties: 1
                 properties:
                   after:
                     description: |-
@@ -232,7 +249,7 @@ spec:
                         order:
                           description: order is the name of the upstream Order, in
                             the same namespace.
-                          maxLength: 253
+                          maxLength: 63
                           minLength: 1
                           type: string
                         soakSeconds:
@@ -247,6 +264,7 @@ spec:
                       - order
                       type: object
                     maxItems: 8
+                    minItems: 1
                     type: array
                     x-kubernetes-list-map-keys:
                     - order
@@ -260,6 +278,7 @@ spec:
                           are eligible to approve.
                         items:
                           maxLength: 253
+                          minLength: 1
                           type: string
                         maxItems: 16
                         minItems: 1
@@ -279,6 +298,7 @@ spec:
                   checks:
                     description: checks are the promotion checks the Preparation must
                       pass.
+                    minProperties: 1
                     properties:
                       vulnerabilities:
                         description: |-
@@ -351,12 +371,14 @@ spec:
                     description: baseDigest is the SHA256 digest of the base source
                       artifact
                     maxLength: 71
+                    minLength: 1
                     pattern: ^sha256:[a-f0-9]{64}$
                     type: string
                   url:
                     description: url is the oci:// URL of the repository of the source
                       artifact
                     maxLength: 2048
+                    minLength: 1
                     type: string
                     x-kubernetes-validations:
                     - message: must be a valid OCI URL
@@ -386,11 +408,13 @@ spec:
               rule: self == oldSelf
           status:
             description: status defines the observed state of Preparation
+            minProperties: 1
             properties:
               approval:
                 description: |-
                   approval aggregates the Approvals of this Preparation. Only set when
                   spec.promotion.approvals is set.
+                minProperties: 1
                 properties:
                   approvedCount:
                     description: approvedCount is the number of eligible approvers
@@ -404,12 +428,14 @@ spec:
                       digest:
                         description: digest is the manifest digest of the attestation.
                         maxLength: 71
+                        minLength: 1
                         pattern: ^sha256:[a-f0-9]{64}$
                         type: string
                       ociRef:
                         description: ociRef is the full OCI reference of the attestation
                           including digest.
                         maxLength: 2048
+                        minLength: 1
                         type: string
                     required:
                     - digest
@@ -454,6 +480,7 @@ spec:
                           description: approvalName is the name of the Approval carrying
                             this vote.
                           maxLength: 253
+                          minLength: 1
                           type: string
                         decision:
                           description: decision is the verdict of the vote.
@@ -464,6 +491,7 @@ spec:
                         issuer:
                           description: issuer is the OIDC issuer of the approver.
                           maxLength: 2048
+                          minLength: 1
                           type: string
                         result:
                           description: result reports whether the vote counts towards
@@ -475,6 +503,7 @@ spec:
                         subject:
                           description: subject is the OIDC subject of the approver.
                           maxLength: 255
+                          minLength: 1
                           type: string
                         submittedTime:
                           description: submittedTime is when the vote was submitted.
@@ -484,6 +513,7 @@ spec:
                           description: username is the human-readable name of the
                             approver.
                           maxLength: 253
+                          minLength: 1
                           type: string
                       required:
                       - approvalName
@@ -494,6 +524,7 @@ spec:
                       - submittedTime
                       type: object
                     maxItems: 64
+                    minItems: 1
                     type: array
                     x-kubernetes-list-type: atomic
                 type: object
@@ -511,12 +542,14 @@ spec:
                     digest:
                       description: digest is the manifest digest of the attestation.
                       maxLength: 71
+                      minLength: 1
                       pattern: ^sha256:[a-f0-9]{64}$
                       type: string
                     ociRef:
                       description: ociRef is the full OCI reference of the attestation
                         including digest.
                       maxLength: 2048
+                      minLength: 1
                       type: string
                     type:
                       description: type is the kind of evidence the attestation carries.
@@ -530,6 +563,7 @@ spec:
                   - type
                   type: object
                 maxItems: 16
+                minItems: 1
                 type: array
                 x-kubernetes-list-map-keys:
                 - type
@@ -591,6 +625,8 @@ spec:
                   - status
                   - type
                   type: object
+                maxItems: 32
+                minItems: 1
                 type: array
                 x-kubernetes-list-map-keys:
                 - type

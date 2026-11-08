@@ -52,18 +52,22 @@ type Approver struct {
 
 	// username is the human-readable name of the approver.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
 	Username string `json:"username,omitempty"`
 
 	// email is the verified email address of the approver.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=254
 	Email string `json:"email,omitempty"`
 
 	// groups are the verified OIDC groups of the approver at submission time.
 	// +optional
 	// +listType=set
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:MinLength=1
 	// +kubebuilder:validation:items:MaxLength=253
 	Groups []string `json:"groups,omitempty"`
 }
@@ -84,6 +88,7 @@ type ApprovalPreparationReference struct {
 
 	// artifactDigest is the digest of the reviewed Preparation artifact.
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	ArtifactDigest string `json:"artifactDigest"`
@@ -96,7 +101,7 @@ type ApprovalSpec struct {
 	// orderName is the name of the Order the reviewed Preparation belongs to.
 	// +required
 	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:MaxLength=63
 	OrderName string `json:"orderName"`
 
 	// preparationRef references the reviewed Preparation.
@@ -113,6 +118,7 @@ type ApprovalSpec struct {
 
 	// comment is an optional review comment.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=1024
 	Comment string `json:"comment,omitempty"`
 
@@ -123,6 +129,7 @@ type ApprovalSpec struct {
 }
 
 // ApprovalStatus defines the observed state of Approval.
+// +kubebuilder:validation:MinProperties=1
 type ApprovalStatus struct {
 	// conditions represent the current state of the Approval resource.
 	// The Counted condition reports whether this vote contributes to the
@@ -130,6 +137,8 @@ type ApprovalStatus struct {
 	// +listType=map
 	// +listMapKey=type
 	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=32
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// observedGeneration is the most recent generation observed by the controller.

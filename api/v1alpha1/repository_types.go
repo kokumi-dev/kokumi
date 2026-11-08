@@ -26,6 +26,7 @@ import (
 type RepositorySpec struct {
 	// url is the oci:// URL of the repository, without a tag or digest.
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:Pattern=`^oci://[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?(:[0-9]+)?(/[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*)+$`
 	URL string `json:"url"`
@@ -38,17 +39,21 @@ type RepositorySpec struct {
 
 	// description is a human-readable description of the repository.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=1024
 	Description string `json:"description,omitempty"`
 }
 
 // RepositoryStatus defines the observed state of Repository.
+// +kubebuilder:validation:MinProperties=1
 type RepositoryStatus struct {
 	// conditions represent the current state of the Repository. Ready
 	// reports whether its Registry exists and covers it.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=32
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// observedGeneration is the most recent generation observed by the

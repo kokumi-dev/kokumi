@@ -85,17 +85,22 @@ spec:
             properties:
               orderName:
                 description: orderName is the name of the Order to serve
+                maxLength: 63
+                minLength: 1
                 type: string
               preparationName:
                 description: |-
                   preparationName is the Preparation promoted for Manual promotion.
                   It is ignored when the Order uses Automatic promotion.
+                maxLength: 253
+                minLength: 1
                 type: string
             required:
             - orderName
             type: object
           status:
             description: status defines the observed state of Serving
+            minProperties: 1
             properties:
               clusters:
                 description: |-
@@ -197,6 +202,8 @@ spec:
                   - status
                   - type
                   type: object
+                maxItems: 32
+                minItems: 1
                 type: array
                 x-kubernetes-list-map-keys:
                 - type
@@ -206,6 +213,7 @@ spec:
                   deployedVulnerabilities sums the latest scans of the images of the
                   deployed Preparation. It keeps changing after the deployment, as new
                   vulnerabilities are published.
+                minProperties: 1
                 properties:
                   critical:
                     description: critical counts the findings of severity Critical.
@@ -256,11 +264,13 @@ spec:
                         deploymentRecord is the digest of the signed deployment record, a
                         referrer of the artifact pushed once the deployment was healthy.
                       maxLength: 71
+                      minLength: 1
                       pattern: ^sha256:[a-f0-9]{64}$
                       type: string
                     digest:
                       description: digest is the digest of the Preparation's artifact.
                       maxLength: 71
+                      minLength: 1
                       pattern: ^sha256:[a-f0-9]{64}$
                       type: string
                     endReason:
@@ -283,6 +293,7 @@ spec:
                       description: ociRef is the full OCI reference of the artifact,
                         including digest.
                       maxLength: 2048
+                      minLength: 1
                       type: string
                     preparationName:
                       description: preparationName is the name of the deployed Preparation.
@@ -293,6 +304,7 @@ spec:
                       description: productRevision is the Product revision the Preparation
                         renders.
                       maxLength: 71
+                      minLength: 1
                       pattern: ^sha256:[a-f0-9]{64}$
                       type: string
                     promotionRecord:
@@ -301,6 +313,7 @@ spec:
                         referrer of the artifact. A recovery carries the record of the
                         promotion it continues.
                       maxLength: 71
+                      minLength: 1
                       pattern: ^sha256:[a-f0-9]{64}$
                       type: string
                     registryRef:
@@ -332,6 +345,7 @@ spec:
                   - startedTime
                   type: object
                 maxItems: 16
+                minItems: 1
                 type: array
                 x-kubernetes-list-type: atomic
               observedGeneration:
@@ -345,9 +359,11 @@ spec:
                   once it is approved and its evidence verifies: spec.preparationName
                   for Manual promotion, or the newest Ready Preparation of the Order for
                   Automatic promotion, after it passed its upstream stages and checks.
-                  Its approvals are sealed when it becomes the target. It is empty
+                  Its approvals are sealed when it becomes the target. It is absent
                   while the Preparation the Serving converges to has not passed them,
                   or is not Ready.
+                maxLength: 253
+                minLength: 1
                 type: string
               targets:
                 description: |-
@@ -363,7 +379,7 @@ spec:
                     cluster:
                       description: cluster is the name of the Cluster, in the Serving's
                         namespace.
-                      maxLength: 253
+                      maxLength: 63
                       minLength: 1
                       type: string
                     conditions:
@@ -427,6 +443,7 @@ spec:
                         - type
                         type: object
                       maxItems: 8
+                      minItems: 1
                       type: array
                       x-kubernetes-list-map-keys:
                       - type
@@ -436,11 +453,13 @@ spec:
                         revision is the artifact digest the engine reports synced to the
                         cluster.
                       maxLength: 71
+                      minLength: 1
                       type: string
                   required:
                   - cluster
                   type: object
                 maxItems: 64
+                minItems: 1
                 type: array
                 x-kubernetes-list-map-keys:
                 - cluster
