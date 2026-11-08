@@ -40,8 +40,8 @@ the specs are laid out and written.
 
 ## Run your build
 
-Kokumi publishes images for releases only. To run `main` or your own change,
-build the image into the local Kind cluster and deploy it:
+Kokumi publishes an image for every release, and `latest` for `main`. To run
+your own change, build the image into the local Kind cluster and deploy it:
 
 ```bash
 make kind-setup                                   # the Kind cluster "kokumi"
@@ -58,8 +58,9 @@ Then register the bundled registry with Argo CD and turn on login, as
 ## Docs
 
 The docs are a [Hugo](https://gohugo.io/) site in `docs/`. `make website-dev`
-serves it at [http://localhost:1313](http://localhost:1313), and every push
-to `main` publishes it at [kokumi.dev](https://kokumi.dev/docs/).
+serves it at [http://localhost:1313](http://localhost:1313). The site at
+[kokumi.dev](https://kokumi.dev/docs/) shows the docs of the latest release;
+the docs of `main` are at [kokumi.dev/next](https://kokumi.dev/next/docs/).
 
 - Each fact lives on one page; other pages link to it.
 - A scenario a user would apply is an example in `examples/`, shown with
@@ -67,6 +68,9 @@ to `main` publishes it at [kokumi.dev](https://kokumi.dev/docs/).
   explains a single field may stay inline.
 - The release version comes from `kokumiVersion` in `docs/hugo.toml`; use
   `{{</* param kokumiVersion */>}}` instead of writing it out.
+- Install commands use `{{</* install-url */>}}`. In the docs of `main`, which
+  `docs/hugo.next.toml` configures, it points at `main` instead of the
+  release, as `{{</* apply-example */>}}` and `{{</* example */>}}` do.
 
 ## Community
 

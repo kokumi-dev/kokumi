@@ -1,0 +1,11 @@
+{{- /*
+The banner of the docs of main, which hugo.next.toml turns on. Hextra shows
+it above every page.
+*/ -}}
+
+{{- if site.Params.unreleased -}}
+<div class="hx:px-8">
+  These docs describe <code>main</code>, which is not released yet.
+  <a class="hx:underline" href="https://kokumi.dev/docs/">Read the docs of {{ site.Params.kokumiVersion }}</a>.
+</div>
+{{- end -}}

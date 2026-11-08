@@ -30,7 +30,7 @@ kubectl label -f - argocd.argoproj.io/secret-type=repo-creds --local -o yaml | \
 kubectl apply -f -
 
 kubectl apply -f \
-    https://github.com/kokumi-dev/kokumi/releases/download/{{< param kokumiVersion >}}/install.yaml
+    {{< install-url >}}
 kubectl -n kokumi rollout status deployment/kokumi-controller-manager
 
 kubectl -n kokumi patch kitchen default --type=merge \
