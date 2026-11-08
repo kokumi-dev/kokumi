@@ -40,14 +40,18 @@ spec:
             type: object
           spec:
             description: spec defines the desired state of Recipe
+            minProperties: 1
             properties:
               foo:
                 description: foo is an example field of Recipe. Edit recipe_types.go
                   to remove/update
+                maxLength: 253
+                minLength: 1
                 type: string
             type: object
           status:
             description: status defines the observed state of Recipe
+            minProperties: 1
             properties:
               conditions:
                 description: |-
@@ -114,13 +118,13 @@ spec:
                   - status
                   - type
                   type: object
+                maxItems: 32
+                minItems: 1
                 type: array
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
             type: object
-        required:
-        - spec
         type: object
     served: true
     storage: true

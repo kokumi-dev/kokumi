@@ -71,12 +71,14 @@ spec:
                 description: |-
                   destination defines where the rendered Preparation artifact will be pushed.
                   When omitted, the in-cluster registry is used automatically.
+                minProperties: 0
                 properties:
                   url:
                     description: |-
                       url is the oci:// URL of the repository the artifact is pushed to.
                       When omitted, a repository of the bundled registry is used.
                     maxLength: 2048
+                    minLength: 1
                     type: string
                     x-kubernetes-validations:
                     - message: must be a valid OCI URL
@@ -97,6 +99,7 @@ spec:
                         set contains JSONPath expressions and their values to set
                         Keys are JSONPath expressions (e.g., ".spec.replicas")
                         Values are the desired values for those paths
+                      minProperties: 1
                       type: object
                     target:
                       description: target identifies which resource to patch
@@ -104,14 +107,20 @@ spec:
                         kind:
                           description: kind specifies the Kubernetes resource kind
                             to patch
+                          maxLength: 63
+                          minLength: 1
                           type: string
                         name:
                           description: name specifies the name of the resource to
                             patch
+                          maxLength: 253
+                          minLength: 1
                           type: string
                         namespace:
                           description: namespace specifies the namespace of the resource
                             (optional, defaults to same namespace as Order)
+                          maxLength: 63
+                          minLength: 1
                           type: string
                       required:
                       - kind
@@ -122,6 +131,7 @@ spec:
                   - target
                   type: object
                 maxItems: 128
+                minItems: 1
                 type: array
                 x-kubernetes-list-type: atomic
               environmentRef:
@@ -159,6 +169,7 @@ spec:
                         set contains JSONPath expressions and their values to set
                         Keys are JSONPath expressions (e.g., ".spec.replicas")
                         Values are the desired values for those paths
+                      minProperties: 1
                       type: object
                     target:
                       description: target identifies which resource to patch
@@ -166,14 +177,20 @@ spec:
                         kind:
                           description: kind specifies the Kubernetes resource kind
                             to patch
+                          maxLength: 63
+                          minLength: 1
                           type: string
                         name:
                           description: name specifies the name of the resource to
                             patch
+                          maxLength: 253
+                          minLength: 1
                           type: string
                         namespace:
                           description: namespace specifies the namespace of the resource
                             (optional, defaults to same namespace as Order)
+                          maxLength: 63
+                          minLength: 1
                           type: string
                       required:
                       - kind
@@ -184,6 +201,7 @@ spec:
                   - target
                   type: object
                 maxItems: 128
+                minItems: 1
                 type: array
                 x-kubernetes-list-type: atomic
               productRef:
@@ -207,6 +225,7 @@ spec:
               promotion:
                 description: promotion configures how new Preparations become active
                   Servings.
+                minProperties: 1
                 properties:
                   after:
                     description: |-
@@ -224,7 +243,7 @@ spec:
                         order:
                           description: order is the name of the upstream Order, in
                             the same namespace.
-                          maxLength: 253
+                          maxLength: 63
                           minLength: 1
                           type: string
                         soakSeconds:
@@ -239,6 +258,7 @@ spec:
                       - order
                       type: object
                     maxItems: 8
+                    minItems: 1
                     type: array
                     x-kubernetes-list-map-keys:
                     - order
@@ -257,6 +277,7 @@ spec:
                           are eligible to approve.
                         items:
                           maxLength: 253
+                          minLength: 1
                           type: string
                         maxItems: 16
                         minItems: 1
@@ -280,6 +301,7 @@ spec:
                       into each Preparation when it is created, so a change produces a new
                       Preparation. They hold new deployments only: a deployed Preparation
                       that stops passing stays deployed.
+                    minProperties: 1
                     properties:
                       vulnerabilities:
                         description: |-
@@ -346,6 +368,7 @@ spec:
                   type: object
                   x-kubernetes-map-type: atomic
                 maxItems: 16
+                minItems: 1
                 type: array
                 x-kubernetes-list-map-keys:
                 - name
@@ -358,6 +381,7 @@ spec:
                   rendered: Helm renders into it, and resources without a namespace
                   are deployed there.
                 maxLength: 63
+                minLength: 1
                 pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                 type: string
               values:
@@ -373,6 +397,7 @@ spec:
             type: object
           status:
             description: status defines the observed state of Order
+            minProperties: 1
             properties:
               conditions:
                 description: conditions represent the current state of the Order resource.
@@ -430,6 +455,8 @@ spec:
                   - status
                   - type
                   type: object
+                maxItems: 32
+                minItems: 1
                 type: array
                 x-kubernetes-list-map-keys:
                 - type
@@ -439,6 +466,8 @@ spec:
                   latestArtifactDigest is the SHA256 digest of the OCI artifact produced by the
                   most recent Preparation. It is used as the pointer for the parentDigest of
                   the next Preparation.
+                maxLength: 71
+                minLength: 1
                 pattern: ^sha256:[a-f0-9]{64}$
                 type: string
               latestConfigHash:
@@ -448,11 +477,15 @@ spec:
                   handling and promotion gates after merging the Order over its Product,
                   and the Product revision. It is the intent latestPreparationName was
                   rendered from, written once its render completed.
+                maxLength: 71
+                minLength: 1
                 type: string
               latestPreparationName:
                 description: |-
                   latestPreparationName is the name of the most recent immutable Preparation
                   produced from this Order
+                maxLength: 253
+                minLength: 1
                 type: string
               observedGeneration:
                 description: observedGeneration is the most recent generation observed
@@ -489,14 +522,16 @@ spec:
                     registry:
                       description: |-
                         registry names the Registry whose connection Kokumi uses there. It is
-                        empty when Kokumi accesses the location anonymously, and for the
+                        absent when Kokumi accesses the location anonymously, and for the
                         other clients.
                       maxLength: 253
+                      minLength: 1
                       type: string
                     url:
                       description: url is the location, or the prefix of the locations,
                         accessed.
                       maxLength: 2048
+                      minLength: 1
                       type: string
                   required:
                   - client
@@ -504,6 +539,7 @@ spec:
                   - url
                   type: object
                 maxItems: 32
+                minItems: 1
                 type: array
                 x-kubernetes-list-map-keys:
                 - url
@@ -520,6 +556,7 @@ spec:
                       configHash is the hash of the intent being rendered, which becomes
                       latestConfigHash once the render completes.
                     maxLength: 71
+                    minLength: 1
                     pattern: ^sha256:[a-f0-9]+$
                     type: string
                 required:

@@ -73,14 +73,17 @@ spec:
                   email:
                     description: email is the verified email address of the approver.
                     maxLength: 254
+                    minLength: 1
                     type: string
                   groups:
                     description: groups are the verified OIDC groups of the approver
                       at submission time.
                     items:
                       maxLength: 253
+                      minLength: 1
                       type: string
                     maxItems: 64
+                    minItems: 1
                     type: array
                     x-kubernetes-list-type: set
                   issuer:
@@ -99,6 +102,7 @@ spec:
                   username:
                     description: username is the human-readable name of the approver.
                     maxLength: 253
+                    minLength: 1
                     type: string
                 required:
                 - issuer
@@ -107,6 +111,7 @@ spec:
               comment:
                 description: comment is an optional review comment.
                 maxLength: 1024
+                minLength: 1
                 type: string
               decision:
                 description: decision is the verdict of this vote.
@@ -117,7 +122,7 @@ spec:
               orderName:
                 description: orderName is the name of the Order the reviewed Preparation
                   belongs to.
-                maxLength: 253
+                maxLength: 63
                 minLength: 1
                 type: string
               preparationRef:
@@ -127,6 +132,7 @@ spec:
                     description: artifactDigest is the digest of the reviewed Preparation
                       artifact.
                     maxLength: 71
+                    minLength: 1
                     pattern: ^sha256:[a-f0-9]{64}$
                     type: string
                   name:
@@ -162,6 +168,7 @@ spec:
               rule: self == oldSelf
           status:
             description: status defines the observed state of Approval
+            minProperties: 1
             properties:
               conditions:
                 description: |-
@@ -222,6 +229,8 @@ spec:
                   - status
                   - type
                   type: object
+                maxItems: 32
+                minItems: 1
                 type: array
                 x-kubernetes-list-map-keys:
                 - type

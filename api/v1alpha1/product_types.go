@@ -55,6 +55,7 @@ type AllowedPatchTarget struct {
 
 // ValueOverrides controls which Helm values Orders may set.
 // +kubebuilder:validation:XValidation:rule="has(self.policy) && self.policy == 'Listed' ? has(self.paths) : !has(self.paths)",message="paths must be set when policy is Listed, and only then"
+// +kubebuilder:validation:MinProperties=1
 type ValueOverrides struct {
 	// policy controls which Helm values Orders may set.
 	// None: Orders may not set any values.
@@ -69,11 +70,15 @@ type ValueOverrides struct {
 	// +optional
 	// +listType=set
 	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=64
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=1024
 	Paths []string `json:"paths,omitempty"`
 }
 
 // PatchOverrides controls which patches and edits Orders may set.
 // +kubebuilder:validation:XValidation:rule="has(self.policy) && self.policy == 'Listed' ? has(self.targets) : !has(self.targets)",message="targets must be set when policy is Listed, and only then"
+// +kubebuilder:validation:MinProperties=1
 type PatchOverrides struct {
 	// policy controls which patches and edits Orders may set.
 	// None: Orders may not set any patches or edits.
@@ -88,19 +93,21 @@ type PatchOverrides struct {
 	// +optional
 	// +listType=atomic
 	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=64
 	Targets []AllowedPatchTarget `json:"targets,omitempty"`
 }
 
 // Overrides controls what the Orders of a Product may change.
+// +kubebuilder:validation:MinProperties=1
 type Overrides struct {
 	// values controls which Helm values Orders may set.
 	// +optional
-	// +kubebuilder:default={}
+	// +kubebuilder:default={policy:None}
 	Values ValueOverrides `json:"values,omitzero"`
 
 	// patches controls which patches and edits Orders may set.
 	// +optional
-	// +kubebuilder:default={}
+	// +kubebuilder:default={policy:None}
 	Patches PatchOverrides `json:"patches,omitzero"`
 }
 
@@ -127,15 +134,17 @@ const (
 // ImageFieldSpec locates a field that holds a container image reference, in
 // the shape of a kustomize FieldSpec.
 type ImageFieldSpec struct {
-	// group is the API group of the resources. Empty matches the core group
-	// and every other group.
+	// group is the API group of the resources. When omitted, it matches
+	// every group, the core group included.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
 	Group string `json:"group,omitempty"`
 
-	// version is the API version of the resources. Empty matches every
-	// version.
+	// version is the API version of the resources. When omitted, it matches
+	// every version.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
 	Version string `json:"version,omitempty"`
 
@@ -156,6 +165,7 @@ type ImageFieldSpec struct {
 
 // ProductImages configures how the container images of a Product's rendered
 // manifests are handled.
+// +kubebuilder:validation:MinProperties=1
 type ProductImages struct {
 	// policy controls what Kokumi does with the images: Record lists them by
 	// digest, Pin also rewrites the manifests to those digests, and Vendor
@@ -171,6 +181,7 @@ type ProductImages struct {
 	// ephemeralContainers and image volumes of every Pod template.
 	// +optional
 	// +listType=atomic
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=32
 	FieldSpecs []ImageFieldSpec `json:"fieldSpecs,omitempty"`
 }
@@ -214,6 +225,7 @@ type ProductSpec struct {
 	// every cluster of their Environment, unless an Order sets its own. When
 	// neither sets it, it is the Order's namespace.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	TargetNamespace string `json:"targetNamespace,omitempty"`
@@ -222,20 +234,21 @@ type ProductSpec struct {
 	// are merged on top, per target.
 	// +optional
 	// +listType=atomic
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=128
 	Patches []Patch `json:"patches,omitempty"`
 
 	// overrides controls what Orders may change. By default Orders may not
 	// set any Helm values, patches, or edits.
 	// +optional
-	// +kubebuilder:default={}
+	// +kubebuilder:default={values:{policy:None},patches:{policy:None}}
 	Overrides Overrides `json:"overrides,omitzero"`
 
 	// images configures how the container images the rendered manifests
 	// reference are recorded, pinned or vendored. It applies to every Order
 	// of the Product.
 	// +optional
-	// +kubebuilder:default={}
+	// +kubebuilder:default={policy:Record}
 	Images ProductImages `json:"images,omitzero"`
 
 	// registryRefs lists Registries in the Product's namespace. Kokumi
@@ -246,6 +259,7 @@ type ProductSpec struct {
 	// +optional
 	// +listType=map
 	// +listMapKey=name
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=16
 	RegistryRefs []corev1.LocalObjectReference `json:"registryRefs,omitempty"`
 }
@@ -256,6 +270,7 @@ type ProductSourceStatus struct {
 	// url is the oci:// URL of the repository of the source artifact: of
 	// the vendored copy when the Product vendors.
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() == 'oci'",message="must be a valid OCI URL"
 	URL string `json:"url"`
@@ -263,12 +278,15 @@ type ProductSourceStatus struct {
 	// version is the tag of the source artifact.
 	// +required
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=128
 	Version string `json:"version"`
 
 	// digest is the digest version resolved to. Orders render exactly this
 	// artifact, so every variant of the Product renders the same source.
 	// +required
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=71
 	Digest string `json:"digest"`
 
 	// verified records who signed the source, when its signature verified:
@@ -285,6 +303,7 @@ type ProductSourceStatus struct {
 	// +optional
 	// +listType=map
 	// +listMapKey=digest
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=64
 	Signatures []SignatureVerdict `json:"signatures,omitempty"`
 
@@ -321,11 +340,15 @@ type SignatureVerdict struct {
 	// legacy cosign signature manifest, or a signature in another format.
 	// +required
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=71
 	Digest string `json:"digest"`
 
 	// subject is the digest of the manifest the signature signs.
 	// +required
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=71
 	Subject string `json:"subject"`
 
 	// result is the result of the verification.
@@ -339,6 +362,7 @@ type SignatureVerdict struct {
 
 	// message says why the signature did not verify.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=1024
 	Message string `json:"message,omitempty"`
 }
@@ -354,26 +378,32 @@ type SourceVerification struct {
 	// base64-encoded SHA-256 of its DER encoding. Set for key-based
 	// verification.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=64
 	KeyID string `json:"keyID,omitempty"`
 
 	// issuer is the OIDC issuer of the keyless signer's certificate.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	Issuer string `json:"issuer,omitempty"`
 
 	// subject is the subject of the keyless signer's certificate.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	Subject string `json:"subject,omitempty"`
 }
 
 // ProductStatus defines the observed state of Product.
+// +kubebuilder:validation:MinProperties=1
 type ProductStatus struct {
 	// conditions represent the current state of the Product resource.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=32
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// observedGeneration is the most recent generation observed by the controller.
@@ -384,6 +414,8 @@ type ProductStatus struct {
 	// and the OCI URLs they resolved to. When it matches the current inputs
 	// the published source is reused without resolving it again.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=71
 	ConfigHash string `json:"configHash,omitempty"`
 
 	// source is the source address Orders render from. Absent until the
@@ -401,6 +433,7 @@ type ProductStatus struct {
 	// +listMapKey=url
 	// +listMapKey=operation
 	// +listMapKey=client
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=32
 	RegistryAccess []RegistryAccess `json:"registryAccess,omitempty"`
 
@@ -426,6 +459,7 @@ type ProductVulnerabilities struct {
 	// +optional
 	// +listType=map
 	// +listMapKey=digest
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=512
 	Images []ImageScan `json:"images,omitempty"`
 }
@@ -448,6 +482,7 @@ type VulnerabilityScanner struct {
 	// database is the OCI reference of the vulnerability database, with
 	// its digest.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	Database string `json:"database,omitempty"`
 
@@ -478,16 +513,20 @@ type ImageScan struct {
 	// manifest.
 	// +required
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=71
 	Digest string `json:"digest"`
 
 	// repository is the oci:// URL of the vendored image's repository.
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	Repository string `json:"repository"`
 
 	// platform is the platform of the image index that was scanned, such
-	// as "linux/amd64". Empty for a single-platform image.
+	// as "linux/amd64". Absent for a single-platform image.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=64
 	Platform string `json:"platform,omitempty"`
 
@@ -503,6 +542,8 @@ type ImageScan struct {
 	// of the vendored image.
 	// +required
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=71
 	Report string `json:"report"`
 
 	// summary counts the findings of the report.
@@ -516,6 +557,8 @@ type ImageSBOM struct {
 	// the SBOM.
 	// +required
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=71
 	Digest string `json:"digest"`
 
 	// origin says where the SBOM came from.
@@ -524,6 +567,7 @@ type ImageSBOM struct {
 }
 
 // VulnerabilitySummary counts vulnerability findings by severity.
+// +kubebuilder:validation:MinProperties=1
 type VulnerabilitySummary struct {
 	// critical counts the findings of severity Critical.
 	// +optional

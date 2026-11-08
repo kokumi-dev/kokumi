@@ -48,6 +48,7 @@ type RegistrySpec struct {
 	// When several of its Registries cover a location, the one with the
 	// longest url wins.
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:Pattern=`^oci://[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?(:[0-9]+)?(/[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*)*$`
 	// +kubebuilder:validation:XValidation:rule="!self.matches('^oci://[^/]+:443(/|$)')",message="must not name the default port 443"
@@ -84,6 +85,7 @@ func (s RegistrySpec) EffectiveScheme() RegistryScheme {
 }
 
 // RegistryStatus defines the observed state of Registry.
+// +kubebuilder:validation:MinProperties=1
 type RegistryStatus struct {
 	// conditions represent the current state of the Registry. Ready reports
 	// whether the registry accepted the Registry's credentials and TLS
@@ -93,6 +95,8 @@ type RegistryStatus struct {
 	// +listType=map
 	// +listMapKey=type
 	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=32
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// observedGeneration is the most recent generation observed by the
@@ -134,6 +138,7 @@ const (
 type RegistryAccess struct {
 	// url is the location, or the prefix of the locations, accessed.
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	URL string `json:"url"`
 
@@ -146,9 +151,10 @@ type RegistryAccess struct {
 	Client RegistryClient `json:"client"`
 
 	// registry names the Registry whose connection Kokumi uses there. It is
-	// empty when Kokumi accesses the location anonymously, and for the
+	// absent when Kokumi accesses the location anonymously, and for the
 	// other clients.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
 	Registry string `json:"registry,omitempty"`
 }

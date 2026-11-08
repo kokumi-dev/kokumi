@@ -57,27 +57,31 @@ spec:
             type: object
           spec:
             description: spec defines the desired state of Kitchen
+            minProperties: 1
             properties:
               argoCDURL:
                 description: |-
                   argoCDURL is the base URL of the Argo CD instance used to build deep
-                  links on the Servings page. Empty means no links.
+                  links on the Servings page. Unset means no links.
+                maxLength: 2048
+                minLength: 1
                 type: string
                 x-kubernetes-validations:
                 - message: must be a valid http or https URL
-                  rule: self == '' || (isURL(self) && url(self).getScheme() in ['http',
-                    'https'])
+                  rule: isURL(self) && url(self).getScheme() in ['http', 'https']
               auth:
                 description: |-
                   auth configures UI/API authentication. The built-in admin account
                   (auth.adminUser, when enabled) and an external OIDC provider (auth.oidc)
                   may be active at once. With neither, no one can sign in and the API
                   refuses every request.
+                minProperties: 1
                 properties:
                   adminUser:
                     description: |-
                       adminUser configures the built-in admin account for UI login. It is off
                       unless enabled.
+                    minProperties: 1
                     properties:
                       enabled:
                         description: |-
@@ -111,6 +115,7 @@ spec:
                         description: username is the login name for the admin account.
                           Defaults to "admin".
                         maxLength: 253
+                        minLength: 1
                         pattern: ^[^/\s]+$
                         type: string
                     type: object
@@ -124,6 +129,8 @@ spec:
                       clientID:
                         description: clientID is the OAuth2/OIDC client identifier
                           registered with the issuer.
+                        maxLength: 255
+                        minLength: 1
                         type: string
                       clientSecretRef:
                         default:
@@ -153,12 +160,15 @@ spec:
                           (kokumi.dev/identity-groups). Supports dotted paths for nested claims
                           (e.g. "realm_access.roles" for Keycloak). Defaults to "groups".
                         maxLength: 253
+                        minLength: 1
                         type: string
                       issuerURL:
                         description: |-
                           issuerURL is the base URL of the OIDC issuer (e.g.
                           "https://accounts.google.com"). The server discovers the authorization
                           and token endpoints from the issuer's well-known configuration.
+                        maxLength: 2048
+                        minLength: 1
                         type: string
                         x-kubernetes-validations:
                         - message: must be a valid http or https URL
@@ -187,8 +197,10 @@ spec:
                           Defaults to ["openid", "profile", "email"].
                         items:
                           maxLength: 256
+                          minLength: 1
                           type: string
                         maxItems: 16
+                        minItems: 1
                         type: array
                         x-kubernetes-list-type: atomic
                       usernameClaim:
@@ -199,6 +211,7 @@ spec:
                           ServiceAccounts by "sub", by "email" when "email_verified" is true, and
                           by groups. Defaults to "email".
                         maxLength: 253
+                        minLength: 1
                         type: string
                     required:
                     - clientID
@@ -231,6 +244,7 @@ spec:
                 description: |-
                   images configures how Kokumi reaches the registries of the container
                   images that rendered manifests reference.
+                minProperties: 1
                 properties:
                   mirrors:
                     description: |-
@@ -250,6 +264,7 @@ spec:
                             A Product connects to it through the Registry among its
                             registryRefs that covers it.
                           maxLength: 2048
+                          minLength: 1
                           type: string
                           x-kubernetes-validations:
                           - message: must be a valid OCI URL
@@ -272,6 +287,7 @@ spec:
                       - prefix
                       type: object
                     maxItems: 32
+                    minItems: 1
                     type: array
                     x-kubernetes-list-map-keys:
                     - prefix
@@ -282,6 +298,7 @@ spec:
                   scanning enables scanning the images Products vendor for
                   vulnerabilities. When unset, nothing is scanned. An empty object
                   scans with the defaults.
+                minProperties: 0
                 properties:
                   dbRepository:
                     description: |-
@@ -291,6 +308,7 @@ spec:
                       oci://mirror.gcr.io/aquasec/trivy-db. Set it to a mirror in
                       air-gapped clusters.
                     maxLength: 2048
+                    minLength: 1
                     type: string
                     x-kubernetes-validations:
                     - message: must be a valid OCI URL
@@ -313,6 +331,7 @@ spec:
                       be scanned without it. Defaults to
                       oci://mirror.gcr.io/aquasec/trivy-java-db.
                     maxLength: 2048
+                    minLength: 1
                     type: string
                     x-kubernetes-validations:
                     - message: must be a valid OCI URL
@@ -350,6 +369,7 @@ spec:
                       type: object
                       x-kubernetes-map-type: atomic
                     maxItems: 16
+                    minItems: 1
                     type: array
                     x-kubernetes-list-map-keys:
                     - name
@@ -359,6 +379,7 @@ spec:
                 description: |-
                   signing configures which keys Kokumi trusts besides its own signing
                   key, and whether the source of every Product must verify.
+                minProperties: 1
                 properties:
                   requireSourceVerification:
                     description: |-
@@ -396,6 +417,7 @@ spec:
                       - publicKey
                       type: object
                     maxItems: 16
+                    minItems: 1
                     type: array
                     x-kubernetes-list-map-keys:
                     - name
@@ -404,6 +426,7 @@ spec:
             type: object
           status:
             description: status defines the observed state of Kitchen
+            minProperties: 1
             properties:
               conditions:
                 description: |-
@@ -470,6 +493,8 @@ spec:
                   - status
                   - type
                   type: object
+                maxItems: 32
+                minItems: 1
                 type: array
                 x-kubernetes-list-map-keys:
                 - type
@@ -504,8 +529,6 @@ spec:
                 - publicKey
                 type: object
             type: object
-        required:
-        - spec
         type: object
     served: true
     storage: true

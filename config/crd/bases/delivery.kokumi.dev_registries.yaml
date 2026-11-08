@@ -112,6 +112,7 @@ spec:
                   When several of its Registries cover a location, the one with the
                   longest url wins.
                 maxLength: 2048
+                minLength: 1
                 pattern: ^oci://[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?(:[0-9]+)?(/[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*)*$
                 type: string
                 x-kubernetes-validations:
@@ -125,6 +126,7 @@ spec:
               rule: '!(has(self.certSecretRef) && self.scheme == ''HTTP'')'
           status:
             description: status defines the observed state of Registry
+            minProperties: 1
             properties:
               conditions:
                 description: |-
@@ -187,6 +189,8 @@ spec:
                   - status
                   - type
                   type: object
+                maxItems: 32
+                minItems: 1
                 type: array
                 x-kubernetes-list-map-keys:
                 - type

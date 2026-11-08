@@ -182,7 +182,7 @@ var _ = Describe("Scan Controller", func() {
 			Spec:      deliveryv1alpha1.KitchenSpec{Scanning: &deliveryv1alpha1.KitchenScanning{}},
 		})).To(Succeed())
 
-		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Product{
+		product := &deliveryv1alpha1.Product{
 			Name:      scanProductName,
 			Namespace: scanNamespace,
 			Spec: deliveryv1alpha1.ProductSpec{
@@ -190,7 +190,14 @@ var _ = Describe("Scan Controller", func() {
 				Vendor: &deliveryv1alpha1.OCIDestination{},
 				Images: deliveryv1alpha1.ProductImages{Policy: deliveryv1alpha1.ImagePolicyVendor},
 			},
-		})).To(Succeed())
+		}
+		Expect(k8sClient.Create(ctx, product)).To(Succeed())
+		// The Product controller's part of the status, which the scans
+		// share it with.
+		apimeta.SetStatusCondition(&product.Status.Conditions, metav1.Condition{
+			Type: deliveryv1alpha1.ConditionTypeReady, Status: metav1.ConditionTrue, Reason: testReadyReason,
+		})
+		Expect(k8sClient.Status().Update(ctx, product)).To(Succeed())
 		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Order{
 			Name:      scanOrderName,
 			Namespace: scanNamespace,

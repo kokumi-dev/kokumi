@@ -64,11 +64,13 @@ spec:
             description: spec defines the desired state of Product
             properties:
               images:
-                default: {}
+                default:
+                  policy: Record
                 description: |-
                   images configures how the container images the rendered manifests
                   reference are recorded, pinned or vendored. It applies to every Order
                   of the Product.
+                minProperties: 1
                 properties:
                   fieldSpecs:
                     description: |-
@@ -82,9 +84,10 @@ spec:
                       properties:
                         group:
                           description: |-
-                            group is the API group of the resources. Empty matches the core group
-                            and every other group.
+                            group is the API group of the resources. When omitted, it matches
+                            every group, the core group included.
                           maxLength: 253
+                          minLength: 1
                           type: string
                         kind:
                           description: kind is the kind of the resources, for example
@@ -102,15 +105,17 @@ spec:
                           type: string
                         version:
                           description: |-
-                            version is the API version of the resources. Empty matches every
-                            version.
+                            version is the API version of the resources. When omitted, it matches
+                            every version.
                           maxLength: 63
+                          minLength: 1
                           type: string
                       required:
                       - kind
                       - path
                       type: object
                     maxItems: 32
+                    minItems: 1
                     type: array
                     x-kubernetes-list-type: atomic
                   policy:
@@ -128,15 +133,22 @@ spec:
                     type: string
                 type: object
               overrides:
-                default: {}
+                default:
+                  patches:
+                    policy: None
+                  values:
+                    policy: None
                 description: |-
                   overrides controls what Orders may change. By default Orders may not
                   set any Helm values, patches, or edits.
+                minProperties: 1
                 properties:
                   patches:
-                    default: {}
+                    default:
+                      policy: None
                     description: patches controls which patches and edits Orders may
                       set.
+                    minProperties: 1
                     properties:
                       policy:
                         default: None
@@ -178,15 +190,21 @@ spec:
                                 kind:
                                   description: kind specifies the Kubernetes resource
                                     kind to patch
+                                  maxLength: 63
+                                  minLength: 1
                                   type: string
                                 name:
                                   description: name specifies the name of the resource
                                     to patch
+                                  maxLength: 253
+                                  minLength: 1
                                   type: string
                                 namespace:
                                   description: namespace specifies the namespace of
                                     the resource (optional, defaults to same namespace
                                     as Order)
+                                  maxLength: 63
+                                  minLength: 1
                                   type: string
                               required:
                               - kind
@@ -196,6 +214,7 @@ spec:
                           - paths
                           - target
                           type: object
+                        maxItems: 64
                         minItems: 1
                         type: array
                         x-kubernetes-list-type: atomic
@@ -206,15 +225,20 @@ spec:
                       rule: 'has(self.policy) && self.policy == ''Listed'' ? has(self.targets)
                         : !has(self.targets)'
                   values:
-                    default: {}
+                    default:
+                      policy: None
                     description: values controls which Helm values Orders may set.
+                    minProperties: 1
                     properties:
                       paths:
                         description: |-
                           paths lists the dot-separated Helm value paths that Orders may set
                           (e.g. "ui.message", "replicaCount"). Only used when policy is Listed.
                         items:
+                          maxLength: 1024
+                          minLength: 1
                           type: string
+                        maxItems: 64
                         minItems: 1
                         type: array
                         x-kubernetes-list-type: set
@@ -250,6 +274,7 @@ spec:
                         set contains JSONPath expressions and their values to set
                         Keys are JSONPath expressions (e.g., ".spec.replicas")
                         Values are the desired values for those paths
+                      minProperties: 1
                       type: object
                     target:
                       description: target identifies which resource to patch
@@ -257,14 +282,20 @@ spec:
                         kind:
                           description: kind specifies the Kubernetes resource kind
                             to patch
+                          maxLength: 63
+                          minLength: 1
                           type: string
                         name:
                           description: name specifies the name of the resource to
                             patch
+                          maxLength: 253
+                          minLength: 1
                           type: string
                         namespace:
                           description: namespace specifies the namespace of the resource
                             (optional, defaults to same namespace as Order)
+                          maxLength: 63
+                          minLength: 1
                           type: string
                       required:
                       - kind
@@ -275,6 +306,7 @@ spec:
                   - target
                   type: object
                 maxItems: 128
+                minItems: 1
                 type: array
                 x-kubernetes-list-type: atomic
               registryRefs:
@@ -301,6 +333,7 @@ spec:
                   type: object
                   x-kubernetes-map-type: atomic
                 maxItems: 16
+                minItems: 1
                 type: array
                 x-kubernetes-list-map-keys:
                 - name
@@ -315,6 +348,7 @@ spec:
                     description: |-
                       helm renders the source OCI artifact as a Helm chart.
                       When set, the source must be a Helm chart in OCI format.
+                    minProperties: 0
                     properties:
                       includeCRDs:
                         default: false
@@ -326,6 +360,8 @@ spec:
                         description: |-
                           releaseName is the Helm release name passed to helm template.
                           Defaults to the Order's metadata.name when omitted.
+                        maxLength: 53
+                        minLength: 1
                         type: string
                       values:
                         description: |-
@@ -337,6 +373,7 @@ spec:
                   manifest:
                     description: manifest configures rendering of a raw manifest bundle
                       source.
+                    minProperties: 0
                     properties:
                       layout:
                         default: Single
@@ -351,8 +388,9 @@ spec:
                     type: object
                 type: object
                 x-kubernetes-validations:
-                - message: helm and manifest are mutually exclusive
-                  rule: '!(has(self.helm) && has(self.manifest))'
+                - message: exactly one of the fields in [helm manifest] must be set
+                  rule: '[has(self.helm),has(self.manifest)].filter(x,x==true).size()
+                    == 1'
               source:
                 description: |-
                   source defines the OCI artifact the Product is built from. Orders
@@ -364,6 +402,7 @@ spec:
                       Product connects to it through the Registry among its registryRefs
                       that covers it.
                     maxLength: 2048
+                    minLength: 1
                     type: string
                     x-kubernetes-validations:
                     - message: must be a valid OCI URL
@@ -451,15 +490,18 @@ spec:
                         x-kubernetes-map-type: atomic
                     type: object
                     x-kubernetes-validations:
-                    - message: exactly one of secretRef or matchOIDCIdentity must
-                        be set
-                      rule: has(self.secretRef) != has(self.matchOIDCIdentity)
                     - message: trustedRootSecretRef is only used with matchOIDCIdentity
                       rule: '!has(self.trustedRootSecretRef) || has(self.matchOIDCIdentity)'
+                    - message: exactly one of the fields in [secretRef matchOIDCIdentity]
+                        must be set
+                      rule: '[has(self.secretRef),has(self.matchOIDCIdentity)].filter(x,x==true).size()
+                        == 1'
                   version:
                     description: |-
                       version is the semantic version or tag of the artifact
                       The controller will resolve this to a digest
+                    maxLength: 128
+                    minLength: 1
                     type: string
                 required:
                 - url
@@ -471,6 +513,7 @@ spec:
                   every cluster of their Environment, unless an Order sets its own. When
                   neither sets it, it is the Order's namespace.
                 maxLength: 63
+                minLength: 1
                 pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                 type: string
               vendor:
@@ -482,12 +525,14 @@ spec:
                   oci://<in-cluster registry>/<namespace>/vendor/<name>. A source read
                   with credentials is only copied where a Registry with credentials
                   connects to.
+                minProperties: 0
                 properties:
                   url:
                     description: |-
                       url is the oci:// URL of the repository the artifact is pushed to.
                       When omitted, a repository of the bundled registry is used.
                     maxLength: 2048
+                    minLength: 1
                     type: string
                     x-kubernetes-validations:
                     - message: must be a valid OCI URL
@@ -503,6 +548,7 @@ spec:
                 != ''Vendor'' || has(self.vendor)'
           status:
             description: status defines the observed state of Product
+            minProperties: 1
             properties:
               conditions:
                 description: conditions represent the current state of the Product
@@ -561,6 +607,8 @@ spec:
                   - status
                   - type
                   type: object
+                maxItems: 32
+                minItems: 1
                 type: array
                 x-kubernetes-list-map-keys:
                 - type
@@ -570,6 +618,8 @@ spec:
                   configHash is a SHA-256 hash of the source and vendor configuration
                   and the OCI URLs they resolved to. When it matches the current inputs
                   the published source is reused without resolving it again.
+                maxLength: 71
+                minLength: 1
                 type: string
               observedGeneration:
                 description: observedGeneration is the most recent generation observed
@@ -605,14 +655,16 @@ spec:
                     registry:
                       description: |-
                         registry names the Registry whose connection Kokumi uses there. It is
-                        empty when Kokumi accesses the location anonymously, and for the
+                        absent when Kokumi accesses the location anonymously, and for the
                         other clients.
                       maxLength: 253
+                      minLength: 1
                       type: string
                     url:
                       description: url is the location, or the prefix of the locations,
                         accessed.
                       maxLength: 2048
+                      minLength: 1
                       type: string
                   required:
                   - client
@@ -620,6 +672,7 @@ spec:
                   - url
                   type: object
                 maxItems: 32
+                minItems: 1
                 type: array
                 x-kubernetes-list-map-keys:
                 - url
@@ -636,6 +689,8 @@ spec:
                     description: |-
                       digest is the digest version resolved to. Orders render exactly this
                       artifact, so every variant of the Product renders the same source.
+                    maxLength: 71
+                    minLength: 1
                     pattern: ^sha256:[a-f0-9]{64}$
                     type: string
                   signatures:
@@ -654,11 +709,14 @@ spec:
                           description: |-
                             digest is the digest of the signature: a Sigstore bundle referrer, a
                             legacy cosign signature manifest, or a signature in another format.
+                          maxLength: 71
+                          minLength: 1
                           pattern: ^sha256:[a-f0-9]{64}$
                           type: string
                         message:
                           description: message says why the signature did not verify.
                           maxLength: 1024
+                          minLength: 1
                           type: string
                         result:
                           description: result is the result of the verification.
@@ -677,6 +735,7 @@ spec:
                               description: issuer is the OIDC issuer of the keyless
                                 signer's certificate.
                               maxLength: 2048
+                              minLength: 1
                               type: string
                             keyID:
                               description: |-
@@ -684,6 +743,7 @@ spec:
                                 base64-encoded SHA-256 of its DER encoding. Set for key-based
                                 verification.
                               maxLength: 64
+                              minLength: 1
                               type: string
                             provider:
                               description: provider is the signature format that verified.
@@ -694,6 +754,7 @@ spec:
                               description: subject is the subject of the keyless signer's
                                 certificate.
                               maxLength: 2048
+                              minLength: 1
                               type: string
                           required:
                           - provider
@@ -701,6 +762,8 @@ spec:
                         subject:
                           description: subject is the digest of the manifest the signature
                             signs.
+                          maxLength: 71
+                          minLength: 1
                           pattern: ^sha256:[a-f0-9]{64}$
                           type: string
                       required:
@@ -709,6 +772,7 @@ spec:
                       - subject
                       type: object
                     maxItems: 64
+                    minItems: 1
                     type: array
                     x-kubernetes-list-map-keys:
                     - digest
@@ -725,6 +789,7 @@ spec:
                       url is the oci:// URL of the repository of the source artifact: of
                       the vendored copy when the Product vendors.
                     maxLength: 2048
+                    minLength: 1
                     type: string
                     x-kubernetes-validations:
                     - message: must be a valid OCI URL
@@ -739,6 +804,7 @@ spec:
                         description: issuer is the OIDC issuer of the keyless signer's
                           certificate.
                         maxLength: 2048
+                        minLength: 1
                         type: string
                       keyID:
                         description: |-
@@ -746,6 +812,7 @@ spec:
                           base64-encoded SHA-256 of its DER encoding. Set for key-based
                           verification.
                         maxLength: 64
+                        minLength: 1
                         type: string
                       provider:
                         description: provider is the signature format that verified.
@@ -756,12 +823,14 @@ spec:
                         description: subject is the subject of the keyless signer's
                           certificate.
                         maxLength: 2048
+                        minLength: 1
                         type: string
                     required:
                     - provider
                     type: object
                   version:
                     description: version is the tag of the source artifact.
+                    maxLength: 128
                     minLength: 1
                     type: string
                 required:
@@ -790,24 +859,30 @@ spec:
                           description: |-
                             digest is the digest of the vendored image, an image index or
                             manifest.
+                          maxLength: 71
+                          minLength: 1
                           pattern: ^sha256:[a-f0-9]{64}$
                           type: string
                         platform:
                           description: |-
                             platform is the platform of the image index that was scanned, such
-                            as "linux/amd64". Empty for a single-platform image.
+                            as "linux/amd64". Absent for a single-platform image.
                           maxLength: 64
+                          minLength: 1
                           type: string
                         report:
                           description: |-
                             report is the digest of the signed vulnerability report, a referrer
                             of the vendored image.
+                          maxLength: 71
+                          minLength: 1
                           pattern: ^sha256:[a-f0-9]{64}$
                           type: string
                         repository:
                           description: repository is the oci:// URL of the vendored
                             image's repository.
                           maxLength: 2048
+                          minLength: 1
                           type: string
                         sbom:
                           description: sbom is the SBOM the scan was computed from.
@@ -816,6 +891,8 @@ spec:
                               description: |-
                                 digest is the digest of the referrer or attestation manifest holding
                                 the SBOM.
+                              maxLength: 71
+                              minLength: 1
                               pattern: ^sha256:[a-f0-9]{64}$
                               type: string
                             origin:
@@ -835,6 +912,7 @@ spec:
                           type: string
                         summary:
                           description: summary counts the findings of the report.
+                          minProperties: 1
                           properties:
                             critical:
                               description: critical counts the findings of severity
@@ -879,6 +957,7 @@ spec:
                       - summary
                       type: object
                     maxItems: 512
+                    minItems: 1
                     type: array
                     x-kubernetes-list-map-keys:
                     - digest
@@ -892,6 +971,7 @@ spec:
                           database is the OCI reference of the vulnerability database, with
                           its digest.
                         maxLength: 2048
+                        minLength: 1
                         type: string
                       databaseUpdatedTime:
                         description: databaseUpdatedTime is when the vulnerability

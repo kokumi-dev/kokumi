@@ -20,7 +20,7 @@ shown only to users with its capability:
 
 | Tab | Field | What it sets |
 |---|---|---|
-| **General** | `spec.argoCDURL`, `spec.images.mirrors` | The Argo CD base URL, which the Servings and Clusters pages build deep links to Argo CD from; empty means no links. The image mirrors; see [Container Images](../images/). |
+| **General** | `spec.argoCDURL`, `spec.images.mirrors` | The Argo CD base URL, which the Servings and Clusters pages build deep links to Argo CD from; unset means no links. The image mirrors; see [Container Images](../images/). |
 | **Authentication** | `spec.auth` | The admin account and OIDC; see [Authentication](../authentication/). |
 | **Signing** | `spec.signing` | The public key Kokumi signs with, the cosign commands that verify its artifacts, the further keys it trusts, and whether every Product source must verify; see [Signing](../signing/). |
 | **Scanning** | `spec.scanning` | Whether vendored images are scanned, how often, how old the vulnerability database may be, where the databases are read from, and the Registries that connect to them; see [Vulnerability Scanning](../scanning/). |

@@ -39,10 +39,8 @@ linters:
         settings:
           linters:
             enable:
-              # TODO: add MinLength/MinItems by hand.
-              # - minlength
-              # TODO: add MaxLength/MaxItems by hand.
-              # - maxlength
+              - minlength
+              - maxlength
               - statussubresource
               - statusoptional
             disable:

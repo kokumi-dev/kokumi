@@ -60,6 +60,7 @@ spec:
               description:
                 description: description is a human-readable description of the repository.
                 maxLength: 1024
+                minLength: 1
                 type: string
               registryRef:
                 description: |-
@@ -82,6 +83,7 @@ spec:
                 description: url is the oci:// URL of the repository, without a tag
                   or digest.
                 maxLength: 2048
+                minLength: 1
                 pattern: ^oci://[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?(:[0-9]+)?(/[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*)+$
                 type: string
             required:
@@ -89,6 +91,7 @@ spec:
             type: object
           status:
             description: status defines the observed state of Repository
+            minProperties: 1
             properties:
               conditions:
                 description: |-
@@ -148,6 +151,8 @@ spec:
                   - status
                   - type
                   type: object
+                maxItems: 32
+                minItems: 1
                 type: array
                 x-kubernetes-list-map-keys:
                 - type

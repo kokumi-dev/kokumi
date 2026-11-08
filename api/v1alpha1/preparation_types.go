@@ -26,12 +26,14 @@ import (
 type OrderSource struct {
 	// url is the oci:// URL of the repository of the source artifact
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() == 'oci'",message="must be a valid OCI URL"
 	URL string `json:"url"`
 
 	// baseDigest is the SHA256 digest of the base source artifact
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	BaseDigest string `json:"baseDigest"`
@@ -75,12 +77,14 @@ type Renderer struct {
 type Artifact struct {
 	// ociRef is the full OCI reference including digest
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:Pattern=`^oci://.*@sha256:[a-f0-9]{64}$`
 	OCIRef string `json:"ociRef"`
 
 	// digest is the SHA256 digest of the artifact
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	Digest string `json:"digest"`
@@ -96,27 +100,31 @@ type Artifact struct {
 // GitSource records the SCM provenance of the base artifact that produced this
 // Preparation. It is derived from the org.opencontainers.image.source,
 // org.opencontainers.image.version, and org.opencontainers.image.revision
-// annotations on the base artifact. Empty when the base artifact carries no git
+// annotations on the base artifact. Absent when the base artifact carries no git
 // provenance.
+// +kubebuilder:validation:MinProperties=1
 type GitSource struct {
 	// repo is the SCM repository URL of the base artifact's source
-	// (org.opencontainers.image.source). Empty when the base artifact carries
+	// (org.opencontainers.image.source). Absent when the base artifact carries
 	// no git provenance.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	Repo string `json:"repo,omitempty"`
 
 	// tag is the SCM tag of the base artifact's source files
-	// (org.opencontainers.image.version). Empty when the base artifact carries
+	// (org.opencontainers.image.version). Absent when the base artifact carries
 	// no git tag.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=256
 	Tag string `json:"tag,omitempty"`
 
 	// commitHash is the SCM commit SHA of the base artifact's source files
-	// (org.opencontainers.image.revision). Empty when the base artifact carries
+	// (org.opencontainers.image.revision). Absent when the base artifact carries
 	// no git revision.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=64
 	CommitHash string `json:"commitHash,omitempty"`
 }
@@ -126,7 +134,8 @@ type GitSource struct {
 type PreparationSpec struct {
 	// orderName is the name of the Order this preparation belongs to
 	// +required
-	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
 	OrderName string `json:"orderName"`
 
 	// source defines the source artifact information
@@ -146,6 +155,7 @@ type PreparationSpec struct {
 
 	// configHash is the SHA256 hash of the canonicalized order configuration
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]+$`
 	ConfigHash string `json:"configHash"`
@@ -157,27 +167,30 @@ type PreparationSpec struct {
 	// commitMessage is the human-readable description of why this Preparation was created.
 	// It is stored as the org.opencontainers.image.description annotation on the OCI artifact.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=512
 	CommitMessage string `json:"commitMessage,omitempty"`
 
 	// parentDigest is the SHA256 digest of the artifact produced by the immediately preceding
-	// Preparation for this Order. It is empty for the first Preparation and is stored as the
+	// Preparation for this Order. It is absent for the first Preparation and is stored as the
 	// kokumi.dev/parent annotation on the OCI artifact, forming a git-like revision chain.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	ParentDigest string `json:"parentDigest,omitempty"`
 
 	// gitSource records the SCM provenance of the base artifact that produced
-	// this Preparation. Empty when the base artifact carries no git provenance.
+	// this Preparation. Absent when the base artifact carries no git provenance.
 	// +optional
-	GitSource GitSource `json:"gitSource,omitempty"` //nolint:lll
+	GitSource GitSource `json:"gitSource,omitzero"`
 
 	// productRevision identifies the Product change this Preparation renders:
 	// the SHA-256 of the Product's part of the intent. The Preparations
 	// other Orders of the Product render from the same change carry the same
 	// revision, which is what upstream stages are matched by.
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	ProductRevision string `json:"productRevision"`
@@ -194,6 +207,7 @@ type PreparationSpec struct {
 	// could not be resolved.
 	// +optional
 	// +listType=atomic
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=512
 	Images []PreparationImage `json:"images,omitempty"`
 }
@@ -210,6 +224,7 @@ type PreparationImage struct {
 	// name is the normalized repository of ref, for example
 	// "docker.io/library/nginx". Absent when ref is not a valid reference.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=512
 	Name string `json:"name,omitempty"`
 
@@ -217,6 +232,7 @@ type PreparationImage struct {
 	// algorithms the OCI image spec registers. Absent when the image could
 	// not be resolved, which only the Record policy allows.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=135
 	// +kubebuilder:validation:Pattern=`^(sha256:[a-f0-9]{64}|sha512:[a-f0-9]{128})$`
 	Digest string `json:"digest,omitempty"`
@@ -224,6 +240,7 @@ type PreparationImage struct {
 	// mediaType is the media type of the manifest digest names: an image
 	// index for multi-platform images, an image manifest otherwise.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=255
 	MediaType string `json:"mediaType,omitempty"`
 
@@ -232,6 +249,7 @@ type PreparationImage struct {
 	// <destination>/images/ghcr.io/example/app:1.0@sha256:.... Set under the
 	// Vendor policy only.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	Vendored string `json:"vendored,omitempty"`
 }
@@ -251,21 +269,25 @@ const (
 type ApprovalVote struct {
 	// approvalName is the name of the Approval carrying this vote.
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
 	ApprovalName string `json:"approvalName"`
 
 	// issuer is the OIDC issuer of the approver.
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	Issuer string `json:"issuer"`
 
 	// subject is the OIDC subject of the approver.
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=255
 	Subject string `json:"subject"`
 
 	// username is the human-readable name of the approver.
 	// +optional
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
 	Username string `json:"username,omitempty"`
 
@@ -287,17 +309,20 @@ type ApprovalVote struct {
 type ApprovalAttestation struct {
 	// ociRef is the full OCI reference of the attestation including digest.
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	OCIRef string `json:"ociRef"`
 
 	// digest is the manifest digest of the attestation.
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	Digest string `json:"digest"`
 }
 
 // PreparationApprovalStatus aggregates the Approvals of a Preparation.
+// +kubebuilder:validation:MinProperties=1
 type PreparationApprovalStatus struct {
 	// requiredApprovals is the number of approvals required by the policy.
 	// +optional
@@ -324,6 +349,7 @@ type PreparationApprovalStatus struct {
 	// votes are considered.
 	// +optional
 	// +listType=atomic
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=64
 	Votes []ApprovalVote `json:"votes,omitempty"`
 
@@ -359,22 +385,27 @@ type AttestationReference struct {
 
 	// ociRef is the full OCI reference of the attestation including digest.
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	OCIRef string `json:"ociRef"`
 
 	// digest is the manifest digest of the attestation.
 	// +required
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	Digest string `json:"digest"`
 }
 
 // PreparationStatus defines the observed state of Preparation.
+// +kubebuilder:validation:MinProperties=1
 type PreparationStatus struct {
 	// conditions represent the current state of the Preparation resource.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=32
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// observedGeneration is the most recent generation observed by the controller.
@@ -386,6 +417,7 @@ type PreparationStatus struct {
 	// not listed here; it is recorded in approval.attestation.
 	// +listType=map
 	// +listMapKey=type
+	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=16
 	// +optional
 	Attestations []AttestationReference `json:"attestations,omitempty"`
