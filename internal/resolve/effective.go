@@ -61,7 +61,7 @@ type ProductIdentity struct {
 // ProductReady reports whether Orders may render from product: its source is
 // resolved for the current generation and its Ready condition is True.
 func ProductReady(product *deliveryv1alpha1.Product) bool {
-	if product.Status.Source == nil {
+	if product.Status.Source.Digest == "" {
 		return false
 	}
 
@@ -76,7 +76,7 @@ func ProductReady(product *deliveryv1alpha1.Product) bool {
 // Order's values and patches, which must be allowed by the Product's
 // overrides.
 func ForProduct(product *deliveryv1alpha1.Product, order *deliveryv1alpha1.Order) (*EffectiveSpec, error) {
-	if product.Status.Source == nil {
+	if product.Status.Source.Digest == "" {
 		return nil, fmt.Errorf("product %q source is not resolved yet", product.Name)
 	}
 
@@ -105,7 +105,7 @@ func ForProduct(product *deliveryv1alpha1.Product, order *deliveryv1alpha1.Order
 			Version: product.Status.Source.Version,
 		},
 		SourceDigest:    product.Status.Source.Digest,
-		SourceVerified:  product.Status.Source.Verified,
+		SourceVerified:  sourceVerified(&product.Status.Source),
 		Render:          render,
 		Patches:         patches,
 		Edits:           order.Spec.Edits,
@@ -151,7 +151,7 @@ func LockedImages(preparation *deliveryv1alpha1.Preparation) []images.Image {
 // ImageMirrors returns the image mirrors of kitchen, without the oci://
 // scheme of their locations.
 func ImageMirrors(kitchen *deliveryv1alpha1.Kitchen) []images.Mirror {
-	if kitchen == nil || kitchen.Spec.Images == nil {
+	if kitchen == nil || len(kitchen.Spec.Images.Mirrors) == 0 {
 		return nil
 	}
 
@@ -160,4 +160,13 @@ func ImageMirrors(kitchen *deliveryv1alpha1.Kitchen) []images.Mirror {
 		mirrors = append(mirrors, images.Mirror{Prefix: m.Prefix, Location: strings.TrimPrefix(m.Location, "oci://")})
 	}
 	return mirrors
+}
+
+// sourceVerified returns who signed source, nil when it was not verified.
+func sourceVerified(source *deliveryv1alpha1.ProductSourceStatus) *deliveryv1alpha1.SourceVerification {
+	if source.Verified == (deliveryv1alpha1.SourceVerification{}) {
+		return nil
+	}
+	verified := source.Verified
+	return &verified
 }

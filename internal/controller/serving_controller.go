@@ -33,6 +33,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/events"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -379,7 +380,7 @@ func (r *ServingReconciler) deploy(
 		if now := observed.Deployed(); deployed.Healthy.IsZero() && !now.Healthy.IsZero() {
 			// The summary described what ran before; the next pass
 			// describes the Preparation that is healthy now.
-			serving.Status.DeployedVulnerabilities = nil
+			serving.Status.DeployedVulnerabilities = deliveryv1alpha1.VulnerabilitySummary{}
 		}
 		setHistory(serving, observed)
 		return historyPassInterval, nil
@@ -586,7 +587,7 @@ func setTargets(serving *deliveryv1alpha1.Serving, deployed *promotion.Entry, ta
 	for _, t := range serving.Status.Targets {
 		previous[t.Cluster] = t
 	}
-	counts := &deliveryv1alpha1.DeploymentClusters{Selected: int32(len(targets))}
+	var held, degraded, healthy, progressing int32
 	listed := make([]deliveryv1alpha1.DeploymentTarget, 0, len(targets))
 	for _, target := range targets {
 		entry := deliveryv1alpha1.DeploymentTarget{Cluster: target.cluster}
@@ -599,18 +600,18 @@ func setTargets(serving *deliveryv1alpha1.Serving, deployed *promotion.Entry, ta
 		}
 		switch {
 		case target.holdReason != "":
-			counts.Held++
+			held++
 			conditions.MarkFalse(ready, deliveryv1alpha1.ConditionTypeReady, target.holdReason,
 				conditions.Truncate(target.holdMessage, maxTargetMessageLength))
 		case atTarget && state.health == promotion.HealthDegraded:
-			counts.Degraded++
+			degraded++
 			conditions.MarkFalse(ready, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonDegraded,
 				conditions.Truncate(cmp.Or(state.message, "The engine reports the deployment degraded"), maxTargetMessageLength))
 		case atTarget && state.health == promotion.HealthHealthy:
-			counts.Healthy++
+			healthy++
 			continue
 		default:
-			counts.Progressing++
+			progressing++
 			conditions.MarkUnknown(ready, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonProgressing,
 				"Deploying Preparation "+deployed.Preparation)
 		}
@@ -619,7 +620,9 @@ func setTargets(serving *deliveryv1alpha1.Serving, deployed *promotion.Entry, ta
 	slices.SortStableFunc(listed, func(a, b deliveryv1alpha1.DeploymentTarget) int {
 		return cmp.Compare(targetRank(a), targetRank(b))
 	})
-	serving.Status.Clusters = counts
+	serving.Status.Clusters = deliveryv1alpha1.DeploymentClusters{
+		Selected: new(int32(len(targets))), Healthy: &healthy, Progressing: &progressing, Degraded: &degraded, Held: &held,
+	}
 	serving.Status.Targets = listed[:min(len(listed), maxListedTargets)]
 }
 
@@ -856,12 +859,14 @@ func (r *ServingReconciler) requirements(ctx context.Context, order *deliveryv1a
 	if err := r.Get(ctx, client.ObjectKey{Namespace: order.Namespace, Name: order.Spec.EnvironmentRef.Name}, env); err != nil {
 		return nil, client.IgnoreNotFound(err)
 	}
-	if env.Spec.Promotion == nil {
+	if len(env.Spec.Promotion.RequireAfter) == 0 {
 		return nil, nil
 	}
 	requirements := make([]promotion.Requirement, 0, len(env.Spec.Promotion.RequireAfter))
 	for _, required := range env.Spec.Promotion.RequireAfter {
-		requirements = append(requirements, promotion.Requirement{Environment: required.Environment, MinSoakSeconds: required.MinSoakSeconds})
+		requirements = append(requirements, promotion.Requirement{
+			Environment: required.Environment, MinSoakSeconds: ptr.Deref(required.MinSoakSeconds, 0),
+		})
 	}
 	return requirements, nil
 }
@@ -957,8 +962,8 @@ func (r *ServingReconciler) checks(
 	ctx context.Context, serving *deliveryv1alpha1.Serving, preparation *deliveryv1alpha1.Preparation,
 ) (checksVerdict, error) {
 	var check *deliveryv1alpha1.VulnerabilityCheck
-	if checks := preparation.PromotionChecks(); checks != nil {
-		check = checks.Vulnerabilities
+	if checks := preparation.Spec.Promotion.PromotionChecks(); checks != nil {
+		check = &checks.Vulnerabilities
 	}
 	if check == nil {
 		conditions.Remove(serving, deliveryv1alpha1.ConditionTypeChecksPassed)
@@ -1002,7 +1007,7 @@ func (r *ServingReconciler) evaluateVulnerabilities(
 	assessments := vulnerability.Read(ctx, releaseImagesOf(preparation, product), r.reports.Reader(r.reportAccess(product)), 1)
 	verdict, err := vulnerability.Evaluate(assessments, vulnerability.Check{
 		MaxSeverity:   vulnerability.Severity(check.MaxSeverity),
-		IgnoreUnfixed: check.IgnoreUnfixed,
+		IgnoreUnfixed: ptr.Deref(check.IgnoreUnfixed, false),
 		MaxAge:        vulnerability.MaxAge(time.Duration(check.MaxAgeSeconds)*time.Second, interval),
 	}, r.clock())
 	return verdict, assessments, err
@@ -1055,21 +1060,17 @@ func (r *ServingReconciler) recordDeployedVulnerabilities(ctx context.Context, s
 		total, scanned = vulnerability.Total(releaseImagesOf(preparation, product))
 	}
 	previous := serving.Status.DeployedVulnerabilities
-	serving.Status.DeployedVulnerabilities = nil
+	serving.Status.DeployedVulnerabilities = deliveryv1alpha1.VulnerabilitySummary{}
 	if scanned {
-		serving.Status.DeployedVulnerabilities = &deliveryv1alpha1.VulnerabilitySummary{
-			Critical: total.Critical, High: total.High, Medium: total.Medium,
-			Low: total.Low, Unknown: total.Unknown, Fixable: total.Fixable,
-		}
+		serving.Status.DeployedVulnerabilities = apiSummary(total)
 	}
 
-	checks := preparation.PromotionChecks()
-	if previous == nil || !scanned || checks == nil || checks.Vulnerabilities == nil || r.Recorder == nil {
+	checks := preparation.Spec.Promotion.PromotionChecks()
+	if previous == (deliveryv1alpha1.VulnerabilitySummary{}) || !scanned || checks == nil || r.Recorder == nil {
 		return nil
 	}
 	maxSeverity := vulnerability.Severity(checks.Vulnerabilities.MaxSeverity)
-	was := vulnerability.Summary{Critical: previous.Critical, High: previous.High, Medium: previous.Medium, Low: previous.Low}
-	if before, after, increased := vulnerability.Increased(was, total, maxSeverity); increased {
+	if before, after, increased := vulnerability.Increased(summaryOf(previous), total, maxSeverity); increased {
 		r.Recorder.Eventf(serving, preparation, corev1.EventTypeWarning, deliveryv1alpha1.ReasonVulnerabilitiesIncreased, "Scan",
 			"Deployed Preparation %s has %d vulnerabilities at or above %s, up from %d", preparation.Name, after, maxSeverity, before)
 	}
@@ -1089,7 +1090,7 @@ func (r *ServingReconciler) recordPromotion(
 		return "", fmt.Errorf("waiting for the signing key to record the promotion: %w", err)
 	}
 	gates := promotion.Gates{After: promotion.StageEvidenceOf(serving.Namespace, stagesOf(candidate), upstream), Checks: checks.evidence}
-	if a := candidate.Status.Approval; candidate.ApprovalPolicy() != nil && a != nil && a.Attestation != nil {
+	if a := candidate.Status.Approval; candidate.Spec.Promotion.ApprovalPolicy() != nil && a.Attestation.Digest != "" {
 		gates.Approvals = &promotion.ApprovalsEvidence{Attestation: a.Attestation.Digest}
 	}
 	registryClient, err := r.connect(ctx, serving.Namespace, serving.Spec.OrderName, candidate.Spec.Artifact.RegistryRef, candidate.Spec.Artifact.OCIRef)
@@ -1149,10 +1150,8 @@ func (r *ServingReconciler) recordDeployments(
 // Product records of their digests, to the images a check evaluates.
 func releaseImagesOf(preparation *deliveryv1alpha1.Preparation, product *deliveryv1alpha1.Product) []vulnerability.Image {
 	scans := map[string]deliveryv1alpha1.ImageScan{}
-	if product.Status.Vulnerabilities != nil {
-		for _, s := range product.Status.Vulnerabilities.Images {
-			scans[s.Digest] = s
-		}
+	for _, s := range product.Status.Vulnerabilities.Images {
+		scans[s.Digest] = s
 	}
 	images := make([]vulnerability.Image, 0, len(preparation.Spec.Images))
 	for _, img := range preparation.Spec.Images {
@@ -1162,11 +1161,8 @@ func releaseImagesOf(preparation *deliveryv1alpha1.Preparation, product *deliver
 				Repository: s.Repository,
 				Digest:     s.Digest,
 				Report:     s.Report,
-				ScannedAt:  s.ScannedTime.Time,
-				Summary: vulnerability.Summary{
-					Critical: s.Summary.Critical, High: s.Summary.High, Medium: s.Summary.Medium,
-					Low: s.Summary.Low, Unknown: s.Summary.Unknown, Fixable: s.Summary.Fixable,
-				},
+				ScannedAt:  ptr.Deref(s.ScannedTime, metav1.Time{}).Time,
+				Summary:    summaryOf(s.Summary),
 			}
 		}
 		images = append(images, image)
@@ -1321,7 +1317,7 @@ func markDeployment(serving *deliveryv1alpha1.Serving, deployed *promotion.Entry
 		where += "; not ready: " + conditions.List(unready, ", ", maxListedClusters)
 	}
 
-	failing := int(counts.Held) - len(unready) + int(counts.Degraded)
+	failing := int(ptr.Deref(counts.Held, 0)) - len(unready) + int(ptr.Deref(counts.Degraded, 0))
 	switch {
 	case failing > 0:
 		var failed []string
@@ -1333,9 +1329,9 @@ func markDeployment(serving *deliveryv1alpha1.Serving, deployed *promotion.Entry
 		}
 		listed := failed[:min(len(failed), maxListedFailures)]
 		msg := "deployment of Preparation " + deployed.Preparation + " failed on " + strings.Join(listed, "; ")
-		if counts.Selected > 1 {
+		if selected := ptr.Deref(counts.Selected, 0); selected > 1 {
 			msg = fmt.Sprintf("deployment of Preparation %s failed on %d of %d clusters: %s",
-				deployed.Preparation, failing, counts.Selected, strings.Join(listed, "; "))
+				deployed.Preparation, failing, selected, strings.Join(listed, "; "))
 		}
 		if more := failing - len(listed); more > 0 {
 			msg += fmt.Sprintf("; and %d more", more)
@@ -1404,7 +1400,7 @@ func historyOf(serving *deliveryv1alpha1.Serving) promotion.History {
 			Digest:           e.Digest,
 			OCIRef:           e.OCIRef,
 			ProductRevision:  e.ProductRevision,
-			Started:          e.StartedTime.UTC(),
+			Started:          ptr.Deref(e.StartedTime, metav1.Time{}).UTC(),
 			EndReason:        promotion.EndReason(e.EndReason),
 			PromotionRecord:  e.PromotionRecord,
 			DeploymentRecord: e.DeploymentRecord,
@@ -1437,7 +1433,7 @@ func setHistory(serving *deliveryv1alpha1.Serving, history promotion.History) {
 			OCIRef:           e.OCIRef,
 			RegistryRef:      registryRef(e.Registry),
 			ProductRevision:  e.ProductRevision,
-			StartedTime:      metav1.NewTime(e.Started),
+			StartedTime:      new(metav1.NewTime(e.Started)),
 			HealthyTime:      optionalTime(e.Healthy),
 			EndedTime:        optionalTime(e.Ended),
 			EndReason:        deliveryv1alpha1.DeploymentEndReason(e.EndReason),
@@ -1482,13 +1478,13 @@ func entryOf(preparation *deliveryv1alpha1.Preparation) promotion.Entry {
 
 // stagesOf returns the upstream stages preparation names.
 func stagesOf(preparation *deliveryv1alpha1.Preparation) []promotion.Stage {
-	upstreams := preparation.UpstreamStages()
+	upstreams := preparation.Spec.Promotion.After
 	if len(upstreams) == 0 {
 		return nil
 	}
 	stages := make([]promotion.Stage, 0, len(upstreams))
 	for _, u := range upstreams {
-		stages = append(stages, promotion.Stage{Order: u.Order, SoakSeconds: u.SoakSeconds})
+		stages = append(stages, promotion.Stage{Order: u.Order, SoakSeconds: ptr.Deref(u.SoakSeconds, 0)})
 	}
 	return stages
 }
@@ -1689,7 +1685,7 @@ func (r *ServingReconciler) servingsOfProject(ctx context.Context, obj client.Ob
 	}
 	var reqs []ctrl.Request
 	for i := range environments.Items {
-		if env := &environments.Items[i]; env.Spec.Deployer.ArgoCD != nil && env.Spec.Deployer.ArgoCD.Project == obj.GetName() {
+		if env := &environments.Items[i]; env.Spec.Deployer.ArgoCD.Project == obj.GetName() {
 			reqs = append(reqs, r.servingsOfEnvironments(ctx, env.Namespace, env.Name)...)
 		}
 	}
@@ -1761,4 +1757,20 @@ func (r *ServingReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return err
 	}
 	return applications.Add(mgr, c, handler.EnqueueRequestsFromMapFunc(servingOfApplication), applicationChanged)
+}
+
+// apiSummary returns s as a status summary.
+func apiSummary(s vulnerability.Summary) deliveryv1alpha1.VulnerabilitySummary {
+	return deliveryv1alpha1.VulnerabilitySummary{
+		Critical: &s.Critical, High: &s.High, Medium: &s.Medium,
+		Low: &s.Low, Unknown: &s.Unknown, Fixable: &s.Fixable,
+	}
+}
+
+// summaryOf returns the status summary s as a vulnerability summary.
+func summaryOf(s deliveryv1alpha1.VulnerabilitySummary) vulnerability.Summary {
+	return vulnerability.Summary{
+		Critical: ptr.Deref(s.Critical, 0), High: ptr.Deref(s.High, 0), Medium: ptr.Deref(s.Medium, 0),
+		Low: ptr.Deref(s.Low, 0), Unknown: ptr.Deref(s.Unknown, 0), Fixable: ptr.Deref(s.Fixable, 0),
+	}
 }

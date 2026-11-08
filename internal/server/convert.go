@@ -12,6 +12,7 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
@@ -126,9 +127,9 @@ func orderToDTO(r deliveryv1alpha1.Order, activePreparation string, product *del
 		Patches:           patchesToDTO(r.Spec.Patches),
 		Edits:             patchesToDTO(r.Spec.Edits),
 		Mode:              string(r.EffectivePromotionMode()),
-		Approvals:         approvalPolicyToDTO(r.ApprovalPolicy()),
-		After:             upstreamStagesToDTO(r.UpstreamStages()),
-		Checks:            checksToDTO(r.PromotionChecks()),
+		Approvals:         approvalPolicyToDTO(r.Spec.Promotion.ApprovalPolicy()),
+		After:             upstreamStagesToDTO(r.Spec.Promotion.After),
+		Checks:            checksToDTO(r.Spec.Promotion.PromotionChecks()),
 		State:             stateFromConditions(r.Status.Conditions),
 		LatestRevision:    r.Status.LatestPreparationName,
 		ActivePreparation: activePreparation,
@@ -146,12 +147,9 @@ func orderToDTO(r deliveryv1alpha1.Order, activePreparation string, product *del
 	return dto
 }
 
-// renderToDTO converts a Render CRD spec into a RenderDTO, returning nil when r is nil.
-func renderToDTO(r *deliveryv1alpha1.Render) *RenderDTO {
-	if r == nil {
-		return nil
-	}
-
+// renderToDTO converts a Render CRD spec into a RenderDTO, returning nil when r
+// is unset.
+func renderToDTO(r deliveryv1alpha1.Render) *RenderDTO {
 	var dto RenderDTO
 
 	if h := r.Helm; h != nil {
@@ -161,7 +159,7 @@ func renderToDTO(r *deliveryv1alpha1.Render) *RenderDTO {
 		}
 		dto.Helm = &HelmRenderDTO{
 			ReleaseName: h.ReleaseName,
-			IncludeCRDs: h.IncludeCRDs,
+			IncludeCRDs: ptr.Deref(h.IncludeCRDs, false),
 			Values:      vals,
 		}
 	}
@@ -195,7 +193,7 @@ func renderFromDTO(dto *RenderDTO) *deliveryv1alpha1.Render {
 		}
 		r.Helm = &deliveryv1alpha1.HelmRender{
 			ReleaseName: h.ReleaseName,
-			IncludeCRDs: h.IncludeCRDs,
+			IncludeCRDs: new(h.IncludeCRDs),
 			Values:      vals,
 		}
 	}
@@ -243,8 +241,8 @@ func preparationToDTO(p deliveryv1alpha1.Preparation, isActive bool) Preparation
 		},
 		Conditions:      conditionsToDTO(p.Status.Conditions),
 		Approval:        preparationApprovalToDTO(p),
-		Checks:          checksToDTO(p.PromotionChecks()),
-		After:           upstreamStagesToDTO(p.UpstreamStages()),
+		Checks:          checksToDTO(p.Spec.Promotion.PromotionChecks()),
+		After:           upstreamStagesToDTO(p.Spec.Promotion.After),
 		ProductRevision: p.Spec.ProductRevision,
 		Version:         p.Labels[deliveryv1alpha1.LabelVersion],
 	}
@@ -271,7 +269,7 @@ func checksToDTO(c *deliveryv1alpha1.PromotionChecks) *PromotionChecksDTO {
 	if c == nil {
 		return nil
 	}
-	return &PromotionChecksDTO{Vulnerabilities: vulnerabilityCheckToDTO(c.Vulnerabilities)}
+	return &PromotionChecksDTO{Vulnerabilities: vulnerabilityCheckToDTO(&c.Vulnerabilities)}
 }
 
 // vulnerabilityCheckToDTO converts a VulnerabilityCheck; nil stays nil.
@@ -279,25 +277,31 @@ func vulnerabilityCheckToDTO(c *deliveryv1alpha1.VulnerabilityCheck) *Vulnerabil
 	if c == nil {
 		return nil
 	}
-	return &VulnerabilityCheckDTO{MaxSeverity: string(c.MaxSeverity), IgnoreUnfixed: c.IgnoreUnfixed, MaxAgeSeconds: c.MaxAgeSeconds}
+	return &VulnerabilityCheckDTO{
+		MaxSeverity: string(c.MaxSeverity), IgnoreUnfixed: ptr.Deref(c.IgnoreUnfixed, false), MaxAgeSeconds: c.MaxAgeSeconds,
+	}
 }
 
-// checksFromDTO converts requested checks; nil and empty checks mean none.
-func checksFromDTO(dto *PromotionChecksDTO) *deliveryv1alpha1.PromotionChecks {
+// checksFromDTO converts requested checks; nil and empty checks mean none,
+// the zero value.
+func checksFromDTO(dto *PromotionChecksDTO) deliveryv1alpha1.PromotionChecks {
 	if dto == nil || dto.Vulnerabilities == nil {
-		return nil
+		return deliveryv1alpha1.PromotionChecks{}
 	}
 	v := dto.Vulnerabilities
-	return &deliveryv1alpha1.PromotionChecks{Vulnerabilities: &deliveryv1alpha1.VulnerabilityCheck{
+	return deliveryv1alpha1.PromotionChecks{Vulnerabilities: deliveryv1alpha1.VulnerabilityCheck{
 		MaxSeverity:   deliveryv1alpha1.Severity(v.MaxSeverity),
-		IgnoreUnfixed: v.IgnoreUnfixed,
+		IgnoreUnfixed: new(v.IgnoreUnfixed),
 		MaxAgeSeconds: v.MaxAgeSeconds,
 	}}
 }
 
 // summaryToDTO converts a VulnerabilitySummary.
 func summaryToDTO(s deliveryv1alpha1.VulnerabilitySummary) VulnerabilitySummaryDTO {
-	return VulnerabilitySummaryDTO{Critical: s.Critical, High: s.High, Medium: s.Medium, Low: s.Low, Unknown: s.Unknown, Fixable: s.Fixable}
+	return VulnerabilitySummaryDTO{
+		Critical: ptr.Deref(s.Critical, 0), High: ptr.Deref(s.High, 0), Medium: ptr.Deref(s.Medium, 0),
+		Low: ptr.Deref(s.Low, 0), Unknown: ptr.Deref(s.Unknown, 0), Fixable: ptr.Deref(s.Fixable, 0),
+	}
 }
 
 // scannerToDTO converts a VulnerabilityScanner.
@@ -316,7 +320,7 @@ func imageScanToDTO(s deliveryv1alpha1.ImageScan) ImageScanDTO {
 		Digest:      s.Digest,
 		Repository:  s.Repository,
 		Platform:    s.Platform,
-		ScannedTime: s.ScannedTime.UTC(),
+		ScannedTime: ptr.Deref(s.ScannedTime, metav1.Time{}).UTC(),
 		SBOMDigest:  s.SBOM.Digest,
 		SBOMOrigin:  string(s.SBOM.Origin),
 		Report:      s.Report,
@@ -327,7 +331,7 @@ func imageScanToDTO(s deliveryv1alpha1.ImageScan) ImageScanDTO {
 // productVulnerabilitiesToDTO converts a Product's status.vulnerabilities;
 // nil stays nil.
 func productVulnerabilitiesToDTO(v *deliveryv1alpha1.ProductVulnerabilities) *ProductVulnerabilitiesDTO {
-	if v == nil {
+	if v.Scanner.Name == "" && len(v.Images) == 0 {
 		return nil
 	}
 	dto := &ProductVulnerabilitiesDTO{Scanner: scannerToDTO(v.Scanner)}
@@ -344,7 +348,7 @@ func upstreamStagesToDTO(stages []deliveryv1alpha1.UpstreamStage) []UpstreamStag
 	}
 	out := make([]UpstreamStageDTO, 0, len(stages))
 	for _, s := range stages {
-		out = append(out, UpstreamStageDTO{Order: s.Order, SoakSeconds: s.SoakSeconds})
+		out = append(out, UpstreamStageDTO{Order: s.Order, SoakSeconds: ptr.Deref(s.SoakSeconds, 0)})
 	}
 	return out
 }
@@ -356,7 +360,7 @@ func upstreamStagesFromDTO(stages []UpstreamStageDTO) []deliveryv1alpha1.Upstrea
 	}
 	out := make([]deliveryv1alpha1.UpstreamStage, 0, len(stages))
 	for _, s := range stages {
-		out = append(out, deliveryv1alpha1.UpstreamStage{Order: s.Order, SoakSeconds: s.SoakSeconds})
+		out = append(out, deliveryv1alpha1.UpstreamStage{Order: s.Order, SoakSeconds: new(s.SoakSeconds)})
 	}
 	return out
 }
@@ -369,18 +373,19 @@ func approvalPolicyToDTO(p *deliveryv1alpha1.ApprovalPolicy) *ApprovalPolicyDTO 
 	return &ApprovalPolicyDTO{RequiredApprovals: p.RequiredApprovals, AllowedGroups: p.AllowedGroups}
 }
 
-// approvalPolicyFromDTO converts a request policy; nil disables the gate.
-func approvalPolicyFromDTO(dto *ApprovalPolicyDTO) *deliveryv1alpha1.ApprovalPolicy {
+// approvalPolicyFromDTO converts a request policy; nil disables the gate,
+// the zero value.
+func approvalPolicyFromDTO(dto *ApprovalPolicyDTO) deliveryv1alpha1.ApprovalPolicy {
 	if dto == nil {
-		return nil
+		return deliveryv1alpha1.ApprovalPolicy{}
 	}
-	return &deliveryv1alpha1.ApprovalPolicy{RequiredApprovals: dto.RequiredApprovals, AllowedGroups: dto.AllowedGroups}
+	return deliveryv1alpha1.ApprovalPolicy{RequiredApprovals: dto.RequiredApprovals, AllowedGroups: dto.AllowedGroups}
 }
 
 // preparationApprovalToDTO summarizes the approval gate from the
 // controller-owned Preparation status.
 func preparationApprovalToDTO(p deliveryv1alpha1.Preparation) *PreparationApprovalDTO {
-	policy := p.ApprovalPolicy()
+	policy := p.Spec.Promotion.ApprovalPolicy()
 	if policy == nil {
 		return nil
 	}
@@ -394,14 +399,11 @@ func preparationApprovalToDTO(p deliveryv1alpha1.Preparation) *PreparationApprov
 		dto.State = c.Reason
 		dto.Message = c.Message
 	}
-	s := p.Status.Approval
-	if s == nil {
-		return dto
-	}
-	dto.ApprovedCount = s.ApprovedCount
-	dto.RejectedCount = s.RejectedCount
-	dto.IneligibleCount = s.IneligibleCount
-	dto.SubmissionCount = s.SubmissionCount
+	s := &p.Status.Approval
+	dto.ApprovedCount = ptr.Deref(s.ApprovedCount, 0)
+	dto.RejectedCount = ptr.Deref(s.RejectedCount, 0)
+	dto.IneligibleCount = ptr.Deref(s.IneligibleCount, 0)
+	dto.SubmissionCount = ptr.Deref(s.SubmissionCount, 0)
 	for _, v := range s.Votes {
 		dto.Votes = append(dto.Votes, ApprovalVoteDTO{
 			ApprovalName: v.ApprovalName,
@@ -409,16 +411,14 @@ func preparationApprovalToDTO(p deliveryv1alpha1.Preparation) *PreparationApprov
 			Subject:      v.Subject,
 			Decision:     string(v.Decision),
 			Result:       string(v.Result),
-			SubmittedAt:  v.SubmittedTime.UTC(),
+			SubmittedAt:  ptr.Deref(v.SubmittedTime, metav1.MicroTime{}).UTC(),
 		})
 	}
 	if s.SealedTime != nil {
 		t := s.SealedTime.UTC()
 		dto.SealedAt = &t
 	}
-	if s.Attestation != nil {
-		dto.Attestation = s.Attestation.OCIRef
-	}
+	dto.Attestation = s.Attestation.OCIRef
 	return dto
 }
 
@@ -439,7 +439,7 @@ func approvalToDTO(a deliveryv1alpha1.Approval) ApprovalDTO {
 		},
 		Decision:    string(a.Spec.Decision),
 		Comment:     a.Spec.Comment,
-		SubmittedAt: a.Spec.SubmittedTime.UTC(),
+		SubmittedAt: ptr.Deref(a.Spec.SubmittedTime, metav1.MicroTime{}).UTC(),
 	}
 	if c := apimeta.FindStatusCondition(a.Status.Conditions, deliveryv1alpha1.ConditionTypeCounted); c != nil {
 		dto.Counted = c.Status == metav1.ConditionTrue
@@ -545,9 +545,9 @@ func sourceFromDTO(dto OCISourceDTO) deliveryv1alpha1.OCISource {
 	return deliveryv1alpha1.OCISource{URL: dto.URL, Version: dto.Version, Verify: verifyFromDTO(dto.Verify)}
 }
 
-// verifyToDTO converts an OCISourceVerification; nil stays nil.
-func verifyToDTO(verify *deliveryv1alpha1.OCISourceVerification) *SourceVerifyDTO {
-	if verify == nil {
+// verifyToDTO converts an OCISourceVerification; unset, it is nil.
+func verifyToDTO(verify deliveryv1alpha1.OCISourceVerification) *SourceVerifyDTO {
+	if verify.SecretRef == nil && len(verify.MatchOIDCIdentity) == 0 {
 		return nil
 	}
 	dto := &SourceVerifyDTO{}
@@ -563,13 +563,13 @@ func verifyToDTO(verify *deliveryv1alpha1.OCISourceVerification) *SourceVerifyDT
 	return dto
 }
 
-// verifyFromDTO converts a SourceVerifyDTO; nil stays nil. The provider is
-// left to its default.
-func verifyFromDTO(dto *SourceVerifyDTO) *deliveryv1alpha1.OCISourceVerification {
+// verifyFromDTO converts a SourceVerifyDTO; nil is the zero value. The
+// provider is left to its default.
+func verifyFromDTO(dto *SourceVerifyDTO) deliveryv1alpha1.OCISourceVerification {
+	var verify deliveryv1alpha1.OCISourceVerification
 	if dto == nil {
-		return nil
+		return verify
 	}
-	verify := &deliveryv1alpha1.OCISourceVerification{}
 	if dto.SecretRef != "" {
 		verify.SecretRef = &corev1.LocalObjectReference{Name: dto.SecretRef}
 	}
@@ -582,9 +582,9 @@ func verifyFromDTO(dto *SourceVerifyDTO) *deliveryv1alpha1.OCISourceVerification
 	return verify
 }
 
-// sourceVerificationToDTO converts a SourceVerification; nil stays nil.
-func sourceVerificationToDTO(verified *deliveryv1alpha1.SourceVerification) *SourceVerificationDTO {
-	if verified == nil {
+// sourceVerificationToDTO converts a SourceVerification; unset, it is nil.
+func sourceVerificationToDTO(verified deliveryv1alpha1.SourceVerification) *SourceVerificationDTO {
+	if verified == (deliveryv1alpha1.SourceVerification{}) {
 		return nil
 	}
 	return &SourceVerificationDTO{
@@ -741,12 +741,13 @@ func servingToDTO(s deliveryv1alpha1.Serving) ServingDTO {
 	for _, e := range s.Status.History {
 		dto.History = append(dto.History, deploymentEntryToDTO(e))
 	}
-	if summary := s.Status.DeployedVulnerabilities; summary != nil {
-		dto.DeployedVulnerabilities = new(summaryToDTO(*summary))
+	if summary := s.Status.DeployedVulnerabilities; summary != (deliveryv1alpha1.VulnerabilitySummary{}) {
+		dto.DeployedVulnerabilities = new(summaryToDTO(summary))
 	}
-	if c := s.Status.Clusters; c != nil {
+	if c := s.Status.Clusters; c != (deliveryv1alpha1.DeploymentClusters{}) {
 		dto.Clusters = &DeploymentClustersDTO{
-			Selected: c.Selected, Healthy: c.Healthy, Progressing: c.Progressing, Degraded: c.Degraded, Held: c.Held,
+			Selected: ptr.Deref(c.Selected, 0), Healthy: ptr.Deref(c.Healthy, 0), Progressing: ptr.Deref(c.Progressing, 0),
+			Degraded: ptr.Deref(c.Degraded, 0), Held: ptr.Deref(c.Held, 0),
 		}
 	}
 	if !s.CreationTimestamp.IsZero() {
@@ -762,7 +763,7 @@ func deploymentEntryToDTO(e deliveryv1alpha1.DeploymentEntry) DeploymentEntryDTO
 		Preparation:      e.PreparationName,
 		Digest:           e.Digest,
 		ProductRevision:  e.ProductRevision,
-		StartedAt:        e.StartedTime.UTC(),
+		StartedAt:        ptr.Deref(e.StartedTime, metav1.Time{}).UTC(),
 		EndReason:        string(e.EndReason),
 		PromotionRecord:  e.PromotionRecord,
 		DeploymentRecord: e.DeploymentRecord,
@@ -805,13 +806,13 @@ func productToDTO(p deliveryv1alpha1.Product) ProductDTO {
 
 		RegistryRefs:    registryRefsToDTO(p.Spec.RegistryRefs),
 		RegistryAccess:  registryAccessToDTO(p.Status.RegistryAccess),
-		Vulnerabilities: productVulnerabilitiesToDTO(p.Status.Vulnerabilities)}
+		Vulnerabilities: productVulnerabilitiesToDTO(&p.Status.Vulnerabilities)}
 	if p.DeletionTimestamp != nil {
 		t := p.DeletionTimestamp.UTC()
 		dto.DeletionTimestamp = &t
 		dto.State = stateDeleting
 	}
-	if src := p.Status.Source; src != nil {
+	if src := p.Status.Source; src.Digest != "" {
 		dto.ResolvedSource = &ProductSourceStatusDTO{
 			URL:      src.URL,
 			Version:  src.Version,
@@ -842,7 +843,7 @@ func productsToDTO(products []deliveryv1alpha1.Product) []ProductDTO {
 func productSpecFromDTO(dto ProductSpecDTO) deliveryv1alpha1.ProductSpec {
 	spec := deliveryv1alpha1.ProductSpec{
 		Source:          sourceFromDTO(dto.Source),
-		Render:          renderFromDTO(dto.Render),
+		Render:          ptr.Deref(renderFromDTO(dto.Render), deliveryv1alpha1.Render{}),
 		TargetNamespace: dto.TargetNamespace,
 		Patches:         patchesFromDTO(dto.Patches),
 		Overrides:       overridesFromDTO(dto.Overrides),
@@ -1010,8 +1011,8 @@ func environmentToDTO(env deliveryv1alpha1.Environment, installNamespace string)
 		Conditions:      conditionsToDTO(env.Status.Conditions),
 		Ensured:         env.Namespace == installNamespace && env.Name == cluster.LocalEnvironment,
 	}
-	if c := env.Status.Clusters; c != nil {
-		dto.SelectedClusters, dto.ReadyClusters = c.Selected, c.Ready
+	if c := env.Status.Clusters; c != (deliveryv1alpha1.EnvironmentClusters{}) {
+		dto.SelectedClusters, dto.ReadyClusters = ptr.Deref(c.Selected, 0), ptr.Deref(c.Ready, 0)
 	}
 	if !env.CreationTimestamp.IsZero() {
 		dto.CreatedAt = new(env.CreationTimestamp.UTC())
@@ -1048,9 +1049,7 @@ func clusterToDTO(c deliveryv1alpha1.Cluster, environments []string, installName
 		Conditions:        conditionsToDTO(c.Status.Conditions),
 		Ensured:           c.Namespace == installNamespace && c.Name == cluster.InCluster,
 	}
-	if k := c.Spec.Kubeconfig; k != nil {
-		dto.KubeconfigSecret = k.SecretRef.Name
-	}
+	dto.KubeconfigSecret = c.Spec.Kubeconfig.SecretRef.Name
 	if ready := apimeta.FindStatusCondition(c.Status.Conditions, deliveryv1alpha1.ConditionTypeReady); ready != nil {
 		dto.State, dto.Message = ready.Reason, ready.Message
 		dto.Ready = ready.Status == metav1.ConditionTrue

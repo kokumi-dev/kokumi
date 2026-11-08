@@ -133,19 +133,19 @@ func (r *EnvironmentReconciler) reconcileEnvironment(ctx context.Context, env *d
 	}
 	selected, err := resolve.SelectedClusters(env, clusters.Items)
 	if err != nil {
-		env.Status.Clusters = nil
+		env.Status.Clusters = deliveryv1alpha1.EnvironmentClusters{}
 		conditions.MarkFalse(env, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonInvalidSelector, "clusterSelector: "+err.Error())
 		return nil
 	}
 	names := make([]string, 0, len(selected))
-	counts := &deliveryv1alpha1.EnvironmentClusters{Selected: int32(len(selected))}
+	var ready int32
 	for _, c := range selected {
 		names = append(names, c.Name)
 		if meta.IsStatusConditionTrue(c.Status.Conditions, deliveryv1alpha1.ConditionTypeReady) {
-			counts.Ready++
+			ready++
 		}
 	}
-	env.Status.Clusters = counts
+	env.Status.Clusters = deliveryv1alpha1.EnvironmentClusters{Selected: new(int32(len(selected))), Ready: &ready}
 
 	admitted, err := r.admitter(env).Admit(ctx, env)
 	if err != nil {
@@ -249,7 +249,7 @@ func (r *EnvironmentReconciler) environmentsOfProject(ctx context.Context, obj c
 		return nil
 	}
 	return environmentRequests(slices.DeleteFunc(environments.Items, func(env deliveryv1alpha1.Environment) bool {
-		return env.Spec.Deployer.ArgoCD == nil || env.Spec.Deployer.ArgoCD.Project != obj.GetName()
+		return env.Spec.Deployer.ArgoCD.Project != obj.GetName()
 	}))
 }
 

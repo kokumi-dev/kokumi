@@ -177,6 +177,7 @@ spec:
                           minLength: 1
                           type: string
                         minSoakSeconds:
+                          default: 0
                           description: |-
                             minSoakSeconds is the least soakSeconds the Order must give its
                             upstream Order of the Environment.
@@ -290,6 +291,7 @@ spec:
                   observedGeneration is the most recent generation observed by the
                   controller.
                 format: int64
+                minimum: 1
                 type: integer
             type: object
         required:

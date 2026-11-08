@@ -33,7 +33,7 @@ func testPreparation(required int32) *deliveryv1alpha1.Preparation {
 		},
 	}
 	if required > 0 {
-		p.Spec.Promotion = &deliveryv1alpha1.PromotionGates{Approvals: &deliveryv1alpha1.ApprovalPolicy{RequiredApprovals: required, AllowedGroups: []string{testGroup}}}
+		p.Spec.Promotion = deliveryv1alpha1.PromotionGates{Approvals: deliveryv1alpha1.ApprovalPolicy{RequiredApprovals: required, AllowedGroups: []string{testGroup}}}
 	}
 	return p
 }
@@ -54,7 +54,7 @@ func vote(name, subject string, decision deliveryv1alpha1.ApprovalDecision, seco
 			},
 			Approver:      deliveryv1alpha1.Approver{Issuer: testIssuer, Subject: subject, Username: subject, Groups: groups},
 			Decision:      decision,
-			SubmittedTime: metav1.NewMicroTime(created.Add(time.Duration(micro) * time.Microsecond)),
+			SubmittedTime: new(metav1.NewMicroTime(created.Add(time.Duration(micro) * time.Microsecond))),
 		},
 	}
 }
@@ -170,7 +170,7 @@ func TestEvaluateSealed(t *testing.T) {
 	open := Evaluate(prep, []deliveryv1alpha1.Approval{early, counted})
 	require.True(t, open.Approved)
 	sealedTime := metav1.NewTime(base.Add(2 * time.Second))
-	prep.Status.Approval = open.Status
+	prep.Status.Approval = *open.Status
 	prep.Status.Approval.SealedTime = &sealedTime
 
 	late := vote("a3", "alice", reject, 5, 0)
@@ -182,7 +182,7 @@ func TestEvaluateSealed(t *testing.T) {
 	assert.Equal(t, deliveryv1alpha1.ReasonCounted, res.Verdicts["a2"].Reason)
 	assert.Equal(t, deliveryv1alpha1.ReasonSubmittedAfterSeal, res.Verdicts["a3"].Reason)
 	assert.Equal(t, deliveryv1alpha1.ReasonSubmittedAfterSeal, res.Verdicts["b1"].Reason)
-	assert.Equal(t, int32(4), res.Status.SubmissionCount)
+	assert.Equal(t, int32(4), *res.Status.SubmissionCount)
 	assert.Equal(t, &sealedTime, res.Status.SealedTime)
 }
 
@@ -196,7 +196,7 @@ func TestBuildAttestation(t *testing.T) {
 
 	res := Evaluate(prep, approvals)
 	sealedTime := metav1.NewTime(base.Add(time.Minute))
-	prep.Status.Approval = res.Status
+	prep.Status.Approval = *res.Status
 	prep.Status.Approval.SealedTime = &sealedTime
 
 	first, err := buildAttestation(prep, approvals)

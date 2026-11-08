@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"reflect"
 	"regexp"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/utils/ptr"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/signing"
@@ -225,11 +227,8 @@ func validateScanningDTO(dto *scanningSettingsDTO) error {
 }
 
 // imagesSettingsToDTO converts a Kitchen spec.images to its DTO shape.
-func imagesSettingsToDTO(images *deliveryv1alpha1.KitchenImages) imagesSettingsDTO {
+func imagesSettingsToDTO(images deliveryv1alpha1.KitchenImages) imagesSettingsDTO {
 	out := imagesSettingsDTO{Mirrors: []imageMirrorDTO{}}
-	if images == nil {
-		return out
-	}
 	for _, m := range images.Mirrors {
 		out.Mirrors = append(out.Mirrors, imageMirrorDTO{Prefix: m.Prefix, Location: m.Location})
 	}
@@ -238,11 +237,8 @@ func imagesSettingsToDTO(images *deliveryv1alpha1.KitchenImages) imagesSettingsD
 
 // imagesSettingsFromDTO converts the request DTO to a Kitchen spec.images.
 // Settings without mirrors clear it.
-func imagesSettingsFromDTO(dto *imagesSettingsDTO) *deliveryv1alpha1.KitchenImages {
-	if len(dto.Mirrors) == 0 {
-		return nil
-	}
-	out := &deliveryv1alpha1.KitchenImages{}
+func imagesSettingsFromDTO(dto *imagesSettingsDTO) deliveryv1alpha1.KitchenImages {
+	var out deliveryv1alpha1.KitchenImages
 	for _, m := range dto.Mirrors {
 		out.Mirrors = append(out.Mirrors, deliveryv1alpha1.ImageMirror{Prefix: m.Prefix, Location: m.Location})
 	}
@@ -282,22 +278,23 @@ func secretRefToDTO(ref *corev1.LocalObjectReference) *secretRefDTO {
 	return &secretRefDTO{Name: ref.Name}
 }
 
-// authToDTO converts a Kitchen spec.auth to its DTO shape (nil-safe).
-func authToDTO(auth *deliveryv1alpha1.KitchenAuth) *authDTO {
-	if auth == nil {
+// authToDTO converts a Kitchen spec.auth to its DTO shape, nil when it is
+// unset.
+func authToDTO(auth deliveryv1alpha1.KitchenAuth) *authDTO {
+	if reflect.ValueOf(auth).IsZero() {
 		return nil
 	}
 	out := &authDTO{
 		TokenSigningKeySecretRef: secretRefToDTO(auth.TokenSigningKeySecretRef),
 	}
-	if auth.AdminUser != nil {
+	if auth.AdminUser != (deliveryv1alpha1.AdminUserConfig{}) {
 		out.AdminUser = &adminUserDTO{
-			Enabled:   auth.AdminUser.Enabled,
+			Enabled:   ptr.Deref(auth.AdminUser.Enabled, false),
 			Username:  auth.AdminUser.Username,
 			SecretRef: secretRefToDTO(auth.AdminUser.SecretRef),
 		}
 	}
-	if auth.OIDC != nil {
+	if auth.OIDC.IssuerURL != "" {
 		out.OIDC = &oidcDTO{
 			IssuerURL:       auth.OIDC.IssuerURL,
 			ClientID:        auth.OIDC.ClientID,
@@ -321,32 +318,29 @@ func secretRefFromDTO(ref *secretRefDTO) *corev1.LocalObjectReference {
 
 // signingToDTO converts a Kitchen spec.signing to its DTO shape. An unset
 // spec.signing trusts no further keys and requires nothing.
-func signingToDTO(s *deliveryv1alpha1.KitchenSigning) signingSettingsDTO {
+func signingToDTO(s deliveryv1alpha1.KitchenSigning) signingSettingsDTO {
 	out := signingSettingsDTO{TrustedKeys: []trustedKeyDTO{}}
-	if s == nil {
-		return out
-	}
 	for _, k := range s.TrustedKeys {
 		out.TrustedKeys = append(out.TrustedKeys, trustedKeyDTO{Name: k.Name, PublicKey: k.PublicKey})
 	}
-	out.RequireSourceVerification = s.RequireSourceVerification
+	out.RequireSourceVerification = ptr.Deref(s.RequireSourceVerification, false)
 	return out
 }
 
 // applyAuth overwrites the target spec.auth subtree from the request DTO. nil
 // sub-objects in the DTO clear the corresponding config.
 func applyAuth(auth *deliveryv1alpha1.KitchenAuth, dto *authDTO) {
+	auth.AdminUser = deliveryv1alpha1.AdminUserConfig{}
 	if dto.AdminUser != nil {
-		auth.AdminUser = &deliveryv1alpha1.AdminUserConfig{
-			Enabled:   dto.AdminUser.Enabled,
+		auth.AdminUser = deliveryv1alpha1.AdminUserConfig{
+			Enabled:   new(dto.AdminUser.Enabled),
 			Username:  dto.AdminUser.Username,
 			SecretRef: secretRefFromDTO(dto.AdminUser.SecretRef),
 		}
-	} else {
-		auth.AdminUser = nil
 	}
+	auth.OIDC = deliveryv1alpha1.OIDCConfig{}
 	if dto.OIDC != nil {
-		auth.OIDC = &deliveryv1alpha1.OIDCConfig{
+		auth.OIDC = deliveryv1alpha1.OIDCConfig{
 			IssuerURL:       dto.OIDC.IssuerURL,
 			ClientID:        dto.OIDC.ClientID,
 			ClientSecretRef: secretRefFromDTO(dto.OIDC.ClientSecretRef),
@@ -355,19 +349,17 @@ func applyAuth(auth *deliveryv1alpha1.KitchenAuth, dto *authDTO) {
 			Scopes:          dto.OIDC.Scopes,
 			ProviderSignOut: deliveryv1alpha1.ProviderSignOut(dto.OIDC.ProviderSignOut),
 		}
-	} else {
-		auth.OIDC = nil
 	}
 	auth.TokenSigningKeySecretRef = secretRefFromDTO(dto.TokenSigningKeySecretRef)
 }
 
 // signingFromDTO converts the request DTO to a Kitchen spec.signing. Settings
 // that trust nothing and require nothing clear it.
-func signingFromDTO(dto *signingSettingsDTO) *deliveryv1alpha1.KitchenSigning {
+func signingFromDTO(dto *signingSettingsDTO) deliveryv1alpha1.KitchenSigning {
 	if len(dto.TrustedKeys) == 0 && !dto.RequireSourceVerification {
-		return nil
+		return deliveryv1alpha1.KitchenSigning{}
 	}
-	out := &deliveryv1alpha1.KitchenSigning{RequireSourceVerification: dto.RequireSourceVerification}
+	out := deliveryv1alpha1.KitchenSigning{RequireSourceVerification: new(dto.RequireSourceVerification)}
 	for _, k := range dto.TrustedKeys {
 		out.TrustedKeys = append(out.TrustedKeys, deliveryv1alpha1.TrustedKey{Name: k.Name, PublicKey: k.PublicKey})
 	}
@@ -535,8 +527,8 @@ func handlePutSettings(deps *apiDeps, namespace string) http.HandlerFunc {
 			return
 		}
 
-		// DeepCopy so later mutations (applyAuth writes through the shared
-		// *KitchenAuth pointer) cannot alias the snapshot used for the no-op check.
+		// DeepCopy so that later mutations cannot alias the snapshot used
+		// for the no-op check through the spec's pointers and slices.
 		before := *kitchen.Spec.DeepCopy()
 		applySettings(&kitchen.Spec, &req, argoCDURL)
 		if apiequality.Semantic.DeepEqual(&before, &kitchen.Spec) {
@@ -580,10 +572,7 @@ func applySettings(spec *deliveryv1alpha1.KitchenSpec, req *settingsRequest, arg
 		spec.ArgoCDURL = argoCDURL
 	}
 	if req.Auth != nil {
-		if spec.Auth == nil {
-			spec.Auth = &deliveryv1alpha1.KitchenAuth{}
-		}
-		applyAuth(spec.Auth, req.Auth)
+		applyAuth(&spec.Auth, req.Auth)
 	}
 	if req.Signing != nil {
 		spec.Signing = signingFromDTO(req.Signing)

@@ -34,8 +34,8 @@ func promotablePreparation(name string) *deliveryv1alpha1.Preparation {
 		Name: name, Namespace: nsA,
 		Spec: deliveryv1alpha1.PreparationSpec{
 			OrderName: promoteOrder,
-			Promotion: &deliveryv1alpha1.PromotionGates{
-				Approvals: &deliveryv1alpha1.ApprovalPolicy{RequiredApprovals: 2, AllowedGroups: []string{testGroup}},
+			Promotion: deliveryv1alpha1.PromotionGates{
+				Approvals: deliveryv1alpha1.ApprovalPolicy{RequiredApprovals: 2, AllowedGroups: []string{testGroup}},
 			},
 		},
 		Status: deliveryv1alpha1.PreparationStatus{Conditions: []metav1.Condition{
@@ -49,7 +49,7 @@ func promotablePreparation(name string) *deliveryv1alpha1.Preparation {
 func promoteOrderOf(mode deliveryv1alpha1.PromotionMode) *deliveryv1alpha1.Order {
 	return &deliveryv1alpha1.Order{
 		Name: promoteOrder, Namespace: nsA,
-		Spec: deliveryv1alpha1.OrderSpec{Promotion: &deliveryv1alpha1.PromotionSpec{Mode: mode}},
+		Spec: deliveryv1alpha1.OrderSpec{Promotion: deliveryv1alpha1.PromotionSpec{Mode: mode}},
 	}
 }
 
@@ -129,7 +129,7 @@ func TestHandlePromote(t *testing.T) {
 func TestHandleServingTargets(t *testing.T) {
 	const digest = "sha256:" + "b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0"
 	env := &deliveryv1alpha1.Environment{Name: prod, Namespace: nsA, Spec: deliveryv1alpha1.EnvironmentSpec{
-		ClusterSelector: metav1.LabelSelector{MatchLabels: map[string]string{"stage": prod}},
+		ClusterSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"stage": prod}},
 	}}
 	order := &deliveryv1alpha1.Order{Name: promoteOrder, Namespace: nsA, Spec: deliveryv1alpha1.OrderSpec{
 		EnvironmentRef: deliveryv1alpha1.EnvironmentRef{Name: prod},
@@ -144,7 +144,7 @@ func TestHandleServingTargets(t *testing.T) {
 		Name: promoteOrder, Namespace: nsA, Spec: deliveryv1alpha1.ServingSpec{OrderName: promoteOrder},
 		Status: deliveryv1alpha1.ServingStatus{
 			History:  []deliveryv1alpha1.DeploymentEntry{{PreparationName: promoteDeployed, Digest: digest, PromotionRecord: digest}},
-			Clusters: &deliveryv1alpha1.DeploymentClusters{Selected: 2, Healthy: 1, Degraded: 1},
+			Clusters: deliveryv1alpha1.DeploymentClusters{Selected: new(int32(2)), Healthy: new(int32(1)), Degraded: new(int32(1))},
 			Targets: []deliveryv1alpha1.DeploymentTarget{{Cluster: "eu", Conditions: []metav1.Condition{{
 				Type: deliveryv1alpha1.ConditionTypeReady, Status: metav1.ConditionFalse, Reason: deliveryv1alpha1.ReasonDegraded,
 			}}}},

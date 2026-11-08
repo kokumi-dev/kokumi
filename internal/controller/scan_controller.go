@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -175,7 +176,7 @@ func (r *ScanReconciler) reconcileScan(ctx context.Context, product *deliveryv1a
 	}
 	if scanning == nil || product.Spec.Images.EffectivePolicy() != deliveryv1alpha1.ImagePolicyVendor {
 		// Scanning covers the images Kokumi vendors, while it is enabled.
-		product.Status.Vulnerabilities = nil
+		product.Status.Vulnerabilities = deliveryv1alpha1.ProductVulnerabilities{}
 		conditions.Remove(product, deliveryv1alpha1.ConditionTypeScanned)
 		return ctrl.Result{}, nil
 	}
@@ -408,9 +409,6 @@ func scanReleaseOf(prep deliveryv1alpha1.Preparation) scan.Release {
 // by digest.
 func scanRecordsOf(product *deliveryv1alpha1.Product, inUse map[string]oci.Reference) map[string]scan.Record {
 	records := map[string]scan.Record{}
-	if product.Status.Vulnerabilities == nil {
-		return records
-	}
 	for _, s := range product.Status.Vulnerabilities.Images {
 		if _, ok := inUse[s.Digest]; !ok {
 			continue
@@ -419,13 +417,10 @@ func scanRecordsOf(product *deliveryv1alpha1.Product, inUse map[string]oci.Refer
 			Digest:     s.Digest,
 			Repository: s.Repository,
 			Platform:   s.Platform,
-			ScannedAt:  s.ScannedTime.Time,
+			ScannedAt:  ptr.Deref(s.ScannedTime, metav1.Time{}).Time,
 			SBOM:       scan.SBOM{Digest: s.SBOM.Digest, Origin: sbom.Origin(s.SBOM.Origin)},
 			Report:     s.Report,
-			Summary: vulnerability.Summary{
-				Critical: s.Summary.Critical, High: s.Summary.High, Medium: s.Summary.Medium,
-				Low: s.Summary.Low, Unknown: s.Summary.Unknown, Fixable: s.Summary.Fixable,
-			},
+			Summary:    scanSummary(s.Summary),
 		}
 	}
 	return records
@@ -434,11 +429,8 @@ func scanRecordsOf(product *deliveryv1alpha1.Product, inUse map[string]oci.Refer
 // setScanRecords writes records to the Product's status, as many as it
 // lists.
 func setScanRecords(product *deliveryv1alpha1.Product, records map[string]scan.Record) {
-	if len(records) == 0 && product.Status.Vulnerabilities == nil {
+	if len(records) == 0 && !hasVulnerabilities(product) {
 		return
-	}
-	if product.Status.Vulnerabilities == nil {
-		product.Status.Vulnerabilities = &deliveryv1alpha1.ProductVulnerabilities{}
 	}
 	latest := scan.Latest(records, maxImageScans)
 	images := make([]deliveryv1alpha1.ImageScan, 0, len(latest))
@@ -447,13 +439,10 @@ func setScanRecords(product *deliveryv1alpha1.Product, records map[string]scan.R
 			Digest:      rec.Digest,
 			Repository:  rec.Repository,
 			Platform:    rec.Platform,
-			ScannedTime: metav1.Time{Time: rec.ScannedAt},
+			ScannedTime: &metav1.Time{Time: rec.ScannedAt},
 			SBOM:        deliveryv1alpha1.ImageSBOM{Digest: rec.SBOM.Digest, Origin: deliveryv1alpha1.SBOMOrigin(rec.SBOM.Origin)},
 			Report:      rec.Report,
-			Summary: deliveryv1alpha1.VulnerabilitySummary{
-				Critical: rec.Summary.Critical, High: rec.Summary.High, Medium: rec.Summary.Medium,
-				Low: rec.Summary.Low, Unknown: rec.Summary.Unknown, Fixable: rec.Summary.Fixable,
-			},
+			Summary:     imageScanSummary(rec.Summary),
 		})
 	}
 	product.Status.Vulnerabilities.Images = images
@@ -461,9 +450,6 @@ func setScanRecords(product *deliveryv1alpha1.Product, records map[string]scan.R
 
 // setScanner records the scanner and the database of the latest scan.
 func setScanner(product *deliveryv1alpha1.Product, result scan.Result) {
-	if product.Status.Vulnerabilities == nil {
-		product.Status.Vulnerabilities = &deliveryv1alpha1.ProductVulnerabilities{}
-	}
 	product.Status.Vulnerabilities.Scanner = deliveryv1alpha1.VulnerabilityScanner{
 		Name:                result.Scanner.Name,
 		Version:             result.Scanner.Version,
@@ -476,13 +462,13 @@ func setScanner(product *deliveryv1alpha1.Product, result scan.Result) {
 // scans.
 func markScanned(product *deliveryv1alpha1.Product, scanning *deliveryv1alpha1.KitchenScanning, inUse int, failures []scan.Failure, now time.Time) {
 	status := scan.Status{InUse: inUse, Failures: failures}
-	if v := product.Status.Vulnerabilities; v != nil {
+	if v := product.Status.Vulnerabilities; hasVulnerabilities(product) {
 		status.Database = v.Scanner.Database
 		if v.Scanner.DatabaseUpdatedTime != nil {
 			status.DatabaseBuilt = v.Scanner.DatabaseUpdatedTime.Time
 		}
 		for _, img := range v.Images {
-			status.Records = append(status.Records, scan.Record{Digest: img.Digest, ScannedAt: img.ScannedTime.Time})
+			status.Records = append(status.Records, scan.Record{Digest: img.Digest, ScannedAt: ptr.Deref(img.ScannedTime, metav1.Time{}).Time})
 		}
 	}
 	interval := time.Duration(scanning.EffectiveIntervalSeconds()) * time.Second
@@ -587,7 +573,7 @@ func (r *ScanReconciler) enqueueVendoringProducts(ctx context.Context, _ client.
 	var reqs []reconcile.Request
 	for i := range products.Items {
 		if products.Items[i].Spec.Images.EffectivePolicy() == deliveryv1alpha1.ImagePolicyVendor ||
-			products.Items[i].Status.Vulnerabilities != nil {
+			hasVulnerabilities(&products.Items[i]) {
 			reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&products.Items[i])})
 		}
 	}
@@ -638,4 +624,26 @@ func (r *ScanReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Named("scan").
 		WithOptions(controller.Options{MaxConcurrentReconciles: scanConcurrency}).
 		Complete(r)
+}
+
+// hasVulnerabilities reports whether the status of product records scans.
+func hasVulnerabilities(product *deliveryv1alpha1.Product) bool {
+	v := &product.Status.Vulnerabilities
+	return v.Scanner.Name != "" || len(v.Images) > 0
+}
+
+// scanSummary returns the summary of a recorded scan.
+func scanSummary(s deliveryv1alpha1.VulnerabilitySummary) vulnerability.Summary {
+	return vulnerability.Summary{
+		Critical: ptr.Deref(s.Critical, 0), High: ptr.Deref(s.High, 0), Medium: ptr.Deref(s.Medium, 0),
+		Low: ptr.Deref(s.Low, 0), Unknown: ptr.Deref(s.Unknown, 0), Fixable: ptr.Deref(s.Fixable, 0),
+	}
+}
+
+// imageScanSummary returns s as the summary of a recorded scan.
+func imageScanSummary(s vulnerability.Summary) deliveryv1alpha1.VulnerabilitySummary {
+	return deliveryv1alpha1.VulnerabilitySummary{
+		Critical: &s.Critical, High: &s.High, Medium: &s.Medium,
+		Low: &s.Low, Unknown: &s.Unknown, Fixable: &s.Fixable,
+	}
 }

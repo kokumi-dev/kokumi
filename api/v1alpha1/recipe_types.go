@@ -36,7 +36,7 @@ type RecipeSpec struct {
 	// +optional
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
-	Foo *string `json:"foo,omitempty"`
+	Foo string `json:"foo,omitempty"`
 }
 
 // RecipeStatus defines the observed state of Recipe.

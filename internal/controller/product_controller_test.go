@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
@@ -186,7 +187,7 @@ var _ = Describe("Product Controller", func() {
 		Expect(readyOf(name).Status).To(Equal(metav1.ConditionTrue))
 		Expect(readyOf(name).Reason).To(Equal("Resolved"))
 		Expect(fake.Copies).To(BeEmpty())
-		Expect(product.Status.Source.Verified).To(BeNil(), "an unsigned source is not verified")
+		Expect(product.Status.Source.Verified).To(BeZero(), "an unsigned source is not verified")
 		Expect(sourceVerifiedOf(name)).To(BeNil(), "and need not be")
 	})
 
@@ -197,7 +198,7 @@ var _ = Describe("Product Controller", func() {
 
 		Expect(reconcileProduct(name)).To(Succeed())
 
-		Expect(getProduct(name).Status.Source.Verified).To(Equal(&deliveryv1alpha1.SourceVerification{
+		Expect(getProduct(name).Status.Source.Verified).To(Equal(deliveryv1alpha1.SourceVerification{
 			Provider: deliveryv1alpha1.VerificationProviderCosign, KeyID: testSigner.KeyID(),
 		}))
 		Expect(sourceVerifiedOf(name).Status).To(Equal(metav1.ConditionTrue))
@@ -224,7 +225,7 @@ var _ = Describe("Product Controller", func() {
 		Expect(published.Signatures).To(HaveLen(2), "the SBOM is not a signature, its signature is")
 		signer := &deliveryv1alpha1.SourceVerification{Provider: deliveryv1alpha1.VerificationProviderCosign, KeyID: testSigner.KeyID()}
 		Expect(published.Signatures).To(ContainElement(deliveryv1alpha1.SignatureVerdict{
-			Digest: sbomSignature, Subject: sbom, Result: deliveryv1alpha1.SignatureVerified, Signer: signer,
+			Digest: sbomSignature, Subject: sbom, Result: deliveryv1alpha1.SignatureVerified, Signer: *signer,
 		}))
 		Expect(published.SignaturesCheckedTime).NotTo(BeNil())
 
@@ -243,7 +244,7 @@ var _ = Describe("Product Controller", func() {
 
 		Expect(reconcileProduct(name)).To(Succeed())
 
-		Expect(getProduct(name).Status.Source.Verified).To(BeNil())
+		Expect(getProduct(name).Status.Source.Verified).To(BeZero())
 		Expect(sourceVerifiedOf(name)).To(BeNil())
 		Expect(readyOf(name).Status).To(Equal(metav1.ConditionTrue))
 		Expect(getProduct(name).Status.Source.Signatures).To(ConsistOf(HaveField("Result", deliveryv1alpha1.SignatureUntrustedSigner)))
@@ -264,7 +265,7 @@ var _ = Describe("Product Controller", func() {
 		Expect(readyOf(name).Status).To(Equal(metav1.ConditionFalse))
 		Expect(readyOf(name).Reason).To(Equal(deliveryv1alpha1.ReasonVerificationRequired))
 		Expect(sourceVerifiedOf(name).Reason).To(Equal(deliveryv1alpha1.ReasonVerificationRequired))
-		Expect(getProduct(name).Status.Source).To(BeNil(), "an unverified source is never published")
+		Expect(getProduct(name).Status.Source).To(BeZero(), "an unverified source is never published")
 		Expect(resolve.ProductReady(getProduct(name))).To(BeFalse())
 
 		By("publishing it once a trusted key signed it")
@@ -288,7 +289,7 @@ var _ = Describe("Product Controller", func() {
 		DeferCleanup(func() { _ = k8sClient.Delete(ctx, secret) })
 		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{
 			URL: testOCIRef, Version: testVersion,
-			Verify: &deliveryv1alpha1.OCISourceVerification{SecretRef: &corev1.LocalObjectReference{Name: secretName}},
+			Verify: deliveryv1alpha1.OCISourceVerification{SecretRef: &corev1.LocalObjectReference{Name: secretName}},
 		}})
 		verifier.signer = &signingsource.Signer{KeyID: testKeyID}
 
@@ -297,7 +298,7 @@ var _ = Describe("Product Controller", func() {
 		Expect(verifier.policies).To(HaveLen(1))
 		Expect(verifier.policies[0].Keys).To(HaveLen(2))
 		Expect(verifier.policies[0].Keys[0].Name).To(Equal("cosign.pub"))
-		Expect(getProduct(name).Status.Source.Verified).To(Equal(&deliveryv1alpha1.SourceVerification{
+		Expect(getProduct(name).Status.Source.Verified).To(Equal(deliveryv1alpha1.SourceVerification{
 			Provider: deliveryv1alpha1.VerificationProviderCosign, KeyID: testKeyID,
 		}))
 		Expect(sourceVerifiedOf(name).Status).To(Equal(metav1.ConditionTrue))
@@ -308,7 +309,7 @@ var _ = Describe("Product Controller", func() {
 		create(name, deliveryv1alpha1.ProductSpec{
 			Source: deliveryv1alpha1.OCISource{
 				URL: testOCIRef, Version: testVersion,
-				Verify: &deliveryv1alpha1.OCISourceVerification{MatchOIDCIdentity: []deliveryv1alpha1.OIDCIdentityMatch{{
+				Verify: deliveryv1alpha1.OCISourceVerification{MatchOIDCIdentity: []deliveryv1alpha1.OIDCIdentityMatch{{
 					Issuer: "^https://token\\.actions\\.githubusercontent\\.com$", Subject: "^https://github\\.com/example/.*$",
 				}}},
 			},
@@ -321,7 +322,7 @@ var _ = Describe("Product Controller", func() {
 		Expect(result.RequeueAfter).To(BeNumerically(">", 0))
 		Expect(readyOf(name).Reason).To(Equal(deliveryv1alpha1.ReasonVerificationError))
 		Expect(sourceVerifiedOf(name).Status).To(Equal(metav1.ConditionFalse))
-		Expect(getProduct(name).Status.Source).To(BeNil())
+		Expect(getProduct(name).Status.Source).To(BeZero())
 		Expect(fake.Copies).To(BeEmpty(), "an unverified source is not vendored")
 
 		By("vendoring it with its signatures once it verifies")
@@ -344,7 +345,7 @@ var _ = Describe("Product Controller", func() {
 		DeferCleanup(func() { _ = k8sClient.Delete(ctx, secret) })
 		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{
 			URL: testOCIRef, Version: testVersion,
-			Verify: &deliveryv1alpha1.OCISourceVerification{SecretRef: &corev1.LocalObjectReference{Name: secretName}},
+			Verify: deliveryv1alpha1.OCISourceVerification{SecretRef: &corev1.LocalObjectReference{Name: secretName}},
 		}})
 		signature := "sha256:" + strings.Repeat("5", 64)
 		verifier.signer = &signingsource.Signer{KeyID: testKeyID}
@@ -358,7 +359,7 @@ var _ = Describe("Product Controller", func() {
 		Expect(reconcileProduct(name)).To(Succeed())
 
 		published := getProduct(name).Status.Source
-		Expect(published.Verified).To(BeNil())
+		Expect(published.Verified).To(BeZero())
 		Expect(published.Signatures).To(Equal([]deliveryv1alpha1.SignatureVerdict{{
 			Digest: signature, Subject: oci.FakeDigest, Result: deliveryv1alpha1.SignatureUntrustedSigner, Message: "signed by key key-id",
 		}}))
@@ -370,7 +371,7 @@ var _ = Describe("Product Controller", func() {
 		create(name, deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{URL: testOCIRef, Version: testVersion}})
 		signSource(testSigner)
 		Expect(reconcileProduct(name)).To(Succeed())
-		Expect(getProduct(name).Status.Source.Verified).NotTo(BeNil())
+		Expect(getProduct(name).Status.Source.Verified).NotTo(BeZero())
 
 		r.Registries = fakeRegistries(unlistableClient{fake})
 		Expect(reconcileProduct(name)).To(Succeed())
@@ -399,7 +400,7 @@ var _ = Describe("Product Controller", func() {
 		By("removing the key from the trusted keys")
 		r.Signing = testSigning
 		Expect(reconcileProduct(name)).To(Succeed())
-		Expect(getProduct(name).Status.Source.Verified).To(BeNil())
+		Expect(getProduct(name).Status.Source.Verified).To(BeZero())
 		Expect(sourceVerifiedOf(name)).To(BeNil())
 	})
 
@@ -439,7 +440,7 @@ var _ = Describe("Product Controller", func() {
 		Expect(reconcileProduct(name)).NotTo(Succeed())
 		Expect(readyOf(name).Status).To(Equal(metav1.ConditionFalse))
 		Expect(readyOf(name).Message).To(ContainSubstring("failed to resolve source digest"))
-		Expect(getProduct(name).Status.Source).To(BeNil())
+		Expect(getProduct(name).Status.Source).To(BeZero())
 	})
 
 	It("marks a spec change that keeps the source ready without vendoring again", func() {
@@ -486,7 +487,7 @@ var _ = Describe("Product Controller", func() {
 		Expect(result.RequeueAfter).To(BeNumerically(">", 0), "the status write is locked to the version that was resolved")
 
 		product := getProduct(name)
-		Expect(product.Status.Source).To(BeNil())
+		Expect(product.Status.Source).To(BeZero())
 		Expect(resolve.ProductReady(product)).To(BeFalse(), "Orders must not render the new spec over the old source")
 	})
 
@@ -556,7 +557,7 @@ var _ = Describe("Product Controller", func() {
 		Expect(reconcileProduct(name)).To(Succeed(), "the Registry watch reconciles it again")
 		Expect(readyOf(name).Status).To(Equal(metav1.ConditionFalse))
 		Expect(readyOf(name).Reason).To(Equal(deliveryv1alpha1.ReasonRegistryNotFound))
-		Expect(getProduct(name).Status.Source).To(BeNil())
+		Expect(getProduct(name).Status.Source).To(BeZero())
 	})
 
 	It("does not vendor a private source to a location without credentials", func() {
@@ -638,7 +639,7 @@ var _ = Describe("Product field indexes", func() {
 
 	DescribeTable("indexes a Product by the Secrets its source verification reads",
 		func(verify *deliveryv1alpha1.OCISourceVerification, want []string) {
-			product := &deliveryv1alpha1.Product{Spec: deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{Verify: verify}}}
+			product := &deliveryv1alpha1.Product{Spec: deliveryv1alpha1.ProductSpec{Source: deliveryv1alpha1.OCISource{Verify: ptr.Deref(verify, deliveryv1alpha1.OCISourceVerification{})}}}
 			Expect(productVerifySecrets(product)).To(Equal(want))
 		},
 		Entry("no verification", nil, nil),

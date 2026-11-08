@@ -52,7 +52,7 @@ type RegistrySpec struct {
 	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:Pattern=`^oci://[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?(:[0-9]+)?(/[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*)*$`
 	// +kubebuilder:validation:XValidation:rule="!self.matches('^oci://[^/]+:443(/|$)')",message="must not name the default port 443"
-	URL string `json:"url"`
+	URL string `json:"url,omitempty"`
 
 	// secretRef names a kubernetes.io/dockerconfigjson Secret in the
 	// Registry's namespace. Its entry for the host of url, matched as the
@@ -102,6 +102,7 @@ type RegistryStatus struct {
 	// observedGeneration is the most recent generation observed by the
 	// controller.
 	// +optional
+	// +kubebuilder:validation:Minimum=1
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }
 
@@ -140,15 +141,15 @@ type RegistryAccess struct {
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
-	URL string `json:"url"`
+	URL string `json:"url,omitempty"`
 
 	// operation is what client does there.
 	// +required
-	Operation RegistryOperation `json:"operation"`
+	Operation RegistryOperation `json:"operation,omitempty"`
 
 	// client is who accesses the location.
 	// +required
-	Client RegistryClient `json:"client"`
+	Client RegistryClient `json:"client,omitempty"`
 
 	// registry names the Registry whose connection Kokumi uses there. It is
 	// absent when Kokumi accesses the location anonymously, and for the
@@ -179,7 +180,7 @@ type Registry struct {
 
 	// spec defines the desired state of Registry
 	// +required
-	Spec RegistrySpec `json:"spec"`
+	Spec RegistrySpec `json:"spec,omitzero"`
 
 	// status defines the observed state of Registry
 	// +optional

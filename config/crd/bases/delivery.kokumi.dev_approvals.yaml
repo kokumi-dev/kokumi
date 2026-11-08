@@ -144,6 +144,8 @@ spec:
                     description: |-
                       uid is the UID of the Preparation. A recreated Preparation with the
                       same name does not inherit votes.
+                    maxLength: 36
+                    minLength: 1
                     type: string
                 required:
                 - artifactDigest
@@ -239,6 +241,7 @@ spec:
                 description: observedGeneration is the most recent generation observed
                   by the controller.
                 format: int64
+                minimum: 1
                 type: integer
             type: object
         required:

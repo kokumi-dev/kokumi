@@ -97,7 +97,7 @@ var _ = Describe("Cluster Controller", Ordered, func() {
 			Name: name, Namespace: namespace, Labels: map[string]string{fleet: testEdge},
 			Spec: deliveryv1alpha1.ClusterSpec{
 				Connection: deliveryv1alpha1.ClusterConnectionKubeconfig,
-				Kubeconfig: &deliveryv1alpha1.ClusterKubeconfig{SecretRef: deliveryv1alpha1.KubeconfigSecretReference{Name: secretName}},
+				Kubeconfig: deliveryv1alpha1.ClusterKubeconfig{SecretRef: deliveryv1alpha1.KubeconfigSecretReference{Name: secretName}},
 			},
 		})).To(Succeed())
 	}
@@ -105,8 +105,8 @@ var _ = Describe("Cluster Controller", Ordered, func() {
 		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Environment{
 			Name: envName, Namespace: namespace,
 			Spec: deliveryv1alpha1.EnvironmentSpec{
-				ClusterSelector: metav1.LabelSelector{MatchLabels: map[string]string{fleet: testEdge}},
-				Deployer:        deliveryv1alpha1.Deployer{Type: deliveryv1alpha1.DeployerTypeArgoCD, ArgoCD: &deliveryv1alpha1.ArgoCDDeployer{Project: "default"}},
+				ClusterSelector: &metav1.LabelSelector{MatchLabels: map[string]string{fleet: testEdge}},
+				Deployer:        deliveryv1alpha1.Deployer{Type: deliveryv1alpha1.DeployerTypeArgoCD, ArgoCD: deliveryv1alpha1.ArgoCDDeployer{Project: "default"}},
 			},
 		})).To(Succeed())
 	}
@@ -387,7 +387,7 @@ var _ = Describe("Cluster probes and mapping", func() {
 		named := func(namespace, name, secretName string) *deliveryv1alpha1.Cluster {
 			return &deliveryv1alpha1.Cluster{Name: name, Namespace: namespace, Spec: deliveryv1alpha1.ClusterSpec{
 				Connection: deliveryv1alpha1.ClusterConnectionKubeconfig,
-				Kubeconfig: &deliveryv1alpha1.ClusterKubeconfig{SecretRef: deliveryv1alpha1.KubeconfigSecretReference{Name: secretName}},
+				Kubeconfig: deliveryv1alpha1.ClusterKubeconfig{SecretRef: deliveryv1alpha1.KubeconfigSecretReference{Name: secretName}},
 			}}
 		}
 		r := &ClusterReconciler{Client: fake.NewClientBuilder().WithScheme(scheme.Scheme).
@@ -410,7 +410,7 @@ var _ = Describe("Cluster probes and mapping", func() {
 			labeled("eu", testWorkspace, testEdge), labeled("old", testWorkspace, testRetired), labeled("other", testKokumiNamespace, testEdge),
 		).Build()}
 		env := &deliveryv1alpha1.Environment{Name: testEdge, Namespace: testWorkspace, Spec: deliveryv1alpha1.EnvironmentSpec{
-			ClusterSelector: metav1.LabelSelector{MatchLabels: map[string]string{testFleet: testEdge}},
+			ClusterSelector: &metav1.LabelSelector{MatchLabels: map[string]string{testFleet: testEdge}},
 		}}
 
 		Expect(r.clustersOfEnvironment(ctx, env)).To(ConsistOf(HaveField("NamespacedName", types.NamespacedName{Namespace: testWorkspace, Name: "eu"})))

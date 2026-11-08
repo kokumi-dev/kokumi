@@ -102,7 +102,7 @@ func NewTrustSet(keys ...TrustedPublicKey) (*TrustSet, error) {
 // Kitchen has not published its key.
 func TrustSetForKitchen(kitchen *deliveryv1alpha1.Kitchen) (*TrustSet, error) {
 	var keys []TrustedPublicKey
-	if s := kitchen.Status.Signing; s != nil && s.PublicKey != "" {
+	if s := kitchen.Status.Signing; s.PublicKey != "" {
 		keys = append(keys, TrustedPublicKey{Name: CurrentKeyName, PEM: []byte(s.PublicKey)})
 	}
 	return NewTrustSet(append(keys, KitchenTrustedKeys(kitchen)...)...)
@@ -110,7 +110,7 @@ func TrustSetForKitchen(kitchen *deliveryv1alpha1.Kitchen) (*TrustSet, error) {
 
 // KitchenTrustedKeys returns the keys in the Kitchen's spec.signing.trustedKeys.
 func KitchenTrustedKeys(kitchen *deliveryv1alpha1.Kitchen) []TrustedPublicKey {
-	if kitchen == nil || kitchen.Spec.Signing == nil {
+	if kitchen == nil || len(kitchen.Spec.Signing.TrustedKeys) == 0 {
 		return nil
 	}
 

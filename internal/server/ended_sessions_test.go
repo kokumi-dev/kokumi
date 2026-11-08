@@ -197,17 +197,17 @@ func TestEventsStreamEndsWithItsSession(t *testing.T) {
 		})).Build()
 		mgr := &authManager{reader: c, apiReader: c, ns: testNS, logger: logr.Discard()}
 		admin := &deliveryv1alpha1.AdminUserConfig{
-			Enabled: true, Username: testUsername, SecretRef: &corev1.LocalObjectReference{Name: testSecret},
+			Enabled: new(true), Username: testUsername, SecretRef: &corev1.LocalObjectReference{Name: testSecret},
 		}
-		mgr.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: admin}))
+		mgr.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: *admin}))
 		done, _ := stream(t, mgr)
 
-		mgr.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: admin}))
+		mgr.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: *admin}))
 		stays(t, done, "the stream must stay open while the configuration still signs it in")
 
 		off := *admin
-		off.Enabled = false
-		mgr.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: &off}))
+		off.Enabled = new(false)
+		mgr.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: off}))
 		ends(t, done, "the stream must end when admin login is turned off")
 	})
 }

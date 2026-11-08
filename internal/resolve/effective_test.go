@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 )
@@ -25,7 +26,7 @@ func testProduct(render *deliveryv1alpha1.Render) *deliveryv1alpha1.Product {
 		Name: appName,
 		Spec: deliveryv1alpha1.ProductSpec{
 			Source: deliveryv1alpha1.OCISource{URL: "oci://registry/charts/app", Version: "1.0.0"},
-			Render: render,
+			Render: ptr.Deref(render, deliveryv1alpha1.Render{}),
 			Patches: []deliveryv1alpha1.Patch{
 				{Target: deliveryv1alpha1.PatchTarget{Kind: depKind, Name: appName}, Set: map[string]string{testPath: "1", pausedPath: "false"}},
 			},
@@ -36,7 +37,7 @@ func testProduct(render *deliveryv1alpha1.Render) *deliveryv1alpha1.Product {
 		},
 		Status: deliveryv1alpha1.ProductStatus{
 			ConfigHash: "sha256:product",
-			Source: &deliveryv1alpha1.ProductSourceStatus{
+			Source: deliveryv1alpha1.ProductSourceStatus{
 				URL:     "oci://mirror/charts/app",
 				Version: "1.0.0",
 				Digest:  sourceDigest,
@@ -123,7 +124,7 @@ func TestForProduct(t *testing.T) {
 
 	t.Run("fails while the Product source is not resolved", func(t *testing.T) {
 		product := testProduct(nil)
-		product.Status.Source = nil
+		product.Status.Source = deliveryv1alpha1.ProductSourceStatus{}
 
 		_, err := ForProduct(product, &deliveryv1alpha1.Order{})
 		require.Error(t, err)
@@ -281,6 +282,6 @@ func TestProductReady(t *testing.T) {
 	require.False(t, ProductReady(ready(2, 2, metav1.ConditionFalse)))
 
 	unresolved := ready(2, 2, metav1.ConditionTrue)
-	unresolved.Status.Source = nil
+	unresolved.Status.Source = deliveryv1alpha1.ProductSourceStatus{}
 	require.False(t, ProductReady(unresolved))
 }

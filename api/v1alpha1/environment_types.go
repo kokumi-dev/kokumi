@@ -33,16 +33,16 @@ type EnvironmentSpec struct {
 	// clusterSelector selects the Clusters of the Environment's namespace by
 	// their labels. {} selects every Cluster of the namespace.
 	// +required
-	ClusterSelector metav1.LabelSelector `json:"clusterSelector"`
+	ClusterSelector *metav1.LabelSelector `json:"clusterSelector,omitempty"`
 
 	// deployer is the engine that deploys to the Environment's clusters.
 	// +required
-	Deployer Deployer `json:"deployer"`
+	Deployer Deployer `json:"deployer,omitzero"`
 
 	// promotion configures what an Order must pass before it deploys to the
 	// Environment.
 	// +optional
-	Promotion *EnvironmentPromotion `json:"promotion,omitempty"`
+	Promotion EnvironmentPromotion `json:"promotion,omitzero"`
 }
 
 // DeployerType is an engine that deploys Preparations.
@@ -63,12 +63,12 @@ type Deployer struct {
 	// type is the engine: ArgoCD.
 	// +required
 	// +unionDiscriminator
-	Type DeployerType `json:"type"`
+	Type DeployerType `json:"type,omitempty"`
 
 	// argoCD configures the Argo CD Applications of the Environment.
 	// +optional
 	// +unionMember
-	ArgoCD *ArgoCDDeployer `json:"argoCD,omitempty"`
+	ArgoCD ArgoCDDeployer `json:"argoCD,omitzero"`
 }
 
 // ArgoCDDeployer configures the Argo CD Applications of an Environment.
@@ -81,7 +81,7 @@ type ArgoCDDeployer struct {
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
-	Project string `json:"project"`
+	Project string `json:"project,omitempty"`
 }
 
 // EnvironmentPromotion configures what an Order must pass before it deploys
@@ -106,13 +106,14 @@ type RequiredEnvironment struct {
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
-	Environment string `json:"environment"`
+	Environment string `json:"environment,omitempty"`
 
 	// minSoakSeconds is the least soakSeconds the Order must give its
 	// upstream Order of the Environment.
 	// +optional
 	// +kubebuilder:validation:Minimum=0
-	MinSoakSeconds int32 `json:"minSoakSeconds,omitempty"`
+	// +kubebuilder:default=0
+	MinSoakSeconds *int32 `json:"minSoakSeconds,omitempty"`
 }
 
 // EnvironmentStatus defines the observed state of Environment.
@@ -131,11 +132,12 @@ type EnvironmentStatus struct {
 	// observedGeneration is the most recent generation observed by the
 	// controller.
 	// +optional
+	// +kubebuilder:validation:Minimum=1
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// clusters counts the Clusters the Environment selects.
 	// +optional
-	Clusters *EnvironmentClusters `json:"clusters,omitempty"`
+	Clusters EnvironmentClusters `json:"clusters,omitzero"`
 }
 
 // EnvironmentClusters counts the Clusters an Environment selects.
@@ -144,12 +146,12 @@ type EnvironmentClusters struct {
 	// selects.
 	// +required
 	// +kubebuilder:validation:Minimum=0
-	Selected int32 `json:"selected"`
+	Selected *int32 `json:"selected,omitempty"`
 
 	// ready is how many of them are Ready.
 	// +required
 	// +kubebuilder:validation:Minimum=0
-	Ready int32 `json:"ready"`
+	Ready *int32 `json:"ready,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -176,7 +178,7 @@ type Environment struct {
 
 	// spec defines the desired state of Environment
 	// +required
-	Spec EnvironmentSpec `json:"spec"`
+	Spec EnvironmentSpec `json:"spec,omitzero"`
 
 	// status defines the observed state of Environment
 	// +optional

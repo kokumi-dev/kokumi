@@ -16,6 +16,7 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
@@ -67,7 +68,7 @@ func listApprovals(deps *apiDeps, field string) http.HandlerFunc {
 			if c := a.CreationTimestamp.Compare(b.CreationTimestamp.Time); c != 0 {
 				return c
 			}
-			if c := a.Spec.SubmittedTime.Compare(b.Spec.SubmittedTime.Time); c != 0 {
+			if c := ptr.Deref(a.Spec.SubmittedTime, metav1.MicroTime{}).Compare(ptr.Deref(b.Spec.SubmittedTime, metav1.MicroTime{}).Time); c != 0 {
 				return c
 			}
 			return strings.Compare(a.Name, b.Name)
@@ -145,7 +146,7 @@ func handleSubmitApproval(deps *apiDeps) http.HandlerFunc {
 			respondForbiddenOrError(w, err, "failed to get preparation")
 			return
 		}
-		policy := prep.ApprovalPolicy()
+		policy := prep.Spec.Promotion.ApprovalPolicy()
 		switch {
 		case policy == nil:
 			respondError(w, http.StatusConflict, "preparation does not require approval")
@@ -221,7 +222,7 @@ func rejectVote(prep *deliveryv1alpha1.Preparation, existing []deliveryv1alpha1.
 func newApproval(prep *deliveryv1alpha1.Preparation, existing []deliveryv1alpha1.Approval, id *Identity, decision deliveryv1alpha1.ApprovalDecision, comment string) *deliveryv1alpha1.Approval {
 	var groups []string
 	for _, g := range id.Groups {
-		if slices.Contains(prep.ApprovalPolicy().AllowedGroups, g) && !slices.Contains(groups, g) {
+		if slices.Contains(prep.Spec.Promotion.ApprovalPolicy().AllowedGroups, g) && !slices.Contains(groups, g) {
 			groups = append(groups, g)
 		}
 	}
@@ -258,7 +259,7 @@ func newApproval(prep *deliveryv1alpha1.Preparation, existing []deliveryv1alpha1
 			},
 			Decision:      decision,
 			Comment:       comment,
-			SubmittedTime: metav1.NewMicroTime(time.Now()),
+			SubmittedTime: new(metav1.NewMicroTime(time.Now())),
 		},
 	}
 }

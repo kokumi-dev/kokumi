@@ -81,7 +81,7 @@ func TestProductToDTO(t *testing.T) {
 
 	t.Run("a resolved Product has the revision its Orders render", func(t *testing.T) {
 		product := deliveryv1alpha1.Product{Name: testProduct, Status: deliveryv1alpha1.ProductStatus{
-			Source: &deliveryv1alpha1.ProductSourceStatus{URL: "oci://ghcr.io/org/app", Version: testSourceVersion, Digest: "sha256:" + strings.Repeat("1", 64)},
+			Source: deliveryv1alpha1.ProductSourceStatus{URL: "oci://ghcr.io/org/app", Version: testSourceVersion, Digest: "sha256:" + strings.Repeat("1", 64)},
 		}}
 		revision, err := resolve.ProductRevision(&product)
 		require.NoError(t, err)
@@ -220,8 +220,8 @@ func TestServingToDTO_history(t *testing.T) {
 		Name: prod, Namespace: shopNS,
 		Spec: deliveryv1alpha1.ServingSpec{OrderName: prod},
 		Status: deliveryv1alpha1.ServingStatus{History: []deliveryv1alpha1.DeploymentEntry{
-			{PreparationName: "prod-2", Digest: digest("2"), StartedTime: started},
-			{PreparationName: "prod-1", Digest: digest("1"), ProductRevision: digest("7"), StartedTime: started, HealthyTime: &healthy,
+			{PreparationName: "prod-2", Digest: digest("2"), StartedTime: new(started)},
+			{PreparationName: "prod-1", Digest: digest("1"), ProductRevision: digest("7"), StartedTime: new(started), HealthyTime: &healthy,
 				PromotionRecord: digest("a"), DeploymentRecord: digest("b")},
 		}},
 	}
@@ -240,8 +240,8 @@ func TestServingToDTO_history(t *testing.T) {
 }
 
 func TestOrderToDTO_upstreamStages(t *testing.T) {
-	stages := []deliveryv1alpha1.UpstreamStage{{Order: testStage, SoakSeconds: 3600}}
-	order := deliveryv1alpha1.Order{Spec: deliveryv1alpha1.OrderSpec{Promotion: &deliveryv1alpha1.PromotionSpec{After: stages}}}
+	stages := []deliveryv1alpha1.UpstreamStage{{Order: testStage, SoakSeconds: new(int32(3600))}}
+	order := deliveryv1alpha1.Order{Spec: deliveryv1alpha1.OrderSpec{Promotion: deliveryv1alpha1.PromotionSpec{After: stages}}}
 
 	dto := orderToDTO(order, "", nil)
 	require.Equal(t, []UpstreamStageDTO{{Order: testStage, SoakSeconds: 3600}}, dto.After)
@@ -253,9 +253,9 @@ func TestPreparationToDTO_gates(t *testing.T) {
 	revision := "sha256:" + strings.Repeat("7", 64)
 	prep := deliveryv1alpha1.Preparation{Spec: deliveryv1alpha1.PreparationSpec{
 		ProductRevision: revision,
-		Promotion: &deliveryv1alpha1.PromotionGates{
+		Promotion: deliveryv1alpha1.PromotionGates{
 			After:  []deliveryv1alpha1.UpstreamStage{{Order: testStage}},
-			Checks: &deliveryv1alpha1.PromotionChecks{Vulnerabilities: &deliveryv1alpha1.VulnerabilityCheck{MaxSeverity: deliveryv1alpha1.SeverityHigh}},
+			Checks: deliveryv1alpha1.PromotionChecks{Vulnerabilities: deliveryv1alpha1.VulnerabilityCheck{MaxSeverity: deliveryv1alpha1.SeverityHigh}},
 		},
 	}}
 

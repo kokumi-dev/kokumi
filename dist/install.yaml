@@ -152,6 +152,8 @@ spec:
                     description: |-
                       uid is the UID of the Preparation. A recreated Preparation with the
                       same name does not inherit votes.
+                    maxLength: 36
+                    minLength: 1
                     type: string
                 required:
                 - artifactDigest
@@ -247,6 +249,7 @@ spec:
                 description: observedGeneration is the most recent generation observed
                   by the controller.
                 format: int64
+                minimum: 1
                 type: integer
             type: object
         required:
@@ -460,6 +463,7 @@ spec:
                   observedGeneration is the most recent generation observed by the
                   controller.
                 format: int64
+                minimum: 1
                 type: integer
               server:
                 description: server is the URL of the cluster's API server.
@@ -657,6 +661,7 @@ spec:
                           minLength: 1
                           type: string
                         minSoakSeconds:
+                          default: 0
                           description: |-
                             minSoakSeconds is the least soakSeconds the Order must give its
                             upstream Order of the Environment.
@@ -770,6 +775,7 @@ spec:
                   observedGeneration is the most recent generation observed by the
                   controller.
                 format: int64
+                minimum: 1
                 type: integer
             type: object
         required:
@@ -865,6 +871,7 @@ spec:
                     minProperties: 1
                     properties:
                       enabled:
+                        default: false
                         description: |-
                           enabled turns the admin account on. When its Secret does not exist, the
                           controller then generates a password, writes its bcrypt hash into that
@@ -1163,6 +1170,7 @@ spec:
                 minProperties: 1
                 properties:
                   requireSourceVerification:
+                    default: false
                     description: |-
                       requireSourceVerification requires the source of every Product to
                       verify, either through the Product's spec.source.verify or by a
@@ -1284,6 +1292,7 @@ spec:
                 description: observedGeneration is the most recent generation observed
                   by the controller.
                 format: int64
+                minimum: 1
                 type: integer
               signing:
                 description: |-
@@ -1540,18 +1549,21 @@ spec:
                 - message: productRef is immutable
                   rule: self == oldSelf
               promotion:
-                description: promotion configures how new Preparations become active
-                  Servings.
-                minProperties: 1
+                allOf:
+                - minProperties: 1
+                - minProperties: 1
+                description: |-
+                  promotion configures how new Preparations become active Servings:
+                  the mode, and the gates a Preparation must pass first in either mode.
+                  The gates are copied into each Preparation when it is created, so a
+                  change produces a new Preparation, which needs fresh approvals.
                 properties:
                   after:
                     description: |-
-                      after lists the upstream stages: Orders in the same namespace, variants
-                      of the same Product, that must each have deployed their own
+                      after lists the upstream stages: Orders in the same namespace,
+                      variants of the same Product, that must each have deployed their own
                       Preparation of a Preparation's Product revision healthily, for their
-                      soakSeconds, before this Order deploys it. Like approvals, the stages
-                      are copied into each Preparation when it is created, so a change
-                      produces a new Preparation.
+                      soakSeconds, before it is deployed.
                     items:
                       description: |-
                         UpstreamStage is an Order that must deploy a Product revision before the
@@ -1564,6 +1576,7 @@ spec:
                           minLength: 1
                           type: string
                         soakSeconds:
+                          default: 0
                           description: |-
                             soakSeconds is how long the upstream Order must have run its
                             Preparation of the revision healthily, without interruption, before
@@ -1582,12 +1595,9 @@ spec:
                     x-kubernetes-list-type: map
                   approvals:
                     description: |-
-                      approvals configures an approval gate on the promoted artifact. When
-                      set, the Preparation is blocked from being served until enough
-                      distinct approvers from the listed groups have approved it, in both
-                      Automatic and Manual mode. When omitted, no approval gate applies.
-                      The policy is copied into each Preparation when it is created, so a
-                      change produces a new Preparation that needs fresh approvals.
+                      approvals is an approval gate: a Preparation is not served until
+                      enough distinct approvers from the listed groups have approved it.
+                      When omitted, no approval gate applies.
                     properties:
                       allowedGroups:
                         description: allowedGroups lists the groups whose members
@@ -1613,11 +1623,9 @@ spec:
                     type: object
                   checks:
                     description: |-
-                      checks configures checks a Preparation must pass before it is served,
-                      in both Automatic and Manual mode. Like approvals, they are copied
-                      into each Preparation when it is created, so a change produces a new
-                      Preparation. They hold new deployments only: a deployed Preparation
-                      that stops passing stays deployed.
+                      checks configures checks a Preparation must pass before it is
+                      served. They hold new deployments only: a deployed Preparation that
+                      stops passing stays deployed.
                     minProperties: 1
                     properties:
                       vulnerabilities:
@@ -1628,6 +1636,7 @@ spec:
                           the images it vendors.
                         properties:
                           ignoreUnfixed:
+                            default: false
                             description: ignoreUnfixed ignores vulnerabilities that
                               no version fixes yet.
                             type: boolean
@@ -1808,6 +1817,7 @@ spec:
                 description: observedGeneration is the most recent generation observed
                   by the controller
                 format: int64
+                minimum: 1
                 type: integer
               registryAccess:
                 description: |-
@@ -2138,8 +2148,10 @@ spec:
                 properties:
                   after:
                     description: |-
-                      after lists the upstream stages that must deploy the Preparation's
-                      Product revision first.
+                      after lists the upstream stages: Orders in the same namespace,
+                      variants of the same Product, that must each have deployed their own
+                      Preparation of a Preparation's Product revision healthily, for their
+                      soakSeconds, before it is deployed.
                     items:
                       description: |-
                         UpstreamStage is an Order that must deploy a Product revision before the
@@ -2152,6 +2164,7 @@ spec:
                           minLength: 1
                           type: string
                         soakSeconds:
+                          default: 0
                           description: |-
                             soakSeconds is how long the upstream Order must have run its
                             Preparation of the revision healthily, without interruption, before
@@ -2169,8 +2182,10 @@ spec:
                     - order
                     x-kubernetes-list-type: map
                   approvals:
-                    description: approvals is the approval policy the Preparation
-                      must satisfy.
+                    description: |-
+                      approvals is an approval gate: a Preparation is not served until
+                      enough distinct approvers from the listed groups have approved it.
+                      When omitted, no approval gate applies.
                     properties:
                       allowedGroups:
                         description: allowedGroups lists the groups whose members
@@ -2195,8 +2210,10 @@ spec:
                     - requiredApprovals
                     type: object
                   checks:
-                    description: checks are the promotion checks the Preparation must
-                      pass.
+                    description: |-
+                      checks configures checks a Preparation must pass before it is
+                      served. They hold new deployments only: a deployed Preparation that
+                      stops passing stays deployed.
                     minProperties: 1
                     properties:
                       vulnerabilities:
@@ -2207,6 +2224,7 @@ spec:
                           the images it vendors.
                         properties:
                           ignoreUnfixed:
+                            default: false
                             description: ignoreUnfixed ignores vulnerabilities that
                               no version fixes yet.
                             type: boolean
@@ -2319,6 +2337,7 @@ spec:
                     description: approvedCount is the number of eligible approvers
                       whose latest vote is Approve.
                     format: int32
+                    minimum: 0
                     type: integer
                   attestation:
                     description: attestation references the OCI artifact recording
@@ -2344,16 +2363,19 @@ spec:
                     description: ineligibleCount is the number of approvers not in
                       any allowed group.
                     format: int32
+                    minimum: 0
                     type: integer
                   rejectedCount:
                     description: rejectedCount is the number of eligible approvers
                       whose latest vote is Reject.
                     format: int32
+                    minimum: 0
                     type: integer
                   requiredApprovals:
                     description: requiredApprovals is the number of approvals required
                       by the policy.
                     format: int32
+                    minimum: 0
                     type: integer
                   sealedTime:
                     description: |-
@@ -2366,6 +2388,7 @@ spec:
                       submissionCount is the total number of Approvals for this Preparation,
                       including superseded ones.
                     format: int32
+                    minimum: 0
                     type: integer
                   votes:
                     description: |-
@@ -2534,6 +2557,7 @@ spec:
                 description: observedGeneration is the most recent generation observed
                   by the controller.
                 format: int64
+                minimum: 1
                 type: integer
             type: object
         required:
@@ -3173,6 +3197,7 @@ spec:
                 description: observedGeneration is the most recent generation observed
                   by the controller.
                 format: int64
+                minimum: 1
                 type: integer
               registryAccess:
                 description: |-
@@ -3885,6 +3910,7 @@ spec:
                   observedGeneration is the most recent generation observed by the
                   controller.
                 format: int64
+                minimum: 1
                 type: integer
             type: object
         required:
@@ -4058,6 +4084,7 @@ spec:
                   observedGeneration is the most recent generation observed by the
                   controller.
                 format: int64
+                minimum: 1
                 type: integer
             type: object
         required:
@@ -4421,6 +4448,7 @@ spec:
                 description: observedGeneration is the most recent generation observed
                   by the controller
                 format: int64
+                minimum: 1
                 type: integer
               targetPreparationName:
                 description: |-

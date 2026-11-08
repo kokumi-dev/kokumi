@@ -22,6 +22,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -32,6 +33,7 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -153,7 +155,7 @@ func (r *KitchenReconciler) reconcileSigningKey(ctx context.Context, kitchen *de
 	}
 
 	keyID := state.Signer.KeyID()
-	kitchen.Status.Signing = &deliveryv1alpha1.KitchenSigningStatus{KeyID: keyID, PublicKey: string(state.Signer.PublicKeyPEM())}
+	kitchen.Status.Signing = deliveryv1alpha1.KitchenSigningStatus{KeyID: keyID, PublicKey: string(state.Signer.PublicKeyPEM())}
 	conditions.MarkTrue(kitchen, deliveryv1alpha1.ConditionTypeSigningKeyReady, deliveryv1alpha1.ReasonKeyReady, "Signing key "+keyID+" loaded")
 	return nil
 }
@@ -199,7 +201,7 @@ func markReady(kitchen *deliveryv1alpha1.Kitchen, authErr error) {
 // silently disabling login.
 func (r *KitchenReconciler) reconcileAuth(ctx context.Context, kitchen *deliveryv1alpha1.Kitchen) error {
 	auth := kitchen.Spec.Auth
-	if auth == nil {
+	if reflect.ValueOf(auth).IsZero() {
 		return nil
 	}
 
@@ -212,7 +214,7 @@ func (r *KitchenReconciler) reconcileAuth(ctx context.Context, kitchen *delivery
 
 	// secretRefs are defaulted by CRD defaulting, so a missing ref is a
 	// configuration error.
-	if adminUser := auth.AdminUser; adminUser != nil && adminUser.Enabled {
+	if adminUser := auth.AdminUser; ptr.Deref(adminUser.Enabled, false) {
 		if adminUser.SecretRef == nil || adminUser.SecretRef.Name == "" {
 			return errors.New("admin credentials secretRef not set")
 		}
@@ -222,7 +224,7 @@ func (r *KitchenReconciler) reconcileAuth(ctx context.Context, kitchen *delivery
 	}
 
 	// The token signing key is validated at runtime by the server.
-	if oidc := auth.OIDC; oidc != nil && oidc.IssuerURL != "" && oidc.ClientID != "" {
+	if oidc := auth.OIDC; oidc.IssuerURL != "" && oidc.ClientID != "" {
 		if oidc.ClientSecretRef == nil || oidc.ClientSecretRef.Name == "" {
 			return errors.New("oidc client secretRef not set")
 		}

@@ -6,6 +6,9 @@ import (
 	"slices"
 	"strings"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
+
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 )
 
@@ -41,7 +44,7 @@ type Result struct {
 // sealed votes in its status are authoritative.
 func Evaluate(prep *deliveryv1alpha1.Preparation, approvals []deliveryv1alpha1.Approval) Result {
 	res := Result{Verdicts: make(map[string]Verdict, len(approvals))}
-	policy := prep.ApprovalPolicy()
+	policy := prep.Spec.Promotion.ApprovalPolicy()
 
 	if policy == nil {
 		res.Approved = true
@@ -72,8 +75,8 @@ func Evaluate(prep *deliveryv1alpha1.Preparation, approvals []deliveryv1alpha1.A
 	slices.SortFunc(matching, compareApprovals)
 
 	status := &deliveryv1alpha1.PreparationApprovalStatus{
-		RequiredApprovals: policy.RequiredApprovals,
-		SubmissionCount:   int32(min(len(approvals), math.MaxInt32)), //nolint:gosec // bounded by min
+		RequiredApprovals: new(policy.RequiredApprovals),
+		SubmissionCount:   new(int32(min(len(approvals), math.MaxInt32))), //nolint:gosec // bounded by min
 	}
 
 	var votes []deliveryv1alpha1.ApprovalVote
@@ -87,35 +90,37 @@ func Evaluate(prep *deliveryv1alpha1.Preparation, approvals []deliveryv1alpha1.A
 	}
 	status.Votes = votes
 
+	var approved, rejected, ineligible int32
 	var rejectedBy, approvedBy []string
 	for _, v := range votes {
 		if v.Result != deliveryv1alpha1.VoteResultCounted {
-			status.IneligibleCount++
+			ineligible++
 			continue
 		}
 		switch v.Decision {
 		case deliveryv1alpha1.ApprovalDecisionApprove:
-			status.ApprovedCount++
+			approved++
 			approvedBy = append(approvedBy, displayName(v))
 		case deliveryv1alpha1.ApprovalDecisionReject:
-			status.RejectedCount++
+			rejected++
 			rejectedBy = append(rejectedBy, displayName(v))
 		}
 	}
+	status.ApprovedCount, status.RejectedCount, status.IneligibleCount = &approved, &rejected, &ineligible
 	res.Status = status
 
 	switch {
-	case status.RejectedCount > 0:
+	case rejected > 0:
 		res.Reason = deliveryv1alpha1.ReasonChangesRequested
 		res.Message = "Changes requested by " + strings.Join(rejectedBy, ", ")
-	case status.ApprovedCount >= policy.RequiredApprovals:
+	case approved >= policy.RequiredApprovals:
 		res.Approved = true
 		res.Reason = deliveryv1alpha1.ReasonApproved
 		res.Message = fmt.Sprintf("%d of %d required approvals: approved by %s",
-			status.ApprovedCount, policy.RequiredApprovals, strings.Join(approvedBy, ", "))
+			approved, policy.RequiredApprovals, strings.Join(approvedBy, ", "))
 	default:
 		res.Reason = deliveryv1alpha1.ReasonAwaitingApprovals
-		res.Message = fmt.Sprintf("%d of %d required approvals", status.ApprovedCount, policy.RequiredApprovals)
+		res.Message = fmt.Sprintf("%d of %d required approvals", approved, policy.RequiredApprovals)
 	}
 	return res
 }
@@ -126,10 +131,10 @@ func IsSealed(prep *deliveryv1alpha1.Preparation) bool {
 }
 
 func sealedStatus(prep *deliveryv1alpha1.Preparation) *deliveryv1alpha1.PreparationApprovalStatus {
-	if prep.Status.Approval == nil || prep.Status.Approval.SealedTime == nil {
+	if prep.Status.Approval.SealedTime == nil {
 		return nil
 	}
-	return prep.Status.Approval
+	return &prep.Status.Approval
 }
 
 // evaluateOpen picks the latest vote per approver from the sorted approvals.
@@ -234,7 +239,7 @@ func compareApprovals(a, b *deliveryv1alpha1.Approval) int {
 	if c := a.CreationTimestamp.Compare(b.CreationTimestamp.Time); c != 0 {
 		return c
 	}
-	if c := a.Spec.SubmittedTime.Compare(b.Spec.SubmittedTime.Time); c != 0 {
+	if c := ptr.Deref(a.Spec.SubmittedTime, metav1.MicroTime{}).Compare(ptr.Deref(b.Spec.SubmittedTime, metav1.MicroTime{}).Time); c != 0 {
 		return c
 	}
 	return strings.Compare(a.Name, b.Name)

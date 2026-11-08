@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -679,7 +680,7 @@ func TestBuildTokenAuthenticatorAppliesTokenTTL(t *testing.T) {
 func authKitchen(auth *deliveryv1alpha1.KitchenAuth) *deliveryv1alpha1.Kitchen {
 	return &deliveryv1alpha1.Kitchen{
 		Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS,
-		Spec: deliveryv1alpha1.KitchenSpec{Auth: auth},
+		Spec: deliveryv1alpha1.KitchenSpec{Auth: ptr.Deref(auth, deliveryv1alpha1.KitchenAuth{})},
 	}
 }
 
@@ -696,7 +697,7 @@ func TestAuthManagerAdminCredentials(t *testing.T) {
 		return newAuthSecret(map[string][]byte{secretKeyPasswordHash: hash})
 	}
 	admin := &deliveryv1alpha1.AdminUserConfig{
-		Enabled:   true,
+		Enabled:   new(true),
 		Username:  testUsername,
 		SecretRef: &corev1.LocalObjectReference{Name: testSecret},
 	}
@@ -724,8 +725,8 @@ func TestAuthManagerAdminCredentials(t *testing.T) {
 		}).Build()
 		m := newManager(c)
 		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{
-			AdminUser: admin,
-			OIDC: &deliveryv1alpha1.OIDCConfig{
+			AdminUser: *admin,
+			OIDC: deliveryv1alpha1.OIDCConfig{
 				IssuerURL: testIssuerURL, ClientID: testClientID,
 				ClientSecretRef: &corev1.LocalObjectReference{Name: testOIDCSecret},
 			},
@@ -738,7 +739,7 @@ func TestAuthManagerAdminCredentials(t *testing.T) {
 		secret := adminSecret()
 		c := fake.NewClientBuilder().WithObjects(tokenSecret(), secret).Build()
 		m := newManager(c)
-		kitchen := authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: admin})
+		kitchen := authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: *admin})
 		m.reload(context.Background(), kitchen)
 		require.True(t, canSignIn(m))
 		session := adminSession(t, m)
@@ -754,7 +755,7 @@ func TestAuthManagerAdminCredentials(t *testing.T) {
 		secret := adminSecret()
 		c := fake.NewClientBuilder().WithObjects(tokenSecret(), secret).Build()
 		m := newManager(c)
-		kitchen := authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: admin})
+		kitchen := authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: *admin})
 		m.reload(context.Background(), kitchen)
 		session := adminSession(t, m)
 
@@ -774,7 +775,7 @@ func TestAuthManagerAdminCredentials(t *testing.T) {
 		secret := adminSecret()
 		c := fake.NewClientBuilder().WithObjects(tokenSecret(), secret).Build()
 		m := newManager(c)
-		kitchen := authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: admin})
+		kitchen := authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: *admin})
 		m.reload(context.Background(), kitchen)
 		require.True(t, canSignIn(m))
 
@@ -799,10 +800,10 @@ func TestAuthManagerAdminCredentials(t *testing.T) {
 		}).Build()
 		m := newManager(c)
 		disabled := *admin
-		disabled.Enabled = false
+		disabled.Enabled = new(false)
 		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{
-			AdminUser: &disabled,
-			OIDC: &deliveryv1alpha1.OIDCConfig{
+			AdminUser: disabled,
+			OIDC: deliveryv1alpha1.OIDCConfig{
 				IssuerURL: testIssuerURL, ClientID: testClientID,
 				ClientSecretRef: &corev1.LocalObjectReference{Name: testOIDCSecret},
 			},
@@ -814,14 +815,14 @@ func TestAuthManagerAdminCredentials(t *testing.T) {
 	t.Run("disabling the admin account stops admin login", func(t *testing.T) {
 		c := fake.NewClientBuilder().WithObjects(tokenSecret(), adminSecret()).Build()
 		m := newManager(c)
-		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: admin}))
+		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: *admin}))
 		require.True(t, canSignIn(m))
 
 		session := adminSession(t, m)
 
 		disabled := *admin
-		disabled.Enabled = false
-		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: &disabled}))
+		disabled.Enabled = new(false)
+		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: disabled}))
 		assert.False(t, canSignIn(m))
 		assert.Equal(t, http.StatusUnauthorized, protectedRequest(m, session), "the running admin session ends")
 	})
@@ -829,7 +830,7 @@ func TestAuthManagerAdminCredentials(t *testing.T) {
 	t.Run("removing adminUser stops admin login", func(t *testing.T) {
 		c := fake.NewClientBuilder().WithObjects(tokenSecret(), adminSecret()).Build()
 		m := newManager(c)
-		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: admin}))
+		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: *admin}))
 		require.True(t, canSignIn(m))
 
 		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{}))
@@ -847,7 +848,7 @@ func TestAuthManagerAdminCredentials(t *testing.T) {
 			},
 		}).Build()
 		m := newManager(c)
-		kitchen := authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: admin})
+		kitchen := authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: *admin})
 		m.reload(context.Background(), kitchen)
 		require.True(t, canSignIn(m))
 		session := adminSession(t, m)
@@ -869,7 +870,7 @@ func TestAuthManagerAdminCredentials(t *testing.T) {
 			},
 		}).Build()
 		m := newManager(c)
-		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: admin}))
+		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: *admin}))
 		require.True(t, canSignIn(m))
 
 		unreachable = true
@@ -884,8 +885,8 @@ func TestAuthManagerAdminCredentials(t *testing.T) {
 			"username":            []byte(testRootUser),
 		})).Build()
 		m := newManager(c)
-		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: &deliveryv1alpha1.AdminUserConfig{
-			Enabled:   true,
+		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: deliveryv1alpha1.AdminUserConfig{
+			Enabled:   new(true),
 			SecretRef: &corev1.LocalObjectReference{Name: testSecret},
 		}}))
 		assert.True(t, canSignIn(m), "an unset username falls back to %q", testUsername)
@@ -894,12 +895,12 @@ func TestAuthManagerAdminCredentials(t *testing.T) {
 	t.Run("a new username ends running admin sessions", func(t *testing.T) {
 		c := fake.NewClientBuilder().WithObjects(tokenSecret(), adminSecret()).Build()
 		m := newManager(c)
-		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: admin}))
+		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: *admin}))
 		session := adminSession(t, m)
 
 		renamed := *admin
 		renamed.Username = testRootUser
-		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: &renamed}))
+		m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: renamed}))
 		assert.Equal(t, http.StatusUnauthorized, protectedRequest(m, session))
 	})
 }
@@ -947,8 +948,8 @@ func TestAuthManagerWaitsForTheKitchen(t *testing.T) {
 	_, err = m.refreshSession(context.Background(), browserSession{refreshToken: session.refreshToken}, true)
 	assert.ErrorIs(t, err, errAuthUnavailable)
 
-	m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: &deliveryv1alpha1.AdminUserConfig{
-		Enabled: true, Username: testUsername, SecretRef: &corev1.LocalObjectReference{Name: testSecret},
+	m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{AdminUser: deliveryv1alpha1.AdminUserConfig{
+		Enabled: new(true), Username: testUsername, SecretRef: &corev1.LocalObjectReference{Name: testSecret},
 	}}))
 	res, err := m.signInAdmin(testUsername, testPassword)
 	require.NoError(t, err)

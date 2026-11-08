@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"sync"
 
+	"k8s.io/utils/ptr"
+
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 )
 
@@ -170,7 +172,7 @@ func (p *Provider) build(ctx context.Context) (State, error) {
 	return State{
 		Signer:                    signer,
 		Trust:                     trust,
-		RequireSourceVerification: kitchen != nil && kitchen.Spec.Signing != nil && kitchen.Spec.Signing.RequireSourceVerification,
+		RequireSourceVerification: kitchen != nil && ptr.Deref(kitchen.Spec.Signing.RequireSourceVerification, false),
 	}, nil
 }
 

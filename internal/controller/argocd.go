@@ -66,10 +66,7 @@ type argoCD struct {
 // outside its own namespace, and Kokumi writes them into it, so Kokumi
 // checks it, every time before it deploys.
 func (a *argoCD) Admit(ctx context.Context, env *deliveryv1alpha1.Environment) (admission, error) {
-	name := ""
-	if env.Spec.Deployer.ArgoCD != nil {
-		name = env.Spec.Deployer.ArgoCD.Project
-	}
+	name := env.Spec.Deployer.ArgoCD.Project
 	project := &unstructured.Unstructured{}
 	project.SetGroupVersionKind(argocd.AppProjectGroupVersionKind)
 	err := a.Get(ctx, client.ObjectKey{Namespace: argocd.Namespace, Name: name}, project)
@@ -99,10 +96,7 @@ func (a *argoCD) Apply(
 ) (targetState, error) {
 	logger := log.FromContext(ctx).WithValues("cluster", target.cluster, "preparation", deployed.Preparation)
 
-	project := ""
-	if env.Spec.Deployer.ArgoCD != nil {
-		project = env.Spec.Deployer.ArgoCD.Project
-	}
+	project := env.Spec.Deployer.ArgoCD.Project
 	desired, err := argocd.Application(serving, deployed.OCIRef, argocd.Target{
 		Cluster: target.cluster, Server: target.server, Namespace: target.namespace, Project: project,
 	})

@@ -44,10 +44,6 @@ linters:
               - statussubresource
               - statusoptional
             disable:
-              # TODO: add Minimum=1 to observedGeneration so it stays a value; the approval counts and some structs need omitzero.
-              - optionalfields
-              # TODO: mostly adds omitempty to required fields, and a pointer only where a zero value is still valid.
-              - requiredfields
               # nonpointerstructs is for types validated in Go, not for CRDs, which
               # optionalfields and requiredfields cover. It would mark every
               # optional omitzero struct with a required field as required.

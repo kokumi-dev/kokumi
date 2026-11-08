@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -186,7 +187,7 @@ func (m *authManager) tokenSecretName() string {
 // tokenSigningKeySecretName returns the configured token signing-key Secret
 // name (default when unset).
 func tokenSigningKeySecretName(kitchen *deliveryv1alpha1.Kitchen) string {
-	if kitchen != nil && kitchen.Spec.Auth != nil &&
+	if kitchen != nil &&
 		kitchen.Spec.Auth.TokenSigningKeySecretRef != nil &&
 		kitchen.Spec.Auth.TokenSigningKeySecretRef.Name != "" {
 		return kitchen.Spec.Auth.TokenSigningKeySecretRef.Name
@@ -202,13 +203,14 @@ func tokenSigningKeySecretName(kitchen *deliveryv1alpha1.Kitchen) string {
 func (m *authManager) reload(ctx context.Context, kitchen *deliveryv1alpha1.Kitchen) {
 	var adminCfg *deliveryv1alpha1.AdminUserConfig
 	var oidcCfg *deliveryv1alpha1.OIDCConfig
-	if kitchen != nil && kitchen.Spec.Auth != nil {
-		adminCfg = kitchen.Spec.Auth.AdminUser
-		oidcCfg = kitchen.Spec.Auth.OIDC
-	}
-	// A disabled admin account is as good as none: no Secret is read for it.
-	if adminCfg != nil && !adminCfg.Enabled {
-		adminCfg = nil
+	if kitchen != nil {
+		// A disabled admin account is as good as none: no Secret is read for it.
+		if ptr.Deref(kitchen.Spec.Auth.AdminUser.Enabled, false) {
+			adminCfg = &kitchen.Spec.Auth.AdminUser
+		}
+		if kitchen.Spec.Auth.OIDC.IssuerURL != "" {
+			oidcCfg = &kitchen.Spec.Auth.OIDC
+		}
 	}
 	tokenSecretName := tokenSigningKeySecretName(kitchen)
 

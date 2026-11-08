@@ -218,7 +218,7 @@ func (r *ProductReconciler) reconcileProduct(ctx context.Context, product *deliv
 		return ctrl.Result{}, err
 	}
 
-	if product.Status.ConfigHash == configHash && product.Status.Source != nil {
+	if product.Status.ConfigHash == configHash && product.Status.Source.Digest != "" {
 		return r.reverify(ctx, product, state, src, configHash)
 	}
 	return r.publish(ctx, product, state, src, configHash)
@@ -261,7 +261,7 @@ func (r *ProductReconciler) reverify(
 		return r.verificationFailed(ctx, product, err)
 	default:
 		published.Verified = check.verified
-		recordSignatures(published, product.Status.Source, check.signatures, time.Now())
+		recordSignatures(published, &product.Status.Source, check.signatures, time.Now())
 	}
 
 	markPublished(product, configHash, published)
@@ -298,7 +298,7 @@ func (r *ProductReconciler) publish(
 		Digest:   digest,
 		Verified: check.verified,
 	}
-	recordSignatures(published, product.Status.Source, check.signatures, time.Now())
+	recordSignatures(published, &product.Status.Source, check.signatures, time.Now())
 
 	if src.vendorURL != "" {
 		pinned, err := oci.Parse(src.url + "@" + digest)
@@ -324,7 +324,7 @@ func (r *ProductReconciler) publish(
 	}
 
 	markPublished(product, configHash, published)
-	logger.Info("Resolved Product source", "name", product.Name, "source", published.URL, "verified", published.Verified != nil)
+	logger.Info("Resolved Product source", "name", product.Name, "source", published.URL, "verified", published.Verified.Provider != "")
 	return ctrl.Result{}, nil
 }
 
@@ -333,7 +333,7 @@ func (r *ProductReconciler) publish(
 // SourceVerified condition reports published.verified, and is removed when
 // the source was not verified.
 func markPublished(product *deliveryv1alpha1.Product, configHash string, published *deliveryv1alpha1.ProductSourceStatus) {
-	product.Status.Source = published
+	product.Status.Source = *published
 	product.Status.ConfigHash = configHash
 
 	reason, msg := deliveryv1alpha1.ReasonResolved, "Source resolved"
@@ -342,12 +342,12 @@ func markPublished(product *deliveryv1alpha1.Product, configHash string, publish
 	}
 	conditions.MarkTrue(product, deliveryv1alpha1.ConditionTypeReady, reason, msg)
 
-	if published.Verified == nil {
+	if published.Verified.Provider == "" {
 		conditions.Remove(product, deliveryv1alpha1.ConditionTypeSourceVerified)
 		return
 	}
 	conditions.MarkTrue(product, deliveryv1alpha1.ConditionTypeSourceVerified, deliveryv1alpha1.ReasonSucceeded,
-		"Verified signature of "+verifiedSigner(published.Verified))
+		"Verified signature of "+verifiedSigner(&published.Verified))
 }
 
 // failed records that the Product's source could not be resolved and
@@ -383,8 +383,8 @@ func (r *ProductReconciler) verificationFailed(ctx context.Context, product *del
 	}
 
 	log.FromContext(ctx).Info("Product source did not verify", "reason", rejected.reason, "error", err.Error())
-	if published := product.Status.Source; published != nil {
-		published.Verified = nil
+	if published := &product.Status.Source; published.Digest != "" {
+		published.Verified = deliveryv1alpha1.SourceVerification{}
 		if rejected.checked != nil {
 			recordSignatures(published, published.DeepCopy(), *rejected.checked, time.Now())
 		}
@@ -420,9 +420,9 @@ func verifiedSigner(verified *deliveryv1alpha1.SourceVerification) string {
 
 // sourceCheck is the result of checking the signatures of a source.
 type sourceCheck struct {
-	// verified is who signed the source itself; nil when it is not
-	// verified.
-	verified *deliveryv1alpha1.SourceVerification
+	// verified is who signed the source itself; the zero value when it is
+	// not verified.
+	verified deliveryv1alpha1.SourceVerification
 	// signatures holds the verdict of every signature in the graph of the
 	// source.
 	signatures []deliveryv1alpha1.SignatureVerdict
@@ -440,7 +440,7 @@ func (r *ProductReconciler) verifySource(ctx context.Context, product *deliveryv
 		return nil, fmt.Errorf("parsing source reference: %w", err)
 	}
 
-	if verify := product.Spec.Source.Verify; verify != nil {
+	if verify := &product.Spec.Source.Verify; verifiesSource(product) {
 		policy, err := r.verificationPolicy(ctx, product.Namespace, verify)
 		if err != nil {
 			return nil, &errSourceRejected{reason: deliveryv1alpha1.ReasonVerificationError, err: err}
@@ -454,7 +454,7 @@ func (r *ProductReconciler) verifySource(ctx context.Context, product *deliveryv
 		}
 
 		check := newSourceCheck(report)
-		if check.verified == nil {
+		if check.verified.Provider == "" {
 			return nil, &errSourceRejected{
 				reason:  deliveryv1alpha1.ReasonVerificationError,
 				err:     fmt.Errorf("no signature of %s verifies against spec.source.verify%s", ref, describeVerdicts(report, ref.Digest)),
@@ -474,7 +474,7 @@ func (r *ProductReconciler) verifySource(ctx context.Context, product *deliveryv
 	}
 
 	check := newSourceCheck(report)
-	if check.verified == nil && state.RequireSourceVerification {
+	if check.verified.Provider == "" && state.RequireSourceVerification {
 		return nil, &errSourceRejected{
 			reason:  deliveryv1alpha1.ReasonVerificationRequired,
 			err:     fmt.Errorf("the Kitchen requires sources to verify, and the source sets no spec.source.verify and carries no signature by a trusted Kokumi key%s", describeVerdicts(report, ref.Digest)),
@@ -502,11 +502,12 @@ func newSourceCheck(report *signingsource.Report) *sourceCheck {
 // maxVerdictMessage is the longest message a SignatureVerdict records.
 const maxVerdictMessage = 1024
 
-func sourceVerification(signer *signingsource.Signer) *deliveryv1alpha1.SourceVerification {
+// sourceVerification records signer, the zero value when nothing verified.
+func sourceVerification(signer *signingsource.Signer) deliveryv1alpha1.SourceVerification {
 	if signer == nil {
-		return nil
+		return deliveryv1alpha1.SourceVerification{}
 	}
-	return &deliveryv1alpha1.SourceVerification{
+	return deliveryv1alpha1.SourceVerification{
 		Provider: deliveryv1alpha1.VerificationProviderCosign,
 		KeyID:    signer.KeyID,
 		Issuer:   signer.Issuer,
@@ -672,7 +673,7 @@ func productRegistryNames(obj client.Object) []string {
 // reads, for productVerifySecretsField.
 func productVerifySecrets(obj client.Object) []string {
 	product, ok := obj.(*deliveryv1alpha1.Product)
-	if !ok || product.Spec.Source.Verify == nil {
+	if !ok || !verifiesSource(product) {
 		return nil
 	}
 	verify := product.Spec.Source.Verify
@@ -785,4 +786,11 @@ func (r *ProductReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Named("product").
 		WithOptions(controller.Options{MaxConcurrentReconciles: productConcurrency}).
 		Complete(r)
+}
+
+// verifiesSource reports whether product sets spec.source.verify, which
+// names either a Secret of public keys or keyless identities.
+func verifiesSource(product *deliveryv1alpha1.Product) bool {
+	verify := &product.Spec.Source.Verify
+	return verify.SecretRef != nil || len(verify.MatchOIDCIdentity) > 0
 }

@@ -119,7 +119,7 @@ var _ = Describe("Preparation Controller", func() {
 			cond := apimeta.FindStatusCondition(preparation.Status.Conditions, deliveryv1alpha1.ConditionTypeApproved)
 			Expect(cond).NotTo(BeNil())
 			Expect(cond.Reason).To(Equal(deliveryv1alpha1.ReasonApprovalNotRequired))
-			Expect(preparation.Status.Approval).To(BeNil())
+			Expect(preparation.Status.Approval).To(BeZero())
 		})
 	})
 
@@ -325,7 +325,7 @@ var _ = Describe("Preparation Controller", func() {
 		It("aggregates the latest votes into the Approved condition", func() {
 			prep := setup(2)
 			Expect(approvedReason(prep)).To(Equal(deliveryv1alpha1.ReasonAwaitingApprovals))
-			Expect(prep.Status.Approval.RequiredApprovals).To(Equal(int32(2)))
+			Expect(prep.Status.Approval.RequiredApprovals).To(HaveValue(Equal(int32(2))))
 
 			createTestApproval(ctx, prep, "alice", release, deliveryv1alpha1.ApprovalDecisionApprove)
 			createTestApproval(ctx, prep, "bob", release, deliveryv1alpha1.ApprovalDecisionReject)
@@ -334,10 +334,10 @@ var _ = Describe("Preparation Controller", func() {
 
 			prep = getPrep()
 			Expect(approvedReason(prep)).To(Equal(deliveryv1alpha1.ReasonChangesRequested))
-			Expect(prep.Status.Approval.ApprovedCount).To(Equal(int32(1)))
-			Expect(prep.Status.Approval.RejectedCount).To(Equal(int32(1)))
-			Expect(prep.Status.Approval.IneligibleCount).To(Equal(int32(1)))
-			Expect(prep.Status.Approval.SubmissionCount).To(Equal(int32(3)))
+			Expect(prep.Status.Approval.ApprovedCount).To(HaveValue(Equal(int32(1))))
+			Expect(prep.Status.Approval.RejectedCount).To(HaveValue(Equal(int32(1))))
+			Expect(prep.Status.Approval.IneligibleCount).To(HaveValue(Equal(int32(1))))
+			Expect(prep.Status.Approval.SubmissionCount).To(HaveValue(Equal(int32(3))))
 
 			createTestApproval(ctx, prep, "bob", release, deliveryv1alpha1.ApprovalDecisionApprove)
 			Expect(reconcilePrep()).To(Succeed())
@@ -355,13 +355,13 @@ var _ = Describe("Preparation Controller", func() {
 			Expect(reconcilePrep()).To(Succeed())
 			prep = getPrep()
 			Expect(prep.Status.Approval.SealedTime).NotTo(BeNil())
-			Expect(prep.Status.Approval.Attestation).To(BeNil(), "the votes are sealed before they are archived")
+			Expect(prep.Status.Approval.Attestation).To(BeZero(), "the votes are sealed before they are archived")
 			Expect(referrersOfPredicate(fakeOCI, approval.AttestationPredicateType)).To(BeEmpty())
 
 			By("archiving them in the pass the seal triggers")
 			Expect(reconcilePrep()).To(Succeed())
 			prep = getPrep()
-			Expect(prep.Status.Approval.Attestation).NotTo(BeNil())
+			Expect(prep.Status.Approval.Attestation).NotTo(BeZero())
 			Expect(apimeta.IsStatusConditionTrue(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeApprovalsSealed)).To(BeTrue())
 			approvals := referrersOfPredicate(fakeOCI, approval.AttestationPredicateType)
 			Expect(approvals).To(HaveLen(1))
@@ -399,7 +399,7 @@ var _ = Describe("Preparation Controller", func() {
 			Expect(reconcilePrep()).To(Succeed())
 			prep = getPrep()
 			Expect(prep.Status.Approval.SealedTime).To(Equal(sealedTime))
-			Expect(prep.Status.Approval.Attestation).NotTo(BeNil())
+			Expect(prep.Status.Approval.Attestation).NotTo(BeZero())
 			Expect(apimeta.IsStatusConditionTrue(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeApprovalsSealed)).To(BeTrue())
 		})
 	})
@@ -476,7 +476,7 @@ func createTestPreparation(ctx context.Context, name, orderName, digest string, 
 		},
 	}
 	if policy != nil {
-		prep.Spec.Promotion = &deliveryv1alpha1.PromotionGates{Approvals: policy}
+		prep.Spec.Promotion = deliveryv1alpha1.PromotionGates{Approvals: *policy}
 	}
 	Expect(k8sClient.Create(ctx, prep)).To(Succeed())
 	return prep

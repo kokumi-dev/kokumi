@@ -95,7 +95,7 @@ func TestAuthManagerOIDCNeedsTheSigningKey(t *testing.T) {
 		Data: map[string][]byte{secretKeyClientSecret: []byte(testClientSec)},
 	}).Build()
 	m := &authManager{reader: client, apiReader: client, ns: testNS, logger: logr.Discard()}
-	m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{OIDC: &deliveryv1alpha1.OIDCConfig{
+	m.reload(context.Background(), authKitchen(&deliveryv1alpha1.KitchenAuth{OIDC: deliveryv1alpha1.OIDCConfig{
 		IssuerURL:       testIssuerURL,
 		ClientID:        testClientID,
 		ClientSecretRef: &corev1.LocalObjectReference{Name: testOIDCSecret},
@@ -262,13 +262,13 @@ func TestAuthManagerReloadWithKitchenOIDC(t *testing.T) {
 	kitchen := &deliveryv1alpha1.Kitchen{
 		Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS,
 		Spec: deliveryv1alpha1.KitchenSpec{
-			Auth: &deliveryv1alpha1.KitchenAuth{
-				AdminUser: &deliveryv1alpha1.AdminUserConfig{
-					Enabled:   true,
+			Auth: deliveryv1alpha1.KitchenAuth{
+				AdminUser: deliveryv1alpha1.AdminUserConfig{
+					Enabled:   new(true),
 					Username:  testUsername,
 					SecretRef: &corev1.LocalObjectReference{Name: testSecret},
 				},
-				OIDC: &deliveryv1alpha1.OIDCConfig{
+				OIDC: deliveryv1alpha1.OIDCConfig{
 					IssuerURL:       testIssuerURL,
 					ClientID:        testClientID,
 					ClientSecretRef: &corev1.LocalObjectReference{Name: testOIDCSecret},
@@ -287,8 +287,8 @@ func TestAuthManagerReloadWithKitchenOIDC(t *testing.T) {
 	oidcKitchen := &deliveryv1alpha1.Kitchen{
 		Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS,
 		Spec: deliveryv1alpha1.KitchenSpec{
-			Auth: &deliveryv1alpha1.KitchenAuth{
-				OIDC: &deliveryv1alpha1.OIDCConfig{
+			Auth: deliveryv1alpha1.KitchenAuth{
+				OIDC: deliveryv1alpha1.OIDCConfig{
 					IssuerURL:       httpSrv.URL,
 					ClientID:        testClientID,
 					ClientSecretRef: &corev1.LocalObjectReference{Name: testOIDCSecret},
@@ -355,8 +355,8 @@ func TestHandleLoginForbiddenWithoutAdmin(t *testing.T) {
 	kitchen := &deliveryv1alpha1.Kitchen{
 		Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS,
 		Spec: deliveryv1alpha1.KitchenSpec{
-			Auth: &deliveryv1alpha1.KitchenAuth{
-				OIDC: &deliveryv1alpha1.OIDCConfig{
+			Auth: deliveryv1alpha1.KitchenAuth{
+				OIDC: deliveryv1alpha1.OIDCConfig{
 					IssuerURL:       testIssuerURL,
 					ClientID:        testClientID,
 					ClientSecretRef: &corev1.LocalObjectReference{Name: testOIDCSecret},
@@ -500,8 +500,8 @@ func TestAuthManagerReloadKeepsDiscoveredIssuer(t *testing.T) {
 	kitchen := func(issuerURL string, scopes ...string) *deliveryv1alpha1.Kitchen {
 		return &deliveryv1alpha1.Kitchen{
 			Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNS,
-			Spec: deliveryv1alpha1.KitchenSpec{Auth: &deliveryv1alpha1.KitchenAuth{
-				OIDC: &deliveryv1alpha1.OIDCConfig{
+			Spec: deliveryv1alpha1.KitchenSpec{Auth: deliveryv1alpha1.KitchenAuth{
+				OIDC: deliveryv1alpha1.OIDCConfig{
 					IssuerURL:       issuerURL,
 					ClientID:        testClientID,
 					ClientSecretRef: &corev1.LocalObjectReference{Name: testOIDCSecret},

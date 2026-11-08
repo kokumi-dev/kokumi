@@ -249,8 +249,8 @@ func (r *OrderReconciler) reconcileOrder(ctx context.Context, order *deliveryv1a
 	// retried at once, after the back-off of the returned error, and keeps
 	// reporting its failure meanwhile; a patch that does not apply is not
 	// retried (see renderFailed).
-	if render := order.Status.Render; render == nil || render.ConfigHash != specHash {
-		order.Status.Render = &deliveryv1alpha1.OrderRender{ConfigHash: specHash}
+	if order.Status.Render.ConfigHash != specHash {
+		order.Status.Render = deliveryv1alpha1.OrderRender{ConfigHash: specHash}
 		conditions.MarkUnknown(order, deliveryv1alpha1.ConditionTypeReady, deliveryv1alpha1.ReasonProcessing, "Processing component configuration")
 		return ctrl.Result{}, nil
 	}
@@ -261,7 +261,7 @@ func (r *OrderReconciler) reconcileOrder(ctx context.Context, order *deliveryv1a
 // pipelineProblem says why the upstream stages of the Order do not form a
 // valid pipeline with the Orders of its namespace, "" when they do.
 func (r *OrderReconciler) pipelineProblem(ctx context.Context, order *deliveryv1alpha1.Order) (string, error) {
-	if len(order.UpstreamStages()) == 0 {
+	if len(order.Spec.Promotion.After) == 0 {
 		return "", nil
 	}
 	orders := &deliveryv1alpha1.OrderList{}
@@ -351,7 +351,7 @@ func (r *OrderReconciler) reconcileUpToDate(
 ) error {
 	log.FromContext(ctx).V(4).Info("Configuration is up-to-date, skipping render")
 	// A render of another intent that failed is not wanted any longer.
-	order.Status.Render = nil
+	order.Status.Render = deliveryv1alpha1.OrderRender{}
 
 	latest, err := r.latestPreparation(ctx, order)
 	if err != nil {
@@ -448,7 +448,7 @@ func (r *OrderReconciler) render(
 	order.Status.LatestConfigHash = specHash
 	order.Status.LatestPreparationName = preparation.Name
 	order.Status.LatestArtifactDigest = result.DestRef.Digest
-	order.Status.Render = nil
+	order.Status.Render = deliveryv1alpha1.OrderRender{}
 	r.markUpToDate(ctx, order, effective, conns, preparation)
 	return ctrl.Result{}, nil
 }
@@ -811,8 +811,8 @@ func orderUpstreamNames(obj client.Object) []string {
 	if !ok {
 		return nil
 	}
-	names := make([]string, 0, len(order.UpstreamStages()))
-	for _, stage := range order.UpstreamStages() {
+	names := make([]string, 0, len(order.Spec.Promotion.After))
+	for _, stage := range order.Spec.Promotion.After {
 		names = append(names, stage.Order)
 	}
 	return names
@@ -929,7 +929,7 @@ var renderStarted = predicate.Funcs{
 // renderHash returns the config hash of the render obj, an Order, records
 // in progress, "" when it records none.
 func renderHash(obj client.Object) string {
-	if order, ok := obj.(*deliveryv1alpha1.Order); ok && order.Status.Render != nil {
+	if order, ok := obj.(*deliveryv1alpha1.Order); ok {
 		return order.Status.Render.ConfigHash
 	}
 	return ""

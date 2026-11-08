@@ -73,17 +73,17 @@ type KitchenSpec struct {
 	// may be active at once. With neither, no one can sign in and the API
 	// refuses every request.
 	// +optional
-	Auth *KitchenAuth `json:"auth,omitempty"`
+	Auth KitchenAuth `json:"auth,omitzero"`
 
 	// signing configures which keys Kokumi trusts besides its own signing
 	// key, and whether the source of every Product must verify.
 	// +optional
-	Signing *KitchenSigning `json:"signing,omitempty"`
+	Signing KitchenSigning `json:"signing,omitzero"`
 
 	// images configures how Kokumi reaches the registries of the container
 	// images that rendered manifests reference.
 	// +optional
-	Images *KitchenImages `json:"images,omitempty"`
+	Images KitchenImages `json:"images,omitzero"`
 
 	// scanning enables scanning the images Products vendor for
 	// vulnerabilities. When unset, nothing is scanned. An empty object
@@ -221,7 +221,7 @@ type ImageMirror struct {
 	// +kubebuilder:validation:MaxLength=255
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.:]*[a-z0-9])?(/[a-z0-9]+([._-][a-z0-9]+)*)*$`
 	// +kubebuilder:validation:XValidation:rule="self.matches('^(localhost|[^/]*[.:][^/]*)(/|$)')",message="must start with a registry host, such as docker.io"
-	Prefix string `json:"prefix"`
+	Prefix string `json:"prefix,omitempty"`
 
 	// location is the oci:// URL the prefix is replaced with, for example
 	// "oci://harbor.example.com/dockerhub" for a pull-through cache.
@@ -231,7 +231,7 @@ type ImageMirror struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() == 'oci'",message="must be a valid OCI URL"
-	Location string `json:"location"`
+	Location string `json:"location,omitempty"`
 }
 
 // KitchenSigning configures the trust of the Kitchen. The signing key itself
@@ -253,7 +253,8 @@ type KitchenSigning struct {
 	// signature from a key the Kitchen trusts. A Product whose source does
 	// not verify is not ready, and its Orders render nothing.
 	// +optional
-	RequireSourceVerification bool `json:"requireSourceVerification,omitempty"`
+	// +kubebuilder:default=false
+	RequireSourceVerification *bool `json:"requireSourceVerification,omitempty"`
 }
 
 // TrustedKey is a public key Kokumi trusts for its own artifacts.
@@ -263,14 +264,14 @@ type TrustedKey struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
-	Name string `json:"name"`
+	Name string `json:"name,omitempty"`
 
 	// publicKey is the PEM-encoded public key, as in cosign.pub.
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=4096
 	// +kubebuilder:validation:XValidation:rule="self.startsWith('-----BEGIN PUBLIC KEY-----')",message="must be a PEM-encoded public key"
-	PublicKey string `json:"publicKey"`
+	PublicKey string `json:"publicKey,omitempty"`
 }
 
 // KitchenAuth groups the authentication configuration for the Kitchen server.
@@ -279,14 +280,14 @@ type KitchenAuth struct {
 	// adminUser configures the built-in admin account for UI login. It is off
 	// unless enabled.
 	// +optional
-	AdminUser *AdminUserConfig `json:"adminUser,omitempty"`
+	AdminUser AdminUserConfig `json:"adminUser,omitzero"`
 
 	// oidc configures an external OpenID Connect identity provider for UI
 	// login. When set, the login page offers an SSO button alongside (or
 	// instead of) the admin account, depending on whether adminUser is also
 	// enabled.
 	// +optional
-	OIDC *OIDCConfig `json:"oidc,omitempty"`
+	OIDC OIDCConfig `json:"oidc,omitzero"`
 
 	// tokenSigningKeySecretRef points to the Secret holding the HMAC signing
 	// key (key "signing-key") used to sign all session tokens, for both admin
@@ -308,7 +309,8 @@ type AdminUserConfig struct {
 	// Secret and the password into the Secret "kokumi-initial-admin".
 	// Defaults to false.
 	// +optional
-	Enabled bool `json:"enabled,omitempty"`
+	// +kubebuilder:default=false
+	Enabled *bool `json:"enabled,omitempty"`
 
 	// username is the login name for the admin account. Defaults to "admin".
 	// +kubebuilder:validation:MinLength=1
@@ -337,13 +339,13 @@ type OIDCConfig struct {
 	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() in ['http', 'https']",message="must be a valid http or https URL"
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
-	IssuerURL string `json:"issuerURL"`
+	IssuerURL string `json:"issuerURL,omitempty"`
 
 	// clientID is the OAuth2/OIDC client identifier registered with the issuer.
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=255
-	ClientID string `json:"clientID"`
+	ClientID string `json:"clientID,omitempty"`
 
 	// clientSecretRef points to the Secret holding the OAuth2 client secret in
 	// the "client-secret" key. The Secret must reside in the same namespace as
@@ -432,12 +434,13 @@ type KitchenStatus struct {
 
 	// observedGeneration is the most recent generation observed by the controller.
 	// +optional
+	// +kubebuilder:validation:Minimum=1
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// signing publishes the public half of the signing key. Absent until the
 	// controller has loaded the key.
 	// +optional
-	Signing *KitchenSigningStatus `json:"signing,omitempty"`
+	Signing KitchenSigningStatus `json:"signing,omitzero"`
 }
 
 // KitchenSigningStatus is the public half of the Kitchen signing key.
@@ -447,7 +450,7 @@ type KitchenSigningStatus struct {
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=64
-	KeyID string `json:"keyID"`
+	KeyID string `json:"keyID,omitempty"`
 
 	// publicKey is the PEM-encoded public key, as in cosign.pub. It verifies
 	// every artifact and attestation Kokumi writes, for example with
@@ -455,7 +458,7 @@ type KitchenSigningStatus struct {
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=4096
-	PublicKey string `json:"publicKey"`
+	PublicKey string `json:"publicKey,omitempty"`
 }
 
 // +kubebuilder:object:root=true

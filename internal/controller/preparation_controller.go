@@ -145,7 +145,7 @@ func (r *PreparationReconciler) reconcilePreparation(ctx context.Context, prepar
 	switch {
 	case !res.Required:
 		return ctrl.Result{}, nil
-	case approval.IsSealed(preparation) && preparation.Status.Approval.Attestation == nil:
+	case approval.IsSealed(preparation) && preparation.Status.Approval.Attestation.Digest == "":
 		return r.archive(ctx, preparation)
 	case approval.IsSealed(preparation), !res.Approved:
 		return ctrl.Result{}, nil
@@ -242,7 +242,7 @@ func (r *PreparationReconciler) seal(ctx context.Context, prep *deliveryv1alpha1
 
 	sealedTime := approval.NewSealTime(time.Now())
 	prep.Status.Approval.SealedTime = &sealedTime
-	prep.Status.Approval.Attestation = nil
+	prep.Status.Approval.Attestation = deliveryv1alpha1.ApprovalAttestation{}
 	conditions.MarkFalse(prep, deliveryv1alpha1.ConditionTypeApprovalsSealed, deliveryv1alpha1.ReasonArchiving,
 		"Recording the sealed approvals in the OCI registry")
 	log.FromContext(ctx).Info("Sealed Approvals", "preparation", prep.Name, "approvedCount", res.Status.ApprovedCount)
@@ -278,7 +278,7 @@ func (r *PreparationReconciler) archive(ctx context.Context, prep *deliveryv1alp
 		return ctrl.Result{}, fmt.Errorf("failed to archive Approvals: %w", err)
 	}
 
-	prep.Status.Approval.Attestation = &archived
+	prep.Status.Approval.Attestation = archived
 	conditions.MarkTrue(prep, deliveryv1alpha1.ConditionTypeApprovalsSealed, deliveryv1alpha1.ReasonSealed,
 		"Approvals sealed and recorded at "+archived.OCIRef)
 	logger.Info("Recorded approval attestation", "preparation", prep.Name, "attestation", archived.OCIRef)
@@ -414,9 +414,9 @@ func markEvidenceReady(prep *deliveryv1alpha1.Preparation) {
 // markApproval records the aggregated approval status and the Approved
 // condition.
 func markApproval(prep *deliveryv1alpha1.Preparation, res approval.Result) {
-	prep.Status.Approval = nil
+	prep.Status.Approval = deliveryv1alpha1.PreparationApprovalStatus{}
 	if res.Required {
-		prep.Status.Approval = res.Status.DeepCopy()
+		prep.Status.Approval = *res.Status.DeepCopy()
 	}
 	condStatus := metav1.ConditionFalse
 	if res.Approved {

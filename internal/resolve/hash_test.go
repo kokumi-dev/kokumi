@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/utils/ptr"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/resolve"
@@ -40,7 +41,7 @@ func resolvedProduct(render *deliveryv1alpha1.Render) *deliveryv1alpha1.Product 
 		Name: appName,
 		Spec: deliveryv1alpha1.ProductSpec{
 			Source: deliveryv1alpha1.OCISource{URL: hashSource, Version: hashVersion},
-			Render: render,
+			Render: ptr.Deref(render, deliveryv1alpha1.Render{}),
 			Overrides: deliveryv1alpha1.Overrides{
 				Values:  deliveryv1alpha1.ValueOverrides{Policy: deliveryv1alpha1.OverridePolicyAll},
 				Patches: deliveryv1alpha1.PatchOverrides{Policy: deliveryv1alpha1.OverridePolicyAll},
@@ -48,7 +49,7 @@ func resolvedProduct(render *deliveryv1alpha1.Render) *deliveryv1alpha1.Product 
 		},
 		Status: deliveryv1alpha1.ProductStatus{
 			ConfigHash: "sha256:product",
-			Source:     &deliveryv1alpha1.ProductSourceStatus{URL: hashSource, Version: hashVersion, Digest: hashDigest},
+			Source:     deliveryv1alpha1.ProductSourceStatus{URL: hashSource, Version: hashVersion, Digest: hashDigest},
 		},
 	}
 }
@@ -125,15 +126,15 @@ func TestCalculateSpecHash(t *testing.T) {
 
 	t.Run("key order of inline values is not hashed", func(t *testing.T) {
 		p := product()
-		p.Spec.Render = helmRender(`{"image": {"tag": "1.0.0"}, "replicaCount": 2}`)
+		p.Spec.Render = *helmRender(`{"image": {"tag": "1.0.0"}, "replicaCount": 2}`)
 		require.Equal(t, base, hashOf(t, p, order(), hashDest))
 	})
 
 	t.Run("large numbers in inline values are kept as written", func(t *testing.T) {
 		p := product()
-		p.Spec.Render = helmRender(`{"id":9007199254740993,"note":"<a&b>"}`)
+		p.Spec.Render = *helmRender(`{"id":9007199254740993,"note":"<a&b>"}`)
 		neighbour := product()
-		neighbour.Spec.Render = helmRender(`{"id":9007199254740992,"note":"<a&b>"}`)
+		neighbour.Spec.Render = *helmRender(`{"id":9007199254740992,"note":"<a&b>"}`)
 		require.NotEqual(t, hashOf(t, p, order(), hashDest), hashOf(t, neighbour, order(), hashDest))
 
 		canonical := canonicalOf(t, p, order(), hashDest)
@@ -143,7 +144,7 @@ func TestCalculateSpecHash(t *testing.T) {
 
 	t.Run("promotion mode is not hashed", func(t *testing.T) {
 		o := order()
-		o.Spec.Promotion = &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeAutomatic}
+		o.Spec.Promotion = deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeAutomatic}
 		require.Equal(t, base, hashOf(t, product(), o, hashDest))
 	})
 
@@ -167,8 +168,8 @@ func TestCalculateSpecHash(t *testing.T) {
 
 	t.Run("approval policy change produces different hash", func(t *testing.T) {
 		o := order()
-		o.Spec.Promotion = &deliveryv1alpha1.PromotionSpec{
-			Approvals: &deliveryv1alpha1.ApprovalPolicy{RequiredApprovals: 1},
+		o.Spec.Promotion = deliveryv1alpha1.PromotionSpec{
+			Approvals: deliveryv1alpha1.ApprovalPolicy{RequiredApprovals: 1},
 		}
 		one := hashOf(t, product(), o, hashDest)
 		require.NotEqual(t, base, one)
@@ -179,31 +180,27 @@ func TestCalculateSpecHash(t *testing.T) {
 
 	t.Run("upstream stages produce different hashes, in any order", func(t *testing.T) {
 		o := order()
-		o.Spec.Promotion = &deliveryv1alpha1.PromotionSpec{After: []deliveryv1alpha1.UpstreamStage{{Order: "staging"}}}
+		o.Spec.Promotion = deliveryv1alpha1.PromotionSpec{After: []deliveryv1alpha1.UpstreamStage{{Order: "staging"}}}
 		staging := hashOf(t, product(), o, hashDest)
 		require.NotEqual(t, base, staging)
 
-		o.Spec.Promotion.After[0].SoakSeconds = 3600
+		o.Spec.Promotion.After[0].SoakSeconds = new(int32(3600))
 		soaked := hashOf(t, product(), o, hashDest)
 		require.NotEqual(t, staging, soaked)
 
 		o.Spec.Promotion.After = append(o.Spec.Promotion.After, deliveryv1alpha1.UpstreamStage{Order: "qa"})
 		reversed := order()
-		reversed.Spec.Promotion = &deliveryv1alpha1.PromotionSpec{After: []deliveryv1alpha1.UpstreamStage{{Order: "qa"}, {Order: "staging", SoakSeconds: 3600}}}
+		reversed.Spec.Promotion = deliveryv1alpha1.PromotionSpec{After: []deliveryv1alpha1.UpstreamStage{{Order: "qa"}, {Order: "staging", SoakSeconds: new(int32(3600))}}}
 		require.Equal(t, hashOf(t, product(), o, hashDest), hashOf(t, product(), reversed, hashDest))
 	})
 
 	t.Run("promotion checks produce different hashes", func(t *testing.T) {
 		o := order()
-		o.Spec.Promotion = &deliveryv1alpha1.PromotionSpec{Checks: &deliveryv1alpha1.PromotionChecks{}}
-		empty := hashOf(t, product(), o, hashDest)
-		require.NotEqual(t, base, empty)
-
-		o.Spec.Promotion.Checks.Vulnerabilities = &deliveryv1alpha1.VulnerabilityCheck{MaxSeverity: deliveryv1alpha1.SeverityHigh}
+		o.Spec.Promotion.Checks.Vulnerabilities = deliveryv1alpha1.VulnerabilityCheck{MaxSeverity: deliveryv1alpha1.SeverityHigh}
 		high := hashOf(t, product(), o, hashDest)
-		require.NotEqual(t, empty, high)
+		require.NotEqual(t, base, high)
 
-		o.Spec.Promotion.Checks.Vulnerabilities.IgnoreUnfixed = true
+		o.Spec.Promotion.Checks.Vulnerabilities.IgnoreUnfixed = new(true)
 		require.NotEqual(t, high, hashOf(t, product(), o, hashDest))
 	})
 }
@@ -232,7 +229,7 @@ func TestCalculateSpecHash_product(t *testing.T) {
 
 	t.Run("product values change produces different hash", func(t *testing.T) {
 		p := product()
-		p.Spec.Render = helmRender(`{"replicaCount":3}`)
+		p.Spec.Render = *helmRender(`{"replicaCount":3}`)
 		require.NotEqual(t, base, hashOf(t, p, order, hashDest))
 	})
 
@@ -251,7 +248,7 @@ func TestCalculateSpecHash_product(t *testing.T) {
 
 	t.Run("product change the Order's values hide produces different hash", func(t *testing.T) {
 		p := product()
-		p.Spec.Render = helmRender(`{"replicaCount":1,"image":{"tag":"0.9.0"}}`)
+		p.Spec.Render = *helmRender(`{"replicaCount":1,"image":{"tag":"0.9.0"}}`)
 		require.Equal(t, canonicalRender(t, product(), order), canonicalRender(t, p, order), "the merged render is the same")
 		require.NotEqual(t, base, hashOf(t, p, order, hashDest), "the Product revision is not")
 	})
@@ -327,7 +324,7 @@ func TestIntent_golden(t *testing.T) {
 	product := resolvedProduct(&deliveryv1alpha1.Render{
 		Helm: &deliveryv1alpha1.HelmRender{
 			ReleaseName: name,
-			IncludeCRDs: true,
+			IncludeCRDs: new(true),
 			Values:      &apiextensionsv1.JSON{Raw: []byte(`{"replicaCount": 1, "image": {"tag": "1.0.0"}, "args": "a && <b>"}`)},
 		},
 	})
@@ -352,12 +349,12 @@ func TestIntent_golden(t *testing.T) {
 			Target: deliveryv1alpha1.PatchTarget{Kind: "Service", Name: name},
 			Set:    map[string]string{".spec.type": "ClusterIP"},
 		}},
-		Promotion: &deliveryv1alpha1.PromotionSpec{
+		Promotion: deliveryv1alpha1.PromotionSpec{
 			Mode:      deliveryv1alpha1.PromotionModeManual,
-			Approvals: &deliveryv1alpha1.ApprovalPolicy{RequiredApprovals: 2, AllowedGroups: []string{"release", "security"}},
-			After:     []deliveryv1alpha1.UpstreamStage{{Order: "podinfo-staging", SoakSeconds: 86400}, {Order: "podinfo-qa"}},
-			Checks: &deliveryv1alpha1.PromotionChecks{Vulnerabilities: &deliveryv1alpha1.VulnerabilityCheck{
-				MaxSeverity: deliveryv1alpha1.SeverityHigh, IgnoreUnfixed: true, MaxAgeSeconds: 172800,
+			Approvals: deliveryv1alpha1.ApprovalPolicy{RequiredApprovals: 2, AllowedGroups: []string{"release", "security"}},
+			After:     []deliveryv1alpha1.UpstreamStage{{Order: "podinfo-staging", SoakSeconds: new(int32(86400))}, {Order: "podinfo-qa"}},
+			Checks: deliveryv1alpha1.PromotionChecks{Vulnerabilities: deliveryv1alpha1.VulnerabilityCheck{
+				MaxSeverity: deliveryv1alpha1.SeverityHigh, IgnoreUnfixed: new(true), MaxAgeSeconds: 172800,
 			}},
 		},
 	})

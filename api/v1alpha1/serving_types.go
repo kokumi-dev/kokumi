@@ -29,7 +29,7 @@ type ServingSpec struct {
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
-	OrderName string `json:"orderName"`
+	OrderName string `json:"orderName,omitempty"`
 
 	// preparationName is the Preparation promoted for Manual promotion.
 	// It is ignored when the Order uses Automatic promotion.
@@ -52,6 +52,7 @@ type ServingStatus struct {
 
 	// observedGeneration is the most recent generation observed by the controller
 	// +optional
+	// +kubebuilder:validation:Minimum=1
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// targetPreparationName is the Preparation the Serving is converging to
@@ -78,7 +79,7 @@ type ServingStatus struct {
 	// clusters counts the clusters the Serving deploys to by the state of
 	// their deployment.
 	// +optional
-	Clusters *DeploymentClusters `json:"clusters,omitempty"`
+	Clusters DeploymentClusters `json:"clusters,omitzero"`
 
 	// targets are the clusters that do not run the deployed Preparation
 	// healthily, with what the engine reports on each: held clusters first,
@@ -95,7 +96,7 @@ type ServingStatus struct {
 	// deployed Preparation. It keeps changing after the deployment, as new
 	// vulnerabilities are published.
 	// +optional
-	DeployedVulnerabilities *VulnerabilitySummary `json:"deployedVulnerabilities,omitempty"`
+	DeployedVulnerabilities VulnerabilitySummary `json:"deployedVulnerabilities,omitzero"`
 }
 
 // DeploymentClusters counts the clusters a Serving deploys to by the state of
@@ -105,29 +106,29 @@ type DeploymentClusters struct {
 	// Order's Environment selects.
 	// +required
 	// +kubebuilder:validation:Minimum=0
-	Selected int32 `json:"selected"`
+	Selected *int32 `json:"selected,omitempty"`
 
 	// healthy is how many of them run the deployed Preparation healthily.
 	// +required
 	// +kubebuilder:validation:Minimum=0
-	Healthy int32 `json:"healthy"`
+	Healthy *int32 `json:"healthy,omitempty"`
 
 	// progressing is how many are deploying it.
 	// +required
 	// +kubebuilder:validation:Minimum=0
-	Progressing int32 `json:"progressing"`
+	Progressing *int32 `json:"progressing,omitempty"`
 
 	// degraded is how many run it degraded.
 	// +required
 	// +kubebuilder:validation:Minimum=0
-	Degraded int32 `json:"degraded"`
+	Degraded *int32 `json:"degraded,omitempty"`
 
 	// held is how many Kokumi cannot deploy to; their targets say why.
 	// Clusters that are not Ready are among them, and are left out of the
 	// Serving's health until they are Ready again.
 	// +required
 	// +kubebuilder:validation:Minimum=0
-	Held int32 `json:"held"`
+	Held *int32 `json:"held,omitempty"`
 }
 
 // DeploymentTarget is a cluster a Serving deploys to, with what the engine
@@ -147,7 +148,7 @@ type DeploymentTarget struct {
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
-	Cluster string `json:"cluster"`
+	Cluster string `json:"cluster,omitempty"`
 
 	// revision is the artifact digest the engine reports synced to the
 	// cluster.
@@ -179,20 +180,20 @@ type DeploymentEntry struct {
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
-	PreparationName string `json:"preparationName"`
+	PreparationName string `json:"preparationName,omitempty"`
 
 	// digest is the digest of the Preparation's artifact.
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
-	Digest string `json:"digest"`
+	Digest string `json:"digest,omitempty"`
 
 	// ociRef is the full OCI reference of the artifact, including digest.
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
-	OCIRef string `json:"ociRef"`
+	OCIRef string `json:"ociRef,omitempty"`
 
 	// registryRef names the Registry that pushed the artifact, through which
 	// its records are read.
@@ -204,11 +205,11 @@ type DeploymentEntry struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
-	ProductRevision string `json:"productRevision"`
+	ProductRevision string `json:"productRevision,omitempty"`
 
 	// startedTime is when the Preparation passed its gates, or recovered.
 	// +required
-	StartedTime metav1.Time `json:"startedTime"`
+	StartedTime *metav1.Time `json:"startedTime,omitempty"`
 
 	// healthyTime is when Argo CD first reported the deployment synced and
 	// healthy at the digest.
@@ -267,7 +268,7 @@ type Serving struct {
 
 	// spec defines the desired state of Serving
 	// +required
-	Spec ServingSpec `json:"spec"`
+	Spec ServingSpec `json:"spec,omitzero"`
 
 	// status defines the observed state of Serving
 	// +optional

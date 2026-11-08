@@ -49,12 +49,12 @@ type ClusterSpec struct {
 	// Kokumi runs in, or Kubeconfig, the kubeconfig in a Secret.
 	// +required
 	// +unionDiscriminator
-	Connection ClusterConnection `json:"connection"`
+	Connection ClusterConnection `json:"connection,omitempty"`
 
 	// kubeconfig names the Secret that holds the cluster's kubeconfig.
 	// +optional
 	// +unionMember
-	Kubeconfig *ClusterKubeconfig `json:"kubeconfig,omitempty"`
+	Kubeconfig ClusterKubeconfig `json:"kubeconfig,omitzero"`
 }
 
 // ClusterKubeconfig names the Secret that holds the kubeconfig of a cluster.
@@ -65,7 +65,7 @@ type ClusterKubeconfig struct {
 	// inline. Exec plugins, auth providers and file references are not
 	// supported.
 	// +required
-	SecretRef KubeconfigSecretReference `json:"secretRef"`
+	SecretRef KubeconfigSecretReference `json:"secretRef,omitzero"`
 }
 
 // KubeconfigSecretReference names the Secret and the key of a kubeconfig.
@@ -74,7 +74,7 @@ type KubeconfigSecretReference struct {
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
-	Name string `json:"name"`
+	Name string `json:"name,omitempty"`
 
 	// key is the key of the kubeconfig in the Secret: value by default, as
 	// Cluster API names it.
@@ -101,6 +101,7 @@ type ClusterStatus struct {
 	// observedGeneration is the most recent generation observed by the
 	// controller.
 	// +optional
+	// +kubebuilder:validation:Minimum=1
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// server is the URL of the cluster's API server.
@@ -140,7 +141,7 @@ type Cluster struct {
 
 	// spec defines the desired state of Cluster
 	// +required
-	Spec ClusterSpec `json:"spec"`
+	Spec ClusterSpec `json:"spec,omitzero"`
 
 	// status defines the observed state of Cluster
 	// +optional

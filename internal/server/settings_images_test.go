@@ -54,12 +54,12 @@ func TestValidateImagesDTO(t *testing.T) {
 
 func TestImagesSettings(t *testing.T) {
 	t.Run("settings without mirrors clear spec.images", func(t *testing.T) {
-		assert.Nil(t, imagesSettingsFromDTO(&imagesSettingsDTO{}))
-		assert.Equal(t, imagesSettingsDTO{Mirrors: []imageMirrorDTO{}}, imagesSettingsToDTO(nil))
+		assert.Zero(t, imagesSettingsFromDTO(&imagesSettingsDTO{}))
+		assert.Equal(t, imagesSettingsDTO{Mirrors: []imageMirrorDTO{}}, imagesSettingsToDTO(deliveryv1alpha1.KitchenImages{}))
 	})
 
 	t.Run("mirrors round-trip", func(t *testing.T) {
-		images := &deliveryv1alpha1.KitchenImages{Mirrors: []deliveryv1alpha1.ImageMirror{{Prefix: dockerHub, Location: harborMirror}}}
+		images := deliveryv1alpha1.KitchenImages{Mirrors: []deliveryv1alpha1.ImageMirror{{Prefix: dockerHub, Location: harborMirror}}}
 		dto := imagesSettingsToDTO(images)
 		assert.Equal(t, images, imagesSettingsFromDTO(&dto))
 	})

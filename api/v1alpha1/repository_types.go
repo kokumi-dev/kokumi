@@ -29,7 +29,7 @@ type RepositorySpec struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:Pattern=`^oci://[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?(:[0-9]+)?(/[a-z0-9]+(([._]|__|-+)[a-z0-9]+)*)+$`
-	URL string `json:"url"`
+	URL string `json:"url,omitempty"`
 
 	// registryRef names the Registry, in the Repository's namespace, the
 	// repository is read through. Its url must cover the repository's.
@@ -59,6 +59,7 @@ type RepositoryStatus struct {
 	// observedGeneration is the most recent generation observed by the
 	// controller.
 	// +optional
+	// +kubebuilder:validation:Minimum=1
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }
 
@@ -82,7 +83,7 @@ type Repository struct {
 
 	// spec defines the desired state of Repository
 	// +required
-	Spec RepositorySpec `json:"spec"`
+	Spec RepositorySpec `json:"spec,omitzero"`
 
 	// status defines the observed state of Repository
 	// +optional
