@@ -20,7 +20,7 @@ import (
 // sealed returns prep with its current votes sealed at base+1m.
 func sealed(prep *deliveryv1alpha1.Preparation, approvals []deliveryv1alpha1.Approval) *deliveryv1alpha1.Preparation {
 	sealedTime := metav1.NewTime(base.Add(time.Minute))
-	prep.Status.Approval = Evaluate(prep, approvals).Status
+	prep.Status.Approval = *Evaluate(prep, approvals).Status
 	prep.Status.Approval.SealedTime = &sealedTime
 	return prep
 }
@@ -50,7 +50,7 @@ func TestGate(t *testing.T) {
 
 	t.Run("approved and archived", func(t *testing.T) {
 		prep := sealed(testPreparation(1), approve)
-		prep.Status.Approval.Attestation = &deliveryv1alpha1.ApprovalAttestation{OCIRef: "oci://registry.example/shop@" + otherDigest, Digest: otherDigest}
+		prep.Status.Approval.Attestation = deliveryv1alpha1.ApprovalAttestation{OCIRef: "oci://registry.example/shop@" + otherDigest, Digest: otherDigest}
 		apimeta.SetStatusCondition(&prep.Status.Conditions, metav1.Condition{
 			Type: deliveryv1alpha1.ConditionTypeApprovalsSealed, Status: metav1.ConditionTrue, Reason: deliveryv1alpha1.ReasonSealed,
 		})

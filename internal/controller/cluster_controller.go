@@ -206,7 +206,7 @@ func (r *ClusterReconciler) reconcileCluster(ctx context.Context, c *deliveryv1a
 // and records the cluster's server. When the kubeconfig is missing or
 // unusable it marks Ready False and returns false.
 func (r *ClusterReconciler) connect(ctx context.Context, c *deliveryv1alpha1.Cluster) (*rest.Config, *cluster.Kubeconfig, string, bool) {
-	if c.Spec.Connection == deliveryv1alpha1.ClusterConnectionInCluster || c.Spec.Kubeconfig == nil {
+	if c.Spec.Connection == deliveryv1alpha1.ClusterConnectionInCluster || c.Spec.Kubeconfig.SecretRef.Name == "" {
 		c.Status.Server = cluster.InClusterServer
 		return r.LocalConfig, nil, "", true
 	}
@@ -449,7 +449,7 @@ func (r *ClusterReconciler) createInCluster(ctx context.Context) error {
 // kubeconfig, for FieldKubeconfigSecretName.
 func clusterKubeconfigSecret(obj client.Object) []string {
 	c, ok := obj.(*deliveryv1alpha1.Cluster)
-	if !ok || c.Spec.Kubeconfig == nil {
+	if !ok || c.Spec.Kubeconfig.SecretRef.Name == "" {
 		return nil
 	}
 	return []string{c.Spec.Kubeconfig.SecretRef.Name}

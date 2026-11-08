@@ -200,6 +200,7 @@ spec:
                   observedGeneration is the most recent generation observed by the
                   controller.
                 format: int64
+                minimum: 1
                 type: integer
             type: object
         required:

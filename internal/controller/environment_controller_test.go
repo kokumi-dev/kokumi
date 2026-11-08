@@ -79,8 +79,8 @@ var _ = Describe("Environment Controller", Ordered, func() {
 		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Environment{
 			Name: envName, Namespace: testWorkspace,
 			Spec: deliveryv1alpha1.EnvironmentSpec{
-				ClusterSelector: metav1.LabelSelector{MatchLabels: edge},
-				Deployer:        deliveryv1alpha1.Deployer{Type: deliveryv1alpha1.DeployerTypeArgoCD, ArgoCD: &deliveryv1alpha1.ArgoCDDeployer{Project: project}},
+				ClusterSelector: &metav1.LabelSelector{MatchLabels: edge},
+				Deployer:        deliveryv1alpha1.Deployer{Type: deliveryv1alpha1.DeployerTypeArgoCD, ArgoCD: deliveryv1alpha1.ArgoCDDeployer{Project: project}},
 			},
 		})).To(Succeed())
 	})
@@ -106,7 +106,7 @@ var _ = Describe("Environment Controller", Ordered, func() {
 		env := reconcileEnvironment()
 		Expect(env.Finalizers).To(ContainElement(deliveryv1alpha1.Finalizer))
 		Expect(ready(env.Status.Conditions).Reason).To(Equal(deliveryv1alpha1.ReasonNoClusters))
-		Expect(env.Status.Clusters).To(Equal(&deliveryv1alpha1.EnvironmentClusters{}))
+		Expect(env.Status.Clusters).To(Equal(deliveryv1alpha1.EnvironmentClusters{Selected: new(int32(0)), Ready: new(int32(0))}))
 	})
 
 	It("reports a missing AppProject, and counts the Clusters of its namespace it selects and those that are ready", func() {
@@ -121,7 +121,7 @@ var _ = Describe("Environment Controller", Ordered, func() {
 
 		env := reconcileEnvironment()
 		Expect(ready(env.Status.Conditions).Reason).To(Equal(deliveryv1alpha1.ReasonProjectNotFound))
-		Expect(env.Status.Clusters).To(Equal(&deliveryv1alpha1.EnvironmentClusters{Selected: 2, Ready: 1}), "only of its own namespace")
+		Expect(env.Status.Clusters).To(Equal(deliveryv1alpha1.EnvironmentClusters{Selected: new(int32(2)), Ready: new(int32(1))}), "only of its own namespace")
 	})
 
 	It("reports an AppProject that does not admit its namespace", func() {
@@ -148,7 +148,7 @@ var _ = Describe("Environment Controller", Ordered, func() {
 		c.Labels[fleet] = testRetired
 		Expect(k8sClient.Update(ctx, c)).To(Succeed())
 
-		Expect(reconcileEnvironment().Status.Clusters).To(HaveField("Selected", BeEquivalentTo(1)))
+		Expect(reconcileEnvironment().Status.Clusters).To(HaveField("Selected", HaveValue(BeEquivalentTo(1))))
 	})
 
 	It("names at most ten Clusters in Ready, and counts the others", func() {
@@ -162,7 +162,7 @@ var _ = Describe("Environment Controller", Ordered, func() {
 		})
 
 		env := reconcileEnvironment()
-		Expect(env.Status.Clusters).To(HaveField("Selected", BeEquivalentTo(12)))
+		Expect(env.Status.Clusters).To(HaveField("Selected", HaveValue(BeEquivalentTo(12))))
 		Expect(ready(env.Status.Conditions).Message).To(HaveSuffix(", and 2 more"))
 	})
 
@@ -170,7 +170,7 @@ var _ = Describe("Environment Controller", Ordered, func() {
 		env := &deliveryv1alpha1.Environment{}
 		Expect(k8sClient.Get(ctx, key, env)).To(Succeed())
 		selector := env.Spec.ClusterSelector
-		env.Spec.ClusterSelector = metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
+		env.Spec.ClusterSelector = &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
 			{Key: fleet, Operator: metav1.LabelSelectorOpIn},
 		}}
 		Expect(k8sClient.Update(ctx, env)).To(Succeed())
@@ -182,7 +182,7 @@ var _ = Describe("Environment Controller", Ordered, func() {
 
 		env = reconcileEnvironment()
 		Expect(ready(env.Status.Conditions).Reason).To(Equal(deliveryv1alpha1.ReasonInvalidSelector))
-		Expect(env.Status.Clusters).To(BeNil())
+		Expect(env.Status.Clusters).To(BeZero())
 	})
 
 	It("in Kokumi's namespace, uses any AppProject", func() {
@@ -190,8 +190,8 @@ var _ = Describe("Environment Controller", Ordered, func() {
 		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Environment{
 			Name: envName, Namespace: testKokumiNamespace,
 			Spec: deliveryv1alpha1.EnvironmentSpec{
-				ClusterSelector: metav1.LabelSelector{MatchLabels: edge},
-				Deployer:        deliveryv1alpha1.Deployer{Type: deliveryv1alpha1.DeployerTypeArgoCD, ArgoCD: &deliveryv1alpha1.ArgoCDDeployer{Project: project}},
+				ClusterSelector: &metav1.LabelSelector{MatchLabels: edge},
+				Deployer:        deliveryv1alpha1.Deployer{Type: deliveryv1alpha1.DeployerTypeArgoCD, ArgoCD: deliveryv1alpha1.ArgoCDDeployer{Project: project}},
 			},
 		})).To(Succeed())
 		DeferCleanup(func() {
@@ -246,7 +246,7 @@ var _ = Describe("Environment mapping", func() {
 	It("maps a Cluster to the Environments of its namespace that select it", func() {
 		selecting := func(name, namespace, value string) *deliveryv1alpha1.Environment {
 			return &deliveryv1alpha1.Environment{Name: name, Namespace: namespace, Spec: deliveryv1alpha1.EnvironmentSpec{
-				ClusterSelector: metav1.LabelSelector{MatchLabels: map[string]string{testFleet: value}},
+				ClusterSelector: &metav1.LabelSelector{MatchLabels: map[string]string{testFleet: value}},
 			}}
 		}
 		r := &EnvironmentReconciler{Client: fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(

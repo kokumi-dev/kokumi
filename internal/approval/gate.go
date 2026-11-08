@@ -43,6 +43,6 @@ func NewSealTime(now time.Time) metav1.Time {
 // isArchived reports whether the sealed votes of prep are recorded in the OCI registry.
 func isArchived(prep *deliveryv1alpha1.Preparation) bool {
 	return IsSealed(prep) &&
-		prep.Status.Approval.Attestation != nil &&
+		prep.Status.Approval.Attestation.Digest != "" &&
 		apimeta.IsStatusConditionTrue(prep.Status.Conditions, deliveryv1alpha1.ConditionTypeApprovalsSealed)
 }

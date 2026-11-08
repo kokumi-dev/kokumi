@@ -252,9 +252,9 @@ func TestProvider(t *testing.T) {
 	rotated := testSigner(t)
 
 	kitchen := &deliveryv1alpha1.Kitchen{
-		Spec: deliveryv1alpha1.KitchenSpec{Signing: &deliveryv1alpha1.KitchenSigning{
+		Spec: deliveryv1alpha1.KitchenSpec{Signing: deliveryv1alpha1.KitchenSigning{
 			TrustedKeys:               []deliveryv1alpha1.TrustedKey{{Name: "before-rotation", PublicKey: string(rotated.PublicKeyPEM())}},
-			RequireSourceVerification: true,
+			RequireSourceVerification: new(true),
 		}},
 	}
 

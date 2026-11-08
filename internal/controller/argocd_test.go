@@ -70,7 +70,7 @@ var _ = Describe("Argo CD engine", func() {
 	env := &deliveryv1alpha1.Environment{
 		Name: testEdge, Namespace: testWorkspace,
 		Spec: deliveryv1alpha1.EnvironmentSpec{Deployer: deliveryv1alpha1.Deployer{
-			Type: deliveryv1alpha1.DeployerTypeArgoCD, ArgoCD: &deliveryv1alpha1.ArgoCDDeployer{Project: argocd.DefaultProject},
+			Type: deliveryv1alpha1.DeployerTypeArgoCD, ArgoCD: deliveryv1alpha1.ArgoCDDeployer{Project: argocd.DefaultProject},
 		}},
 	}
 	serving := &deliveryv1alpha1.Serving{Name: "argo-web", Namespace: testWorkspace, Spec: deliveryv1alpha1.ServingSpec{OrderName: "argo-web"}}

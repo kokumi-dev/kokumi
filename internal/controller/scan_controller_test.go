@@ -252,7 +252,7 @@ var _ = Describe("Scan Controller", func() {
 			"no SBOM to reuse, so the scanner generates one")
 
 		product := getProduct()
-		Expect(product.Status.Vulnerabilities).NotTo(BeNil())
+		Expect(product.Status.Vulnerabilities).NotTo(BeZero())
 		Expect(product.Status.Vulnerabilities.Scanner.Name).To(Equal("trivy"))
 		Expect(product.Status.Vulnerabilities.Scanner.Database).To(Equal(req.Database.Ref))
 		Expect(product.Status.Vulnerabilities.Images).To(HaveLen(1))
@@ -262,7 +262,7 @@ var _ = Describe("Scan Controller", func() {
 		Expect(scan.Platform).To(Equal(scanPlatform))
 		Expect(scan.ScannedTime.Time).To(BeTemporally("==", now))
 		Expect(scan.SBOM.Origin).To(Equal(deliveryv1alpha1.SBOMOriginGenerated))
-		Expect(scan.Summary).To(Equal(deliveryv1alpha1.VulnerabilitySummary{Critical: 1, High: 2, Medium: 1, Unknown: 1, Fixable: 3}))
+		Expect(scan.Summary).To(Equal(withZeroCounts(deliveryv1alpha1.VulnerabilitySummary{Critical: new(int32(1)), High: new(int32(2)), Medium: new(int32(1)), Unknown: new(int32(1)), Fixable: new(int32(3))})))
 		Expect(apimeta.IsStatusConditionTrue(product.Status.Conditions, deliveryv1alpha1.ConditionTypeScanned)).To(BeTrue())
 
 		By("attaching the SBOM and the report to the vendored image, signed")
@@ -340,7 +340,7 @@ var _ = Describe("Scan Controller", func() {
 		// The cache still holds the Product from before the scan, without
 		// its record, while a Preparation reconciles it.
 		lagging := scanned.DeepCopy()
-		lagging.Status.Vulnerabilities = nil
+		lagging.Status.Vulnerabilities = deliveryv1alpha1.ProductVulnerabilities{}
 		lagging.ResourceVersion = "1"
 		reconciler.Client = laggingProductCache{Client: k8sClient, product: lagging}
 		now = now.Add(time.Minute)
@@ -374,12 +374,12 @@ var _ = Describe("Scan Controller", func() {
 
 	It("clears the scans when the Kitchen disables scanning", func() {
 		reconcileProduct()
-		Expect(getProduct().Status.Vulnerabilities).NotTo(BeNil())
+		Expect(getProduct().Status.Vulnerabilities).NotTo(BeZero())
 
 		setScanning(nil)
 		reconcileProduct()
 		product := getProduct()
-		Expect(product.Status.Vulnerabilities).To(BeNil())
+		Expect(product.Status.Vulnerabilities).To(BeZero())
 		Expect(apimeta.FindStatusCondition(product.Status.Conditions, deliveryv1alpha1.ConditionTypeScanned)).To(BeNil())
 		Expect(imageScans.requests).To(HaveLen(1))
 	})
@@ -391,7 +391,7 @@ var _ = Describe("Scan Controller", func() {
 
 		reconcileProduct()
 		Expect(imageScans.requests).To(BeEmpty())
-		Expect(getProduct().Status.Vulnerabilities).To(BeNil())
+		Expect(getProduct().Status.Vulnerabilities).To(BeZero())
 	})
 
 	It("drops images no Preparation in use runs any more", func() {

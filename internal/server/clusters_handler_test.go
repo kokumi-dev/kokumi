@@ -77,7 +77,7 @@ func TestClustersToDTO(t *testing.T) {
 		Name: member, Namespace: platformNS, Labels: map[string]string{fleet: edge},
 		Spec: deliveryv1alpha1.ClusterSpec{
 			Connection: deliveryv1alpha1.ClusterConnectionKubeconfig,
-			Kubeconfig: &deliveryv1alpha1.ClusterKubeconfig{SecretRef: deliveryv1alpha1.KubeconfigSecretReference{Name: "member-kubeconfig"}},
+			Kubeconfig: deliveryv1alpha1.ClusterKubeconfig{SecretRef: deliveryv1alpha1.KubeconfigSecretReference{Name: "member-kubeconfig"}},
 		},
 		Status: deliveryv1alpha1.ClusterStatus{
 			Server: memberServer, KubernetesVersion: "v1.36.2",
@@ -92,9 +92,9 @@ func TestClustersToDTO(t *testing.T) {
 	}
 	const everything = "all"
 	environments := []deliveryv1alpha1.Environment{
-		{Name: prod, Namespace: platformNS, Spec: deliveryv1alpha1.EnvironmentSpec{ClusterSelector: metav1.LabelSelector{MatchLabels: map[string]string{fleet: edge}}}},
-		{Name: everything, Namespace: platformNS},
-		{Name: everything, Namespace: "elsewhere"},
+		{Name: prod, Namespace: platformNS, Spec: deliveryv1alpha1.EnvironmentSpec{ClusterSelector: &metav1.LabelSelector{MatchLabels: map[string]string{fleet: edge}}}},
+		{Name: everything, Namespace: platformNS, Spec: deliveryv1alpha1.EnvironmentSpec{ClusterSelector: &metav1.LabelSelector{}}},
+		{Name: everything, Namespace: "elsewhere", Spec: deliveryv1alpha1.EnvironmentSpec{ClusterSelector: &metav1.LabelSelector{}}},
 	}
 
 	clusters := clustersToDTO([]deliveryv1alpha1.Cluster{spoke, inCluster}, environments, kokumiNS)
@@ -118,14 +118,14 @@ func TestClustersToDTO(t *testing.T) {
 
 func TestEnvironmentToDTO(t *testing.T) {
 	spec := deliveryv1alpha1.EnvironmentSpec{
-		ClusterSelector: metav1.LabelSelector{MatchLabels: map[string]string{fleet: prod}},
+		ClusterSelector: &metav1.LabelSelector{MatchLabels: map[string]string{fleet: prod}},
 		Deployer: deliveryv1alpha1.Deployer{
-			Type: deliveryv1alpha1.DeployerTypeArgoCD, ArgoCD: &deliveryv1alpha1.ArgoCDDeployer{Project: argocd.DefaultProject},
+			Type: deliveryv1alpha1.DeployerTypeArgoCD, ArgoCD: deliveryv1alpha1.ArgoCDDeployer{Project: argocd.DefaultProject},
 		},
-		Promotion: &deliveryv1alpha1.EnvironmentPromotion{RequireAfter: []deliveryv1alpha1.RequiredEnvironment{{Environment: "staging", MinSoakSeconds: 60}}},
+		Promotion: deliveryv1alpha1.EnvironmentPromotion{RequireAfter: []deliveryv1alpha1.RequiredEnvironment{{Environment: "staging", MinSoakSeconds: new(int32(60))}}},
 	}
 	env := deliveryv1alpha1.Environment{Name: prod, Namespace: platformNS, Spec: spec}
-	env.Status.Clusters = &deliveryv1alpha1.EnvironmentClusters{Selected: 2, Ready: 1}
+	env.Status.Clusters = deliveryv1alpha1.EnvironmentClusters{Selected: new(int32(2)), Ready: new(int32(1))}
 
 	dto := environmentToDTO(env, kokumiNS)
 	assert.Equal(t, platformNS, dto.Namespace)
@@ -145,7 +145,7 @@ func TestHandleCreateEnvironmentRefusesAnInvalidSelector(t *testing.T) {
 	admin := adminCluster(t)
 	rec := serveClusters(t, http.MethodPost, "/api/v1/environments", EnvironmentRequest{
 		Namespace: platformNS, Name: prod,
-		ClusterSelector: metav1.LabelSelector{
+		ClusterSelector: &metav1.LabelSelector{
 			MatchExpressions: []metav1.LabelSelectorRequirement{{Key: fleet, Operator: metav1.LabelSelectorOpIn}},
 		},
 	}, admin)
@@ -175,7 +175,7 @@ func TestHandleListClustersBySelector(t *testing.T) {
 
 func TestServingToDTOClusters(t *testing.T) {
 	serving := deliveryv1alpha1.Serving{Name: "storefront", Namespace: shopNS, Spec: deliveryv1alpha1.ServingSpec{OrderName: "storefront"}}
-	serving.Status.Clusters = &deliveryv1alpha1.DeploymentClusters{Selected: 3, Healthy: 2, Progressing: 1}
+	serving.Status.Clusters = deliveryv1alpha1.DeploymentClusters{Selected: new(int32(3)), Healthy: new(int32(2)), Progressing: new(int32(1))}
 
 	assert.Equal(t, &DeploymentClustersDTO{Selected: 3, Healthy: 2, Progressing: 1}, servingToDTO(serving).Clusters,
 		"the list sends counts; the targets come with /targets")
@@ -210,7 +210,7 @@ func kubeconfigCluster() *deliveryv1alpha1.Cluster {
 		Name: member, Namespace: platformNS,
 		Spec: deliveryv1alpha1.ClusterSpec{
 			Connection: deliveryv1alpha1.ClusterConnectionKubeconfig,
-			Kubeconfig: &deliveryv1alpha1.ClusterKubeconfig{
+			Kubeconfig: deliveryv1alpha1.ClusterKubeconfig{
 				SecretRef: deliveryv1alpha1.KubeconfigSecretReference{Name: member + kubeconfigSecretSuffix, Key: cluster.KubeconfigKey},
 			},
 		},
@@ -324,10 +324,10 @@ func TestClusterDeployments(t *testing.T) {
 	target := &deliveryv1alpha1.Cluster{Name: member, Namespace: platformNS, Labels: map[string]string{fleet: prod}}
 	environments := []deliveryv1alpha1.Environment{
 		{Name: prod, Namespace: platformNS, Spec: deliveryv1alpha1.EnvironmentSpec{
-			ClusterSelector: metav1.LabelSelector{MatchLabels: map[string]string{fleet: prod}},
+			ClusterSelector: &metav1.LabelSelector{MatchLabels: map[string]string{fleet: prod}},
 		}},
 		{Name: edge, Namespace: platformNS, Spec: deliveryv1alpha1.EnvironmentSpec{
-			ClusterSelector: metav1.LabelSelector{MatchLabels: map[string]string{fleet: edge}},
+			ClusterSelector: &metav1.LabelSelector{MatchLabels: map[string]string{fleet: edge}},
 		}},
 	}
 	order := func(name, environment string) deliveryv1alpha1.Order {
@@ -340,7 +340,7 @@ func TestClusterDeployments(t *testing.T) {
 			Name: name, Namespace: platformNS, Spec: deliveryv1alpha1.ServingSpec{OrderName: name},
 			Status: deliveryv1alpha1.ServingStatus{
 				History:  []deliveryv1alpha1.DeploymentEntry{{PreparationName: deployed, PromotionRecord: record}},
-				Clusters: &counts,
+				Clusters: counts,
 				Targets:  targets,
 			},
 		}
@@ -352,8 +352,8 @@ func TestClusterDeployments(t *testing.T) {
 	got := clusterDeployments(target, environments,
 		[]deliveryv1alpha1.Order{order(webOrder, prod), order(shopNS, prod), order("blog", prod), order("cdn", edge)},
 		[]deliveryv1alpha1.Serving{
-			serving(webOrder, deliveryv1alpha1.DeploymentClusters{Selected: 2, Healthy: 1, Degraded: 1}, degraded),
-			serving(shopNS, deliveryv1alpha1.DeploymentClusters{Selected: 2, Healthy: 2}),
+			serving(webOrder, deliveryv1alpha1.DeploymentClusters{Selected: new(int32(2)), Healthy: new(int32(1)), Degraded: new(int32(1))}, degraded),
+			serving(shopNS, deliveryv1alpha1.DeploymentClusters{Selected: new(int32(2)), Healthy: new(int32(2))}),
 		})
 
 	require.Len(t, got, 3, "only the Orders of the Environments that select the cluster")

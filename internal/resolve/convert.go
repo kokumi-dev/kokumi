@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/utils/ptr"
+
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/artifact"
 	"github.com/kokumi-dev/kokumi/internal/images"
-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 )
 
 // ArtifactSpec is the domain-agnostic rendering spec derived from an
@@ -65,7 +67,7 @@ func toRenderSpec(render *deliveryv1alpha1.Render) (*artifact.RenderSpec, error)
 
 		spec.Helm = &artifact.HelmSpec{
 			ReleaseName: render.Helm.ReleaseName,
-			IncludeCRDs: render.Helm.IncludeCRDs,
+			IncludeCRDs: ptr.Deref(render.Helm.IncludeCRDs, false),
 			Values:      vals,
 		}
 	}

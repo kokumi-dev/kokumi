@@ -223,18 +223,21 @@ spec:
                 - message: productRef is immutable
                   rule: self == oldSelf
               promotion:
-                description: promotion configures how new Preparations become active
-                  Servings.
-                minProperties: 1
+                allOf:
+                - minProperties: 1
+                - minProperties: 1
+                description: |-
+                  promotion configures how new Preparations become active Servings:
+                  the mode, and the gates a Preparation must pass first in either mode.
+                  The gates are copied into each Preparation when it is created, so a
+                  change produces a new Preparation, which needs fresh approvals.
                 properties:
                   after:
                     description: |-
-                      after lists the upstream stages: Orders in the same namespace, variants
-                      of the same Product, that must each have deployed their own
+                      after lists the upstream stages: Orders in the same namespace,
+                      variants of the same Product, that must each have deployed their own
                       Preparation of a Preparation's Product revision healthily, for their
-                      soakSeconds, before this Order deploys it. Like approvals, the stages
-                      are copied into each Preparation when it is created, so a change
-                      produces a new Preparation.
+                      soakSeconds, before it is deployed.
                     items:
                       description: |-
                         UpstreamStage is an Order that must deploy a Product revision before the
@@ -247,6 +250,7 @@ spec:
                           minLength: 1
                           type: string
                         soakSeconds:
+                          default: 0
                           description: |-
                             soakSeconds is how long the upstream Order must have run its
                             Preparation of the revision healthily, without interruption, before
@@ -265,12 +269,9 @@ spec:
                     x-kubernetes-list-type: map
                   approvals:
                     description: |-
-                      approvals configures an approval gate on the promoted artifact. When
-                      set, the Preparation is blocked from being served until enough
-                      distinct approvers from the listed groups have approved it, in both
-                      Automatic and Manual mode. When omitted, no approval gate applies.
-                      The policy is copied into each Preparation when it is created, so a
-                      change produces a new Preparation that needs fresh approvals.
+                      approvals is an approval gate: a Preparation is not served until
+                      enough distinct approvers from the listed groups have approved it.
+                      When omitted, no approval gate applies.
                     properties:
                       allowedGroups:
                         description: allowedGroups lists the groups whose members
@@ -296,11 +297,9 @@ spec:
                     type: object
                   checks:
                     description: |-
-                      checks configures checks a Preparation must pass before it is served,
-                      in both Automatic and Manual mode. Like approvals, they are copied
-                      into each Preparation when it is created, so a change produces a new
-                      Preparation. They hold new deployments only: a deployed Preparation
-                      that stops passing stays deployed.
+                      checks configures checks a Preparation must pass before it is
+                      served. They hold new deployments only: a deployed Preparation that
+                      stops passing stays deployed.
                     minProperties: 1
                     properties:
                       vulnerabilities:
@@ -311,6 +310,7 @@ spec:
                           the images it vendors.
                         properties:
                           ignoreUnfixed:
+                            default: false
                             description: ignoreUnfixed ignores vulnerabilities that
                               no version fixes yet.
                             type: boolean
@@ -491,6 +491,7 @@ spec:
                 description: observedGeneration is the most recent generation observed
                   by the controller
                 format: int64
+                minimum: 1
                 type: integer
               registryAccess:
                 description: |-

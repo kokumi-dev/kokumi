@@ -40,7 +40,7 @@ type AllowedPatchTarget struct {
 	// target identifies the resource that Orders may patch. A target without
 	// a namespace matches the resource in any namespace.
 	// +required
-	Target PatchTarget `json:"target"`
+	Target PatchTarget `json:"target,omitzero"`
 
 	// paths lists the allowed JSONPath expressions within the target
 	// (e.g. ".spec.replicas").
@@ -50,7 +50,7 @@ type AllowedPatchTarget struct {
 	// +kubebuilder:validation:items:MaxLength=1024
 	// +kubebuilder:validation:MaxItems=64
 	// +listType=set
-	Paths []string `json:"paths"`
+	Paths []string `json:"paths,omitempty"`
 }
 
 // ValueOverrides controls which Helm values Orders may set.
@@ -152,7 +152,7 @@ type ImageFieldSpec struct {
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
-	Kind string `json:"kind"`
+	Kind string `json:"kind,omitempty"`
 
 	// path is the slash-separated path to the field, with [] for every
 	// element of a list, for example "spec/image" or
@@ -160,7 +160,7 @@ type ImageFieldSpec struct {
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=256
-	Path string `json:"path"`
+	Path string `json:"path,omitempty"`
 }
 
 // ProductImages configures how the container images of a Product's rendered
@@ -203,7 +203,7 @@ type ProductSpec struct {
 	// source defines the OCI artifact the Product is built from. Orders
 	// cannot change the source or version.
 	// +required
-	Source OCISource `json:"source"`
+	Source OCISource `json:"source,omitzero"`
 
 	// vendor optionally copies the source artifact to another OCI
 	// repository, and under the Vendor image policy also the images, below
@@ -219,7 +219,7 @@ type ProductSpec struct {
 	// When absent the source is treated as a pre-rendered manifest bundle.
 	// Orders cannot change the render type.
 	// +optional
-	Render *Render `json:"render,omitempty"`
+	Render Render `json:"render,omitzero"`
 
 	// targetNamespace is the namespace Orders of the Product deploy into on
 	// every cluster of their Environment, unless an Order sets its own. When
@@ -273,13 +273,13 @@ type ProductSourceStatus struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() == 'oci'",message="must be a valid OCI URL"
-	URL string `json:"url"`
+	URL string `json:"url,omitempty"`
 
 	// version is the tag of the source artifact.
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=128
-	Version string `json:"version"`
+	Version string `json:"version,omitempty"`
 
 	// digest is the digest version resolved to. Orders render exactly this
 	// artifact, so every variant of the Product renders the same source.
@@ -287,13 +287,13 @@ type ProductSourceStatus struct {
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
-	Digest string `json:"digest"`
+	Digest string `json:"digest,omitempty"`
 
 	// verified records who signed the source, when its signature verified:
 	// through spec.source.verify, or by a key the Kitchen trusts. Absent
 	// when the source was not verified.
 	// +optional
-	Verified *SourceVerification `json:"verified,omitempty"`
+	Verified SourceVerification `json:"verified,omitzero"`
 
 	// signatures lists every signature in the graph of the source: on the
 	// source itself and on what is attached to it, such as an SBOM. Each is
@@ -342,23 +342,23 @@ type SignatureVerdict struct {
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
-	Digest string `json:"digest"`
+	Digest string `json:"digest,omitempty"`
 
 	// subject is the digest of the manifest the signature signs.
 	// +required
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
-	Subject string `json:"subject"`
+	Subject string `json:"subject,omitempty"`
 
 	// result is the result of the verification.
 	// +required
-	Result SignatureResult `json:"result"`
+	Result SignatureResult `json:"result,omitempty"`
 
 	// signer identifies whose signature verified. Set only when result is
 	// Verified.
 	// +optional
-	Signer *SourceVerification `json:"signer,omitempty"`
+	Signer SourceVerification `json:"signer,omitzero"`
 
 	// message says why the signature did not verify.
 	// +optional
@@ -372,7 +372,7 @@ type SignatureVerdict struct {
 type SourceVerification struct {
 	// provider is the signature format that verified.
 	// +required
-	Provider VerificationProvider `json:"provider"`
+	Provider VerificationProvider `json:"provider,omitempty"`
 
 	// keyID identifies the public key that verified the signature: the
 	// base64-encoded SHA-256 of its DER encoding. Set for key-based
@@ -408,6 +408,7 @@ type ProductStatus struct {
 
 	// observedGeneration is the most recent generation observed by the controller.
 	// +optional
+	// +kubebuilder:validation:Minimum=1
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// configHash is a SHA-256 hash of the source and vendor configuration
@@ -422,7 +423,7 @@ type ProductStatus struct {
 	// Product controller has resolved (and, if configured, vendored) the
 	// source.
 	// +optional
-	Source *ProductSourceStatus `json:"source,omitempty"`
+	Source ProductSourceStatus `json:"source,omitzero"`
 
 	// registryAccess lists the registry locations the Product needs: its
 	// source and its vendor location, and the Registry Kokumi connects to
@@ -443,7 +444,7 @@ type ProductStatus struct {
 	// display. Set while the Kitchen enables scanning and the Product's
 	// image policy is Vendor.
 	// +optional
-	Vulnerabilities *ProductVulnerabilities `json:"vulnerabilities,omitempty"`
+	Vulnerabilities ProductVulnerabilities `json:"vulnerabilities,omitzero"`
 }
 
 // ProductVulnerabilities is the record of the vulnerability scans of a
@@ -451,7 +452,7 @@ type ProductStatus struct {
 type ProductVulnerabilities struct {
 	// scanner identifies the scanner and the database of the latest scan.
 	// +required
-	Scanner VulnerabilityScanner `json:"scanner"`
+	Scanner VulnerabilityScanner `json:"scanner,omitzero"`
 
 	// images lists the latest scan of each vendored image digest in use.
 	// When more digests are in use, the most recently scanned are listed
@@ -471,13 +472,13 @@ type VulnerabilityScanner struct {
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
-	Name string `json:"name"`
+	Name string `json:"name,omitempty"`
 
 	// version is the version of the scanner.
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=64
-	Version string `json:"version"`
+	Version string `json:"version,omitempty"`
 
 	// database is the OCI reference of the vulnerability database, with
 	// its digest.
@@ -515,13 +516,13 @@ type ImageScan struct {
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
-	Digest string `json:"digest"`
+	Digest string `json:"digest,omitempty"`
 
 	// repository is the oci:// URL of the vendored image's repository.
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
-	Repository string `json:"repository"`
+	Repository string `json:"repository,omitempty"`
 
 	// platform is the platform of the image index that was scanned, such
 	// as "linux/amd64". Absent for a single-platform image.
@@ -532,11 +533,11 @@ type ImageScan struct {
 
 	// scannedTime is when the image was scanned.
 	// +required
-	ScannedTime metav1.Time `json:"scannedTime"`
+	ScannedTime *metav1.Time `json:"scannedTime,omitempty"`
 
 	// sbom is the SBOM the scan was computed from.
 	// +required
-	SBOM ImageSBOM `json:"sbom"`
+	SBOM ImageSBOM `json:"sbom,omitzero"`
 
 	// report is the digest of the signed vulnerability report, a referrer
 	// of the vendored image.
@@ -544,11 +545,11 @@ type ImageScan struct {
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
-	Report string `json:"report"`
+	Report string `json:"report,omitempty"`
 
 	// summary counts the findings of the report.
 	// +required
-	Summary VulnerabilitySummary `json:"summary"`
+	Summary VulnerabilitySummary `json:"summary,omitzero"`
 }
 
 // ImageSBOM identifies the SBOM a scan was computed from.
@@ -559,11 +560,11 @@ type ImageSBOM struct {
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
-	Digest string `json:"digest"`
+	Digest string `json:"digest,omitempty"`
 
 	// origin says where the SBOM came from.
 	// +required
-	Origin SBOMOrigin `json:"origin"`
+	Origin SBOMOrigin `json:"origin,omitempty"`
 }
 
 // VulnerabilitySummary counts vulnerability findings by severity.
@@ -572,27 +573,27 @@ type VulnerabilitySummary struct {
 	// critical counts the findings of severity Critical.
 	// +optional
 	// +kubebuilder:validation:Minimum=0
-	Critical int32 `json:"critical"`
+	Critical *int32 `json:"critical,omitempty"`
 	// high counts the findings of severity High.
 	// +optional
 	// +kubebuilder:validation:Minimum=0
-	High int32 `json:"high"`
+	High *int32 `json:"high,omitempty"`
 	// medium counts the findings of severity Medium.
 	// +optional
 	// +kubebuilder:validation:Minimum=0
-	Medium int32 `json:"medium"`
+	Medium *int32 `json:"medium,omitempty"`
 	// low counts the findings of severity Low.
 	// +optional
 	// +kubebuilder:validation:Minimum=0
-	Low int32 `json:"low"`
+	Low *int32 `json:"low,omitempty"`
 	// unknown counts the findings without a severity.
 	// +optional
 	// +kubebuilder:validation:Minimum=0
-	Unknown int32 `json:"unknown"`
+	Unknown *int32 `json:"unknown,omitempty"`
 	// fixable counts the findings a newer version of the package fixes.
 	// +optional
 	// +kubebuilder:validation:Minimum=0
-	Fixable int32 `json:"fixable"`
+	Fixable *int32 `json:"fixable,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -617,7 +618,7 @@ type Product struct {
 
 	// spec defines the desired state of Product
 	// +required
-	Spec ProductSpec `json:"spec"`
+	Spec ProductSpec `json:"spec,omitzero"`
 
 	// status defines the observed state of Product
 	// +optional

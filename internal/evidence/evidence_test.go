@@ -36,7 +36,7 @@ func testPreparation(policy *deliveryv1alpha1.ApprovalPolicy) *deliveryv1alpha1.
 		},
 	}
 	if policy != nil {
-		prep.Spec.Promotion = &deliveryv1alpha1.PromotionGates{Approvals: policy}
+		prep.Spec.Promotion = deliveryv1alpha1.PromotionGates{Approvals: *policy}
 	}
 	return prep
 }
@@ -78,12 +78,12 @@ func archive(t *testing.T, registry *oci.FakeClient, signer *signing.Signer, pre
 			PreparationRef: deliveryv1alpha1.ApprovalPreparationReference{Name: prep.Name, UID: prep.UID, ArtifactDigest: digest},
 			Approver:       deliveryv1alpha1.Approver{Issuer: "https://idp.example", Subject: "alice", Groups: []string{"release"}},
 			Decision:       decision,
-			SubmittedTime:  submitted,
+			SubmittedTime:  new(submitted),
 		},
 	}}
 
 	sealed := approval.NewSealTime(submitted.Add(time.Minute))
-	prep.Status.Approval = approval.Evaluate(prep, approvals).Status
+	prep.Status.Approval = *approval.Evaluate(prep, approvals).Status
 	prep.Status.Approval.SealedTime = &sealed
 
 	_, err := approval.Archive(context.Background(), registry, signer, prep, approvals)

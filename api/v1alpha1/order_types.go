@@ -47,20 +47,20 @@ type OCISource struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() == 'oci'",message="must be a valid OCI URL"
-	URL string `json:"url"`
+	URL string `json:"url,omitempty"`
 
 	// version is the semantic version or tag of the artifact
 	// The controller will resolve this to a digest
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=128
-	Version string `json:"version"`
+	Version string `json:"version,omitempty"`
 
 	// verify requires the artifact the version resolves to to carry a
 	// trusted signature, by key or keyless against an expected signer
 	// identity. A source that does not verify is not rendered.
 	// +optional
-	Verify *OCISourceVerification `json:"verify,omitempty"`
+	Verify OCISourceVerification `json:"verify,omitzero"`
 }
 
 // VerificationProvider names the signature format a source is verified with.
@@ -112,14 +112,14 @@ type OIDCIdentityMatch struct {
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=1024
-	Issuer string `json:"issuer"`
+	Issuer string `json:"issuer,omitempty"`
 
 	// subject matches the subject of the signer's certificate, for example
 	// the workflow that released the artifact.
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=1024
-	Subject string `json:"subject"`
+	Subject string `json:"subject,omitempty"`
 }
 
 // HelmRender defines Helm-specific rendering options for the source artifact.
@@ -136,7 +136,7 @@ type HelmRender struct {
 	// Equivalent to helm template --include-crds.
 	// +optional
 	// +kubebuilder:default=false
-	IncludeCRDs bool `json:"includeCRDs,omitempty"`
+	IncludeCRDs *bool `json:"includeCRDs,omitempty"`
 
 	// values holds inline Helm values. On a Product they are the base values;
 	// an Order's spec.values are deep-merged over them.
@@ -202,13 +202,13 @@ type PatchTarget struct {
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
-	Kind string `json:"kind"`
+	Kind string `json:"kind,omitempty"`
 
 	// name specifies the name of the resource to patch
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
-	Name string `json:"name"`
+	Name string `json:"name,omitempty"`
 
 	// namespace specifies the namespace of the resource (optional, defaults to same namespace as Order)
 	// +optional
@@ -221,14 +221,14 @@ type PatchTarget struct {
 type Patch struct {
 	// target identifies which resource to patch
 	// +required
-	Target PatchTarget `json:"target"`
+	Target PatchTarget `json:"target,omitzero"`
 
 	// set contains JSONPath expressions and their values to set
 	// Keys are JSONPath expressions (e.g., ".spec.replicas")
 	// Values are the desired values for those paths
 	// +required
 	// +kubebuilder:validation:MinProperties=1
-	Set map[string]string `json:"set"`
+	Set map[string]string `json:"set,omitempty"`
 }
 
 // ProductRef references a Product by name in the Order's namespace.
@@ -238,7 +238,7 @@ type ProductRef struct {
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
-	Name string `json:"name"`
+	Name string `json:"name,omitempty"`
 }
 
 // OrderSpec defines the desired state of Order.
@@ -249,7 +249,7 @@ type OrderSpec struct {
 	// Order is a variant of. It cannot be changed after creation.
 	// +required
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="productRef is immutable"
-	ProductRef ProductRef `json:"productRef"`
+	ProductRef ProductRef `json:"productRef,omitzero"`
 
 	// values holds Helm values deep-merged over the Product's
 	// render.helm.values; the Order's values win. Only valid when the
@@ -292,9 +292,12 @@ type OrderSpec struct {
 	// +listType=atomic
 	Edits []Patch `json:"edits,omitempty"`
 
-	// promotion configures how new Preparations become active Servings.
+	// promotion configures how new Preparations become active Servings:
+	// the mode, and the gates a Preparation must pass first in either mode.
+	// The gates are copied into each Preparation when it is created, so a
+	// change produces a new Preparation, which needs fresh approvals.
 	// +optional
-	Promotion *PromotionSpec `json:"promotion,omitempty"`
+	Promotion PromotionSpec `json:"promotion,omitzero"`
 
 	// environmentRef references the Environment, in the Order's namespace,
 	// the Order deploys to: every cluster it selects. It decides where
@@ -303,7 +306,7 @@ type OrderSpec struct {
 	// passing its gates: another Environment is another Order.
 	// +required
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="environmentRef is immutable: create a new Order to deploy to another Environment"
-	EnvironmentRef EnvironmentRef `json:"environmentRef"`
+	EnvironmentRef EnvironmentRef `json:"environmentRef,omitzero"`
 
 	// targetNamespace is the namespace the Order deploys into on every
 	// cluster of its Environment, overriding the Product's. When neither
@@ -323,7 +326,7 @@ type EnvironmentRef struct {
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
-	Name string `json:"name"`
+	Name string `json:"name,omitempty"`
 }
 
 // PromotionSpec defines how new Preparations are promoted to active Servings.
@@ -335,35 +338,9 @@ type PromotionSpec struct {
 	// +kubebuilder:default=Manual
 	Mode PromotionMode `json:"mode,omitempty"`
 
-	// approvals configures an approval gate on the promoted artifact. When
-	// set, the Preparation is blocked from being served until enough
-	// distinct approvers from the listed groups have approved it, in both
-	// Automatic and Manual mode. When omitted, no approval gate applies.
-	// The policy is copied into each Preparation when it is created, so a
-	// change produces a new Preparation that needs fresh approvals.
-	// +optional
-	Approvals *ApprovalPolicy `json:"approvals,omitempty"`
-
-	// after lists the upstream stages: Orders in the same namespace, variants
-	// of the same Product, that must each have deployed their own
-	// Preparation of a Preparation's Product revision healthily, for their
-	// soakSeconds, before this Order deploys it. Like approvals, the stages
-	// are copied into each Preparation when it is created, so a change
-	// produces a new Preparation.
-	// +optional
-	// +listType=map
-	// +listMapKey=order
-	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:MaxItems=8
-	After []UpstreamStage `json:"after,omitempty"`
-
-	// checks configures checks a Preparation must pass before it is served,
-	// in both Automatic and Manual mode. Like approvals, they are copied
-	// into each Preparation when it is created, so a change produces a new
-	// Preparation. They hold new deployments only: a deployed Preparation
-	// that stops passing stays deployed.
-	// +optional
-	Checks *PromotionChecks `json:"checks,omitempty"`
+	// PromotionGates are the gates a Preparation must pass before it is
+	// served, in either mode.
+	PromotionGates `json:",inline"`
 }
 
 // UpstreamStage is an Order that must deploy a Product revision before the
@@ -373,27 +350,32 @@ type UpstreamStage struct {
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
-	Order string `json:"order"`
+	Order string `json:"order,omitempty"`
 
 	// soakSeconds is how long the upstream Order must have run its
 	// Preparation of the revision healthily, without interruption, before
 	// it qualifies. 0 qualifies it as soon as it is healthy.
 	// +optional
 	// +kubebuilder:validation:Minimum=0
-	SoakSeconds int32 `json:"soakSeconds,omitempty"`
+	// +kubebuilder:default=0
+	SoakSeconds *int32 `json:"soakSeconds,omitempty"`
 }
 
-// PromotionGates is what must hold before a Preparation is served: the
-// gates of the Order's spec.promotion, without the mode. It is copied into
-// each Preparation when it is created.
+// PromotionGates is what must hold before a Preparation is served. An
+// Order sets them in its spec.promotion, and each Preparation records a copy
+// of them in its own spec.promotion when it is created.
 // +kubebuilder:validation:MinProperties=1
 type PromotionGates struct {
-	// approvals is the approval policy the Preparation must satisfy.
+	// approvals is an approval gate: a Preparation is not served until
+	// enough distinct approvers from the listed groups have approved it.
+	// When omitted, no approval gate applies.
 	// +optional
-	Approvals *ApprovalPolicy `json:"approvals,omitempty"`
+	Approvals ApprovalPolicy `json:"approvals,omitzero"`
 
-	// after lists the upstream stages that must deploy the Preparation's
-	// Product revision first.
+	// after lists the upstream stages: Orders in the same namespace,
+	// variants of the same Product, that must each have deployed their own
+	// Preparation of a Preparation's Product revision healthily, for their
+	// soakSeconds, before it is deployed.
 	// +optional
 	// +listType=map
 	// +listMapKey=order
@@ -401,9 +383,28 @@ type PromotionGates struct {
 	// +kubebuilder:validation:MaxItems=8
 	After []UpstreamStage `json:"after,omitempty"`
 
-	// checks are the promotion checks the Preparation must pass.
+	// checks configures checks a Preparation must pass before it is
+	// served. They hold new deployments only: a deployed Preparation that
+	// stops passing stays deployed.
 	// +optional
-	Checks *PromotionChecks `json:"checks,omitempty"`
+	Checks PromotionChecks `json:"checks,omitzero"`
+}
+
+// ApprovalPolicy returns the approval gate, nil when none applies: a policy
+// requires at least one approval.
+func (g *PromotionGates) ApprovalPolicy() *ApprovalPolicy {
+	if g.Approvals.RequiredApprovals == 0 {
+		return nil
+	}
+	return &g.Approvals
+}
+
+// PromotionChecks returns the checks, nil when none applies.
+func (g *PromotionGates) PromotionChecks() *PromotionChecks {
+	if g.Checks == (PromotionChecks{}) {
+		return nil
+	}
+	return &g.Checks
 }
 
 // PromotionChecks configures the checks a Preparation must pass before it is
@@ -415,7 +416,7 @@ type PromotionChecks struct {
 	// the Kitchen and the Product's Vendor image policy: Kokumi scans only
 	// the images it vendors.
 	// +optional
-	Vulnerabilities *VulnerabilityCheck `json:"vulnerabilities,omitempty"`
+	Vulnerabilities VulnerabilityCheck `json:"vulnerabilities,omitzero"`
 }
 
 // Severity is the severity of a vulnerability.
@@ -435,11 +436,12 @@ type VulnerabilityCheck struct {
 	// maxSeverity is the lowest severity that blocks: High blocks findings
 	// of severity High and Critical.
 	// +required
-	MaxSeverity Severity `json:"maxSeverity"`
+	MaxSeverity Severity `json:"maxSeverity,omitempty"`
 
 	// ignoreUnfixed ignores vulnerabilities that no version fixes yet.
 	// +optional
-	IgnoreUnfixed bool `json:"ignoreUnfixed,omitempty"`
+	// +kubebuilder:default=false
+	IgnoreUnfixed *bool `json:"ignoreUnfixed,omitempty"`
 
 	// maxAgeSeconds is how old the scan of every image may be. Defaults to
 	// twice the Kitchen's scanning intervalSeconds.
@@ -454,7 +456,7 @@ type ApprovalPolicy struct {
 	// +required
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=32
-	RequiredApprovals int32 `json:"requiredApprovals"`
+	RequiredApprovals int32 `json:"requiredApprovals,omitempty"`
 
 	// allowedGroups lists the groups whose members are eligible to approve.
 	// +required
@@ -463,7 +465,7 @@ type ApprovalPolicy struct {
 	// +kubebuilder:validation:MaxItems=16
 	// +kubebuilder:validation:items:MinLength=1
 	// +kubebuilder:validation:items:MaxLength=253
-	AllowedGroups []string `json:"allowedGroups"`
+	AllowedGroups []string `json:"allowedGroups,omitempty"`
 }
 
 // OrderRender is a render of an Order in progress.
@@ -474,7 +476,7 @@ type OrderRender struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]+$`
-	ConfigHash string `json:"configHash"`
+	ConfigHash string `json:"configHash,omitempty"`
 }
 
 // OrderStatus defines the observed state of Order.
@@ -490,6 +492,7 @@ type OrderStatus struct {
 
 	// observedGeneration is the most recent generation observed by the controller
 	// +optional
+	// +kubebuilder:validation:Minimum=1
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// latestPreparationName is the name of the most recent immutable Preparation
@@ -521,7 +524,7 @@ type OrderStatus struct {
 	// render is the render in progress: recorded before it starts, kept
 	// while it fails and is retried, and removed once it completes.
 	// +optional
-	Render *OrderRender `json:"render,omitempty"`
+	Render OrderRender `json:"render,omitzero"`
 
 	// registryAccess lists the registry locations the Order needs: where
 	// Kokumi pushes the Preparation and through which Registry, where Argo
@@ -565,7 +568,7 @@ type Order struct {
 
 	// spec defines the desired state of Order
 	// +required
-	Spec OrderSpec `json:"spec"`
+	Spec OrderSpec `json:"spec,omitzero"`
 
 	// status defines the observed state of Order
 	// +optional
@@ -574,48 +577,17 @@ type Order struct {
 
 // EffectivePromotionMode returns spec.promotion.mode, defaulting to Manual.
 func (o *Order) EffectivePromotionMode() PromotionMode {
-	if o.Spec.Promotion == nil || o.Spec.Promotion.Mode == "" {
+	if o.Spec.Promotion.Mode == "" {
 		return PromotionModeManual
 	}
 	return o.Spec.Promotion.Mode
 }
 
-// ApprovalPolicy returns spec.promotion.approvals, or nil when no gate applies.
-func (o *Order) ApprovalPolicy() *ApprovalPolicy {
-	if o.Spec.Promotion == nil {
-		return nil
-	}
-	return o.Spec.Promotion.Approvals
-}
-
-// PromotionChecks returns spec.promotion.checks, or nil when no check applies.
-func (o *Order) PromotionChecks() *PromotionChecks {
-	if o.Spec.Promotion == nil {
-		return nil
-	}
-	return o.Spec.Promotion.Checks
-}
-
-// UpstreamStages returns spec.promotion.after.
-func (o *Order) UpstreamStages() []UpstreamStage {
-	if o.Spec.Promotion == nil {
-		return nil
-	}
-	return o.Spec.Promotion.After
-}
-
 // PromotionGates returns a copy of the gates of spec.promotion, with the
-// upstream stages sorted by Order, or nil when no gate applies.
-func (o *Order) PromotionGates() *PromotionGates {
-	approvals, after, checks := o.ApprovalPolicy(), o.UpstreamStages(), o.PromotionChecks()
-	if approvals == nil && len(after) == 0 && checks == nil {
-		return nil
-	}
-	gates := &PromotionGates{
-		Approvals: approvals.DeepCopy(),
-		After:     slices.Clone(after),
-		Checks:    checks.DeepCopy(),
-	}
+// upstream stages sorted by Order, as the intent and each Preparation record
+// them.
+func (o *Order) PromotionGates() PromotionGates {
+	gates := *o.Spec.Promotion.PromotionGates.DeepCopy()
 	slices.SortFunc(gates.After, func(a, b UpstreamStage) int { return strings.Compare(a.Order, b.Order) })
 	return gates
 }

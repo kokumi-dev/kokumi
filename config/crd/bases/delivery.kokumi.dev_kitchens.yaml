@@ -84,6 +84,7 @@ spec:
                     minProperties: 1
                     properties:
                       enabled:
+                        default: false
                         description: |-
                           enabled turns the admin account on. When its Secret does not exist, the
                           controller then generates a password, writes its bcrypt hash into that
@@ -382,6 +383,7 @@ spec:
                 minProperties: 1
                 properties:
                   requireSourceVerification:
+                    default: false
                     description: |-
                       requireSourceVerification requires the source of every Product to
                       verify, either through the Product's spec.source.verify or by a
@@ -503,6 +505,7 @@ spec:
                 description: observedGeneration is the most recent generation observed
                   by the controller.
                 format: int64
+                minimum: 1
                 type: integer
               signing:
                 description: |-

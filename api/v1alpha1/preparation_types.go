@@ -29,14 +29,14 @@ type OrderSource struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:XValidation:rule="isURL(self) && url(self).getScheme() == 'oci'",message="must be a valid OCI URL"
-	URL string `json:"url"`
+	URL string `json:"url,omitempty"`
 
 	// baseDigest is the SHA256 digest of the base source artifact
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
-	BaseDigest string `json:"baseDigest"`
+	BaseDigest string `json:"baseDigest,omitempty"`
 }
 
 // RenderType identifies how the source was rendered to produce a Preparation.
@@ -55,14 +55,14 @@ type Renderer struct {
 	// One of "Manifest" or "Helm".
 	// +required
 	// +kubebuilder:validation:Enum=Manifest;Helm
-	Type RenderType `json:"type"`
+	Type RenderType `json:"type,omitempty"`
 
 	// version is the version of the rendering engine: the Helm library
 	// version for Helm, the Kokumi version for Manifest.
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=64
-	Version string `json:"version"`
+	Version string `json:"version,omitempty"`
 
 	// builder identifies the Kokumi controller that rendered the artifact,
 	// normally its container image reference including digest. It is
@@ -70,7 +70,7 @@ type Renderer struct {
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=512
-	Builder string `json:"builder"`
+	Builder string `json:"builder,omitempty"`
 }
 
 // Artifact defines the final immutable output of the rendering process
@@ -80,14 +80,14 @@ type Artifact struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
 	// +kubebuilder:validation:Pattern=`^oci://.*@sha256:[a-f0-9]{64}$`
-	OCIRef string `json:"ociRef"`
+	OCIRef string `json:"ociRef,omitempty"`
 
 	// digest is the SHA256 digest of the artifact
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
-	Digest string `json:"digest"`
+	Digest string `json:"digest,omitempty"`
 
 	// registryRef names the Registry Kokumi connected through to push the
 	// artifact. Signing, verification and the UI read the artifact through
@@ -136,33 +136,33 @@ type PreparationSpec struct {
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
-	OrderName string `json:"orderName"`
+	OrderName string `json:"orderName,omitempty"`
 
 	// source defines the source artifact information
 	// +required
-	Source OrderSource `json:"source"`
+	Source OrderSource `json:"source,omitzero"`
 
 	// renderer identifies what rendered this preparation
 	// +required
-	Renderer Renderer `json:"renderer"`
+	Renderer Renderer `json:"renderer,omitzero"`
 
 	// targetNamespace is the namespace the Preparation was rendered for:
 	// it deploys there on every cluster, wherever it is promoted.
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
-	TargetNamespace string `json:"targetNamespace"`
+	TargetNamespace string `json:"targetNamespace,omitempty"`
 
 	// configHash is the SHA256 hash of the canonicalized order configuration
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]+$`
-	ConfigHash string `json:"configHash"`
+	ConfigHash string `json:"configHash,omitempty"`
 
 	// artifact defines the output artifact information
 	// +required
-	Artifact Artifact `json:"artifact"`
+	Artifact Artifact `json:"artifact,omitzero"`
 
 	// commitMessage is the human-readable description of why this Preparation was created.
 	// It is stored as the org.opencontainers.image.description annotation on the OCI artifact.
@@ -193,13 +193,13 @@ type PreparationSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
-	ProductRevision string `json:"productRevision"`
+	ProductRevision string `json:"productRevision,omitempty"`
 
 	// promotion holds the gates copied from the Order's spec.promotion when
 	// this Preparation was created: the Preparation is only served once it
 	// passes them. They are part of the intent recorded on the OCI artifact.
 	// +optional
-	Promotion *PromotionGates `json:"promotion,omitempty"`
+	Promotion PromotionGates `json:"promotion,omitzero"`
 
 	// images lists the container images the rendered manifests reference,
 	// resolved to digests when the Preparation was rendered. The artifact's
@@ -219,7 +219,7 @@ type PreparationImage struct {
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=1024
-	Ref string `json:"ref"`
+	Ref string `json:"ref,omitempty"`
 
 	// name is the normalized repository of ref, for example
 	// "docker.io/library/nginx". Absent when ref is not a valid reference.
@@ -271,19 +271,19 @@ type ApprovalVote struct {
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
-	ApprovalName string `json:"approvalName"`
+	ApprovalName string `json:"approvalName,omitempty"`
 
 	// issuer is the OIDC issuer of the approver.
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
-	Issuer string `json:"issuer"`
+	Issuer string `json:"issuer,omitempty"`
 
 	// subject is the OIDC subject of the approver.
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=255
-	Subject string `json:"subject"`
+	Subject string `json:"subject,omitempty"`
 
 	// username is the human-readable name of the approver.
 	// +optional
@@ -293,15 +293,15 @@ type ApprovalVote struct {
 
 	// decision is the verdict of the vote.
 	// +required
-	Decision ApprovalDecision `json:"decision"`
+	Decision ApprovalDecision `json:"decision,omitempty"`
 
 	// result reports whether the vote counts towards the gate.
 	// +required
-	Result VoteResult `json:"result"`
+	Result VoteResult `json:"result,omitempty"`
 
 	// submittedTime is when the vote was submitted.
 	// +required
-	SubmittedTime metav1.MicroTime `json:"submittedTime"`
+	SubmittedTime *metav1.MicroTime `json:"submittedTime,omitempty"`
 }
 
 // ApprovalAttestation references the OCI referrer that records the sealed
@@ -311,14 +311,14 @@ type ApprovalAttestation struct {
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
-	OCIRef string `json:"ociRef"`
+	OCIRef string `json:"ociRef,omitempty"`
 
 	// digest is the manifest digest of the attestation.
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
-	Digest string `json:"digest"`
+	Digest string `json:"digest,omitempty"`
 }
 
 // PreparationApprovalStatus aggregates the Approvals of a Preparation.
@@ -326,24 +326,29 @@ type ApprovalAttestation struct {
 type PreparationApprovalStatus struct {
 	// requiredApprovals is the number of approvals required by the policy.
 	// +optional
-	RequiredApprovals int32 `json:"requiredApprovals"`
+	// +kubebuilder:validation:Minimum=0
+	RequiredApprovals *int32 `json:"requiredApprovals,omitempty"`
 
 	// approvedCount is the number of eligible approvers whose latest vote is Approve.
 	// +optional
-	ApprovedCount int32 `json:"approvedCount"`
+	// +kubebuilder:validation:Minimum=0
+	ApprovedCount *int32 `json:"approvedCount,omitempty"`
 
 	// rejectedCount is the number of eligible approvers whose latest vote is Reject.
 	// +optional
-	RejectedCount int32 `json:"rejectedCount"`
+	// +kubebuilder:validation:Minimum=0
+	RejectedCount *int32 `json:"rejectedCount,omitempty"`
 
 	// ineligibleCount is the number of approvers not in any allowed group.
 	// +optional
-	IneligibleCount int32 `json:"ineligibleCount"`
+	// +kubebuilder:validation:Minimum=0
+	IneligibleCount *int32 `json:"ineligibleCount,omitempty"`
 
 	// submissionCount is the total number of Approvals for this Preparation,
 	// including superseded ones.
 	// +optional
-	SubmissionCount int32 `json:"submissionCount"`
+	// +kubebuilder:validation:Minimum=0
+	SubmissionCount *int32 `json:"submissionCount,omitempty"`
 
 	// votes lists the latest vote of each approver. Once sealed, only these
 	// votes are considered.
@@ -360,7 +365,7 @@ type PreparationApprovalStatus struct {
 
 	// attestation references the OCI artifact recording the sealed votes.
 	// +optional
-	Attestation *ApprovalAttestation `json:"attestation,omitempty"`
+	Attestation ApprovalAttestation `json:"attestation,omitzero"`
 }
 
 // AttestationType identifies the kind of evidence an attestation carries.
@@ -381,20 +386,20 @@ const (
 type AttestationReference struct {
 	// type is the kind of evidence the attestation carries.
 	// +required
-	Type AttestationType `json:"type"`
+	Type AttestationType `json:"type,omitempty"`
 
 	// ociRef is the full OCI reference of the attestation including digest.
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
-	OCIRef string `json:"ociRef"`
+	OCIRef string `json:"ociRef,omitempty"`
 
 	// digest is the manifest digest of the attestation.
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
-	Digest string `json:"digest"`
+	Digest string `json:"digest,omitempty"`
 }
 
 // PreparationStatus defines the observed state of Preparation.
@@ -410,6 +415,7 @@ type PreparationStatus struct {
 
 	// observedGeneration is the most recent generation observed by the controller.
 	// +optional
+	// +kubebuilder:validation:Minimum=1
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 
 	// attestations lists the latest attestation of each type that signs the
@@ -425,7 +431,7 @@ type PreparationStatus struct {
 	// approval aggregates the Approvals of this Preparation. Only set when
 	// spec.promotion.approvals is set.
 	// +optional
-	Approval *PreparationApprovalStatus `json:"approval,omitempty"`
+	Approval PreparationApprovalStatus `json:"approval,omitzero"`
 }
 
 // +kubebuilder:object:root=true
@@ -451,37 +457,11 @@ type Preparation struct {
 
 	// spec defines the desired state of Preparation
 	// +required
-	Spec PreparationSpec `json:"spec"`
+	Spec PreparationSpec `json:"spec,omitzero"`
 
 	// status defines the observed state of Preparation
 	// +optional
 	Status PreparationStatus `json:"status,omitzero"`
-}
-
-// ApprovalPolicy returns spec.promotion.approvals, or nil when no approval
-// gate applies.
-func (p *Preparation) ApprovalPolicy() *ApprovalPolicy {
-	if p.Spec.Promotion == nil {
-		return nil
-	}
-	return p.Spec.Promotion.Approvals
-}
-
-// UpstreamStages returns spec.promotion.after.
-func (p *Preparation) UpstreamStages() []UpstreamStage {
-	if p.Spec.Promotion == nil {
-		return nil
-	}
-	return p.Spec.Promotion.After
-}
-
-// PromotionChecks returns spec.promotion.checks, or nil when no check
-// applies.
-func (p *Preparation) PromotionChecks() *PromotionChecks {
-	if p.Spec.Promotion == nil {
-		return nil
-	}
-	return p.Spec.Promotion.Checks
 }
 
 // GetConditions returns the status conditions of the Preparation.

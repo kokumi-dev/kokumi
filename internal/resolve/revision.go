@@ -44,11 +44,11 @@ func ProductRevision(product *deliveryv1alpha1.Product) (string, error) {
 // product is the SHA-256 of.
 func productRevisionCanonical(product *deliveryv1alpha1.Product) ([]byte, error) {
 	part := productPart{
-		Render:  product.Spec.Render,
+		Render:  productRender(product),
 		Patches: product.Spec.Patches,
 	}
 	vendorURL := ""
-	if source := product.Status.Source; source != nil {
+	if source := product.Status.Source; source.Digest != "" {
 		part.Source.Digest = source.Digest
 		if product.Spec.Images.EffectivePolicy() == deliveryv1alpha1.ImagePolicyVendor {
 			vendorURL = source.URL
@@ -61,4 +61,13 @@ func productRevisionCanonical(product *deliveryv1alpha1.Product) ([]byte, error)
 		return nil, fmt.Errorf("failed to canonicalize the revision of Product %q: %w", product.Name, err)
 	}
 	return canonical, nil
+}
+
+// productRender returns the render of product, nil when it renders nothing.
+func productRender(product *deliveryv1alpha1.Product) *deliveryv1alpha1.Render {
+	if product.Spec.Render == (deliveryv1alpha1.Render{}) {
+		return nil
+	}
+	render := product.Spec.Render
+	return &render
 }

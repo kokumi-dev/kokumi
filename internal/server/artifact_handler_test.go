@@ -113,7 +113,7 @@ func TestArtifactGraph_RecordedVerdicts(t *testing.T) {
 	require.NoError(t, err)
 
 	verdicts := map[string]deliveryv1alpha1.SignatureVerdict{
-		keyless: {Digest: keyless, Subject: digest, Result: deliveryv1alpha1.SignatureVerified, Signer: &deliveryv1alpha1.SourceVerification{
+		keyless: {Digest: keyless, Subject: digest, Result: deliveryv1alpha1.SignatureVerified, Signer: deliveryv1alpha1.SourceVerification{
 			Provider: deliveryv1alpha1.VerificationProviderCosign, Issuer: "https://token.actions.githubusercontent.com", Subject: "https://github.com/example/app/release.yml@refs/tags/v1",
 		}},
 		notary:   {Digest: notary, Subject: digest, Result: deliveryv1alpha1.SignatureUnsupported, Message: "Notary signatures are not verified"},

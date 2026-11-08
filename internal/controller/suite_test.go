@@ -216,6 +216,28 @@ func testRegistries(newClient func(oci.Options) oci.Client) *registry.Resolver {
 	return registry.NewResolver(registry.NewClients(artifact.DefaultRegistryHost).WithClientFactory(newClient), RegistryReader(k8sClient))
 }
 
+// withZeroCounts returns s with each count it leaves out set to 0, as the
+// controllers write every count of a summary.
+func withZeroCounts(s deliveryv1alpha1.VulnerabilitySummary) deliveryv1alpha1.VulnerabilitySummary {
+	for _, count := range []**int32{&s.Critical, &s.High, &s.Medium, &s.Low, &s.Unknown, &s.Fixable} {
+		if *count == nil {
+			*count = new(int32(0))
+		}
+	}
+	return s
+}
+
+// withZeroClusters returns c with each count it leaves out set to 0, as the
+// Serving controller writes every count.
+func withZeroClusters(c deliveryv1alpha1.DeploymentClusters) deliveryv1alpha1.DeploymentClusters {
+	for _, count := range []**int32{&c.Selected, &c.Healthy, &c.Progressing, &c.Degraded, &c.Held} {
+		if *count == nil {
+			*count = new(int32(0))
+		}
+	}
+	return c
+}
+
 // getFirstFoundEnvTestBinaryDir locates the first binary in the specified path.
 // ENVTEST-based tests depend on specific binaries, usually located in paths set by
 // controller-runtime. When running tests directly (e.g., via an IDE) without using

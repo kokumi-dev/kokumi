@@ -49,7 +49,7 @@ func createTestApproval(ctx context.Context, prep *deliveryv1alpha1.Preparation,
 				Groups:   groups,
 			},
 			Decision:      decision,
-			SubmittedTime: metav1.NewMicroTime(time.Now()),
+			SubmittedTime: new(metav1.NewMicroTime(time.Now())),
 		},
 	}
 	Expect(k8sClient.Create(ctx, a)).To(Succeed())
@@ -147,7 +147,7 @@ var _ = Describe("Approval Controller", func() {
 
 		It("ignores votes submitted after the approvals were sealed", func() {
 			sealedTime := metav1.NewTime(time.Now().Add(-time.Minute).Truncate(time.Second))
-			prep.Status.Approval = &deliveryv1alpha1.PreparationApprovalStatus{RequiredApprovals: 1, SealedTime: &sealedTime}
+			prep.Status.Approval = deliveryv1alpha1.PreparationApprovalStatus{RequiredApprovals: new(int32(1)), SealedTime: &sealedTime}
 			Expect(k8sClient.Status().Update(ctx, prep)).To(Succeed())
 
 			late := createTestApproval(ctx, prep, "alice", release, deliveryv1alpha1.ApprovalDecisionApprove)

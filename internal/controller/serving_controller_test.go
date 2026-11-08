@@ -802,11 +802,11 @@ var _ = Describe("Serving Controller", func() {
 			Expect(res.Approved).To(BeTrue())
 
 			sealedTime := approval.NewSealTime(time.Now())
-			p.Status.Approval = res.Status
+			p.Status.Approval = *res.Status
 			p.Status.Approval.SealedTime = &sealedTime
 			archived, err := approval.Archive(ctx, registry, testSigner, p, approvals.Items)
 			Expect(err).NotTo(HaveOccurred())
-			p.Status.Approval.Attestation = &archived
+			p.Status.Approval.Attestation = archived
 			apimeta.SetStatusCondition(&p.Status.Conditions, metav1.Condition{
 				Type: deliveryv1alpha1.ConditionTypeApprovalsSealed, Status: metav1.ConditionTrue, Reason: deliveryv1alpha1.ReasonSealed,
 			})
@@ -970,12 +970,12 @@ var _ = Describe("Serving vulnerability checks", func() {
 	recordScan := func(report string, scanned time.Time, summary deliveryv1alpha1.VulnerabilitySummary) {
 		product := &deliveryv1alpha1.Product{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: productName}, product)).To(Succeed())
-		product.Status.Vulnerabilities = &deliveryv1alpha1.ProductVulnerabilities{
+		product.Status.Vulnerabilities = deliveryv1alpha1.ProductVulnerabilities{
 			Scanner: deliveryv1alpha1.VulnerabilityScanner{Name: "trivy", Version: "0.71.0"},
 			Images: []deliveryv1alpha1.ImageScan{{
-				Digest: imageDigest, Repository: "oci://" + vendoredRepo, ScannedTime: metav1.Time{Time: scanned},
+				Digest: imageDigest, Repository: "oci://" + vendoredRepo, ScannedTime: &metav1.Time{Time: scanned},
 				SBOM:   deliveryv1alpha1.ImageSBOM{Digest: imageDigest, Origin: deliveryv1alpha1.SBOMOriginImage},
-				Report: report, Summary: summary,
+				Report: report, Summary: withZeroCounts(summary),
 			}},
 		}
 		Expect(k8sClient.Status().Update(ctx, product)).To(Succeed())
@@ -1040,7 +1040,7 @@ var _ = Describe("Serving vulnerability checks", func() {
 			Spec: deliveryv1alpha1.OrderSpec{
 				EnvironmentRef: localEnvironment,
 				ProductRef:     deliveryv1alpha1.ProductRef{Name: productName},
-				Promotion:      &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
+				Promotion:      deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
 			},
 		})).To(Succeed())
 		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Preparation{
@@ -1057,8 +1057,8 @@ var _ = Describe("Serving vulnerability checks", func() {
 					OCIRef: "oci://registry.kokumi.svc.cluster.local:5000/" + orderName + "@" + artifactDigest,
 					Digest: artifactDigest,
 				},
-				Promotion: &deliveryv1alpha1.PromotionGates{Checks: &deliveryv1alpha1.PromotionChecks{
-					Vulnerabilities: &deliveryv1alpha1.VulnerabilityCheck{MaxSeverity: deliveryv1alpha1.SeverityHigh},
+				Promotion: deliveryv1alpha1.PromotionGates{Checks: deliveryv1alpha1.PromotionChecks{
+					Vulnerabilities: deliveryv1alpha1.VulnerabilityCheck{MaxSeverity: deliveryv1alpha1.SeverityHigh},
 				}},
 				Images: []deliveryv1alpha1.PreparationImage{{
 					Ref: "nginx:1.27", Name: "docker.io/library/nginx", Digest: imageDigest,
@@ -1092,7 +1092,7 @@ var _ = Describe("Serving vulnerability checks", func() {
 	})
 
 	It("does not deploy a Preparation with vulnerabilities at or above the allowed severity", func() {
-		recordScan(vulnerable, now.Add(-time.Hour), deliveryv1alpha1.VulnerabilitySummary{Critical: 1, High: 2})
+		recordScan(vulnerable, now.Add(-time.Hour), deliveryv1alpha1.VulnerabilitySummary{Critical: new(int32(1)), High: new(int32(2))})
 
 		reconcileServing()
 		cond := checksPassed()
@@ -1139,21 +1139,21 @@ var _ = Describe("Serving vulnerability checks", func() {
 	})
 
 	It("keeps a deployed Preparation deployed when a new scan finds vulnerabilities, and warns", func() {
-		recordScan(clean, now.Add(-time.Hour), deliveryv1alpha1.VulnerabilitySummary{Low: 1})
+		recordScan(clean, now.Add(-time.Hour), deliveryv1alpha1.VulnerabilitySummary{Low: new(int32(1))})
 		reconcileServing()
 		setAppHealthy()
 		reconcileServing()
 		s := getServing()
 		Expect(healthyDigest(s)).To(Equal(artifactDigest))
-		Expect(s.Status.DeployedVulnerabilities).To(Equal(&deliveryv1alpha1.VulnerabilitySummary{Low: 1}))
+		Expect(s.Status.DeployedVulnerabilities).To(Equal(withZeroCounts(deliveryv1alpha1.VulnerabilitySummary{Low: new(int32(1))})))
 
-		recordScan(vulnerable, now, deliveryv1alpha1.VulnerabilitySummary{Critical: 1, High: 2, Fixable: 2})
+		recordScan(vulnerable, now, deliveryv1alpha1.VulnerabilitySummary{Critical: new(int32(1)), High: new(int32(2)), Fixable: new(int32(2))})
 		reconcileServing()
 
 		s = getServing()
 		Expect(apimeta.IsStatusConditionTrue(s.Status.Conditions, deliveryv1alpha1.ConditionTypeReady)).To(BeTrue(), "the checks hold new deployments only")
 		Expect(checksPassed().Reason).To(Equal(deliveryv1alpha1.ReasonVulnerabilitiesFound))
-		Expect(s.Status.DeployedVulnerabilities).To(Equal(&deliveryv1alpha1.VulnerabilitySummary{Critical: 1, High: 2, Fixable: 2}))
+		Expect(s.Status.DeployedVulnerabilities).To(Equal(withZeroCounts(deliveryv1alpha1.VulnerabilitySummary{Critical: new(int32(1)), High: new(int32(2)), Fixable: new(int32(2))})))
 		Expect(recorder.Events).To(Receive(ContainSubstring("VulnerabilitiesIncreased")))
 	})
 })
@@ -1264,7 +1264,7 @@ var _ = Describe("Serving promotion pipelines", func() {
 			Spec: deliveryv1alpha1.OrderSpec{
 				EnvironmentRef: localEnvironment,
 				ProductRef:     deliveryv1alpha1.ProductRef{Name: product},
-				Promotion:      &deliveryv1alpha1.PromotionSpec{Mode: mode, After: upstreams},
+				Promotion:      deliveryv1alpha1.PromotionSpec{Mode: mode, After: upstreams},
 			},
 		})).To(Succeed())
 		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Serving{
@@ -1369,7 +1369,7 @@ var _ = Describe("Serving promotion pipelines", func() {
 		createStage(dev, testProductName, deliveryv1alpha1.PromotionModeAutomatic)
 		createStage(staging, testProductName, deliveryv1alpha1.PromotionModeAutomatic, deliveryv1alpha1.UpstreamStage{Order: dev})
 		createStage(prod, testProductName, deliveryv1alpha1.PromotionModeAutomatic,
-			deliveryv1alpha1.UpstreamStage{Order: staging, SoakSeconds: int32(soak / time.Second)})
+			deliveryv1alpha1.UpstreamStage{Order: staging, SoakSeconds: new(int32(soak / time.Second))})
 	})
 
 	It("deploys each stage once its upstream stage ran the revision healthily for its soak", func() {
@@ -1462,7 +1462,7 @@ var _ = Describe("Serving promotion pipelines", func() {
 		o := &deliveryv1alpha1.Order{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: testNamespace, Name: prod}, o)).To(Succeed())
 		o.Spec.Promotion.Mode = deliveryv1alpha1.PromotionModeManual
-		o.Spec.Promotion.After[0].SoakSeconds = 0
+		o.Spec.Promotion.After[0].SoakSeconds = new(int32(0))
 		Expect(k8sClient.Update(ctx, o)).To(Succeed())
 		promote := func(name string) {
 			s := servingOf(prod)
@@ -1645,7 +1645,7 @@ var _ = Describe("Serving environments", Ordered, func() {
 				Name: name, Namespace: testNamespace, Labels: map[string]string{fleet: testEdge},
 				Spec: deliveryv1alpha1.ClusterSpec{
 					Connection: deliveryv1alpha1.ClusterConnectionKubeconfig,
-					Kubeconfig: &deliveryv1alpha1.ClusterKubeconfig{SecretRef: deliveryv1alpha1.KubeconfigSecretReference{Name: name + "-kubeconfig"}},
+					Kubeconfig: deliveryv1alpha1.ClusterKubeconfig{SecretRef: deliveryv1alpha1.KubeconfigSecretReference{Name: name + "-kubeconfig"}},
 				},
 			})).To(Succeed())
 			setClusterStatus(name, deliveryv1alpha1.ReasonReady)
@@ -1653,8 +1653,8 @@ var _ = Describe("Serving environments", Ordered, func() {
 		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Environment{
 			Name: envName, Namespace: testNamespace,
 			Spec: deliveryv1alpha1.EnvironmentSpec{
-				ClusterSelector: metav1.LabelSelector{MatchLabels: map[string]string{fleet: testEdge}},
-				Deployer:        deliveryv1alpha1.Deployer{Type: deliveryv1alpha1.DeployerTypeArgoCD, ArgoCD: &deliveryv1alpha1.ArgoCDDeployer{Project: project}},
+				ClusterSelector: &metav1.LabelSelector{MatchLabels: map[string]string{fleet: testEdge}},
+				Deployer:        deliveryv1alpha1.Deployer{Type: deliveryv1alpha1.DeployerTypeArgoCD, ArgoCD: deliveryv1alpha1.ArgoCDDeployer{Project: project}},
 			},
 		})).To(Succeed())
 		appProject := newAppProject()
@@ -1672,7 +1672,7 @@ var _ = Describe("Serving environments", Ordered, func() {
 			Spec: deliveryv1alpha1.OrderSpec{
 				EnvironmentRef: deliveryv1alpha1.EnvironmentRef{Name: envName},
 				ProductRef:     deliveryv1alpha1.ProductRef{Name: testProductName},
-				Promotion:      &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
+				Promotion:      deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
 			},
 		})).To(Succeed())
 		p := createTestPreparation(ctx, prep, order, digest, nil)
@@ -1720,7 +1720,7 @@ var _ = Describe("Serving environments", Ordered, func() {
 		s := getServing()
 		Expect(ready(s.Status.Conditions)).To(And(HaveField("Reason", deliveryv1alpha1.ReasonDeploying),
 			HaveField("Message", ContainSubstring("to srv-eu, srv-us"))))
-		Expect(s.Status.Clusters).To(Equal(&deliveryv1alpha1.DeploymentClusters{Selected: 2, Progressing: 2}))
+		Expect(s.Status.Clusters).To(Equal(withZeroClusters(deliveryv1alpha1.DeploymentClusters{Selected: new(int32(2)), Progressing: new(int32(2))})))
 		Expect(ready(s.Status.Targets[0].Conditions)).To(HaveField("Reason", deliveryv1alpha1.ReasonProgressing))
 	})
 
@@ -1729,7 +1729,7 @@ var _ = Describe("Serving environments", Ordered, func() {
 		reconcileServing()
 		s := getServing()
 		Expect(ready(s.Status.Conditions).Reason).To(Equal(deliveryv1alpha1.ReasonDeploying))
-		Expect(s.Status.Clusters).To(Equal(&deliveryv1alpha1.DeploymentClusters{Selected: 2, Healthy: 1, Progressing: 1}))
+		Expect(s.Status.Clusters).To(Equal(withZeroClusters(deliveryv1alpha1.DeploymentClusters{Selected: new(int32(2)), Healthy: new(int32(1)), Progressing: new(int32(1))})))
 		Expect(targetClusters()).To(Equal([]string{us}), "a healthy cluster is counted, not listed")
 		Expect(healthyDigest(s)).To(BeEmpty(), "one cluster does not make the deployment healthy")
 
@@ -1746,7 +1746,7 @@ var _ = Describe("Serving environments", Ordered, func() {
 		labelCluster(us, testRetired)
 
 		reconcileServing()
-		Expect(getServing().Status.Clusters).To(HaveField("Selected", BeEquivalentTo(1)))
+		Expect(getServing().Status.Clusters).To(HaveField("Selected", HaveValue(BeEquivalentTo(1))))
 		_, err := application(us)
 		Expect(errors.IsNotFound(err)).To(BeTrue())
 		_, err = application(eu)
@@ -1760,7 +1760,7 @@ var _ = Describe("Serving environments", Ordered, func() {
 
 		reconcileServing()
 		s := getServing()
-		Expect(s.Status.Clusters).To(HaveField("Held", BeEquivalentTo(1)))
+		Expect(s.Status.Clusters).To(HaveField("Held", HaveValue(BeEquivalentTo(1))))
 		Expect(ready(s.Status.Targets[0].Conditions)).To(And(HaveField("Reason", deliveryv1alpha1.ReasonClusterNotReady),
 			HaveField("Message", ContainSubstring("cannot be reached"))))
 		_, err := application(us)
@@ -1855,8 +1855,8 @@ var _ = Describe("Serving environments", Ordered, func() {
 	It("holds a new Preparation that does not run after the stages its Environment requires", func() {
 		env := &deliveryv1alpha1.Environment{}
 		Expect(k8sClient.Get(ctx, envKey, env)).To(Succeed())
-		env.Spec.Promotion = &deliveryv1alpha1.EnvironmentPromotion{
-			RequireAfter: []deliveryv1alpha1.RequiredEnvironment{{Environment: "pre-edge", MinSoakSeconds: 60}},
+		env.Spec.Promotion = deliveryv1alpha1.EnvironmentPromotion{
+			RequireAfter: []deliveryv1alpha1.RequiredEnvironment{{Environment: "pre-edge", MinSoakSeconds: new(int32(60))}},
 		}
 		Expect(k8sClient.Update(ctx, env)).To(Succeed())
 		next := createTestPreparation(ctx, prep+"-next", order, "sha256:6666666666666666666666666666666666666666666666666666666666666666", nil)
@@ -1912,7 +1912,7 @@ var _ = Describe("Serving Applications", func() {
 				Spec: deliveryv1alpha1.OrderSpec{
 					EnvironmentRef: localEnvironment,
 					ProductRef:     deliveryv1alpha1.ProductRef{Name: testProductName},
-					Promotion:      &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
+					Promotion:      deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
 				},
 			})).To(Succeed())
 			var p *deliveryv1alpha1.Preparation
@@ -2047,8 +2047,8 @@ var _ = Describe("Serving targets", func() {
 		serving := &deliveryv1alpha1.Serving{}
 
 		setTargets(serving, deployed, targets, states)
-		Expect(serving.Status.Clusters).To(Equal(&deliveryv1alpha1.DeploymentClusters{
-			Selected: 73, Healthy: 1, Degraded: 1, Held: 1, Progressing: 70,
+		Expect(serving.Status.Clusters).To(Equal(deliveryv1alpha1.DeploymentClusters{
+			Selected: new(int32(73)), Healthy: new(int32(1)), Degraded: new(int32(1)), Held: new(int32(1)), Progressing: new(int32(70)),
 		}))
 		Expect(serving.Status.Targets).To(HaveLen(maxListedTargets))
 		Expect(serving.Status.Targets[0].Cluster).To(Equal("held"))

@@ -129,24 +129,22 @@ func handleGetProductSourceArtifact(deps *apiDeps) http.HandlerFunc {
 		}
 
 		var result ProductSourceArtifactDTO
-		resolved := product.Status.Source
+		resolved := &product.Status.Source
 		verdicts := map[string]deliveryv1alpha1.SignatureVerdict{}
-		if resolved != nil {
-			for _, v := range resolved.Signatures {
-				verdicts[v.Digest] = v
-			}
+		for _, v := range resolved.Signatures {
+			verdicts[v.Digest] = v
 		}
 
 		// The source at its source location, by the digest Orders render.
 		// The Product's Registries connect to it and to the vendored copy.
 		source := product.Spec.Source
 		ref := source.URL + ":" + source.Version
-		if resolved != nil {
+		if resolved.Digest != "" {
 			ref = source.URL + ":" + resolved.Version + "@" + resolved.Digest
 		}
 		result.Source = deps.graphThrough(r, product, trust, ref, verdicts)
 
-		if product.Spec.Vendor != nil && resolved != nil {
+		if product.Spec.Vendor != nil && resolved.Digest != "" {
 			vendored := deps.graphThrough(r, product, trust, resolved.URL+":"+resolved.Version+"@"+resolved.Digest, verdicts)
 			result.Vendored = &vendored
 		}
@@ -350,7 +348,7 @@ func recordedVerification(trust *signing.TrustSet, verdicts map[string]deliveryv
 	switch verdict.Result {
 	case deliveryv1alpha1.SignatureVerified:
 		dto := &VerificationDTO{Verified: true}
-		if signer := verdict.Signer; signer != nil {
+		if signer := verdict.Signer; signer.Provider != "" {
 			dto.KeyID, dto.Issuer, dto.Subject = signer.KeyID, signer.Issuer, signer.Subject
 			dto.KeyName = trust.KeyName(signer.KeyID)
 		}

@@ -232,7 +232,7 @@ func TestOIDCSignInUsesTheCurrentSigningKey(t *testing.T) {
 		},
 	}).Build()
 	mgr := &authManager{reader: c, apiReader: c, ns: testNS, logger: logr.Discard()}
-	kitchen := authKitchen(&deliveryv1alpha1.KitchenAuth{OIDC: &deliveryv1alpha1.OIDCConfig{
+	kitchen := authKitchen(&deliveryv1alpha1.KitchenAuth{OIDC: deliveryv1alpha1.OIDCConfig{
 		IssuerURL:       provider.URL,
 		ClientID:        testClientID,
 		ClientSecretRef: &corev1.LocalObjectReference{Name: testOIDCSecret},
@@ -787,7 +787,7 @@ func TestAuthManagerOIDCSessionsFollowTheKitchen(t *testing.T) {
 		}
 	}
 	kitchen := func(issuerURL, secret string) *deliveryv1alpha1.Kitchen {
-		return authKitchen(&deliveryv1alpha1.KitchenAuth{OIDC: &deliveryv1alpha1.OIDCConfig{
+		return authKitchen(&deliveryv1alpha1.KitchenAuth{OIDC: deliveryv1alpha1.OIDCConfig{
 			IssuerURL: issuerURL, ClientID: testClientID,
 			ClientSecretRef: &corev1.LocalObjectReference{Name: secret},
 		}})

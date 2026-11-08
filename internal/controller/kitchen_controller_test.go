@@ -167,8 +167,8 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 		return &deliveryv1alpha1.Kitchen{
 			Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace,
 			Spec: deliveryv1alpha1.KitchenSpec{
-				Auth: &deliveryv1alpha1.KitchenAuth{
-					AdminUser: &deliveryv1alpha1.AdminUserConfig{Enabled: true},
+				Auth: deliveryv1alpha1.KitchenAuth{
+					AdminUser: deliveryv1alpha1.AdminUserConfig{Enabled: new(true)},
 				},
 			},
 		}
@@ -237,8 +237,8 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 	It("generates no admin Secret while the admin account is off", func() {
 		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Kitchen{
 			Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace,
-			Spec: deliveryv1alpha1.KitchenSpec{Auth: &deliveryv1alpha1.KitchenAuth{
-				AdminUser: &deliveryv1alpha1.AdminUserConfig{},
+			Spec: deliveryv1alpha1.KitchenSpec{Auth: deliveryv1alpha1.KitchenAuth{
+				AdminUser: deliveryv1alpha1.AdminUserConfig{},
 			}},
 		})).To(Succeed())
 
@@ -275,8 +275,8 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 		kitchen := &deliveryv1alpha1.Kitchen{
 			Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace,
 			Spec: deliveryv1alpha1.KitchenSpec{
-				Auth: &deliveryv1alpha1.KitchenAuth{
-					OIDC: &deliveryv1alpha1.OIDCConfig{
+				Auth: deliveryv1alpha1.KitchenAuth{
+					OIDC: deliveryv1alpha1.OIDCConfig{
 						IssuerURL: "https://sso.example.com",
 						ClientID:  "kokumi",
 					},
@@ -332,7 +332,8 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 		kitchen := &deliveryv1alpha1.Kitchen{
 			Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace,
 			Spec: deliveryv1alpha1.KitchenSpec{
-				Auth: &deliveryv1alpha1.KitchenAuth{},
+				// What auth: {} defaults to.
+				Auth: deliveryv1alpha1.KitchenAuth{TokenSigningKeySecretRef: &corev1.LocalObjectReference{Name: tokenSecretName}},
 			},
 		}
 		Expect(k8sClient.Create(ctx, kitchen)).To(Succeed())
@@ -361,7 +362,7 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 		kitchen := &deliveryv1alpha1.Kitchen{
 			Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace,
 			Spec: deliveryv1alpha1.KitchenSpec{
-				Auth: &deliveryv1alpha1.KitchenAuth{
+				Auth: deliveryv1alpha1.KitchenAuth{
 					TokenSigningKeySecretRef: &corev1.LocalObjectReference{Name: userTokenSecretName},
 				},
 			},
@@ -391,7 +392,7 @@ var _ = Describe("Kitchen adminUser secret validation", func() {
 		kitchen := &deliveryv1alpha1.Kitchen{
 			Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace,
 			Spec: deliveryv1alpha1.KitchenSpec{
-				Auth: &deliveryv1alpha1.KitchenAuth{
+				Auth: deliveryv1alpha1.KitchenAuth{
 					TokenSigningKeySecretRef: &corev1.LocalObjectReference{Name: userTokenSecretName},
 				},
 			},
@@ -445,8 +446,8 @@ var _ = Describe("Kitchen OIDC sign-out", func() {
 		return &deliveryv1alpha1.Kitchen{
 			Name: deliveryv1alpha1.DefaultKitchenName, Namespace: testNamespace,
 			Spec: deliveryv1alpha1.KitchenSpec{
-				Auth: &deliveryv1alpha1.KitchenAuth{
-					OIDC: &deliveryv1alpha1.OIDCConfig{
+				Auth: deliveryv1alpha1.KitchenAuth{
+					OIDC: deliveryv1alpha1.OIDCConfig{
 						IssuerURL:       "https://sso.example.com",
 						ClientID:        "kokumi",
 						ProviderSignOut: signOut,
@@ -496,7 +497,7 @@ var _ = Describe("Kitchen signing key", func() {
 		Expect(err).NotTo(HaveOccurred(), "stock cosign can read the generated key")
 
 		kitchen := getKitchen(ctx)
-		Expect(kitchen.Status.Signing).NotTo(BeNil())
+		Expect(kitchen.Status.Signing).NotTo(BeZero())
 		Expect(kitchen.Status.Signing.KeyID).To(Equal(key.ID()))
 		Expect(kitchen.Status.Signing.PublicKey).To(Equal(string(secret.Data[signing.SecretPublicKey])))
 		Expect(apimeta.IsStatusConditionTrue(kitchen.Status.Conditions, deliveryv1alpha1.ConditionTypeSigningKeyReady)).To(BeTrue())
@@ -530,7 +531,7 @@ var _ = Describe("Kitchen signing key", func() {
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(cond.Reason).To(Equal(deliveryv1alpha1.ReasonKeyInvalid))
 		Expect(readyCondition(kitchen).Status).To(Equal(metav1.ConditionFalse))
-		Expect(kitchen.Status.Signing).To(BeNil())
+		Expect(kitchen.Status.Signing).To(BeZero())
 	})
 
 	It("stops using a deleted key that cannot be generated again", func() {
@@ -568,7 +569,7 @@ var _ = Describe("Kitchen signing key", func() {
 
 	It("refuses a trusted key that is not a public key", func() {
 		kitchen := getKitchen(ctx)
-		kitchen.Spec.Signing = &deliveryv1alpha1.KitchenSigning{TrustedKeys: []deliveryv1alpha1.TrustedKey{{
+		kitchen.Spec.Signing = deliveryv1alpha1.KitchenSigning{TrustedKeys: []deliveryv1alpha1.TrustedKey{{
 			Name:      "broken",
 			PublicKey: "-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n",
 		}}}
@@ -598,9 +599,9 @@ var _ = Describe("Kitchen signing key", func() {
 
 		It("still ensures the auth objects, so that sign-in works", func() {
 			kitchen := getKitchen(ctx)
-			kitchen.Spec.Signing = &deliveryv1alpha1.KitchenSigning{TrustedKeys: brokenTrustedKey}
-			kitchen.Spec.Auth = &deliveryv1alpha1.KitchenAuth{
-				AdminUser: &deliveryv1alpha1.AdminUserConfig{Enabled: true},
+			kitchen.Spec.Signing = deliveryv1alpha1.KitchenSigning{TrustedKeys: brokenTrustedKey}
+			kitchen.Spec.Auth = deliveryv1alpha1.KitchenAuth{
+				AdminUser: deliveryv1alpha1.AdminUserConfig{Enabled: new(true)},
 			}
 			Expect(k8sClient.Update(ctx, kitchen)).To(Succeed())
 
@@ -626,9 +627,9 @@ var _ = Describe("Kitchen signing key", func() {
 				Data: map[string][]byte{"username": []byte("admin")},
 			})).To(Succeed())
 			kitchen := getKitchen(ctx)
-			kitchen.Spec.Signing = &deliveryv1alpha1.KitchenSigning{TrustedKeys: brokenTrustedKey}
-			kitchen.Spec.Auth = &deliveryv1alpha1.KitchenAuth{
-				AdminUser: &deliveryv1alpha1.AdminUserConfig{Enabled: true},
+			kitchen.Spec.Signing = deliveryv1alpha1.KitchenSigning{TrustedKeys: brokenTrustedKey}
+			kitchen.Spec.Auth = deliveryv1alpha1.KitchenAuth{
+				AdminUser: deliveryv1alpha1.AdminUserConfig{Enabled: new(true)},
 			}
 			Expect(k8sClient.Update(ctx, kitchen)).To(Succeed())
 

@@ -194,7 +194,7 @@ func getEnvironment(w http.ResponseWriter, r *http.Request, uc *userClient) (*de
 // validClusterSelector reports a clusterSelector that is no valid label
 // selector, which the API accepts and the Environment would report.
 func validClusterSelector(spec deliveryv1alpha1.EnvironmentSpec) error {
-	if _, err := metav1.LabelSelectorAsSelector(&spec.ClusterSelector); err != nil {
+	if _, err := metav1.LabelSelectorAsSelector(spec.ClusterSelector); err != nil {
 		return fmt.Errorf("invalid clusterSelector: %w", err)
 	}
 	return nil

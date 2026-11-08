@@ -118,7 +118,8 @@ var _ = Describe("Clusters", Label("clusters"), Serial, func() {
 						framework.KeyServer: spoke.Server, framework.KeyNamespace: targetNamespace,
 					}))))
 				framework.ExpectNoApplication(fleet, order)
-				Eventually(framework.Serving(fleet, order)).Should(HaveField("Status.Clusters.Selected", BeEquivalentTo(1)))
+				Eventually(framework.Serving(fleet, order)).
+					Should(HaveField("Status.Clusters.Selected", HaveValue(BeEquivalentTo(1))))
 			})
 
 			It("is deployed once the spoke runs it healthily", func() {
@@ -156,7 +157,8 @@ var _ = Describe("Clusters", Label("clusters"), Serial, func() {
 			It("deploys to the cluster Kokumi runs in, too, once the admin labels it into the Environment", func() {
 				framework.LabelCluster(fleet, "in-cluster", "fleet", "edge")
 				framework.WaitForDeployment(fleet, order, digest)
-				Eventually(framework.Serving(fleet, order)).Should(HaveField("Status.Clusters.Selected", BeEquivalentTo(2)))
+				Eventually(framework.Serving(fleet, order)).
+					Should(HaveField("Status.Clusters.Selected", HaveValue(BeEquivalentTo(2))))
 
 				framework.SyncHealthy(fleet, order, digest)
 				Eventually(framework.Serving(fleet, order), time.Minute).Should(SatisfyAll(

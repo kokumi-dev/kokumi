@@ -41,14 +41,14 @@ type Approver struct {
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=2048
-	Issuer string `json:"issuer"`
+	Issuer string `json:"issuer,omitempty"`
 
 	// subject is the OIDC subject (sub claim). Together with issuer it is the
 	// stable identity key: only the latest vote per issuer and subject counts.
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=255
-	Subject string `json:"subject"`
+	Subject string `json:"subject,omitempty"`
 
 	// username is the human-readable name of the approver.
 	// +optional
@@ -79,19 +79,22 @@ type ApprovalPreparationReference struct {
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
-	Name string `json:"name"`
+	Name string `json:"name,omitempty"`
 
 	// uid is the UID of the Preparation. A recreated Preparation with the
 	// same name does not inherit votes.
 	// +required
-	UID types.UID `json:"uid"`
+	// +kubebuilder:validation:Type=string
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=36
+	UID types.UID `json:"uid,omitempty"`
 
 	// artifactDigest is the digest of the reviewed Preparation artifact.
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=71
 	// +kubebuilder:validation:Pattern=`^sha256:[a-f0-9]{64}$`
-	ArtifactDigest string `json:"artifactDigest"`
+	ArtifactDigest string `json:"artifactDigest,omitempty"`
 }
 
 // ApprovalSpec is an immutable vote on a Preparation. Approvals can only be
@@ -102,19 +105,19 @@ type ApprovalSpec struct {
 	// +required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
-	OrderName string `json:"orderName"`
+	OrderName string `json:"orderName,omitempty"`
 
 	// preparationRef references the reviewed Preparation.
 	// +required
-	PreparationRef ApprovalPreparationReference `json:"preparationRef"`
+	PreparationRef ApprovalPreparationReference `json:"preparationRef,omitzero"`
 
 	// approver identifies who submitted this vote.
 	// +required
-	Approver Approver `json:"approver"`
+	Approver Approver `json:"approver,omitzero"`
 
 	// decision is the verdict of this vote.
 	// +required
-	Decision ApprovalDecision `json:"decision"`
+	Decision ApprovalDecision `json:"decision,omitempty"`
 
 	// comment is an optional review comment.
 	// +optional
@@ -125,7 +128,7 @@ type ApprovalSpec struct {
 	// submittedTime is when the kokumi server accepted the vote. It orders
 	// votes of the same approver submitted within the same second.
 	// +required
-	SubmittedTime metav1.MicroTime `json:"submittedTime"`
+	SubmittedTime *metav1.MicroTime `json:"submittedTime,omitempty"`
 }
 
 // ApprovalStatus defines the observed state of Approval.
@@ -143,6 +146,7 @@ type ApprovalStatus struct {
 
 	// observedGeneration is the most recent generation observed by the controller.
 	// +optional
+	// +kubebuilder:validation:Minimum=1
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 }
 
@@ -169,7 +173,7 @@ type Approval struct {
 
 	// spec defines the desired state of Approval
 	// +required
-	Spec ApprovalSpec `json:"spec"`
+	Spec ApprovalSpec `json:"spec,omitzero"`
 
 	// status defines the observed state of Approval
 	// +optional

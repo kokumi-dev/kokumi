@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
@@ -204,15 +205,16 @@ func servingTarget(serving *deliveryv1alpha1.Serving, deployed *deliveryv1alpha1
 		return dto
 	}
 	counts := serving.Status.Clusters
+	notHealthy := ptr.Deref(counts.Progressing, 0) + ptr.Deref(counts.Degraded, 0) + ptr.Deref(counts.Held, 0)
 	switch {
-	case counts == nil || counts.Selected == 0:
+	case ptr.Deref(counts.Selected, 0) == 0:
 		dto.Message = "The Serving deploys to no cluster yet"
 		if ready := apimeta.FindStatusCondition(serving.Status.Conditions, deliveryv1alpha1.ConditionTypeReady); ready != nil {
 			dto.State, dto.Message = ready.Reason, ready.Message
 		}
-	case int(counts.Progressing+counts.Degraded+counts.Held) > len(serving.Status.Targets):
+	case int(notHealthy) > len(serving.Status.Targets):
 		dto.Message = fmt.Sprintf("The Serving lists %d of the %d clusters that do not run Preparation %s healthily; this one is not among them",
-			len(serving.Status.Targets), counts.Progressing+counts.Degraded+counts.Held, deployed.PreparationName)
+			len(serving.Status.Targets), notHealthy, deployed.PreparationName)
 	default:
 		dto.State, dto.Ready, dto.Revision = deliveryv1alpha1.ReasonHealthy, true, deployed.Digest
 		dto.Message = "Runs Preparation " + deployed.PreparationName
@@ -268,7 +270,7 @@ func handleCreateCluster(deps *apiDeps) http.HandlerFunc {
 			Spec:      deliveryv1alpha1.ClusterSpec{Description: req.Description, Connection: connection},
 		}
 		if kubeconfig != nil {
-			c.Spec.Kubeconfig = &deliveryv1alpha1.ClusterKubeconfig{
+			c.Spec.Kubeconfig = deliveryv1alpha1.ClusterKubeconfig{
 				SecretRef: deliveryv1alpha1.KubeconfigSecretReference{Name: req.Name + kubeconfigSecretSuffix, Key: cluster.KubeconfigKey},
 			}
 		}
@@ -330,7 +332,7 @@ func handleUpdateCluster(deps *apiDeps) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		if kubeconfig != nil && c.Spec.Kubeconfig == nil {
+		if kubeconfig != nil && c.Spec.Kubeconfig.SecretRef.Name == "" {
 			respondError(w, http.StatusBadRequest, "the cluster Kokumi runs in takes no credential")
 			return
 		}

@@ -239,8 +239,10 @@ spec:
                 properties:
                   after:
                     description: |-
-                      after lists the upstream stages that must deploy the Preparation's
-                      Product revision first.
+                      after lists the upstream stages: Orders in the same namespace,
+                      variants of the same Product, that must each have deployed their own
+                      Preparation of a Preparation's Product revision healthily, for their
+                      soakSeconds, before it is deployed.
                     items:
                       description: |-
                         UpstreamStage is an Order that must deploy a Product revision before the
@@ -253,6 +255,7 @@ spec:
                           minLength: 1
                           type: string
                         soakSeconds:
+                          default: 0
                           description: |-
                             soakSeconds is how long the upstream Order must have run its
                             Preparation of the revision healthily, without interruption, before
@@ -270,8 +273,10 @@ spec:
                     - order
                     x-kubernetes-list-type: map
                   approvals:
-                    description: approvals is the approval policy the Preparation
-                      must satisfy.
+                    description: |-
+                      approvals is an approval gate: a Preparation is not served until
+                      enough distinct approvers from the listed groups have approved it.
+                      When omitted, no approval gate applies.
                     properties:
                       allowedGroups:
                         description: allowedGroups lists the groups whose members
@@ -296,8 +301,10 @@ spec:
                     - requiredApprovals
                     type: object
                   checks:
-                    description: checks are the promotion checks the Preparation must
-                      pass.
+                    description: |-
+                      checks configures checks a Preparation must pass before it is
+                      served. They hold new deployments only: a deployed Preparation that
+                      stops passing stays deployed.
                     minProperties: 1
                     properties:
                       vulnerabilities:
@@ -308,6 +315,7 @@ spec:
                           the images it vendors.
                         properties:
                           ignoreUnfixed:
+                            default: false
                             description: ignoreUnfixed ignores vulnerabilities that
                               no version fixes yet.
                             type: boolean
@@ -420,6 +428,7 @@ spec:
                     description: approvedCount is the number of eligible approvers
                       whose latest vote is Approve.
                     format: int32
+                    minimum: 0
                     type: integer
                   attestation:
                     description: attestation references the OCI artifact recording
@@ -445,16 +454,19 @@ spec:
                     description: ineligibleCount is the number of approvers not in
                       any allowed group.
                     format: int32
+                    minimum: 0
                     type: integer
                   rejectedCount:
                     description: rejectedCount is the number of eligible approvers
                       whose latest vote is Reject.
                     format: int32
+                    minimum: 0
                     type: integer
                   requiredApprovals:
                     description: requiredApprovals is the number of approvals required
                       by the policy.
                     format: int32
+                    minimum: 0
                     type: integer
                   sealedTime:
                     description: |-
@@ -467,6 +479,7 @@ spec:
                       submissionCount is the total number of Approvals for this Preparation,
                       including superseded ones.
                     format: int32
+                    minimum: 0
                     type: integer
                   votes:
                     description: |-
@@ -635,6 +648,7 @@ spec:
                 description: observedGeneration is the most recent generation observed
                   by the controller.
                 format: int64
+                minimum: 1
                 type: integer
             type: object
         required:

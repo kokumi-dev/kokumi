@@ -7,7 +7,9 @@ import (
 	"slices"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/attestation"
@@ -75,7 +77,7 @@ func Archive(ctx context.Context, c oci.Client, signer *signing.Signer, prep *de
 // approvals of prep, so retries produce the same OCI digest. Votes submitted
 // after the seal are excluded.
 func buildAttestation(prep *deliveryv1alpha1.Preparation, approvals []deliveryv1alpha1.Approval) ([]byte, error) {
-	if prep.ApprovalPolicy() == nil {
+	if prep.Spec.Promotion.ApprovalPolicy() == nil {
 		return nil, errors.New("preparation has no approval policy")
 	}
 	if !IsSealed(prep) {
@@ -102,7 +104,7 @@ func buildAttestation(prep *deliveryv1alpha1.Preparation, approvals []deliveryv1
 			Approver:      a.Spec.Approver,
 			Decision:      a.Spec.Decision,
 			Comment:       a.Spec.Comment,
-			SubmittedTime: a.Spec.SubmittedTime.UTC().Format(time.RFC3339Nano),
+			SubmittedTime: ptr.Deref(a.Spec.SubmittedTime, metav1.MicroTime{}).UTC().Format(time.RFC3339Nano),
 			CreationTime:  a.CreationTimestamp.UTC().Format(time.RFC3339),
 			Counted:       v.Counted,
 			Reason:        v.Reason,
@@ -116,7 +118,7 @@ func buildAttestation(prep *deliveryv1alpha1.Preparation, approvals []deliveryv1
 			Name:      prep.Name,
 			UID:       prep.UID,
 		},
-		Policy:      *prep.ApprovalPolicy(),
+		Policy:      *prep.Spec.Promotion.ApprovalPolicy(),
 		Result:      res.Reason,
 		SealedTime:  prep.Status.Approval.SealedTime.UTC().Format(time.RFC3339),
 		Submissions: submissions,

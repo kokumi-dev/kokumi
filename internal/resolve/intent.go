@@ -41,7 +41,7 @@ type Intent struct {
 	Images *IntentImages `json:"images,omitempty"`
 	// Promotion holds the gates the artifact must pass before it is served,
 	// with the upstream stages sorted by Order.
-	Promotion *deliveryv1alpha1.PromotionGates `json:"promotion,omitempty"`
+	Promotion deliveryv1alpha1.PromotionGates `json:"promotion,omitzero"`
 }
 
 // IntentSource is the resolved source of an Intent.

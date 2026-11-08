@@ -174,12 +174,12 @@ func LocalEnvironment(namespace string) *deliveryv1alpha1.Environment {
 		Namespace: namespace,
 		Spec: deliveryv1alpha1.EnvironmentSpec{
 			Description: "The cluster Kokumi runs in",
-			ClusterSelector: metav1.LabelSelector{
+			ClusterSelector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{deliveryv1alpha1.LabelInCluster: "true"},
 			},
 			Deployer: deliveryv1alpha1.Deployer{
 				Type:   deliveryv1alpha1.DeployerTypeArgoCD,
-				ArgoCD: &deliveryv1alpha1.ArgoCDDeployer{Project: argocd.DefaultProject},
+				ArgoCD: deliveryv1alpha1.ArgoCDDeployer{Project: argocd.DefaultProject},
 			},
 		},
 	}

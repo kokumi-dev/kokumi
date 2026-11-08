@@ -5,6 +5,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/signing"
@@ -58,7 +59,7 @@ func handleGetSigning(deps *apiDeps) http.HandlerFunc {
 func signingFromKitchen(kitchen *deliveryv1alpha1.Kitchen) signingResponse {
 	resp := signingResponse{TrustedKeys: []signingKeyDTO{}}
 
-	if s := kitchen.Status.Signing; s != nil {
+	if s := kitchen.Status.Signing; s.KeyID != "" {
 		resp.Current = &signingKeyDTO{Name: signing.CurrentKeyName, KeyID: s.KeyID, PublicKey: s.PublicKey}
 	}
 	if cond := meta.FindStatusCondition(kitchen.Status.Conditions, deliveryv1alpha1.ConditionTypeSigningKeyReady); cond != nil {
@@ -76,9 +77,7 @@ func signingFromKitchen(kitchen *deliveryv1alpha1.Kitchen) signingResponse {
 		resp.TrustedKeys = append(resp.TrustedKeys, dto)
 	}
 
-	if kitchen.Spec.Signing != nil {
-		resp.RequireSourceVerification = kitchen.Spec.Signing.RequireSourceVerification
-	}
+	resp.RequireSourceVerification = ptr.Deref(kitchen.Spec.Signing.RequireSourceVerification, false)
 
 	return resp
 }

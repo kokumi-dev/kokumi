@@ -180,7 +180,7 @@ var _ = Describe("API server", Label("server"), Serial, func() {
 			Expect(resp.StatusCode).To(Equal(http.StatusOK), string(body))
 
 			framework.Update(framework.InstallNamespace, deliveryv1alpha1.DefaultKitchenName, func(k *deliveryv1alpha1.Kitchen) {
-				k.Spec.Auth.AdminUser.Enabled = false
+				k.Spec.Auth.AdminUser.Enabled = new(false)
 			})
 			Eventually(func(g Gomega) {
 				resp, body := server.Do(http.MethodGet, "/api/v1/whoami", token, nil)

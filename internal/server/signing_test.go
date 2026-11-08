@@ -40,20 +40,20 @@ func TestValidateSigningDTO(t *testing.T) {
 	}
 
 	t.Run("settings that trust and require nothing clear spec.signing", func(t *testing.T) {
-		assert.Nil(t, signingFromDTO(&signingSettingsDTO{}))
-		assert.Equal(t, signingSettingsDTO{TrustedKeys: []trustedKeyDTO{}}, signingToDTO(nil))
+		assert.Zero(t, signingFromDTO(&signingSettingsDTO{}))
+		assert.Equal(t, signingSettingsDTO{TrustedKeys: []trustedKeyDTO{}}, signingToDTO(deliveryv1alpha1.KitchenSigning{}))
 	})
 }
 
 func TestSigningFromKitchen(t *testing.T) {
 	current, rotated := signingtest.NewSigner(t), signingtest.NewSigner(t)
 	kitchen := &deliveryv1alpha1.Kitchen{
-		Spec: deliveryv1alpha1.KitchenSpec{Signing: &deliveryv1alpha1.KitchenSigning{
+		Spec: deliveryv1alpha1.KitchenSpec{Signing: deliveryv1alpha1.KitchenSigning{
 			TrustedKeys:               []deliveryv1alpha1.TrustedKey{{Name: "before-rotation", PublicKey: string(rotated.PublicKeyPEM())}},
-			RequireSourceVerification: true,
+			RequireSourceVerification: new(true),
 		}},
 		Status: deliveryv1alpha1.KitchenStatus{
-			Signing: &deliveryv1alpha1.KitchenSigningStatus{KeyID: current.KeyID(), PublicKey: string(current.PublicKeyPEM())},
+			Signing: deliveryv1alpha1.KitchenSigningStatus{KeyID: current.KeyID(), PublicKey: string(current.PublicKeyPEM())},
 			Conditions: []metav1.Condition{{
 				Type: deliveryv1alpha1.ConditionTypeSigningKeyReady, Status: metav1.ConditionTrue, Reason: deliveryv1alpha1.ReasonKeyReady,
 			}},

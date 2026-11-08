@@ -74,7 +74,7 @@ var _ = Describe("Order Controller", func() {
 					Spec: deliveryv1alpha1.OrderSpec{
 						EnvironmentRef: localEnvironment,
 						ProductRef:     deliveryv1alpha1.ProductRef{Name: testProductName},
-						Promotion: &deliveryv1alpha1.PromotionSpec{
+						Promotion: deliveryv1alpha1.PromotionSpec{
 							Mode: deliveryv1alpha1.PromotionModeManual,
 						},
 						Destination: &deliveryv1alpha1.OCIDestination{
@@ -213,7 +213,7 @@ var _ = Describe("Order Controller", func() {
 				Spec: deliveryv1alpha1.OrderSpec{
 					EnvironmentRef: localEnvironment,
 					ProductRef:     deliveryv1alpha1.ProductRef{Name: name},
-					Promotion:      &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
+					Promotion:      deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
 					Destination:    dest,
 					RegistryRefs:   orderRefs,
 				},
@@ -365,7 +365,7 @@ var _ = Describe("Order Controller", func() {
 				Spec: deliveryv1alpha1.OrderSpec{
 					EnvironmentRef: localEnvironment,
 					ProductRef:     deliveryv1alpha1.ProductRef{Name: orderName},
-					Promotion: &deliveryv1alpha1.PromotionSpec{
+					Promotion: deliveryv1alpha1.PromotionSpec{
 						Mode: deliveryv1alpha1.PromotionModeManual,
 					},
 					Destination: &deliveryv1alpha1.OCIDestination{
@@ -484,7 +484,7 @@ var _ = Describe("Order Controller", func() {
 			Expect(k8sClient.List(ctx, preps, client.InNamespace(testNamespace),
 				client.MatchingFields{deliveryv1alpha1.FieldOrderName: orderName})).To(Succeed())
 			Expect(preps.Items).To(HaveLen(1))
-			Expect(preps.Items[0].ApprovalPolicy()).To(Equal(policy))
+			Expect(preps.Items[0].Spec.Promotion.ApprovalPolicy()).To(Equal(policy))
 			Expect(preps.Items[0].Labels).NotTo(HaveKey("delivery.kokumi.dev/auto-deploy"))
 
 			serving := &deliveryv1alpha1.Serving{}
@@ -663,7 +663,7 @@ var _ = Describe("Order Controller", func() {
 			By("hashing exactly the stored intent")
 			var intent resolve.Intent
 			Expect(json.Unmarshal(config.Intent, &intent)).To(Succeed())
-			Expect(intent.Promotion.Approvals).To(Equal(policy))
+			Expect(intent.Promotion.Approvals).To(Equal(*policy))
 			Expect(resolve.CalculateSpecHash(config.Intent)).To(Equal(config.ConfigHash))
 
 			By("recording who rendered it")
@@ -706,7 +706,7 @@ var _ = Describe("Order Controller", func() {
 				Spec: deliveryv1alpha1.OrderSpec{
 					EnvironmentRef: localEnvironment,
 					ProductRef:     deliveryv1alpha1.ProductRef{Name: productName},
-					Promotion:      &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
+					Promotion:      deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
 				},
 			})).To(Succeed())
 			DeferCleanup(func() {
@@ -756,7 +756,7 @@ var _ = Describe("Order Controller", func() {
 				Spec: deliveryv1alpha1.OrderSpec{
 					EnvironmentRef: localEnvironment,
 					ProductRef:     deliveryv1alpha1.ProductRef{Name: productName},
-					Promotion:      &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
+					Promotion:      deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
 				},
 			})).To(Succeed())
 			DeferCleanup(func() {
@@ -1124,7 +1124,7 @@ func resolveTestProduct(ctx context.Context, name, sourceOCI, sourceVersion stri
 	product := getTestProduct(ctx, name)
 
 	product.Status.ConfigHash = "sha256:product-" + sourceVersion
-	product.Status.Source = &deliveryv1alpha1.ProductSourceStatus{
+	product.Status.Source = deliveryv1alpha1.ProductSourceStatus{
 		URL:     sourceOCI,
 		Version: sourceVersion,
 		Digest:  oci.FakeDigest,
@@ -1171,11 +1171,11 @@ func createTestOrder(ctx context.Context, name string, mode deliveryv1alpha1.Pro
 		Spec: deliveryv1alpha1.OrderSpec{
 			EnvironmentRef: localEnvironment,
 			ProductRef:     deliveryv1alpha1.ProductRef{Name: testProductName},
-			Promotion:      &deliveryv1alpha1.PromotionSpec{Mode: mode},
+			Promotion:      deliveryv1alpha1.PromotionSpec{Mode: mode},
 		},
 	}
 	if len(policy) > 0 {
-		order.Spec.Promotion.Approvals = policy[0]
+		order.Spec.Promotion.Approvals = *policy[0]
 	}
 	if err := k8sClient.Create(ctx, order); err != nil && !apierrors.IsAlreadyExists(err) {
 		Expect(err).NotTo(HaveOccurred())
@@ -1547,7 +1547,7 @@ var _ = Describe("Image schema", func() {
 			return &deliveryv1alpha1.Kitchen{
 				Name:      deliveryv1alpha1.DefaultKitchenName,
 				Namespace: testNamespace,
-				Spec: deliveryv1alpha1.KitchenSpec{Images: &deliveryv1alpha1.KitchenImages{
+				Spec: deliveryv1alpha1.KitchenSpec{Images: deliveryv1alpha1.KitchenImages{
 					Mirrors: []deliveryv1alpha1.ImageMirror{{Prefix: prefix, Location: "oci://harbor.example.com/hub"}},
 				}},
 			}
@@ -1646,7 +1646,7 @@ var _ = Describe("Order pipelines", func() {
 			Spec: deliveryv1alpha1.OrderSpec{
 				EnvironmentRef: localEnvironment,
 				ProductRef:     deliveryv1alpha1.ProductRef{Name: product},
-				Promotion:      &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual, After: after},
+				Promotion:      deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual, After: after},
 			},
 		})).To(Succeed())
 		DeferCleanup(func() {
@@ -1681,14 +1681,14 @@ var _ = Describe("Order pipelines", func() {
 
 	It("renders a stage with its upstream stages and the Product revision", func() {
 		createStage("pipeline-dev", testProductName)
-		createStage("pipeline-prod", testProductName, deliveryv1alpha1.UpstreamStage{Order: "pipeline-dev", SoakSeconds: 600})
+		createStage("pipeline-prod", testProductName, deliveryv1alpha1.UpstreamStage{Order: "pipeline-dev", SoakSeconds: new(int32(600))})
 		settle("pipeline-dev")
 		settle("pipeline-prod")
 
 		Expect(ready("pipeline-prod").Status).To(Equal(metav1.ConditionTrue))
 		preps := preparationsOf("pipeline-prod")
 		Expect(preps).To(HaveLen(1))
-		Expect(preps[0].UpstreamStages()).To(Equal([]deliveryv1alpha1.UpstreamStage{{Order: "pipeline-dev", SoakSeconds: 600}}))
+		Expect(preps[0].Spec.Promotion.After).To(Equal([]deliveryv1alpha1.UpstreamStage{{Order: "pipeline-dev", SoakSeconds: new(int32(600))}}))
 
 		revision, err := resolve.ProductRevision(getTestProduct(ctx, testProductName))
 		Expect(err).NotTo(HaveOccurred())
@@ -1701,7 +1701,7 @@ var _ = Describe("Order pipelines", func() {
 		var intent resolve.Intent
 		Expect(json.Unmarshal(config.Intent, &intent)).To(Succeed())
 		Expect(intent.ProductRevision).To(Equal(revision))
-		Expect(intent.Promotion.After).To(Equal(preps[0].UpstreamStages()))
+		Expect(intent.Promotion.After).To(Equal(preps[0].Spec.Promotion.After))
 
 		By("selecting the Preparations every stage rendered from the revision")
 		list := &deliveryv1alpha1.PreparationList{}
@@ -1748,8 +1748,8 @@ var _ = Describe("Order pipelines", func() {
 	})
 
 	It("indexes an Order by the Orders it runs after", func() {
-		order := &deliveryv1alpha1.Order{Spec: deliveryv1alpha1.OrderSpec{EnvironmentRef: localEnvironment, Promotion: &deliveryv1alpha1.PromotionSpec{
-			After: []deliveryv1alpha1.UpstreamStage{{Order: "staging"}, {Order: "qa", SoakSeconds: 60}},
+		order := &deliveryv1alpha1.Order{Spec: deliveryv1alpha1.OrderSpec{EnvironmentRef: localEnvironment, Promotion: deliveryv1alpha1.PromotionSpec{
+			After: []deliveryv1alpha1.UpstreamStage{{Order: "staging"}, {Order: "qa", SoakSeconds: new(int32(60))}},
 		}}}
 		Expect(orderUpstreamNames(order)).To(Equal([]string{"staging", "qa"}))
 		Expect(orderUpstreamNames(&deliveryv1alpha1.Order{})).To(BeEmpty())
@@ -1902,7 +1902,7 @@ var _ = Describe("Order renders that fail", func() {
 		Expect(k8sClient.Create(ctx, &deliveryv1alpha1.Order{Name: name, Namespace: ns, Spec: deliveryv1alpha1.OrderSpec{
 			EnvironmentRef: localEnvironment,
 			ProductRef:     deliveryv1alpha1.ProductRef{Name: testProductName},
-			Promotion:      &deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
+			Promotion:      deliveryv1alpha1.PromotionSpec{Mode: deliveryv1alpha1.PromotionModeManual},
 		}})).To(Succeed())
 		DeferCleanup(func() {
 			order := &deliveryv1alpha1.Order{}
@@ -1934,7 +1934,7 @@ var _ = Describe("Order renders that fail", func() {
 
 		_, err := failing.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 		Expect(err).NotTo(HaveOccurred(), "the first pass records the render")
-		Expect(get(key).Status.Render).NotTo(BeNil())
+		Expect(get(key).Status.Render).NotTo(BeZero())
 		hash := get(key).Status.Render.ConfigHash
 		Expect(readyReason(key)).To(Equal(deliveryv1alpha1.ReasonProcessing))
 
@@ -1943,14 +1943,14 @@ var _ = Describe("Order renders that fail", func() {
 			Expect(err).To(HaveOccurred(), "a failure is returned, so that it is retried with back-off")
 			Expect(stderrors.Is(err, reconcile.TerminalError(nil))).To(BeFalse())
 			Expect(readyReason(key)).To(Equal(deliveryv1alpha1.ReasonProcessingFailed), "a retry keeps the failure")
-			Expect(get(key).Status.Render).To(Equal(&deliveryv1alpha1.OrderRender{ConfigHash: hash}))
+			Expect(get(key).Status.Render).To(Equal(deliveryv1alpha1.OrderRender{ConfigHash: hash}))
 			Expect(get(key).Status.LatestConfigHash).To(BeEmpty())
 		}
 
 		_, err = working.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(get(key).Status.LatestConfigHash).To(Equal(hash))
-		Expect(get(key).Status.Render).To(BeNil())
+		Expect(get(key).Status.Render).To(BeZero())
 		Expect(readyReason(key)).To(Equal(deliveryv1alpha1.ReasonReady))
 	})
 
@@ -1986,7 +1986,7 @@ var _ = Describe("Order renders that fail", func() {
 		Expect(k8sClient.Update(ctx, order)).To(Succeed())
 		_, err = failing.Reconcile(ctx, reconcile.Request{NamespacedName: key})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(get(key).Status.Render).To(BeNil(), "the latest Preparation renders this intent")
+		Expect(get(key).Status.Render).To(BeZero(), "the latest Preparation renders this intent")
 		Expect(readyReason(key)).To(Equal(deliveryv1alpha1.ReasonReady))
 	})
 
@@ -2026,7 +2026,7 @@ var _ = Describe("Order renders that fail", func() {
 		Expect(k8sClient.Update(ctx, order)).To(Succeed())
 		Expect(settleOrder(ctx, working, key)).To(Succeed())
 		Expect(readyReason(key)).To(Equal(deliveryv1alpha1.ReasonReady))
-		Expect(get(key).Status.Render).To(BeNil())
+		Expect(get(key).Status.Render).To(BeZero())
 		Expect(preparations()).To(HaveLen(1), "the latest Preparation renders the Order as it is again")
 	})
 
@@ -2048,7 +2048,7 @@ var _ = Describe("renderStarted", func() {
 	order := func(render string) *deliveryv1alpha1.Order {
 		o := &deliveryv1alpha1.Order{Name: "order-watched", Namespace: testNamespace}
 		if render != "" {
-			o.Status.Render = &deliveryv1alpha1.OrderRender{ConfigHash: render}
+			o.Status.Render = deliveryv1alpha1.OrderRender{ConfigHash: render}
 		}
 		return o
 	}
@@ -2069,7 +2069,7 @@ var _ = Describe("productChanged", func() {
 	product := func() *deliveryv1alpha1.Product {
 		p := &deliveryv1alpha1.Product{Name: "product-watched", Namespace: testNamespace, Generation: 2}
 		p.Status.ConfigHash = "sha256:product"
-		p.Status.Source = &deliveryv1alpha1.ProductSourceStatus{URL: testOCIRef, Version: testVersion, Digest: oci.FakeDigest}
+		p.Status.Source = deliveryv1alpha1.ProductSourceStatus{URL: testOCIRef, Version: testVersion, Digest: oci.FakeDigest}
 		p.Status.Conditions = []metav1.Condition{{
 			Type: deliveryv1alpha1.ConditionTypeReady, Status: metav1.ConditionTrue, Reason: testReadyReason, ObservedGeneration: 2,
 		}}
@@ -2090,7 +2090,7 @@ var _ = Describe("productChanged", func() {
 		Entry("the generation Ready describes", func(p *deliveryv1alpha1.Product) { p.Status.Conditions[0].ObservedGeneration = 1 }, true),
 		Entry("the message of Ready", func(p *deliveryv1alpha1.Product) { p.Status.Conditions[0].Message = "verified" }, true),
 		Entry("its scan results", func(p *deliveryv1alpha1.Product) {
-			p.Status.Vulnerabilities = &deliveryv1alpha1.ProductVulnerabilities{}
+			p.Status.Vulnerabilities = deliveryv1alpha1.ProductVulnerabilities{}
 		}, false),
 		Entry("another condition", func(p *deliveryv1alpha1.Product) {
 			p.Status.Conditions = append(p.Status.Conditions, metav1.Condition{Type: "Scanned", Status: metav1.ConditionTrue})

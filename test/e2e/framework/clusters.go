@@ -193,13 +193,17 @@ func HaveReady(status metav1.ConditionStatus, reason string) OmegaMatcher {
 // HaveSelectedClusters succeeds for an Environment that selects selected
 // Clusters, ready of them Ready.
 func HaveSelectedClusters(selected, ready int32) OmegaMatcher {
-	return SatisfyAll(HaveField("Status.Clusters.Selected", selected), HaveField("Status.Clusters.Ready", ready))
+	return SatisfyAll(
+		HaveField("Status.Clusters.Selected", HaveValue(Equal(selected))),
+		HaveField("Status.Clusters.Ready", HaveValue(Equal(ready))))
 }
 
 // HaveDeploymentClusters succeeds for a Serving that deploys to selected
 // clusters, healthy of which run the deployed Preparation healthily.
 func HaveDeploymentClusters(selected, healthy int32) OmegaMatcher {
-	return SatisfyAll(HaveField("Status.Clusters.Selected", selected), HaveField("Status.Clusters.Healthy", healthy))
+	return SatisfyAll(
+		HaveField("Status.Clusters.Selected", HaveValue(Equal(selected))),
+		HaveField("Status.Clusters.Healthy", HaveValue(Equal(healthy))))
 }
 
 // HaveTargets succeeds for a Serving whose status lists exactly clusters, in

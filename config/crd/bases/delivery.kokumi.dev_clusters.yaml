@@ -199,6 +199,7 @@ spec:
                   observedGeneration is the most recent generation observed by the
                   controller.
                 format: int64
+                minimum: 1
                 type: integer
               server:
                 description: server is the URL of the cluster's API server.

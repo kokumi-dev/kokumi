@@ -131,7 +131,7 @@ var _ = Describe("Vulnerability scanning", Label("scanning", "slow"), Serial, Or
 					HaveField("Status.Vulnerabilities.Images", HaveExactElements(SatisfyAll(
 						HaveField("Digest", imageDigest),
 						HaveField("SBOM.Origin", deliveryv1alpha1.SBOMOriginGenerated),
-						HaveField("Summary.Critical", BeNumerically(">", 0)),
+						HaveField("Summary.Critical", HaveValue(BeNumerically(">", 0))),
 					))),
 				), "one scan for both Orders finds the known Critical vulnerabilities")
 				scan = product.Status.Vulnerabilities.Images[0]

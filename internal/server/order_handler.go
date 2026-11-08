@@ -123,7 +123,7 @@ func handleCreateOrder(deps *apiDeps) http.HandlerFunc {
 				RegistryRefs: registryRefsFromDTO(req.RegistryRefs),
 				Patches:      patchesFromDTO(req.Patches),
 				Edits:        patchesFromDTO(req.Edits),
-				Promotion: &deliveryv1alpha1.PromotionSpec{
+				Promotion: deliveryv1alpha1.PromotionSpec{
 					Mode:      deliveryv1alpha1.PromotionMode(req.Mode),
 					Approvals: approvalPolicyFromDTO(req.Approvals),
 					After:     upstreamStagesFromDTO(req.After),
@@ -195,7 +195,7 @@ func handleUpdateOrder(deps *apiDeps) http.HandlerFunc {
 		order.Spec.RegistryRefs = registryRefsFromDTO(req.RegistryRefs)
 		order.Spec.Patches = patchesFromDTO(req.Patches)
 		order.Spec.Edits = patchesFromDTO(req.Edits)
-		order.Spec.Promotion = &deliveryv1alpha1.PromotionSpec{
+		order.Spec.Promotion = deliveryv1alpha1.PromotionSpec{
 			Mode:      deliveryv1alpha1.PromotionMode(req.Mode),
 			Approvals: approvalPolicyFromDTO(req.Approvals),
 			After:     upstreamStagesFromDTO(req.After),

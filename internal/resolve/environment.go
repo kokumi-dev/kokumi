@@ -19,7 +19,7 @@ type ClusterSelection struct {
 
 // ClusterSelectionOf parses the clusterSelector of env.
 func ClusterSelectionOf(env *deliveryv1alpha1.Environment) (ClusterSelection, error) {
-	selector, err := metav1.LabelSelectorAsSelector(&env.Spec.ClusterSelector)
+	selector, err := metav1.LabelSelectorAsSelector(env.Spec.ClusterSelector)
 	if err != nil {
 		return ClusterSelection{}, err
 	}

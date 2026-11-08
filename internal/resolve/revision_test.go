@@ -47,8 +47,8 @@ func TestProductRevision(t *testing.T) {
 
 	changes := map[string]func(*deliveryv1alpha1.Product){
 		"source digest": func(p *deliveryv1alpha1.Product) { p.Status.Source.Digest = "sha256:" + strings.Repeat("2", 64) },
-		"render values": func(p *deliveryv1alpha1.Product) { p.Spec.Render = helmRender(`{"replicaCount":2}`) },
-		"render type":   func(p *deliveryv1alpha1.Product) { p.Spec.Render = nil },
+		"render values": func(p *deliveryv1alpha1.Product) { p.Spec.Render = *helmRender(`{"replicaCount":2}`) },
+		"render type":   func(p *deliveryv1alpha1.Product) { p.Spec.Render = deliveryv1alpha1.Render{} },
 		"patches": func(p *deliveryv1alpha1.Product) {
 			p.Spec.Patches = []deliveryv1alpha1.Patch{{Target: deliveryv1alpha1.PatchTarget{Kind: depKind, Name: appName}, Set: map[string]string{testPath: "2"}}}
 		},

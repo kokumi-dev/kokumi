@@ -117,7 +117,7 @@ func TestHandlePreview(t *testing.T) {
 		Name:      scanProduct,
 		Namespace: nsA,
 		Status: deliveryv1alpha1.ProductStatus{
-			Source: &deliveryv1alpha1.ProductSourceStatus{URL: source, Version: testSourceVersion},
+			Source: deliveryv1alpha1.ProductSourceStatus{URL: source, Version: testSourceVersion, Digest: oci.FakeDigest},
 		},
 	}
 

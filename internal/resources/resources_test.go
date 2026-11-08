@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/utils/ptr"
 
 	deliveryv1alpha1 "github.com/kokumi-dev/kokumi/api/v1alpha1"
 	"github.com/kokumi-dev/kokumi/internal/images"
@@ -24,7 +25,7 @@ func testOrderObject(policy *deliveryv1alpha1.ApprovalPolicy) *deliveryv1alpha1.
 		Name:      testOrder,
 		Namespace: testNamespace,
 		Spec: deliveryv1alpha1.OrderSpec{
-			Promotion: &deliveryv1alpha1.PromotionSpec{Approvals: policy},
+			Promotion: deliveryv1alpha1.PromotionSpec{Approvals: ptr.Deref(policy, deliveryv1alpha1.ApprovalPolicy{})},
 		},
 	}
 }
@@ -70,36 +71,36 @@ func TestPreparation(t *testing.T) {
 		{Ref: "unknown:latest"},
 	}, prep.Spec.Images, "the Preparation leaves out why an image could not be resolved")
 
-	require.Equal(t, policy, prep.ApprovalPolicy())
-	assert.NotSame(t, policy, prep.ApprovalPolicy(), "the policy is a snapshot")
-	assert.Nil(t, prep.PromotionChecks())
+	require.Equal(t, policy, prep.Spec.Promotion.ApprovalPolicy())
+	assert.NotSame(t, policy, prep.Spec.Promotion.ApprovalPolicy(), "the policy is a snapshot")
+	assert.Nil(t, prep.Spec.Promotion.PromotionChecks())
 
 	anonymous := Preparation(testOrderObject(nil), Rendered{
 		Source:   mustParse(t, "oci://ghcr.io/org/chart:1.0.0@"+testDigest),
 		Artifact: mustParse(t, "oci://registry.example/order/app:1.0.0@"+testDigest),
 	})
 	assert.Nil(t, anonymous.Spec.Artifact.RegistryRef, "no Registry authenticated the push")
-	assert.Nil(t, anonymous.Spec.Promotion, "no gate applies")
+	assert.Zero(t, anonymous.Spec.Promotion, "no gate applies")
 	assert.Nil(t, anonymous.Spec.Images)
 }
 
 func TestPreparation_gates(t *testing.T) {
 	checks := &deliveryv1alpha1.PromotionChecks{
-		Vulnerabilities: &deliveryv1alpha1.VulnerabilityCheck{MaxSeverity: deliveryv1alpha1.SeverityHigh},
+		Vulnerabilities: deliveryv1alpha1.VulnerabilityCheck{MaxSeverity: deliveryv1alpha1.SeverityHigh},
 	}
 	order := testOrderObject(nil)
-	order.Spec.Promotion.Checks = checks
-	order.Spec.Promotion.After = []deliveryv1alpha1.UpstreamStage{{Order: "staging", SoakSeconds: 60}, {Order: "qa"}}
+	order.Spec.Promotion.Checks = *checks
+	order.Spec.Promotion.After = []deliveryv1alpha1.UpstreamStage{{Order: "staging", SoakSeconds: new(int32(60))}, {Order: "qa"}}
 
 	prep := Preparation(order, Rendered{
 		Source:   mustParse(t, "oci://ghcr.io/org/chart:1.0.0@"+testDigest),
 		Artifact: mustParse(t, "oci://registry.example/order/app:1.0.0@"+testDigest),
 	})
 
-	require.Equal(t, checks, prep.PromotionChecks())
-	assert.NotSame(t, checks, prep.PromotionChecks(), "the checks are a snapshot")
-	assert.NotSame(t, checks.Vulnerabilities, prep.PromotionChecks().Vulnerabilities)
-	assert.Equal(t, []deliveryv1alpha1.UpstreamStage{{Order: "qa"}, {Order: "staging", SoakSeconds: 60}}, prep.UpstreamStages(),
+	require.Equal(t, checks, prep.Spec.Promotion.PromotionChecks())
+	assert.NotSame(t, checks, prep.Spec.Promotion.PromotionChecks(), "the checks are a snapshot")
+	assert.NotSame(t, order.Spec.Promotion.After[0].SoakSeconds, prep.Spec.Promotion.After[1].SoakSeconds, "the stages are a snapshot")
+	assert.Equal(t, []deliveryv1alpha1.UpstreamStage{{Order: "qa"}, {Order: "staging", SoakSeconds: new(int32(60))}}, prep.Spec.Promotion.After,
 		"the upstream stages are sorted, as in the intent")
 	assert.Equal(t, "staging", order.Spec.Promotion.After[0].Order, "the Order is left as written")
 }

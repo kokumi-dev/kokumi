@@ -51,7 +51,7 @@ func (v *Verifier) Verify(
 		digest:           preparation.Spec.Artifact.Digest,
 		trust:            trust.ID(),
 		order:            order,
-		approvalRequired: preparation.ApprovalPolicy() != nil,
+		approvalRequired: preparation.Spec.Promotion.ApprovalPolicy() != nil,
 	}
 	if _, ok := v.verified.Get(key); ok {
 		return nil
@@ -109,7 +109,7 @@ func Verify(ctx context.Context, client oci.Client, trust *signing.TrustSet, pre
 		return invalid(fmt.Errorf("provenance %s attests a render for Order %q, not %q", found.Digest, attested, order))
 	}
 
-	if preparation.ApprovalPolicy() == nil {
+	if preparation.Spec.Promotion.ApprovalPolicy() == nil {
 		return nil
 	}
 

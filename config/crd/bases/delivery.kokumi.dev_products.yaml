@@ -625,6 +625,7 @@ spec:
                 description: observedGeneration is the most recent generation observed
                   by the controller.
                 format: int64
+                minimum: 1
                 type: integer
               registryAccess:
                 description: |-
