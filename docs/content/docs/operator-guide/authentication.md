@@ -205,15 +205,14 @@ only at the next sign-in. To end every session at once, replace the
     confirm it.
 
     The next "Sign in with SSO" in this browser asks the provider to
-    authenticate the user again (`max_age=0`), in case the provider session
-    outlives the sign-out: at a provider without RP-initiated logout, such as
-    Dex, or when the user cancels the provider's confirmation. This is a
-    request, not a guarantee. The browser keeps it in the cookie
-    `kokumi.oidc.reauth` until the next sign-in, and a provider that ignores
-    `max_age`, or a browser whose cookie was deleted, signs the user in
-    without asking. Kokumi does not check the ID token's `auth_time` to
-    enforce it, because sign-in would then fail at every provider that
-    ignores `max_age`.
+    authenticate the user again (`prompt=login`), in case a session at the
+    provider outlives the sign-out: at a provider without RP-initiated logout,
+    such as Dex, when the user cancels the provider's confirmation, or when the
+    browser also holds the session of another account that signed in there
+    earlier. The browser keeps this in the cookie `kokumi.oidc.reauth` until
+    the next sign-in. A provider that cannot authenticate the user again
+    answers with an error, such as `login_required`; the sign-in ends with
+    that error, and the next one is an ordinary sign-in.
 
 Another site cannot sign a user in or out: the server refuses state-changing
 requests that a browser sends from another origin. A reverse proxy in front of

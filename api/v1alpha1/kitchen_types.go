@@ -409,7 +409,7 @@ const (
 	// ProviderSignOutAlways also ends the session at the provider, through
 	// the end_session_endpoint of its discovery document (OpenID Connect
 	// RP-Initiated Logout), and asks the provider to authenticate the user
-	// again (max_age=0) at the next sign-in.
+	// again (prompt=login) at the next sign-in.
 	ProviderSignOutAlways ProviderSignOut = "Always"
 )
 

@@ -620,7 +620,10 @@ func TestOIDCSignOutWithoutProviderLogoutAsksForReauthentication(t *testing.T) {
 
 	start := httptest.NewRecorder()
 	handleOIDCStart(mgr).ServeHTTP(start, httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/v1/auth/oidc/start", nil))
-	assert.NotContains(t, start.Header().Get("Location"), "max_age=", "a first sign-in uses the provider's session")
+	loc, err := url.Parse(start.Header().Get("Location"))
+	require.NoError(t, err)
+	assert.False(t, loc.Query().Has("prompt"), "a first sign-in uses the provider's session")
+	assert.False(t, loc.Query().Has("max_age"))
 
 	// An ID token too large for a cookie leaves only the refresh cookie to
 	// tell the session came from OIDC.
@@ -634,10 +637,10 @@ func TestOIDCSignOutWithoutProviderLogoutAsksForReauthentication(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/v1/auth/oidc/start", nil)
 	r.AddCookie(reauth)
 	handleOIDCStart(mgr).ServeHTTP(start, r)
-	loc, err := url.Parse(start.Header().Get("Location"))
+	loc, err = url.Parse(start.Header().Get("Location"))
 	require.NoError(t, err)
-	assert.Equal(t, "0", loc.Query().Get("max_age"))
-	assert.False(t, loc.Query().Has("prompt"), "prompt=login is refused by some providers")
+	assert.Equal(t, []string{"login"}, loc.Query()["prompt"], "the provider asks for credentials again")
+	assert.False(t, loc.Query().Has("max_age"), "Entra ID answers max_age=0 with an ID token that has already expired")
 
 	assert.Equal(t, -1, cookieNamed(t, signInOIDC(t, mgr, reauth), oidcReauthCookie).MaxAge,
 		"signing in again is done with the sign-out")
@@ -648,13 +651,16 @@ func TestOIDCCallbackErrorEndsReauthentication(t *testing.T) {
 	p := newOIDCProviderFor(t, issuer.URL, deliveryv1alpha1.ProviderSignOutAlways)
 	mgr := &authManager{auth: newTokenAuthenticator(), oidc: p, logger: logr.Discard()}
 
-	r := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/v1/auth/oidc/callback?error=invalid_request", nil)
+	// OIDC Core's answer to prompt=login from a provider that cannot
+	// authenticate the user again.
+	r := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/v1/auth/oidc/callback?error=login_required", nil)
 	r.AddCookie(&http.Cookie{Name: oidcReauthCookie, Value: "1"})
 	w := httptest.NewRecorder()
 	handleOIDCCallback(mgr).ServeHTTP(w, r)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "login_required")
 	assert.Equal(t, -1, cookieNamed(t, w.Result().Cookies(), oidcReauthCookie).MaxAge,
-		"a provider that refuses the request must not refuse every later sign-in")
+		"a provider that cannot authenticate the user again must not refuse every later sign-in")
 }
 
 func TestOIDCCallbackCookies(t *testing.T) {
