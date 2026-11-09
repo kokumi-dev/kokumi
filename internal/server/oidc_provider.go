@@ -33,9 +33,9 @@ const (
 	oidcIDTokenCookie = "kokumi.oidc.id_token"
 	// oidcIDTokenCookiePath scopes the ID token cookie to the sign-out.
 	oidcIDTokenCookiePath = "/api/v1/auth/logout"
-	// oidcReauthCookie is set by a sign-out at the provider and makes the
-	// next sign-in ask the provider to authenticate the user again
-	// (max_age=0), in case the provider session outlives the sign-out.
+	// oidcReauthCookie is set by a sign-out with providerSignOut Always and
+	// makes the next sign-in ask the provider to authenticate the user again
+	// (prompt=login), in case a provider session outlives the sign-out.
 	oidcReauthCookie = "kokumi.oidc.reauth"
 	// oidcReauthCookieMaxAge keeps the re-authentication cookie until the
 	// next sign-in; 400 days is the longest lifetime browsers allow.
@@ -278,10 +278,11 @@ func (p *oidcProvider) endSessionURL(ctx context.Context, postLogoutRedirect, id
 
 // handleOIDCStart generates a CSRF state + PKCE verifier, stores them in a cookie,
 // and redirects to the issuer's authorization endpoint. After a sign-out at
-// the provider it sends max_age=0, which OIDC Core defines as equivalent to
-// prompt=login; unlike prompt=login, a provider that does not support it
-// ignores it instead of refusing the request. An issuer that cannot be
-// reached sends the browser back to the login page.
+// the provider it sends prompt=login, which OIDC Core requires every provider
+// to support, rather than max_age=0, which OIDC Core calls equivalent but
+// several providers ignore and Entra ID answers with an ID token that has
+// already expired. An issuer that cannot be reached sends the browser back to
+// the login page.
 func handleOIDCStart(m *authManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		p := m.getOIDC()
@@ -303,7 +304,7 @@ func handleOIDCStart(m *authManager) http.HandlerFunc {
 			oauth2.S256ChallengeOption(verifier),
 		}
 		if _, err := r.Cookie(oidcReauthCookie); err == nil {
-			opts = append(opts, oauth2.SetAuthURLParam("max_age", "0"))
+			opts = append(opts, oauth2.SetAuthURLParam("prompt", "login"))
 		}
 		http.Redirect(w, r, oauth.AuthCodeURL(state, opts...), http.StatusFound)
 	}
