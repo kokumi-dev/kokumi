@@ -96,7 +96,7 @@ func SpokeCluster() *Spoke {
 }
 
 // spokeAccount is the ServiceAccount on a spoke cluster that Kokumi and
-// Argo CD act as there, as hack/kind/spoke-cluster.sh creates it.
+// Argo CD act as there, as hack/kind/register-cluster.sh creates it.
 const spokeAccount = "kokumi"
 
 // RegisterCluster registers spoke with Kokumi under name in namespace with

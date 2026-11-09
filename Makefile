@@ -173,6 +173,23 @@ kind-spoke: ## Create the Kind cluster KIND_SPOKE and store its kubeconfig for t
 kind-spoke-delete: ## Delete the Kind cluster KIND_SPOKE
 	$(KIND) delete cluster --name $(KIND_SPOKE)
 
+# KWOK_CLUSTER is a KWOK cluster the local Kokumi deploys to, registered as the
+# Cluster KWOK_CLUSTER of the workspace namespace KWOK_CLUSTER_NAMESPACE: fake
+# nodes, so that Argo CD deploys for real and Pods report Running without a
+# container. Half of a Kind spoke; one per name for a fleet, e.g.
+# make kwok-cluster KWOK_CLUSTER=prod-eu.
+KWOK_CLUSTER ?= kwok
+KWOK_CLUSTER_NAMESPACE ?= platform
+
+.PHONY: kwok-cluster
+kwok-cluster: kwokctl ## Create the KWOK cluster kokumi-KWOK_CLUSTER and store its kubeconfig for the Cluster KWOK_CLUSTER of KWOK_CLUSTER_NAMESPACE
+	@KWOKCTL="$(KWOKCTL)" KUBECTL=$(KUBECTL) hack/kind/kwok-cluster.sh \
+		$(KIND_CLUSTER_DEVELOPMENT)-$(KWOK_CLUSTER) $(KWOK_CLUSTER) $(KWOK_CLUSTER_NAMESPACE)
+
+.PHONY: kwok-cluster-delete
+kwok-cluster-delete: kwokctl ## Delete the KWOK cluster kokumi-KWOK_CLUSTER
+	"$(KWOKCTL)" delete cluster --name $(KIND_CLUSTER_DEVELOPMENT)-$(KWOK_CLUSTER)
+
 .PHONY: kind-load-image
 kind-load-image: ## Load image into Kind cluster if it exists
 	@command -v $(KIND) >/dev/null 2>&1 || { \
@@ -334,6 +351,7 @@ CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
 COSIGN ?= $(LOCALBIN)/cosign
+KWOKCTL ?= $(LOCALBIN)/kwokctl
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.8.1
@@ -351,6 +369,7 @@ ENVTEST_K8S_VERSION ?= $(shell v='$(call gomodver,k8s.io/api)'; \
 
 GOLANGCI_LINT_VERSION ?= v2.14.0
 COSIGN_VERSION ?= v3.1.3
+KWOKCTL_VERSION ?= v0.8.0
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
 $(KUSTOMIZE): $(LOCALBIN)
@@ -379,6 +398,11 @@ $(ENVTEST): $(LOCALBIN)
 cosign: $(COSIGN) ## Download cosign locally if necessary.
 $(COSIGN): $(LOCALBIN)
 	$(call go-install-tool,$(COSIGN),github.com/sigstore/cosign/v3/cmd/cosign,$(COSIGN_VERSION))
+
+.PHONY: kwokctl
+kwokctl: $(KWOKCTL) ## Download kwokctl locally if necessary.
+$(KWOKCTL): $(LOCALBIN)
+	$(call go-install-tool,$(KWOKCTL),sigs.k8s.io/kwok/cmd/kwokctl,$(KWOKCTL_VERSION))
 
 .PHONY: golangci-lint
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
