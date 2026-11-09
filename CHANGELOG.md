@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.1](https://github.com/kokumi-dev/kokumi/compare/0.18.0...0.18.1) (2026-11-09)
+
+
+### Bug Fixes
+
+* ask the provider to authenticate again after a sign-out ([#544](https://github.com/kokumi-dev/kokumi/issues/544)) ([b8f9efe](https://github.com/kokumi-dev/kokumi/commit/b8f9efeb5a107fabdb280b91f1364ebed1f99742))
+
 ## [0.18.0](https://github.com/kokumi-dev/kokumi/compare/0.17.0...0.18.0) (2026-11-08)
 
 
